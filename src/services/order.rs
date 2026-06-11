@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, Row, Transaction};
 
 use crate::api::metrics::GLOBAL_METRICS;
 use crate::repositories::{
@@ -93,14 +93,40 @@ impl OrderService {
         seller_id: &str,
         final_price: i64,
     ) -> Result<String, OrderError> {
-        let listing_repo = PostgresListingRepository::new(self.db.clone());
-        let order_repo = PostgresOrderRepository::new(self.db.clone());
         let mut tx: sqlx::Transaction<'_, sqlx::Postgres> = sqlx::Acquire::begin(&self.db)
             .await
             .map_err(OrderError::Db)?;
 
+        let order_id = self
+            .create_order_in_tx(&mut tx, listing_id, buyer_id, seller_id, final_price)
+            .await?;
+
+        tx.commit().await.map_err(OrderError::Db)?;
+
+        if let Some(metrics) = GLOBAL_METRICS.get() {
+            metrics.record_order_created();
+        }
+
+        Ok(order_id)
+    }
+
+    /// Create a pending order inside an existing transaction.
+    ///
+    /// Callers that own additional state transitions can use this to keep the
+    /// listing active->sold mutation, order insert, and their own writes atomic.
+    pub async fn create_order_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        listing_id: &str,
+        buyer_id: &str,
+        seller_id: &str,
+        final_price: i64,
+    ) -> Result<String, OrderError> {
+        let listing_repo = PostgresListingRepository::new(self.db.clone());
+        let order_repo = PostgresOrderRepository::new(self.db.clone());
+
         if !listing_repo
-            .mark_sold_if_active_in_tx(&mut tx, listing_id)
+            .mark_sold_if_active_in_tx(tx, listing_id)
             .await
             .map_err(OrderError::Repo)?
         {
@@ -110,22 +136,9 @@ impl OrderService {
         let order_id = uuid::Uuid::new_v4().to_string();
 
         order_repo
-            .create_pending_in_tx(
-                &mut tx,
-                &order_id,
-                listing_id,
-                buyer_id,
-                seller_id,
-                final_price,
-            )
+            .create_pending_in_tx(tx, &order_id, listing_id, buyer_id, seller_id, final_price)
             .await
             .map_err(OrderError::Repo)?;
-
-        tx.commit().await.map_err(OrderError::Db)?;
-
-        if let Some(metrics) = GLOBAL_METRICS.get() {
-            metrics.record_order_created();
-        }
 
         Ok(order_id)
     }

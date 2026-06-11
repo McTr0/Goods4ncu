@@ -112,9 +112,7 @@ async fn resolve_listing_context(
     }
 }
 
-fn history_to_rig_messages(
-    entries: &[crate::services::chat::ChatHistoryEntry],
-) -> Vec<Message> {
+fn history_to_rig_messages(entries: &[crate::services::chat::ChatHistoryEntry]) -> Vec<Message> {
     entries
         .iter()
         .map(|entry| {
@@ -303,9 +301,7 @@ async fn handle_chat_stream_request(
             .header("Connection", "keep-alive")
             .header("X-Conversation-Id", conversation_id)
             .body(body)
-            .map_err(|e| {
-                ApiError::Internal(anyhow::anyhow!("failed to build SSE response: {}", e))
-            })
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("failed to build SSE response: {}", e)))
     }
 
     fn encode_sse_data(payload: &serde_json::Value) -> Vec<u8> {
@@ -339,6 +335,7 @@ async fn handle_chat_stream_request(
         state.secrets.jwt_secret_old.as_deref(),
     )
     .map_err(|_| ApiError::Unauthorized)?;
+    auth::ensure_user_not_banned(&state, &current_user_id).await?;
 
     let intent_result = state.agents.router.classify(&message);
     tracing::debug!(intent = ?intent_result.intent.as_str(), confidence = %intent_result.confidence, "SSE Router classification");
@@ -347,8 +344,7 @@ async fn handle_chat_stream_request(
         let conversation_id = conversation_id
             .filter(|id| !id.is_empty())
             .unwrap_or_else(|| Uuid::new_v4().to_string());
-        let sse_payload =
-            serde_json::json!({ "token": reply, "conversation_id": conversation_id });
+        let sse_payload = serde_json::json!({ "token": reply, "conversation_id": conversation_id });
         let body = axum::body::Body::from(encode_sse_data(&sse_payload));
         return build_sse_response(&conversation_id, body);
     }

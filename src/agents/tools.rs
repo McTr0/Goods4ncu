@@ -1,7 +1,5 @@
-use crate::repositories::{
-    CreateListingInput, ListingRepository, PostgresListingRepository, UpdateListingInput,
-};
-use crate::services::BusinessEvent;
+use crate::repositories::{CreateListingInput, PostgresListingRepository, UpdateListingInput};
+use crate::services::order::{OrderError, OrderService};
 use crate::utils::cents_to_yuan;
 use async_trait::async_trait;
 use rig::completion::ToolDefinition;
@@ -9,25 +7,13 @@ use rig::tool::Tool;
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::{PgConnection, PgPool};
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::runtime::Handle;
-use tokio::sync::mpsc;
 use tokio::task::spawn_blocking;
 
 // ---------------------------------------------------------------------------
 // Shared context for all tools
 // ---------------------------------------------------------------------------
-
-/// Type alias for the embedding function passed to tools.
-pub type EmbedFn = Arc<
-    dyn Fn(
-            String,
-            String,
-        ) -> Pin<Box<dyn std::future::Future<Output = Result<(), ToolError>> + Send>>
-        + Send
-        + Sync,
->;
 
 /// EmbedUpdater enables atomic re-embedding of listing content within a DB transaction.
 ///
@@ -50,14 +36,10 @@ pub trait EmbedUpdater: Send + Sync {
 pub struct ToolContext {
     /// PostgreSQL pool — serves both relational data and vector data (pgvector).
     pub db_pool: PgPool,
-    /// Callback to embed and insert a listing into the vector store.
-    /// This encapsulates the provider-specific embedding model type.
-    pub embed_and_insert: EmbedFn,
     /// Re-embed and update a listing's vector document within a DB transaction.
     /// Called from spawn_blocking in UpdateListingTool so the !Send PgConnection
     /// is safe to use without affecting the Tool::call() Send bound.
     pub embed_updater: Arc<dyn EmbedUpdater>,
-    pub event_tx: mpsc::Sender<BusinessEvent>,
     pub current_user_id: Option<String>,
     /// Notification service for sending in-app alerts (e.g., negotiation requests).
     pub notification: crate::services::notification::NotificationService,
@@ -120,29 +102,54 @@ impl Tool for CreateListingTool {
             .current_user_id
             .clone()
             .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
-        let listing_repo = PostgresListingRepository::new(self.ctx.db_pool.clone());
-        let listing_id = listing_repo
-            .create(CreateListingInput {
-                title: args.title.clone(),
-                category: args.category.clone(),
-                brand: Some(args.brand.clone()),
-                condition_score: args.condition_score as i32,
-                suggested_price_cny: args.suggested_price_cny as f64 / 100.0,
-                defects: args.defects.clone(),
-                description: args.original_description.clone(),
-                owner_id: owner.clone(),
-            })
-            .await
-            .map_err(|e| ToolError(format!("DB insert error: {}", e)))?;
 
         let content_to_embed = format!(
             "Title: {}\nCategory: {}\nBrand: {}\nCondition: {}/10\nDescription: {}",
             args.title, args.category, args.brand, args.condition_score, args.original_description
         );
-        let embed_fn = self.ctx.embed_and_insert.clone();
-        embed_fn(content_to_embed, listing_id.clone())
-            .await
-            .map_err(|e| ToolError(format!("Embedding error: {}", e)))?;
+
+        let db_pool = self.ctx.db_pool.clone();
+        let listing_repo = PostgresListingRepository::new(self.ctx.db_pool.clone());
+        let embed_updater = self.ctx.embed_updater.clone();
+        let input = CreateListingInput {
+            title: args.title.clone(),
+            category: args.category.clone(),
+            brand: Some(args.brand.clone()),
+            condition_score: args.condition_score as i32,
+            suggested_price_cny: args.suggested_price_cny as f64 / 100.0,
+            defects: args.defects.clone(),
+            description: args.original_description.clone(),
+            owner_id: owner.clone(),
+        };
+
+        let listing_id = spawn_blocking(move || {
+            let rt = Handle::current();
+            rt.block_on(async move {
+                let mut tx: sqlx::Transaction<'_, sqlx::Postgres> = db_pool
+                    .begin()
+                    .await
+                    .map_err(|e| ToolError(format!("Transaction error: {}", e)))?;
+
+                let listing_id = listing_repo
+                    .create_in_tx(&mut tx, input)
+                    .await
+                    .map_err(|e| ToolError(format!("DB insert error: {}", e)))?;
+
+                #[allow(clippy::explicit_auto_deref)]
+                embed_updater
+                    .embed_and_update(content_to_embed, listing_id.clone(), &mut *tx)
+                    .await
+                    .map_err(|e| ToolError(format!("Embedding error: {}", e)))?;
+
+                tx.commit()
+                    .await
+                    .map_err(|e| ToolError(format!("Commit error: {}", e)))?;
+
+                Ok::<String, ToolError>(listing_id)
+            })
+        })
+        .await
+        .map_err(|e| ToolError(format!("Spawn error: {}", e)))??;
 
         Ok(format!(
             "Successfully created listing '{}' (ID: {}, Price: {} CNY, Owner: {})",
@@ -619,12 +626,22 @@ impl Tool for DeleteListingTool {
             .clone()
             .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
         let listing_repo = PostgresListingRepository::new(self.ctx.db_pool.clone());
+        let mut tx = self
+            .ctx
+            .db_pool
+            .begin()
+            .await
+            .map_err(|e| ToolError(format!("Transaction error: {}", e)))?;
+
         let deleted = listing_repo
-            .soft_delete_active_owned(&args.listing_id, &owner_id)
+            .soft_delete_active_owned_in_tx(&mut tx, &args.listing_id, &owner_id)
             .await
             .map_err(|e| ToolError(format!("Delete error: {}", e)))?;
 
         if !deleted {
+            tx.rollback()
+                .await
+                .map_err(|e| ToolError(format!("Rollback error: {}", e)))?;
             return Ok(format!(
                 "No active listing found with ID: {} (or you don't own it)",
                 args.listing_id
@@ -633,13 +650,15 @@ impl Tool for DeleteListingTool {
 
         // Sync vector store: remove stale embedding so RAG won't surface deleted listings.
         // pgvector stores documents in the same 'documents' table, so we use SQL DELETE.
-        if let Err(e) = sqlx::query("DELETE FROM documents WHERE id = $1")
+        sqlx::query("DELETE FROM documents WHERE id = $1")
             .bind(&args.listing_id)
-            .execute(&self.ctx.db_pool)
+            .execute(&mut *tx)
             .await
-        {
-            tracing::warn!("Failed to delete listing document from vector store: {}", e);
-        }
+            .map_err(|e| ToolError(format!("Vector cleanup error: {}", e)))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| ToolError(format!("Commit error: {}", e)))?;
 
         Ok(format!("Successfully removed listing {}", args.listing_id))
     }
@@ -682,11 +701,16 @@ impl Tool for PurchaseItemIntentTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        // Verify the listing exists and is active — use FOR UPDATE to lock this row
-        // and prevent a TOCTOU race where two concurrent purchases both see
-        // status='active' and both emit DealReached events.
+        let buyer_id = self
+            .ctx
+            .current_user_id
+            .clone()
+            .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
+
+        // OrderService performs the final active->sold transition and order insert
+        // in one transaction. This read is only for user-facing validation.
         let listing = sqlx::query_as::<_, ListingCheckRow>(
-            "SELECT id, owner_id, suggested_price_cny, status FROM inventory WHERE id = $1 FOR UPDATE",
+            "SELECT id, owner_id, suggested_price_cny, status FROM inventory WHERE id = $1",
         )
         .bind(&args.listing_id)
         .fetch_optional(&self.ctx.db_pool)
@@ -704,13 +728,6 @@ impl Tool for PurchaseItemIntentTool {
                 args.listing_id, listing.status
             ));
         }
-
-        // Require authentication
-        let buyer_id = self
-            .ctx
-            .current_user_id
-            .clone()
-            .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
 
         // Cannot buy your own listing
         if buyer_id == listing.owner_id {
@@ -732,24 +749,32 @@ impl Tool for PurchaseItemIntentTool {
             )));
         }
 
-        // Emit DealReached event to trigger order creation
-        self.ctx
-            .event_tx
-            .send(BusinessEvent::DealReached {
-                listing_id: args.listing_id.clone(),
-                buyer_id: buyer_id.clone(),
-                seller_id: listing.owner_id.clone(),
-                final_price: args.offered_price,
-            })
+        let order_id = OrderService::new(self.ctx.db_pool.clone())
+            .create_order(
+                &args.listing_id,
+                &buyer_id,
+                &listing.owner_id,
+                args.offered_price,
+            )
             .await
-            .map_err(|e| {
-                tracing::error!(%e, "Failed to emit DealReached event");
-                ToolError(format!("Event bus error: {}", e))
+            .map_err(|e| match e {
+                OrderError::AlreadySold => ToolError(format!(
+                    "Listing {} is no longer available",
+                    args.listing_id
+                )),
+                other => {
+                    tracing::error!(%other, listing_id = %args.listing_id, "Failed to create order from purchase tool");
+                    ToolError("订单创建失败，请稍后再试".to_string())
+                }
             })?;
 
         Ok(format!(
-            "Purchase initiated! Order is being created for listing '{}'. Buyer: {}, Seller: {}, Price: {} CNY",
-            args.listing_id, buyer_id, listing.owner_id, args.offered_price
+            "Order created! Order ID: {}. Listing: '{}'. Buyer: {}, Seller: {}, Price: {:.2} CNY",
+            order_id,
+            args.listing_id,
+            buyer_id,
+            listing.owner_id,
+            cents_to_yuan(args.offered_price)
         ))
     }
 }
@@ -1010,8 +1035,44 @@ mod tests {
         }
     }
 
-    fn noop_embed_fn() -> EmbedFn {
-        Arc::new(|_, _| Box::pin(async { Ok(()) }))
+    fn tool_context(pool: sqlx::PgPool, current_user_id: Option<String>) -> ToolContext {
+        ToolContext {
+            db_pool: pool.clone(),
+            embed_updater: Arc::new(NoopEmbedUpdater),
+            current_user_id,
+            notification: crate::services::notification::NotificationService::new(pool),
+        }
+    }
+
+    async fn insert_tool_user(pool: &sqlx::PgPool, id: &str, username: &str) {
+        sqlx::query(
+            "INSERT INTO users (id, username, password_hash, role) VALUES ($1, $2, 'hash', 'user')",
+        )
+        .bind(id)
+        .bind(username)
+        .execute(pool)
+        .await
+        .expect("insert user");
+    }
+
+    async fn insert_tool_listing(
+        pool: &sqlx::PgPool,
+        listing_id: &str,
+        owner_id: &str,
+        suggested_price_cny: i64,
+        status: &str,
+    ) {
+        sqlx::query(
+            "INSERT INTO inventory (id, title, category, brand, condition_score, suggested_price_cny, defects, owner_id, status) \
+             VALUES ($1, 'Tool Listing', 'electronics', 'Acme', 8, $2, '[]', $3, $4)",
+        )
+        .bind(listing_id)
+        .bind(suggested_price_cny)
+        .bind(owner_id)
+        .bind(status)
+        .execute(pool)
+        .await
+        .expect("insert listing");
     }
 
     #[test]
@@ -1148,6 +1209,93 @@ mod tests {
         assert_eq!(args.offered_price, 450000);
     }
 
+    #[tokio::test]
+    async fn purchase_item_tool_creates_order_synchronously_and_marks_listing_sold() {
+        with_test_pool(|pool| async move {
+            let seller_id = Uuid::new_v4().to_string();
+            let buyer_id = Uuid::new_v4().to_string();
+            let listing_id = Uuid::new_v4().to_string();
+
+            insert_tool_user(&pool, &seller_id, "purchase_seller").await;
+            insert_tool_user(&pool, &buyer_id, "purchase_buyer").await;
+            insert_tool_listing(&pool, &listing_id, &seller_id, 10_000, "active").await;
+
+            let tool = PurchaseItemIntentTool {
+                ctx: tool_context(pool.clone(), Some(buyer_id.clone())),
+            };
+
+            let result = tool
+                .call(PurchaseItemIntentArgs {
+                    listing_id: listing_id.clone(),
+                    offered_price: 10_000,
+                })
+                .await
+                .expect("purchase listing");
+
+            assert!(result.contains("Order created!"));
+            assert!(result.contains("Order ID:"));
+
+            let order = sqlx::query(
+                "SELECT listing_id, buyer_id, seller_id, final_price, status FROM orders WHERE listing_id = $1",
+            )
+            .bind(&listing_id)
+            .fetch_one(&pool)
+            .await
+            .expect("select created order");
+
+            assert_eq!(order.get::<String, _>("listing_id"), listing_id);
+            assert_eq!(order.get::<String, _>("buyer_id"), buyer_id);
+            assert_eq!(order.get::<String, _>("seller_id"), seller_id);
+            assert_eq!(order.get::<i64, _>("final_price"), 10_000);
+            assert_eq!(order.get::<String, _>("status"), "pending");
+
+            let listing_status: String =
+                sqlx::query_scalar("SELECT status FROM inventory WHERE id = $1")
+                    .bind(&listing_id)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("select listing status");
+            assert_eq!(listing_status, "sold");
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn purchase_item_tool_reports_sold_listing_without_second_order() {
+        with_test_pool(|pool| async move {
+            let seller_id = Uuid::new_v4().to_string();
+            let buyer_id = Uuid::new_v4().to_string();
+            let listing_id = Uuid::new_v4().to_string();
+
+            insert_tool_user(&pool, &seller_id, "sold_seller").await;
+            insert_tool_user(&pool, &buyer_id, "sold_buyer").await;
+            insert_tool_listing(&pool, &listing_id, &seller_id, 10_000, "sold").await;
+
+            let tool = PurchaseItemIntentTool {
+                ctx: tool_context(pool.clone(), Some(buyer_id)),
+            };
+
+            let result = tool
+                .call(PurchaseItemIntentArgs {
+                    listing_id: listing_id.clone(),
+                    offered_price: 10_000,
+                })
+                .await
+                .expect("sold listing produces user-facing response");
+
+            assert!(result.contains("no longer available"));
+
+            let order_count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM orders WHERE listing_id = $1")
+                    .bind(&listing_id)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("count orders");
+            assert_eq!(order_count, 0);
+        })
+        .await;
+    }
+
     #[test]
     fn test_get_my_listings_args_empty() {
         let json = r#"{}"#;
@@ -1191,13 +1339,10 @@ mod tests {
             .await
             .expect("insert owner");
 
-            let (event_tx, _event_rx) = mpsc::channel(1);
             let tool = CreateListingTool {
                 ctx: ToolContext {
                     db_pool: pool.clone(),
-                    embed_and_insert: noop_embed_fn(),
                     embed_updater: Arc::new(NoopEmbedUpdater),
-                    event_tx,
                     current_user_id: Some(owner_id.clone()),
                     notification: crate::services::notification::NotificationService::new(
                         pool.clone(),

@@ -608,13 +608,14 @@ impl ChatRepository for PostgresChatRepository {
         conversation_id: &str,
         before: Option<i64>,
         limit: i64,
+        offset: i64,
     ) -> Result<(Vec<ChatMessage>, i64), ApiError> {
         let query = if before.is_some() {
-            "SELECT id, conversation_id, sender, receiver, content, image_data, audio_data, image_url, audio_url, is_agent, edited_at, created_at \
-             FROM chat_messages WHERE conversation_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3"
+            "SELECT id::text AS id, conversation_id, sender, receiver, content, image_data, audio_data, image_url, audio_url, is_agent, edited_at, timestamp AS created_at \
+             FROM chat_messages WHERE conversation_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3 OFFSET $4"
         } else {
-            "SELECT id, conversation_id, sender, receiver, content, image_data, audio_data, image_url, audio_url, is_agent, edited_at, created_at \
-             FROM chat_messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT $2"
+            "SELECT id::text AS id, conversation_id, sender, receiver, content, image_data, audio_data, image_url, audio_url, is_agent, edited_at, timestamp AS created_at \
+             FROM chat_messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT $2 OFFSET $3"
         };
 
         let rows = if let Some(b) = before {
@@ -622,12 +623,14 @@ impl ChatRepository for PostgresChatRepository {
                 .bind(conversation_id)
                 .bind(b)
                 .bind(limit)
+                .bind(offset)
                 .fetch_all(&self.pool)
                 .await
         } else {
             sqlx::query_as::<_, ChatMessage>(query)
                 .bind(conversation_id)
                 .bind(limit)
+                .bind(offset)
                 .fetch_all(&self.pool)
                 .await
         }

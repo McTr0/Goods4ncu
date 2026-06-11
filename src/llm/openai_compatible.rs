@@ -20,44 +20,34 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-pub struct MiniMaxProvider {
-    /// MiniMax OpenAI-compatible client for chat completions.
-    chat_client: openai::Client<reqwest::Client>,
-    /// Gemini client used only for embeddings (vector search + tool insertion).
+/// Generic OpenAI Chat Completions compatible provider.
+///
+/// This covers providers such as OpenAI, DeepSeek, Groq, OpenRouter, xAI,
+/// Together, and local gateways that expose `/v1/chat/completions`.
+/// Embeddings still use Gemini so the existing pgvector dimension and RAG
+/// pipeline remain stable while chat providers can vary independently.
+pub struct OpenAiCompatibleProvider {
+    provider_name: String,
+    chat_client: openai::CompletionsClient<reqwest::Client>,
     embedding_client: gemini::Client,
     model: String,
     embedding_dim: usize,
 }
 
-impl MiniMaxProvider {
-    #[allow(dead_code)]
+impl OpenAiCompatibleProvider {
     pub fn new(
-        api_key: &str,
-        base_url: Option<&str>,
-        gemini_api_key: &str,
-        embedding_dim: usize,
-    ) -> anyhow::Result<Self> {
-        Self::new_with_model(
-            api_key,
-            base_url,
-            "MiniMax-M2.7",
-            gemini_api_key,
-            embedding_dim,
-        )
-    }
-
-    pub fn new_with_model(
+        provider_name: impl Into<String>,
         api_key: &str,
         base_url: Option<&str>,
         model: impl Into<String>,
         gemini_api_key: &str,
         embedding_dim: usize,
     ) -> anyhow::Result<Self> {
-        let base_url = base_url.unwrap_or("https://api.minimaxi.com/v1");
-        let chat_client = openai::Client::builder()
-            .api_key(api_key)
-            .base_url(base_url)
-            .build()?;
+        let mut chat_builder = openai::CompletionsClient::builder().api_key(api_key);
+        if let Some(base_url) = base_url {
+            chat_builder = chat_builder.base_url(base_url);
+        }
+        let chat_client = chat_builder.build()?;
 
         let reqwest_client = reqwest::Client::builder().build()?;
         let embedding_client = gemini::Client::builder()
@@ -66,6 +56,7 @@ impl MiniMaxProvider {
             .build()?;
 
         Ok(Self {
+            provider_name: provider_name.into(),
             chat_client,
             embedding_client,
             model: model.into(),
@@ -73,8 +64,6 @@ impl MiniMaxProvider {
         })
     }
 
-    /// Build the RAG index for dynamic_context and the embed_updater for atomic
-    /// listing/vector writes inside tool-owned transactions.
     pub fn build_vector_store(
         &self,
         db_pool: &PgPool,
@@ -87,14 +76,12 @@ impl MiniMaxProvider {
             gemini::EMBEDDING_001,
             self.embedding_dim,
         );
-        // RAG store: owned by dynamic_context (consumed at agent build time).
         let rag_store =
             PostgresVectorStore::with_defaults(embedding_model.clone(), db_pool.clone());
 
-        // embed_updater: for atomic re-embedding within a transaction (UpdateListingTool).
         let embedding_client_for_updater = self.embedding_client.clone();
         let dim_for_updater = self.embedding_dim;
-        let embed_updater: Arc<dyn EmbedUpdater> = Arc::new(MiniMaxEmbedUpdater {
+        let embed_updater: Arc<dyn EmbedUpdater> = Arc::new(OpenAiCompatibleEmbedUpdater {
             embedding_client: embedding_client_for_updater,
             embedding_dim: dim_for_updater,
         });
@@ -103,13 +90,13 @@ impl MiniMaxProvider {
     }
 }
 
-struct MiniMaxEmbedUpdater {
+struct OpenAiCompatibleEmbedUpdater {
     embedding_client: gemini::Client,
     embedding_dim: usize,
 }
 
 #[async_trait(?Send)]
-impl EmbedUpdater for MiniMaxEmbedUpdater {
+impl EmbedUpdater for OpenAiCompatibleEmbedUpdater {
     async fn embed_and_update(
         &self,
         content: String,
@@ -132,7 +119,6 @@ impl EmbedUpdater for MiniMaxEmbedUpdater {
             .await
             .map_err(|e| ToolError(format!("Embeddings API error: {}", e)))?;
 
-        // Extract the embedding vector (Vec<f64>) for SQL binding.
         let embedding_vec: Vec<f64> = embeddings[0].1.first_ref().vec.clone();
         let document_json = serde_json::json!({ "id": listing_id, "content": content });
 
@@ -157,14 +143,14 @@ impl EmbedUpdater for MiniMaxEmbedUpdater {
 }
 
 #[async_trait]
-impl super::LlmProvider for MiniMaxProvider {
+impl super::LlmProvider for OpenAiCompatibleProvider {
     fn name(&self) -> &str {
-        "minimax"
+        &self.provider_name
     }
 
     async fn create_marketplace_agent(
         self: Arc<Self>,
-        db_pool: &sqlx::PgPool,
+        db_pool: &PgPool,
         _event_tx: mpsc::Sender<BusinessEvent>,
         current_user_id: Option<String>,
     ) -> anyhow::Result<Box<dyn MarketplaceAgent>> {
@@ -192,7 +178,7 @@ impl super::LlmProvider for MiniMaxProvider {
             .tool(crate::agents::tools::GetMyListingsTool { ctx: ctx.clone() })
             .build();
 
-        Ok(Box::new(MiniMaxMarketplaceAgent(agent)))
+        Ok(Box::new(OpenAiCompatibleMarketplaceAgent(agent)))
     }
 
     async fn create_negotiate_agent(self: Arc<Self>) -> anyhow::Result<Box<dyn NegotiateAgent>> {
@@ -202,16 +188,16 @@ impl super::LlmProvider for MiniMaxProvider {
             .preamble(NEGOTIATION_PREAMBLE)
             .build();
 
-        Ok(Box::new(MiniMaxNegotiateAgent(agent)))
+        Ok(Box::new(OpenAiCompatibleNegotiateAgent(agent)))
     }
 }
 
-pub struct MiniMaxMarketplaceAgent(
-    Agent<openai::responses_api::ResponsesCompletionModel<reqwest::Client>>,
+pub struct OpenAiCompatibleMarketplaceAgent(
+    Agent<openai::completion::CompletionModel<reqwest::Client>>,
 );
 
 #[async_trait]
-impl MarketplaceAgent for MiniMaxMarketplaceAgent {
+impl MarketplaceAgent for OpenAiCompatibleMarketplaceAgent {
     async fn prompt(&self, msg: String) -> anyhow::Result<String> {
         if LLM_CIRCUIT_BREAKER.is_open().await {
             tracing::warn!("LLM circuit breaker: prompt rejected (circuit open)");
@@ -265,7 +251,6 @@ impl MarketplaceAgent for MiniMaxMarketplaceAgent {
         let agent = self.0.clone();
         let circuit_breaker = LLM_CIRCUIT_BREAKER.clone();
         Box::pin(::async_stream::try_stream! {
-            // Check circuit breaker at stream start — fail fast before any LLM call.
             if circuit_breaker.is_open().await {
                 tracing::warn!("LLM circuit breaker: stream_chat rejected (circuit open)");
                 Err(anyhow::anyhow!(CircuitBreaker::degraded_message()))?;
@@ -346,7 +331,6 @@ impl MarketplaceAgent for MiniMaxMarketplaceAgent {
                 current_msg = chat_history.last().cloned().unwrap_or(current_msg);
             }
 
-            // Record success only if at least one LLM call succeeded.
             if call_succeeded {
                 circuit_breaker.record_success().await;
             }
@@ -354,12 +338,12 @@ impl MarketplaceAgent for MiniMaxMarketplaceAgent {
     }
 }
 
-pub struct MiniMaxNegotiateAgent(
-    Agent<openai::responses_api::ResponsesCompletionModel<reqwest::Client>>,
+pub struct OpenAiCompatibleNegotiateAgent(
+    Agent<openai::completion::CompletionModel<reqwest::Client>>,
 );
 
 #[async_trait]
-impl NegotiateAgent for MiniMaxNegotiateAgent {
+impl NegotiateAgent for OpenAiCompatibleNegotiateAgent {
     async fn prompt(&self, msg: String) -> anyhow::Result<String> {
         Ok(self.0.prompt(msg).await?)
     }

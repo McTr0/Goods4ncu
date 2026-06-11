@@ -15,6 +15,23 @@ use sqlx::Row;
 use crate::api::auth::extract_user_id_from_token_with_fallback;
 use crate::api::error::ApiError;
 use crate::api::AppState;
+use crate::services::order::OrderError;
+
+fn map_order_creation_error(error: OrderError) -> ApiError {
+    match error {
+        OrderError::AlreadySold => ApiError::Conflict("此商品已经售出".to_string()),
+        other => {
+            tracing::error!(%other, "Failed to create order for negotiation");
+            ApiError::Internal(anyhow::anyhow!("Failed to create order"))
+        }
+    }
+}
+
+fn record_order_created_metric() {
+    if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {
+        metrics.record_order_created();
+    }
+}
 
 #[derive(Serialize)]
 pub struct HitlRequestItem {
@@ -80,10 +97,10 @@ pub async fn list_negotiations(
             reason: row.get("reason"),
             status: row.get("status"),
             counter_price: row
-                .try_get::<Option<i32>, _>("counter_price")
+                .try_get::<Option<i64>, _>("counter_price")
                 .ok()
                 .flatten()
-                .map(|c| crate::utils::cents_to_yuan(c as i64)),
+                .map(crate::utils::cents_to_yuan),
             created_at: row
                 .try_get::<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>, _>("created_at")
                 .map(|dt| dt.to_rfc3339())
@@ -125,12 +142,19 @@ pub async fn respond_negotiation(
     )
     .map_err(|_| ApiError::Unauthorized)?;
 
-    // Fetch the request and verify ownership
+    let mut tx = state
+        .infra
+        .db
+        .begin()
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+    // Fetch the request and verify ownership while locking the HITL row.
     let row = sqlx::query(
-        "SELECT id, seller_id, listing_id, buyer_id, status FROM hitl_requests WHERE id = $1",
+        "SELECT id, seller_id, listing_id, buyer_id, status, proposed_price FROM hitl_requests WHERE id = $1 FOR UPDATE",
     )
     .bind(&id)
-    .fetch_optional(&state.infra.db)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
     .ok_or(ApiError::NotFound)?;
@@ -147,6 +171,7 @@ pub async fn respond_negotiation(
 
     let listing_id: String = row.get("listing_id");
     let buyer_id: String = row.get("buyer_id");
+    let proposed_price: i64 = row.get("proposed_price");
 
     let (new_status, counter_price) = match payload.action.as_str() {
         "approve" => ("approved", None),
@@ -164,31 +189,77 @@ pub async fn respond_negotiation(
         }
     };
 
+    let (system_content, final_price_for_deal): (String, Option<i64>) = match new_status {
+        "approved" => {
+            let price = proposed_price;
+            (
+                format!(
+                    "系统：卖家接受了您的还价 ¥{:.2}，订单已创建",
+                    crate::utils::cents_to_yuan(price)
+                ),
+                Some(price),
+            )
+        }
+        "rejected" => ("系统：卖家拒绝了您的还价，交易取消".to_string(), None),
+        "countered" => (
+            format!(
+                "系统：卖家还价 ¥{:.2}",
+                crate::utils::cents_to_yuan(counter_price.unwrap())
+            ),
+            None,
+        ),
+        _ => unreachable!(),
+    };
+
+    if let Some(price) = final_price_for_deal {
+        state
+            .infra
+            .order_service
+            .create_order_in_tx(&mut tx, &listing_id, &buyer_id, &user_id, price)
+            .await
+            .map_err(map_order_creation_error)?;
+    }
+
     sqlx::query(
         r#"UPDATE hitl_requests
            SET status = $1, counter_price = $2, resolved_at = CURRENT_TIMESTAMP
-           WHERE id = $3"#,
+           WHERE id = $3 AND status = 'pending'"#,
     )
     .bind(new_status)
     .bind(counter_price)
     .bind(&id)
-    .execute(&state.infra.db)
+    .execute(&mut *tx)
     .await
     .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
-    // Fetch proposed_price before we emit DealReached (needed for system message + event)
-    let hitl_row = sqlx::query("SELECT proposed_price FROM hitl_requests WHERE id = $1")
-        .bind(&id)
-        .fetch_one(&state.infra.db)
+    // Persist as an agent/system-style message while keeping sender FK-safe.
+    let conversation_id = format!("negotiate:{}", listing_id);
+    sqlx::query(
+        r#"INSERT INTO chat_messages (conversation_id, sender, receiver, is_agent, content, listing_id)
+           VALUES ($1, $2, $3, TRUE, $4, $5)"#,
+    )
+    .bind(&conversation_id)
+    .bind(&user_id)
+    .bind(&buyer_id)
+    .bind(&system_content)
+    .bind(&listing_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+    tx.commit()
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-    let proposed_price: i64 = hitl_row.get::<i64, _>("proposed_price") as i64;
 
-    // Notify the buyer about the seller's decision
+    if final_price_for_deal.is_some() {
+        record_order_created_metric();
+    }
+
+    // Notify the buyer after commit; notification delivery is best-effort.
     let (notif_title, notif_body): (String, String) = match new_status {
         "approved" => (
             "卖家接受了您的还价".to_string(),
-            "卖家接受了您的还价，商品即将为您创建订单".to_string(),
+            "卖家接受了您的还价，订单已创建".to_string(),
         ),
         "rejected" => (
             "卖家拒绝了您的还价".to_string(),
@@ -217,54 +288,6 @@ pub async fn respond_negotiation(
         )
         .await;
 
-    // Inject a system message into the conversation so the buyer sees it in chat history.
-    // Uses sender='system' as a convention; the Flutter UI renders system messages distinctly.
-    let (system_content, final_price_for_deal): (String, Option<i64>) = match new_status {
-        "approved" => {
-            let price = proposed_price;
-            (
-                format!(
-                    "系统：卖家接受了您的还价 ¥{:.2}，订单已创建",
-                    crate::utils::cents_to_yuan(price)
-                ),
-                Some(price),
-            )
-        }
-        "rejected" => ("系统：卖家拒绝了您的还价，交易取消".to_string(), None),
-        "countered" => (
-            format!(
-                "系统：卖家还价 ¥{:.2}",
-                crate::utils::cents_to_yuan(counter_price.unwrap())
-            ),
-            None,
-        ),
-        _ => unreachable!(),
-    };
-    let conversation_id = format!("negotiate:{}", listing_id);
-    let _ = sqlx::query(
-        r#"INSERT INTO chat_messages (conversation_id, sender, is_agent, content, listing_id)
-           VALUES ($1, 'system', FALSE, $2, $3)"#,
-    )
-    .bind(&conversation_id)
-    .bind(&system_content)
-    .bind(&listing_id)
-    .execute(&state.infra.db)
-    .await
-    .map_err(|e| tracing::warn!(%e, "Failed to inject system message into chat"));
-
-    // If approved, emit DealReached so the order is created automatically
-    if let Some(price) = final_price_for_deal {
-        let chat_event = crate::services::BusinessEvent::DealReached {
-            listing_id: listing_id.clone(),
-            buyer_id,
-            seller_id: user_id,
-            final_price: price,
-        };
-        if let Err(e) = state.infra.event_tx.send(chat_event).await {
-            tracing::error!(%e, "Failed to emit DealReached after negotiation approval");
-        }
-    }
-
     Ok(Json(NegotiationResponseResult {
         status: new_status.to_string(),
         message: format!("议价请求已更新为 {}", new_status),
@@ -274,7 +297,7 @@ pub async fn respond_negotiation(
 /// PATCH /api/negotiations/{id}/accept — buyer accepts seller's counter-offer
 ///
 /// After seller counters (status = 'countered'), buyer can accept the counter_price.
-/// This creates a DealReached event and notifies the seller.
+/// This creates the order in the same transaction and notifies the seller.
 pub async fn accept_counter_negotiation(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -287,12 +310,19 @@ pub async fn accept_counter_negotiation(
     )
     .map_err(|_| ApiError::Unauthorized)?;
 
+    let mut tx = state
+        .infra
+        .db
+        .begin()
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
     // Fetch the request and verify the buyer owns it.
     let row = sqlx::query(
-        "SELECT id, buyer_id, seller_id, listing_id, status, counter_price FROM hitl_requests WHERE id = $1",
+        "SELECT id, buyer_id, seller_id, listing_id, status, counter_price FROM hitl_requests WHERE id = $1 FOR UPDATE",
     )
     .bind(&id)
-    .fetch_optional(&state.infra.db)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
     .ok_or(ApiError::NotFound)?;
@@ -309,18 +339,27 @@ pub async fn accept_counter_negotiation(
         ));
     }
 
-    let counter_price: i64 = row.get::<i32, _>("counter_price") as i64;
+    let counter_price: i64 = row
+        .get::<Option<i64>, _>("counter_price")
+        .ok_or_else(|| ApiError::BadRequest("还价缺少 counter_price".to_string()))?;
     let listing_id: String = row.get("listing_id");
     let seller_id: String = row.get("seller_id");
+
+    state
+        .infra
+        .order_service
+        .create_order_in_tx(&mut tx, &listing_id, &buyer_id, &seller_id, counter_price)
+        .await
+        .map_err(map_order_creation_error)?;
 
     // Record buyer's acceptance.
     sqlx::query(
         r#"UPDATE hitl_requests
-           SET buyer_action = 'accepted', resolved_at = CURRENT_TIMESTAMP
-           WHERE id = $1"#,
+           SET status = 'approved', buyer_action = 'accepted', resolved_at = CURRENT_TIMESTAMP
+           WHERE id = $1 AND status = 'countered'"#,
     )
     .bind(&id)
-    .execute(&state.infra.db)
+    .execute(&mut *tx)
     .await
     .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
@@ -330,16 +369,24 @@ pub async fn accept_counter_negotiation(
         crate::utils::cents_to_yuan(counter_price)
     );
     let conversation_id = format!("negotiate:{}", listing_id);
-    let _ = sqlx::query(
-        r#"INSERT INTO chat_messages (conversation_id, sender, is_agent, content, listing_id)
-           VALUES ($1, 'system', FALSE, $2, $3)"#,
+    sqlx::query(
+        r#"INSERT INTO chat_messages (conversation_id, sender, receiver, is_agent, content, listing_id)
+           VALUES ($1, $2, $3, TRUE, $4, $5)"#,
     )
     .bind(&conversation_id)
+    .bind(&buyer_id)
+    .bind(&seller_id)
     .bind(&system_content)
     .bind(&listing_id)
-    .execute(&state.infra.db)
+    .execute(&mut *tx)
     .await
-    .map_err(|e| tracing::warn!(%e, "Failed to inject system message"));
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+    record_order_created_metric();
 
     // Notify seller.
     let _ = state
@@ -355,20 +402,9 @@ pub async fn accept_counter_negotiation(
         )
         .await;
 
-    // Emit DealReached to create the order.
-    let chat_event = crate::services::BusinessEvent::DealReached {
-        listing_id: listing_id.clone(),
-        buyer_id,
-        seller_id,
-        final_price: counter_price,
-    };
-    if let Err(e) = state.infra.event_tx.send(chat_event).await {
-        tracing::error!(%e, "Failed to emit DealReached after buyer accepted counter");
-    }
-
     Ok(Json(NegotiationResponseResult {
         status: "buyer_accepted".to_string(),
-        message: "已接受卖家还价，订单创建中".to_string(),
+        message: "已接受卖家还价，订单已创建".to_string(),
     }))
 }
 
@@ -387,11 +423,18 @@ pub async fn reject_counter_negotiation(
     )
     .map_err(|_| ApiError::Unauthorized)?;
 
+    let mut tx = state
+        .infra
+        .db
+        .begin()
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
     let row = sqlx::query(
-        "SELECT id, buyer_id, seller_id, listing_id, status FROM hitl_requests WHERE id = $1",
+        "SELECT id, buyer_id, seller_id, listing_id, status FROM hitl_requests WHERE id = $1 FOR UPDATE",
     )
     .bind(&id)
-    .fetch_optional(&state.infra.db)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
     .ok_or(ApiError::NotFound)?;
@@ -413,26 +456,32 @@ pub async fn reject_counter_negotiation(
 
     sqlx::query(
         r#"UPDATE hitl_requests
-           SET buyer_action = 'rejected', resolved_at = CURRENT_TIMESTAMP
-           WHERE id = $1"#,
+           SET status = 'rejected', buyer_action = 'rejected', resolved_at = CURRENT_TIMESTAMP
+           WHERE id = $1 AND status = 'countered'"#,
     )
     .bind(&id)
-    .execute(&state.infra.db)
+    .execute(&mut *tx)
     .await
     .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
     let system_content = "系统：买家拒绝了卖家的还价，交易取消".to_string();
     let conversation_id = format!("negotiate:{}", listing_id);
     let _ = sqlx::query(
-        r#"INSERT INTO chat_messages (conversation_id, sender, is_agent, content, listing_id)
-           VALUES ($1, 'system', FALSE, $2, $3)"#,
+        r#"INSERT INTO chat_messages (conversation_id, sender, receiver, is_agent, content, listing_id)
+           VALUES ($1, $2, $3, TRUE, $4, $5)"#,
     )
     .bind(&conversation_id)
+    .bind(&buyer_id)
+    .bind(&seller_id)
     .bind(&system_content)
     .bind(&listing_id)
-    .execute(&state.infra.db)
+    .execute(&mut *tx)
     .await
-    .map_err(|e| tracing::warn!(%e, "Failed to inject system message"));
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
     let _ = state
         .infra

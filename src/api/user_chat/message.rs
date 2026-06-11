@@ -419,7 +419,10 @@ pub async fn typing_indicator(
     // Broadcast to the other party
     let recipient = match access {
         ConversationAccess::Special => "assistant".to_string(),
-        ConversationAccess::Direct(connection) => connection.other_user_id(&user_id)?,
+        ConversationAccess::Direct(connection) => {
+            connection.ensure_connected()?;
+            connection.other_user_id(&user_id)?
+        }
     };
     ws::broadcast_to_user(&recipient, &payload);
 

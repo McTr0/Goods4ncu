@@ -36,7 +36,8 @@ class _FakeApiService extends ApiService {
 }
 
 class _FakeAdminImpersonationService extends AdminImpersonationService {
-  _FakeAdminImpersonationService({this.shouldThrow = false});
+  _FakeAdminImpersonationService({this.shouldThrow = false})
+    : super(gateway: _UnusedAdminImpersonationGateway());
 
   final bool shouldThrow;
   final List<String> calls = <String>[];
@@ -47,6 +48,13 @@ class _FakeAdminImpersonationService extends AdminImpersonationService {
     if (shouldThrow) {
       throw Exception('impersonate failed');
     }
+  }
+}
+
+class _UnusedAdminImpersonationGateway implements AdminImpersonationGateway {
+  @override
+  Future<String> fetchImpersonationToken(String userId) {
+    throw StateError('Test fake overrides impersonate directly.');
   }
 }
 

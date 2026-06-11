@@ -12,10 +12,13 @@
 | `TEST_DATABASE_URL` | 测试需要 | 数据库测试连接串，必须指向安全测试库。 |
 | `JWT_SECRET` | 是 | JWT 签名密钥，至少 32 字符。 |
 | `JWT_SECRET_OLD` | 可选 | JWT 密钥轮换期间用于兼容旧 token。 |
-| `GEMINI_API_KEY` | 条件必需 | 默认 LLM provider 和 embedding 所需 key。 |
+| `GEMINI_API_KEY` | 条件必需 | `gemini` provider 必需；其它 chat provider 当前也需要它做 embedding/RAG。 |
 | `MINIMAX_API_KEY` | 条件必需 | 使用 MiniMax provider 时需要。 |
 | `MINIMAX_API_BASE_URL` | 可选 | MiniMax 自定义 base URL。 |
-| `LLM_PROVIDER` | 可选 | `gemini` 或 `minimax`，默认 `gemini`。 |
+| `LLM_PROVIDER` | 可选 | `gemini`、`minimax`，或 OpenAI-compatible alias：`openai`、`deepseek`、`groq`、`openrouter`、`xai`、`together`、`openai_compatible`。 |
+| `LLM_MODEL` | 条件必需 | Chat model 名称；OpenAI-compatible provider 必须设置。 |
+| `LLM_BASE_URL` | 可选 | OpenAI-compatible 自定义 base URL；命名 alias 有默认 base URL，可覆盖。 |
+| `LLM_API_KEY` | 条件必需 | OpenAI-compatible 通用 key；也可用 `OPENAI_API_KEY`、`DEEPSEEK_API_KEY`、`GROQ_API_KEY`、`OPENROUTER_API_KEY`、`XAI_API_KEY`、`TOGETHER_API_KEY`。 |
 | `VECTOR_DIM` | 可选 | embedding 维度，默认 768，必须与 `documents.embedding` 一致。 |
 | `CORS_ORIGINS` | 生产必需 | 逗号分隔允许来源；生产环境不允许空配置或 `*`。 |
 | `APP_ENV`、`ENVIRONMENT`、`RUST_ENV` | 可选 | 任一值为 `production` 或 `prod` 时启用生产 CORS 防护。 |

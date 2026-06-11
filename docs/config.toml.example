@@ -24,9 +24,13 @@ port = 3000
 # LLM
 # -----------------------------------------------------------------------
 [llm]
-provider = "gemini"          # "gemini" or "minimax"
+provider = "gemini"          # gemini, minimax, openai, deepseek, groq, openrouter, xai, together, openai_compatible
+model = "gemini-3-flash-preview" # Required for OpenAI-compatible providers; optional for gemini/minimax
+# base_url = "https://api.deepseek.com/v1" # Optional; useful for openai_compatible/custom gateways
 vector_dim = 768             # Embedding vector dimensions
-# API keys come from env vars: GEMINI_API_KEY, MINIMAX_API_KEY, MINIMAX_API_BASE_URL
+# API keys come from env vars only:
+#   GEMINI_API_KEY, MINIMAX_API_KEY
+#   LLM_API_KEY or provider-specific keys such as DEEPSEEK_API_KEY/GROQ_API_KEY
 
 # -----------------------------------------------------------------------
 # Rate Limiting

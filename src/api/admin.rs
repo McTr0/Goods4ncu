@@ -6,7 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
-use crate::api::auth::generate_access_token;
+use crate::api::auth::{generate_access_token, revoke_access_token_jti};
 use crate::api::error::ApiError;
 use crate::api::AppState;
 use crate::middleware::admin::require_admin;
@@ -15,7 +15,9 @@ use crate::repositories::{
 };
 use crate::services::order::OrderStatus;
 
-use crate::repositories::traits::{ListingRepository, OrderRepository, UserRepository};
+use crate::repositories::traits::{
+    AuthRepository, ListingRepository, OrderRepository, UserRepository,
+};
 
 /// GET /api/admin/stats - admin marketplace statistics (requires admin role)
 pub async fn get_admin_stats(
@@ -301,8 +303,20 @@ pub async fn ban_user(
         return Err(ApiError::Forbidden);
     }
 
-    // Use repository to ban user (it handles check for non-existence)
+    let target_user = state
+        .user_repo
+        .find_by_id(&target_user_id)
+        .await?
+        .ok_or(ApiError::NotFound)?;
+    if target_user.role == "admin" {
+        return Err(ApiError::Forbidden);
+    }
+
     state.user_repo.ban_user(&target_user_id).await?;
+    state
+        .auth_repo
+        .revoke_all_user_tokens(&target_user_id)
+        .await?;
 
     // Log audit trail
     let _ = state
@@ -425,6 +439,9 @@ pub async fn impersonate_user(
     if user.role == "admin" {
         return Err(ApiError::Forbidden);
     }
+    if user.status != "active" {
+        return Err(ApiError::Forbidden);
+    }
 
     // Generate JWT for target user (shorter TTL: 30 minutes for impersonation)
     let (token, jti, exp) = generate_access_token(
@@ -464,7 +481,7 @@ pub async fn impersonate_user(
         "user_id": user.id,
         "username": user.username,
         "role": user.role,
-        "status": "active",
+        "status": user.status,
         "message": "已以该用户身份登录"
     })))
 }
@@ -481,24 +498,8 @@ pub async fn revoke_token(
         state.secrets.jwt_secret_old.as_deref(),
     )?;
 
-    // Add to denylist with a generous TTL (24h — covers max token lifetime).
     let expires_at = chrono::Utc::now() + chrono::Duration::hours(24);
-    sqlx::query(
-        r#"INSERT INTO revoked_access_tokens (jti, expires_at)
-           VALUES ($1, $2)
-           ON CONFLICT (jti)
-           DO UPDATE SET expires_at = GREATEST(revoked_access_tokens.expires_at, EXCLUDED.expires_at)"#,
-    )
-    .bind(&jti)
-    .bind(expires_at)
-    .execute(&state.infra.db)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-    state
-        .infra
-        .token_denylist
-        .deny(&jti, expires_at.timestamp().max(0) as u64);
+    revoke_access_token_jti(&state, &jti, expires_at).await?;
 
     let _ = state
         .infra

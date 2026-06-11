@@ -57,12 +57,15 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
                     gemini_api_key: "test-gemini-key".to_string(),
                     minimax_api_key: None,
                     minimax_api_base_url: None,
+                    llm_api_key: None,
                     jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),
                     jwt_secret_old: None,
                     database_url: "postgres://test/test".to_string(),
                     oss_access_key_id: None,
                     oss_access_key_secret: None,
                     llm_provider: "gemini".to_string(),
+                    llm_model: "gemini-3-flash-preview".to_string(),
+                    llm_base_url: None,
                     vector_dim: 768,
                     cors_origins: vec![],
                     oss_endpoint: "https://oss-cn-beijing.aliyuncs.com".to_string(),
@@ -182,6 +185,7 @@ async fn admin_routes_require_auth_and_admin_role() {
     with_test_pool(|pool| async move {
         insert_user(&pool, "admin-1", "admin_u", "admin").await;
         insert_user(&pool, "user-1", "user_u", "user").await;
+        insert_user(&pool, "target-user-1", "target_u", "user").await;
 
         let state = build_state(pool.clone());
         let app = create_router(state, &[]);
@@ -192,9 +196,9 @@ async fn admin_routes_require_auth_and_admin_role() {
             ("GET", "/api/admin/listings"),
             ("GET", "/api/admin/orders"),
             ("GET", "/api/admin/audit-logs"),
-            ("POST", "/api/admin/users/user-1/ban"),
-            ("POST", "/api/admin/users/user-1/unban"),
-            ("POST", "/api/admin/users/user-1/impersonate"),
+            ("POST", "/api/admin/users/target-user-1/ban"),
+            ("POST", "/api/admin/users/target-user-1/unban"),
+            ("POST", "/api/admin/users/target-user-1/impersonate"),
             ("POST", "/api/admin/listings/listing-1/takedown"),
             ("POST", "/api/admin/tokens/test-jti/revoke"),
         ];
@@ -296,6 +300,13 @@ async fn admin_routes_require_auth_and_admin_role() {
 async fn admin_self_target_mutations_are_forbidden() {
     with_test_pool(|pool| async move {
         insert_user(&pool, "admin-self", "admin_self", "admin").await;
+        insert_user(&pool, "admin-peer", "admin_peer", "admin").await;
+        insert_user(&pool, "banned-user", "banned_user", "user").await;
+        sqlx::query("UPDATE users SET status = 'banned' WHERE id = $1")
+            .bind("banned-user")
+            .execute(&pool)
+            .await
+            .expect("ban test user");
 
         let state = build_state(pool.clone());
         let app = create_router(state, &[]);
@@ -311,6 +322,31 @@ async fn admin_self_target_mutations_are_forbidden() {
         let req = Request::builder()
             .method("POST")
             .uri("/api/admin/users/admin-self/ban")
+            .header("Authorization", bearer(&admin_token))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/admin/users/admin-peer/ban")
+            .header("Authorization", bearer(&admin_token))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+        let peer_status: String = sqlx::query_scalar("SELECT status FROM users WHERE id = $1")
+            .bind("admin-peer")
+            .fetch_one(&pool)
+            .await
+            .expect("select peer admin status");
+        assert_eq!(peer_status, "active");
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/admin/users/banned-user/impersonate")
             .header("Authorization", bearer(&admin_token))
             .body(Body::empty())
             .unwrap();

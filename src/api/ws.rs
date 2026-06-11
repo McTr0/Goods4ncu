@@ -25,7 +25,9 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::interval;
 
-use crate::api::auth::{ensure_token_not_revoked, extract_user_id_from_token_str_with_fallback};
+use crate::api::auth::{
+    ensure_token_not_revoked, ensure_user_not_banned, extract_user_id_from_token_str_with_fallback,
+};
 use crate::api::AppState;
 
 /// Connection table: user_id → list of tx channels (one per connected device).
@@ -144,6 +146,10 @@ pub async fn ws_handler(
                 .into_response();
         }
     };
+    if let Err(err) = ensure_user_not_banned(&state, &user_id).await {
+        tracing::warn!(user_id = %user_id, "WS auth failed: user is not active");
+        return err.into_response();
+    }
 
     ws.on_upgrade(move |socket| async move {
         handle_socket(socket, user_id).await;

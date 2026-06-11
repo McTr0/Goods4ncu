@@ -22,6 +22,65 @@ pub const DEFAULT_CATEGORIES: &[&str] = &[
     "other",
 ];
 
+pub const SUPPORTED_LLM_PROVIDERS: &[&str] = &[
+    "gemini",
+    "minimax",
+    "openai_compatible",
+    "openai",
+    "deepseek",
+    "groq",
+    "openrouter",
+    "xai",
+    "together",
+];
+
+fn normalize_llm_provider(provider: &str) -> String {
+    provider.trim().to_ascii_lowercase().replace('-', "_")
+}
+
+pub fn is_openai_compatible_provider(provider: &str) -> bool {
+    matches!(
+        provider,
+        "openai_compatible" | "openai" | "deepseek" | "groq" | "openrouter" | "xai" | "together"
+    )
+}
+
+fn is_supported_llm_provider(provider: &str) -> bool {
+    SUPPORTED_LLM_PROVIDERS.contains(&provider)
+}
+
+fn default_llm_model(provider: &str) -> Option<&'static str> {
+    match provider {
+        "gemini" => Some("gemini-3-flash-preview"),
+        "minimax" => Some("MiniMax-M2.7"),
+        _ => None,
+    }
+}
+
+fn default_llm_base_url(provider: &str) -> Option<&'static str> {
+    match provider {
+        "openai" => Some("https://api.openai.com/v1"),
+        "deepseek" => Some("https://api.deepseek.com/v1"),
+        "groq" => Some("https://api.groq.com/openai/v1"),
+        "openrouter" => Some("https://openrouter.ai/api/v1"),
+        "xai" => Some("https://api.x.ai/v1"),
+        "together" => Some("https://api.together.xyz/v1"),
+        _ => None,
+    }
+}
+
+fn provider_api_key_env(provider: &str) -> Option<&'static str> {
+    match provider {
+        "openai" => Some("OPENAI_API_KEY"),
+        "deepseek" => Some("DEEPSEEK_API_KEY"),
+        "groq" => Some("GROQ_API_KEY"),
+        "openrouter" => Some("OPENROUTER_API_KEY"),
+        "xai" => Some("XAI_API_KEY"),
+        "together" => Some("TOGETHER_API_KEY"),
+        _ => None,
+    }
+}
+
 /// Centralized application configuration loaded from environment variables.
 #[derive(Clone)]
 pub struct AppConfig {
@@ -29,6 +88,7 @@ pub struct AppConfig {
     pub gemini_api_key: String,
     pub minimax_api_key: Option<String>,
     pub minimax_api_base_url: Option<String>,
+    pub llm_api_key: Option<String>,
     pub jwt_secret: String,
     pub jwt_secret_old: Option<String>,
     pub database_url: String,
@@ -37,6 +97,8 @@ pub struct AppConfig {
 
     // --- LLM config (env var, with TOML override) ---
     pub llm_provider: String,
+    pub llm_model: String,
+    pub llm_base_url: Option<String>,
     pub vector_dim: usize,
 
     // --- Infrastructure ---
@@ -77,6 +139,10 @@ impl fmt::Debug for AppConfig {
                 &self.minimax_api_key.as_ref().map(|_| "[REDACTED]"),
             )
             .field("minimax_api_base_url", &self.minimax_api_base_url)
+            .field(
+                "llm_api_key",
+                &self.llm_api_key.as_ref().map(|_| "[REDACTED]"),
+            )
             .field("jwt_secret", &"[REDACTED]")
             .field(
                 "jwt_secret_old",
@@ -84,6 +150,8 @@ impl fmt::Debug for AppConfig {
             )
             .field("database_url", &"[REDACTED]")
             .field("llm_provider", &self.llm_provider)
+            .field("llm_model", &self.llm_model)
+            .field("llm_base_url", &self.llm_base_url)
             .field("vector_dim", &self.vector_dim)
             .field("cors_origins", &self.cors_origins)
             .field("oss_endpoint", &self.oss_endpoint)
@@ -154,37 +222,87 @@ impl AppConfig {
 
         // Phase 2: Build config with env var override of file override of default
 
+        let read_non_empty_env = |key: &str| {
+            std::env::var(key)
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        };
+
         // LLM provider: env > file > "gemini"
-        let llm_provider = std::env::var("LLM_PROVIDER")
-            .ok()
+        let llm_provider = read_non_empty_env("LLM_PROVIDER")
             .or_else(|| file.as_ref()?.llm.provider.clone())
+            .map(|provider| normalize_llm_provider(&provider))
             .unwrap_or_else(|| "gemini".into());
 
-        // Validate provider
-        if !["gemini", "minimax"].contains(&llm_provider.as_str()) {
+        if !is_supported_llm_provider(&llm_provider) {
             panic!(
-                "LLM_PROVIDER must be 'gemini' or 'minimax', got: {}",
+                "LLM_PROVIDER must be one of {}, got: {}",
+                SUPPORTED_LLM_PROVIDERS.join(", "),
                 llm_provider
             );
         }
 
-        let vector_dim: usize = std::env::var("VECTOR_DIM")
-            .ok()
+        let llm_model = read_non_empty_env("LLM_MODEL")
+            .or_else(|| file.as_ref()?.llm.model.clone())
+            .or_else(|| default_llm_model(&llm_provider).map(str::to_string))
+            .unwrap_or_else(|| {
+                panic!(
+                    "LLM_MODEL must be set when LLM_PROVIDER={} (or llm.model in TOML)",
+                    llm_provider
+                )
+            });
+
+        let llm_base_url = read_non_empty_env("LLM_BASE_URL")
+            .or_else(|| file.as_ref()?.llm.base_url.clone())
+            .or_else(|| default_llm_base_url(&llm_provider).map(str::to_string));
+
+        let llm_api_key = read_non_empty_env("LLM_API_KEY")
+            .or_else(|| provider_api_key_env(&llm_provider).and_then(read_non_empty_env))
+            .or_else(|| read_non_empty_env("OPENAI_COMPAT_API_KEY"));
+
+        let vector_dim: usize = read_non_empty_env("VECTOR_DIM")
             .or_else(|| file.as_ref()?.llm.vector_dim.map(|v| v.to_string()))
             .and_then(|s| s.parse().ok())
             .unwrap_or(768);
 
-        let gemini_api_key = std::env::var("GEMINI_API_KEY").ok();
-        let minimax_api_key = std::env::var("MINIMAX_API_KEY").ok();
-        let minimax_api_base_url = std::env::var("MINIMAX_API_BASE_URL").ok();
+        let gemini_api_key = read_non_empty_env("GEMINI_API_KEY");
+        let minimax_api_key = read_non_empty_env("MINIMAX_API_KEY");
+        let minimax_api_base_url = read_non_empty_env("MINIMAX_API_BASE_URL");
 
-        if gemini_api_key.is_none() && minimax_api_key.is_none() {
-            panic!("GEMINI_API_KEY or MINIMAX_API_KEY must be set in environment");
+        if llm_provider == "gemini" && gemini_api_key.is_none() {
+            panic!("GEMINI_API_KEY must be set when LLM_PROVIDER=gemini");
         }
 
-        if llm_provider == "minimax" && gemini_api_key.is_none() {
-            panic!("GEMINI_API_KEY must be set when LLM_PROVIDER=minimax (used for embeddings)");
+        if llm_provider == "minimax" && minimax_api_key.is_none() {
+            panic!("MINIMAX_API_KEY must be set when LLM_PROVIDER=minimax");
         }
+
+        if is_openai_compatible_provider(&llm_provider) && llm_api_key.is_none() {
+            panic!(
+                "LLM_API_KEY or provider-specific key must be set when LLM_PROVIDER={}",
+                llm_provider
+            );
+        }
+
+        // All non-Gemini chat providers currently reuse Gemini embeddings so
+        // the existing pgvector schema and RAG pipeline stay stable.
+        if llm_provider != "gemini" && gemini_api_key.is_none() {
+            panic!(
+                "GEMINI_API_KEY must be set when LLM_PROVIDER={} (used for embeddings)",
+                llm_provider
+            );
+        }
+
+        // Deprecated compatibility path: keep accepting MINIMAX_API_BASE_URL
+        // while newer OpenAI-compatible providers use LLM_BASE_URL.
+        let minimax_api_base_url = minimax_api_base_url.or_else(|| {
+            if llm_provider == "minimax" {
+                llm_base_url.clone()
+            } else {
+                None
+            }
+        });
 
         let jwt_secret =
             std::env::var("JWT_SECRET").expect("JWT_SECRET must be set in environment");
@@ -193,13 +311,6 @@ impl AppConfig {
         }
 
         let jwt_secret_old = std::env::var("JWT_SECRET_OLD").ok();
-
-        let read_non_empty_env = |key: &str| {
-            std::env::var(key)
-                .ok()
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-        };
 
         // CORS: env > file > default (empty = allow all in non-production only)
         let cors_origins = std::env::var("CORS_ORIGINS")
@@ -334,11 +445,14 @@ impl AppConfig {
             gemini_api_key: gemini_api_key.unwrap_or_default(),
             minimax_api_key,
             minimax_api_base_url,
+            llm_api_key,
             jwt_secret,
             jwt_secret_old,
             database_url: std::env::var("DATABASE_URL")
                 .expect("DATABASE_URL must be set in environment"),
             llm_provider,
+            llm_model,
+            llm_base_url,
             vector_dim,
             cors_origins,
             blocked_keywords,
@@ -404,12 +518,15 @@ mod tests {
             gemini_api_key: "gemini-secret".to_string(),
             minimax_api_key: Some("minimax-secret".to_string()),
             minimax_api_base_url: None,
+            llm_api_key: Some("generic-llm-secret".to_string()),
             jwt_secret: "jwt-secret-that-is-at-least-32-characters".to_string(),
             jwt_secret_old: None,
             database_url: "postgres://user:pass@localhost/db".to_string(),
             oss_access_key_id: Some("oss-key-id".to_string()),
             oss_access_key_secret: Some("oss-key-secret".to_string()),
             llm_provider: "gemini".to_string(),
+            llm_model: "gemini-3-flash-preview".to_string(),
+            llm_base_url: None,
             vector_dim: 768,
             cors_origins: vec![],
             oss_endpoint: "https://oss-cn-beijing.aliyuncs.com".to_string(),
@@ -442,13 +559,40 @@ mod tests {
         assert!(debug_str.contains("[REDACTED]"));
         assert!(!debug_str.contains("gemini-secret"));
         assert!(!debug_str.contains("minimax-secret"));
+        assert!(!debug_str.contains("generic-llm-secret"));
         assert!(!debug_str.contains("jwt-secret-that-is-at-least-32-characters"));
     }
 
     #[test]
     fn test_valid_llm_providers() {
-        assert!(["gemini", "minimax"].contains(&"gemini"));
-        assert!(["gemini", "minimax"].contains(&"minimax"));
+        for provider in [
+            "gemini",
+            "minimax",
+            "openai_compatible",
+            "openai",
+            "deepseek",
+            "groq",
+            "openrouter",
+            "xai",
+            "together",
+        ] {
+            assert!(is_supported_llm_provider(provider));
+        }
+    }
+
+    #[test]
+    fn test_openai_compatible_provider_detection() {
+        assert!(is_openai_compatible_provider("deepseek"));
+        assert!(is_openai_compatible_provider("openai_compatible"));
+        assert!(!is_openai_compatible_provider("gemini"));
+    }
+
+    #[test]
+    fn test_llm_provider_normalization_accepts_hyphen() {
+        assert_eq!(
+            normalize_llm_provider("OpenAI-Compatible"),
+            "openai_compatible"
+        );
     }
 
     #[test]

@@ -1,5 +1,6 @@
 pub mod gemini;
 pub mod minimax;
+pub mod openai_compatible;
 
 use crate::services::BusinessEvent;
 use async_trait::async_trait;

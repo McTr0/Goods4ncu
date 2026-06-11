@@ -3,7 +3,7 @@ use super::{
     PREAMBLE,
 };
 use crate::agents::models::Document;
-use crate::agents::tools::{EmbedFn, EmbedUpdater, ToolContext, ToolError};
+use crate::agents::tools::{EmbedUpdater, ToolContext, ToolError};
 use crate::services::BusinessEvent;
 use async_trait::async_trait;
 use futures::Stream;
@@ -14,7 +14,6 @@ use rig::completion::{Message, Prompt};
 use rig::embeddings::EmbeddingsBuilder;
 use rig::providers::gemini;
 use rig::streaming::{StreamedAssistantContent, StreamingCompletion};
-use rig::vector_store::InsertDocuments;
 use rig_postgres::PostgresVectorStore;
 use sqlx::{PgConnection, PgPool};
 use std::pin::Pin;
@@ -23,11 +22,21 @@ use tokio::sync::mpsc;
 
 pub struct GeminiProvider {
     client: gemini::Client,
+    model: String,
     embedding_dim: usize,
 }
 
 impl GeminiProvider {
+    #[allow(dead_code)]
     pub fn new(api_key: &str, embedding_dim: usize) -> anyhow::Result<Self> {
+        Self::new_with_model(api_key, embedding_dim, "gemini-3-flash-preview")
+    }
+
+    pub fn new_with_model(
+        api_key: &str,
+        embedding_dim: usize,
+        model: impl Into<String>,
+    ) -> anyhow::Result<Self> {
         let reqwest_client = reqwest::Client::builder().build()?;
 
         let client = gemini::Client::builder()
@@ -37,18 +46,18 @@ impl GeminiProvider {
 
         Ok(Self {
             client,
+            model: model.into(),
             embedding_dim,
         })
     }
 
-    /// Build the RAG index for dynamic_context, the embed function for tools, and the embed_updater
-    /// for atomic re-embedding within a transaction.
+    /// Build the RAG index for dynamic_context and the embed_updater for atomic
+    /// listing/vector writes inside tool-owned transactions.
     pub fn build_vector_store(
         &self,
         db_pool: &PgPool,
     ) -> (
         PostgresVectorStore<gemini::embedding::EmbeddingModel>,
-        EmbedFn,
         Arc<dyn EmbedUpdater>,
     ) {
         let embedding_model = gemini::embedding::EmbeddingModel::new(
@@ -61,49 +70,6 @@ impl GeminiProvider {
         let rag_store =
             PostgresVectorStore::with_defaults(embedding_model.clone(), db_pool.clone());
 
-        // embed_fn creates a FRESH store instance per call.
-        // This is safe because both this store and rag_store share the same
-        // underlying Postgres DB (same db_pool), so inserts are visible to both.
-        let db_pool_clone = db_pool.clone();
-        let client_clone = self.client.clone();
-        let dim = self.embedding_dim;
-
-        let embed_fn: EmbedFn = Arc::new(move |content: String, listing_id: String| {
-            let db_pool = db_pool_clone.clone();
-            let client = client_clone.clone();
-            let client_for_insert = client.clone();
-            Box::pin(async move {
-                let embedding_model =
-                    gemini::embedding::EmbeddingModel::new(client, gemini::EMBEDDING_001, dim);
-                let document = Document {
-                    id: listing_id,
-                    content,
-                };
-                let embeddings = EmbeddingsBuilder::new(embedding_model)
-                    .document(document)
-                    .map_err(|e| ToolError(format!("Embedding builder error: {}", e)))?
-                    .build()
-                    .await
-                    .map_err(|e| ToolError(format!("Embeddings API error: {}", e)))?;
-
-                // Create a fresh store instance per call for insertion.
-                // This store hits the same DB as rag_store, so inserts are visible.
-                let insert_store = PostgresVectorStore::with_defaults(
-                    gemini::embedding::EmbeddingModel::new(
-                        client_for_insert,
-                        gemini::EMBEDDING_001,
-                        dim,
-                    ),
-                    db_pool,
-                );
-                insert_store
-                    .insert_documents(embeddings)
-                    .await
-                    .map_err(|e| ToolError(format!("Vector DB error: {:?}", e)))?;
-                Ok(())
-            })
-        });
-
         // embed_updater: for atomic re-embedding within a transaction (UpdateListingTool).
         let client_for_updater = self.client.clone();
         let dim_for_updater = self.embedding_dim;
@@ -112,7 +78,7 @@ impl GeminiProvider {
             embedding_dim: dim_for_updater,
         });
 
-        (rag_store, embed_fn, embed_updater)
+        (rag_store, embed_updater)
     }
 }
 
@@ -178,23 +144,21 @@ impl super::LlmProvider for GeminiProvider {
     async fn create_marketplace_agent(
         self: Arc<Self>,
         db_pool: &PgPool,
-        event_tx: mpsc::Sender<BusinessEvent>,
+        _event_tx: mpsc::Sender<BusinessEvent>,
         current_user_id: Option<String>,
     ) -> anyhow::Result<Box<dyn MarketplaceAgent>> {
-        let (rag_store, embed_fn, embed_updater) = self.build_vector_store(db_pool);
+        let (rag_store, embed_updater) = self.build_vector_store(db_pool);
 
         let ctx = ToolContext {
             db_pool: db_pool.clone(),
-            embed_and_insert: embed_fn,
             embed_updater,
-            event_tx,
             current_user_id,
             notification: crate::services::notification::NotificationService::new(db_pool.clone()),
         };
 
         let agent = self
             .client
-            .agent("gemini-3-flash-preview")
+            .agent(&self.model)
             .preamble(PREAMBLE)
             .dynamic_context(3, rag_store)
             .tool(crate::agents::tools::CreateListingTool { ctx: ctx.clone() })
@@ -213,7 +177,7 @@ impl super::LlmProvider for GeminiProvider {
     async fn create_negotiate_agent(self: Arc<Self>) -> anyhow::Result<Box<dyn NegotiateAgent>> {
         let agent = self
             .client
-            .agent("gemini-3-flash-preview")
+            .agent(&self.model)
             .preamble(NEGOTIATION_PREAMBLE)
             .build();
 

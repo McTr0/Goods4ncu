@@ -120,6 +120,7 @@ pub struct User {
     pub email: Option<String>,
     pub password_hash: String,
     pub role: String,
+    pub status: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -281,6 +282,7 @@ pub trait ChatRepository: Send + Sync {
         conversation_id: &str,
         before: Option<i64>,
         limit: i64,
+        offset: i64,
     ) -> Result<(Vec<ChatMessage>, i64), ApiError>;
 
     /// Mark all messages in a conversation as read.

@@ -1,16 +1,13 @@
 use async_trait::async_trait;
 use good4ncu::agents::tools::{
-    DeleteListingArgs, DeleteListingTool, EmbedUpdater, ToolContext, ToolError, UpdateListingArgs,
-    UpdateListingTool,
+    CreateListingArgs, CreateListingTool, DeleteListingArgs, DeleteListingTool, EmbedUpdater,
+    ToolContext, ToolError, UpdateListingArgs, UpdateListingTool,
 };
-use good4ncu::services::{notification::NotificationService, BusinessEvent};
+use good4ncu::services::notification::NotificationService;
 use good4ncu::test_infra::with_test_pool;
 use rig::tool::Tool;
 use sqlx::Row;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -28,21 +25,33 @@ impl EmbedUpdater for NoopEmbedUpdater {
     }
 }
 
-fn build_tool_context(db_pool: sqlx::PgPool, current_user_id: Option<&str>) -> ToolContext {
-    let embed_and_insert = Arc::new(
-        |_content: String,
-         _listing_id: String|
-         -> Pin<Box<dyn Future<Output = Result<(), ToolError>> + Send>> {
-            Box::pin(async { Ok(()) })
-        },
-    );
-    let (event_tx, _event_rx) = mpsc::channel::<BusinessEvent>(16);
+#[derive(Clone)]
+struct FailingEmbedUpdater;
 
+#[async_trait(?Send)]
+impl EmbedUpdater for FailingEmbedUpdater {
+    async fn embed_and_update(
+        &self,
+        _content: String,
+        _listing_id: String,
+        _conn: &mut sqlx::PgConnection,
+    ) -> Result<(), ToolError> {
+        Err(ToolError("forced embedding failure".to_string()))
+    }
+}
+
+fn build_tool_context(db_pool: sqlx::PgPool, current_user_id: Option<&str>) -> ToolContext {
+    build_tool_context_with_updater(db_pool, current_user_id, Arc::new(NoopEmbedUpdater))
+}
+
+fn build_tool_context_with_updater(
+    db_pool: sqlx::PgPool,
+    current_user_id: Option<&str>,
+    embed_updater: Arc<dyn EmbedUpdater>,
+) -> ToolContext {
     ToolContext {
         db_pool: db_pool.clone(),
-        embed_and_insert,
-        embed_updater: Arc::new(NoopEmbedUpdater),
-        event_tx,
+        embed_updater,
         current_user_id: current_user_id.map(ToString::to_string),
         notification: NotificationService::new(db_pool),
     }
@@ -159,6 +168,121 @@ async fn test_delete_listing_tool_denies_cross_owner_mutation() {
             .unwrap();
         let status: String = row.get("status");
         assert_eq!(status, "active");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_listing_tool_rolls_back_inventory_when_embedding_fails() {
+    with_test_pool(|pool| async move {
+        let suffix = Uuid::new_v4().to_string();
+        let owner_id = format!("create-owner-{suffix}");
+        let username = format!("create-owner-{suffix}");
+        let title = format!("Rollback Listing {suffix}");
+
+        sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')")
+            .bind(&owner_id)
+            .bind(&username)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let tool = CreateListingTool {
+            ctx: build_tool_context_with_updater(
+                pool.clone(),
+                Some(owner_id.as_str()),
+                Arc::new(FailingEmbedUpdater),
+            ),
+        };
+
+        let err = tool
+            .call(CreateListingArgs {
+                title: title.clone(),
+                category: "misc".to_string(),
+                brand: "Brand".to_string(),
+                condition_score: 8,
+                suggested_price_cny: 10_000,
+                defects: vec![],
+                original_description: "should rollback".to_string(),
+            })
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("Embedding error"));
+
+        let listing_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE owner_id = $1 AND title = $2")
+                .bind(&owner_id)
+                .bind(&title)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(listing_count, 0);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn delete_listing_tool_removes_listing_document_in_same_operation() {
+    with_test_pool(|pool| async move {
+        let suffix = Uuid::new_v4().to_string();
+        let owner_id = format!("delete-owner-{suffix}");
+        let listing_id = format!("delete-listing-{suffix}");
+        let username = format!("delete-owner-{suffix}");
+
+        sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')")
+            .bind(&owner_id)
+            .bind(&username)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "INSERT INTO inventory (id, title, category, brand, condition_score, suggested_price_cny, defects, owner_id) \
+             VALUES ($1, 'Owner Item', 'misc', 'Brand', 8, 10000, '[]', $2)",
+        )
+        .bind(&listing_id)
+        .bind(&owner_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO documents (id, document, embedded_text) VALUES ($1, $2::jsonb, $3)",
+        )
+        .bind(&listing_id)
+        .bind(serde_json::json!({ "id": listing_id, "content": "stale" }))
+        .bind("stale")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let tool = DeleteListingTool {
+            ctx: build_tool_context(pool.clone(), Some(owner_id.as_str())),
+        };
+        let result = tool
+            .call(DeleteListingArgs {
+                listing_id: listing_id.clone(),
+            })
+            .await
+            .unwrap();
+
+        assert!(result.contains("Successfully removed"));
+
+        let row = sqlx::query("SELECT status FROM inventory WHERE id = $1")
+            .bind(&listing_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let status: String = row.get("status");
+        assert_eq!(status, "deleted");
+
+        let document_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM documents WHERE id = $1")
+            .bind(&listing_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(document_count, 0);
     })
     .await;
 }

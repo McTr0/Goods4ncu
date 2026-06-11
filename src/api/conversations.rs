@@ -117,7 +117,7 @@ pub async fn get_conversation_messages(
     // Use repository for messages and total count
     let (messages, total): (Vec<crate::repositories::ChatMessage>, i64) = state
         .chat_repo
-        .get_conversation_messages(&conversation_id, None, limit)
+        .get_conversation_messages(&conversation_id, None, limit, offset)
         .await?;
 
     // Collect unique sender IDs for batch username lookup (skip "assistant" sentinel)
@@ -164,9 +164,6 @@ pub async fn get_conversation_messages(
             }
         })
         .collect();
-
-    // Apply offset: skip the first 'offset' messages
-    let messages: Vec<MessageEntry> = messages.into_iter().skip(offset as usize).collect();
 
     Ok(Json(ConversationMessagesResponse {
         conversation_id,

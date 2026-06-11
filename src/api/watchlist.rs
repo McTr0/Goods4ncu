@@ -125,16 +125,18 @@ pub async fn add_to_watchlist(
     )
     .map_err(|_| ApiError::Unauthorized)?;
 
-    // Verify listing exists
-    let exists = sqlx::query("SELECT id FROM inventory WHERE id = $1")
+    // Verify listing exists and reject self-watchlisting.
+    let owner_id = sqlx::query_scalar::<_, String>("SELECT owner_id FROM inventory WHERE id = $1")
         .bind(&listing_id)
         .fetch_optional(&state.infra.db)
         .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-        .is_some();
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
-    if !exists {
+    let Some(owner_id) = owner_id else {
         return Err(ApiError::NotFound);
+    };
+    if owner_id == user_id {
+        return Err(ApiError::BadRequest("不能收藏自己的商品".to_string()));
     }
 
     // Insert into watchlist (ignore if already exists)

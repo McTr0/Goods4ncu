@@ -191,6 +191,17 @@ pub async fn token_denylist_middleware(
             if auth::ensure_token_not_revoked(&state, token).await.is_err() {
                 return ApiError::Unauthorized.into_response();
             }
+            let user_id = match auth::extract_user_id_from_token_str_with_fallback(
+                token,
+                &state.secrets.jwt_secret,
+                state.secrets.jwt_secret_old.as_deref(),
+            ) {
+                Ok(user_id) => user_id,
+                Err(_) => return ApiError::Unauthorized.into_response(),
+            };
+            if let Err(err) = auth::ensure_user_not_banned(&state, &user_id).await {
+                return err.into_response();
+            }
         }
     }
 
@@ -500,8 +511,6 @@ async fn health_check(State(state): State<AppState>) -> Result<&'static str, Api
     Ok("OK")
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -637,5 +646,4 @@ mod tests {
         let addr = peer_addr_from_extensions(&extensions);
         assert_eq!(addr, Some(socket_addr));
     }
-
 }

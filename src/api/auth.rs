@@ -157,6 +157,13 @@ async fn rotate_refresh_token(
         .await
         .map_err(|e| anyhow::anyhow!("DB error: {}", e))?
         .ok_or_else(|| anyhow::anyhow!("User not found"))?;
+    if user.status.eq_ignore_ascii_case("banned") {
+        auth_repo
+            .revoke_all_user_tokens(&user_id)
+            .await
+            .map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+        return Err(anyhow::anyhow!("User is banned"));
+    }
     let role = user.role;
 
     // Issue new tokens
@@ -190,6 +197,38 @@ async fn revoke_refresh_token(
         Ok(()) | Err(ApiError::Unauthorized) => Ok(()),
         Err(e) => Err(anyhow::anyhow!("DB error: {}", e)),
     }?;
+    Ok(())
+}
+
+fn validate_ncu_email(email: &str) -> Result<(), ApiError> {
+    if email.is_empty() {
+        return Err(ApiError::BadRequest("邮箱不能为空".to_string()));
+    }
+    if email.len() > 100 {
+        return Err(ApiError::BadRequest("邮箱不能超过100个字符".to_string()));
+    }
+
+    let Some((local, domain)) = email.split_once('@') else {
+        return Err(ApiError::BadRequest("邮箱格式无效".to_string()));
+    };
+    if domain.contains('@') || !domain.eq_ignore_ascii_case("email.ncu.edu.cn") {
+        return Err(ApiError::BadRequest(
+            "必须使用 @email.ncu.edu.cn 邮箱注册".to_string(),
+        ));
+    }
+    if local.is_empty() || local.len() > 64 {
+        return Err(ApiError::BadRequest("邮箱格式无效".to_string()));
+    }
+    if local.starts_with('.') || local.ends_with('.') || local.contains("..") {
+        return Err(ApiError::BadRequest("邮箱格式无效".to_string()));
+    }
+    if !local
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'%' | b'+' | b'-'))
+    {
+        return Err(ApiError::BadRequest("邮箱格式无效".to_string()));
+    }
+
     Ok(())
 }
 
@@ -233,17 +272,7 @@ pub async fn register(
 
     // Validate email domain (optional but validated if provided)
     if let Some(ref email) = payload.email {
-        if email.is_empty() {
-            return Err(ApiError::BadRequest("邮箱不能为空".to_string()));
-        }
-        if !email.ends_with("@email.ncu.edu.cn") {
-            return Err(ApiError::BadRequest(
-                "必须使用 @email.ncu.edu.cn 邮箱注册".to_string(),
-            ));
-        }
-        if email.len() > 100 {
-            return Err(ApiError::BadRequest("邮箱不能超过100个字符".to_string()));
-        }
+        validate_ncu_email(email)?;
     }
 
     let password = payload.password.clone();
@@ -341,6 +370,15 @@ pub async fn login(
         }
     };
 
+    if user.status.eq_ignore_ascii_case("banned") {
+        tracing::warn!(
+            username = %payload.username,
+            user_id = %user.id,
+            "Login failed — banned user"
+        );
+        return Err(ApiError::AuthFailed("账号已被封禁".to_string()));
+    }
+
     let password = payload.password.clone();
     let hash_clone = user.password_hash.clone();
 
@@ -425,6 +463,24 @@ pub async fn logout(
         state.secrets.jwt_secret_old.as_deref(),
     )
     .map_err(|_| ApiError::Unauthorized)?;
+
+    let token = headers
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or(ApiError::Unauthorized)?;
+    let claims = decode_claims_from_token_str_with_fallback(
+        token,
+        &state.secrets.jwt_secret,
+        state.secrets.jwt_secret_old.as_deref(),
+    )
+    .map_err(|_| ApiError::Unauthorized)?;
+
+    if let Some(jti) = claims.jti.as_deref() {
+        let expires_at = chrono::DateTime::<chrono::Utc>::from_timestamp(claims.exp as i64, 0)
+            .unwrap_or_else(chrono::Utc::now);
+        revoke_access_token_jti(&state, jti, expires_at).await?;
+    }
 
     if let Some(ref token) = payload.refresh_token {
         revoke_refresh_token(&state.auth_repo, token).await?;
@@ -543,6 +599,24 @@ fn decode_claims_from_token_str(token: &str, jwt_secret: &str) -> Result<Claims,
     Ok(token_data.claims)
 }
 
+fn decode_claims_from_token_str_with_fallback(
+    token: &str,
+    jwt_secret: &str,
+    jwt_secret_old: Option<&str>,
+) -> Result<Claims, String> {
+    match decode_claims_from_token_str(token, jwt_secret) {
+        Ok(claims) => Ok(claims),
+        Err(primary_err) => {
+            if let Some(old) = jwt_secret_old {
+                decode_claims_from_token_str(token, old)
+                    .map_err(|_| format!("Invalid token (primary+fallback): {}", primary_err))
+            } else {
+                Err(primary_err)
+            }
+        }
+    }
+}
+
 pub fn extract_jti_from_token_str(token: &str, jwt_secret: &str) -> Result<String, String> {
     let claims = decode_claims_from_token_str(token, jwt_secret)?;
     claims.jti.ok_or_else(|| "Token missing jti".to_string())
@@ -567,6 +641,31 @@ pub fn extract_jti_from_token_str_with_fallback(
             }
         }
     }
+}
+
+pub(crate) async fn revoke_access_token_jti(
+    state: &AppState,
+    jti: &str,
+    expires_at: chrono::DateTime<chrono::Utc>,
+) -> Result<(), ApiError> {
+    sqlx::query(
+        r#"INSERT INTO revoked_access_tokens (jti, expires_at)
+           VALUES ($1, $2)
+           ON CONFLICT (jti)
+           DO UPDATE SET expires_at = GREATEST(revoked_access_tokens.expires_at, EXCLUDED.expires_at)"#,
+    )
+    .bind(jti)
+    .bind(expires_at)
+    .execute(&state.infra.db)
+    .await
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+    state
+        .infra
+        .token_denylist
+        .deny(jti, expires_at.timestamp().max(0) as u64);
+
+    Ok(())
 }
 
 /// Check whether a token is revoked via in-memory and persisted denylist.
@@ -606,6 +705,21 @@ pub async fn ensure_token_not_revoked(state: &AppState, token: &str) -> Result<(
         Ok(_) => Ok(()),
         Err(e) => Err(format!("Denylist query failed: {}", e)),
     }
+}
+
+pub async fn ensure_user_not_banned(state: &AppState, user_id: &str) -> Result<(), ApiError> {
+    let status = sqlx::query_scalar::<_, String>("SELECT status FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(&state.infra.db)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
+        .ok_or(ApiError::Unauthorized)?;
+
+    if status.eq_ignore_ascii_case("banned") {
+        return Err(ApiError::AuthFailed("账号已被封禁".to_string()));
+    }
+
+    Ok(())
 }
 
 pub fn extract_user_id_from_token_str_with_fallback(
@@ -770,12 +884,15 @@ mod tests {
                         gemini_api_key: "test-gemini-key".to_string(),
                         minimax_api_key: None,
                         minimax_api_base_url: None,
+                        llm_api_key: None,
                         jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),
                         jwt_secret_old: None,
                         database_url: "postgres://test/test".to_string(),
                         oss_access_key_id: None,
                         oss_access_key_secret: None,
                         llm_provider: "gemini".to_string(),
+                        llm_model: "gemini-3-flash-preview".to_string(),
+                        llm_base_url: None,
                         vector_dim: 768,
                         cors_origins: vec![],
                         oss_endpoint: "https://oss-cn-beijing.aliyuncs.com".to_string(),

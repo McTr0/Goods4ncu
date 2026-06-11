@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -469,7 +468,8 @@ class _ChatPageState extends State<ChatPage> {
     _sseService = widget.sseService ?? context.read<SseService>();
     _uploadService = widget.uploadService ?? context.read<UploadService>();
     _mediaSender =
-        widget.mediaSender ?? ChatPageMediaSender(uploadService: _uploadService);
+        widget.mediaSender ??
+        ChatPageMediaSender(uploadService: _uploadService);
     _loadCurrentUser();
     _connectWs();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -602,7 +602,9 @@ class _ChatPageState extends State<ChatPage> {
     final selectedImage = _selectedImage;
     final selectedImageBytes = _selectedImageBytes;
     final selectedAudioBytes = _selectedAudioBytes;
-    if (text.isEmpty && selectedImageBytes == null && selectedAudioBytes == null) {
+    if (text.isEmpty &&
+        selectedImageBytes == null &&
+        selectedAudioBytes == null) {
       return;
     }
 
@@ -705,10 +707,7 @@ class _ChatPageState extends State<ChatPage> {
     } on ChatPageMediaUploadException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.message),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red),
       );
       setState(() {
         _isStreaming = false;
@@ -796,8 +795,8 @@ class _ChatPageState extends State<ChatPage> {
                 onHitlUpdated: _loadNegotiations,
               );
             },
+          ),
         ),
-      ),
         if (_selectedImageBytes != null)
           Container(
             padding: const EdgeInsets.all(8),

@@ -33,6 +33,51 @@ impl PostgresListingRepository {
         Self { pool }
     }
 
+    pub async fn create_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        input: CreateListingInput,
+    ) -> Result<String, ApiError> {
+        let listing_id = uuid::Uuid::new_v4().to_string();
+        let listing_uuid = Uuid::parse_str(&listing_id).map_err(|e| {
+            ApiError::Internal(anyhow::anyhow!(
+                "Generated listing id is not UUID-compatible: {}",
+                e
+            ))
+        })?;
+        let price_cents = (input.suggested_price_cny * 100.0).round() as i32;
+        let defects_json = serde_json::to_string(&input.defects)
+            .map_err(|e| ApiError::BadRequest(format!("invalid defects: {}", e)))?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO inventory (
+                id, new_id,
+                title, category, brand, condition_score,
+                suggested_price_cny, defects, description,
+                owner_id, new_owner_id, status
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                    (SELECT new_id FROM users WHERE id = $10), 'active')
+            "#,
+        )
+        .bind(&listing_id)
+        .bind(listing_uuid)
+        .bind(&input.title)
+        .bind(&input.category)
+        .bind(&input.brand)
+        .bind(input.condition_score)
+        .bind(price_cents)
+        .bind(&defects_json)
+        .bind(&input.description)
+        .bind(&input.owner_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+        Ok(listing_id)
+    }
+
     fn update_query_for_owner(
         input: &UpdateListingInput,
         require_active: bool,
@@ -215,8 +260,9 @@ impl PostgresListingRepository {
         Ok(result.rows_affected() > 0)
     }
 
-    pub async fn soft_delete_active_owned(
+    pub async fn soft_delete_active_owned_in_tx(
         &self,
+        tx: &mut Transaction<'_, Postgres>,
         id: &str,
         owner_id: &str,
     ) -> Result<bool, ApiError> {
@@ -225,7 +271,7 @@ impl PostgresListingRepository {
         )
         .bind(id)
         .bind(owner_id)
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
@@ -387,42 +433,15 @@ impl ListingRepository for PostgresListingRepository {
     }
 
     async fn create(&self, input: CreateListingInput) -> Result<String, ApiError> {
-        let listing_id = uuid::Uuid::new_v4().to_string();
-        let listing_uuid = Uuid::parse_str(&listing_id).map_err(|e| {
-            ApiError::Internal(anyhow::anyhow!(
-                "Generated listing id is not UUID-compatible: {}",
-                e
-            ))
-        })?;
-        let price_cents = (input.suggested_price_cny * 100.0).round() as i32;
-        let defects_json = serde_json::to_string(&input.defects)
-            .map_err(|e| ApiError::BadRequest(format!("invalid defects: {}", e)))?;
-
-        sqlx::query(
-            r#"
-            INSERT INTO inventory (
-                id, new_id,
-                title, category, brand, condition_score,
-                suggested_price_cny, defects, description,
-                owner_id, new_owner_id, status
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                    (SELECT new_id FROM users WHERE id = $10), 'active')
-            "#,
-        )
-        .bind(&listing_id)
-        .bind(listing_uuid)
-        .bind(&input.title)
-        .bind(&input.category)
-        .bind(&input.brand)
-        .bind(input.condition_score)
-        .bind(price_cents)
-        .bind(&defects_json)
-        .bind(&input.description)
-        .bind(&input.owner_id)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        let listing_id = self.create_in_tx(&mut tx, input).await?;
+        tx.commit()
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
         Ok(listing_id)
     }

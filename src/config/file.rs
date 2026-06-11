@@ -62,9 +62,16 @@ pub struct ServerConfig {
 /// LLM provider configuration.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct LlmConfig {
-    /// "gemini" or "minimax". Defaults to "gemini".
+    /// "gemini", "minimax", or an OpenAI-compatible provider alias.
+    /// Defaults to "gemini".
     #[serde(default)]
     pub provider: Option<String>,
+    /// Chat model name. Defaults are only provided for first-party built-ins.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// OpenAI-compatible API base URL. Secrets still come from env vars.
+    #[serde(default)]
+    pub base_url: Option<String>,
     /// Embedding vector dimensions. Defaults to 768.
     #[serde(default)]
     pub vector_dim: Option<usize>,
