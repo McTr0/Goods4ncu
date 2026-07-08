@@ -10,7 +10,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
+use sqlx::{Postgres, Row, Transaction};
 
 use crate::api::auth::extract_user_id_from_token_with_fallback;
 use crate::api::error::ApiError;
@@ -29,8 +29,56 @@ fn map_order_creation_error(error: OrderError) -> ApiError {
 
 fn record_order_created_metric() {
     if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {
-        metrics.record_order_created();
+        metrics.record_deal_intent_created();
     }
+}
+
+async fn create_confirmed_offline_order_in_tx(
+    state: &AppState,
+    tx: &mut Transaction<'_, Postgres>,
+    listing_id: &str,
+    buyer_id: &str,
+    seller_id: &str,
+    final_price: i64,
+    confirmed_by: &str,
+) -> Result<String, ApiError> {
+    let order_id = state
+        .infra
+        .order_service
+        .create_order_in_tx(tx, listing_id, buyer_id, seller_id, final_price)
+        .await
+        .map_err(map_order_creation_error)?;
+
+    let updated =
+        sqlx::query("UPDATE inventory SET status = 'sold' WHERE id = $1 AND status = 'active'")
+            .bind(listing_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+    if updated.rows_affected() == 0 {
+        return Err(ApiError::Conflict("此商品已经不可售".to_string()));
+    }
+
+    sqlx::query(
+        r#"
+        UPDATE orders
+        SET status = 'confirmed',
+            confirmed_at = NOW(),
+            confirmed_by = $2,
+            auto_delist = TRUE,
+            auto_delisted_at = NOW()
+        WHERE id = $1
+          AND status IN ('intent_pending', 'pending')
+        "#,
+    )
+    .bind(&order_id)
+    .bind(confirmed_by)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+    Ok(order_id)
 }
 
 #[derive(Serialize)]
@@ -194,7 +242,7 @@ pub async fn respond_negotiation(
             let price = proposed_price;
             (
                 format!(
-                    "系统：卖家接受了您的还价 ¥{:.2}，订单已创建",
+                    "系统：卖家接受了您的还价 ¥{:.2}，线下成交已确认",
                     crate::utils::cents_to_yuan(price)
                 ),
                 Some(price),
@@ -212,12 +260,16 @@ pub async fn respond_negotiation(
     };
 
     if let Some(price) = final_price_for_deal {
-        state
-            .infra
-            .order_service
-            .create_order_in_tx(&mut tx, &listing_id, &buyer_id, &user_id, price)
-            .await
-            .map_err(map_order_creation_error)?;
+        create_confirmed_offline_order_in_tx(
+            &state,
+            &mut tx,
+            &listing_id,
+            &buyer_id,
+            &user_id,
+            price,
+            &user_id,
+        )
+        .await?;
     }
 
     sqlx::query(
@@ -259,7 +311,7 @@ pub async fn respond_negotiation(
     let (notif_title, notif_body): (String, String) = match new_status {
         "approved" => (
             "卖家接受了您的还价".to_string(),
-            "卖家接受了您的还价，订单已创建".to_string(),
+            "卖家接受了您的还价，线下成交已确认".to_string(),
         ),
         "rejected" => (
             "卖家拒绝了您的还价".to_string(),
@@ -345,12 +397,16 @@ pub async fn accept_counter_negotiation(
     let listing_id: String = row.get("listing_id");
     let seller_id: String = row.get("seller_id");
 
-    state
-        .infra
-        .order_service
-        .create_order_in_tx(&mut tx, &listing_id, &buyer_id, &seller_id, counter_price)
-        .await
-        .map_err(map_order_creation_error)?;
+    create_confirmed_offline_order_in_tx(
+        &state,
+        &mut tx,
+        &listing_id,
+        &buyer_id,
+        &seller_id,
+        counter_price,
+        &buyer_id,
+    )
+    .await?;
 
     // Record buyer's acceptance.
     sqlx::query(
@@ -365,7 +421,7 @@ pub async fn accept_counter_negotiation(
 
     // Inject system message into conversation.
     let system_content = format!(
-        "系统：买家接受了卖家的还价 ¥{:.2}，订单已创建",
+        "系统：买家接受了卖家的还价 ¥{:.2}，线下成交已确认",
         crate::utils::cents_to_yuan(counter_price)
     );
     let conversation_id = format!("negotiate:{}", listing_id);
@@ -396,7 +452,7 @@ pub async fn accept_counter_negotiation(
             &seller_id,
             "negotiation_buyer_accepted",
             "买家接受了您的还价",
-            "买家接受了您的还价，订单已创建",
+            "买家接受了您的还价，线下成交已确认",
             Some(&id),
             Some(&listing_id),
         )
@@ -404,7 +460,7 @@ pub async fn accept_counter_negotiation(
 
     Ok(Json(NegotiationResponseResult {
         status: "buyer_accepted".to_string(),
-        message: "已接受卖家还价，订单已创建".to_string(),
+        message: "已接受卖家还价，线下成交已确认".to_string(),
     }))
 }
 

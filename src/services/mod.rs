@@ -4,6 +4,8 @@ use tokio::sync::mpsc;
 
 pub mod admin;
 pub mod chat;
+pub mod chat_conversation;
+pub mod chat_expire;
 pub mod hitl_expire;
 pub mod moderation;
 pub mod moderation_worker;
@@ -21,9 +23,6 @@ pub enum BusinessEvent {
         buyer_id: String,
         seller_id: String,
         final_price: i64,
-    },
-    OrderPaid {
-        order_id: String,
     },
     ChatMessage {
         conversation_id: String,
@@ -103,19 +102,13 @@ impl ServiceManager {
                                     buyer_id,
                                     seller_id,
                                     final_price,
-                                    "Order created from DealReached event"
+                                    "Deal intent created from DealReached event"
                                 );
                             }
                             Err(e) => {
                                 tracing::error!(%e, listing_id, buyer_id, seller_id, "Failed to create order from DealReached event");
                             }
                         }
-                    }
-                    BusinessEvent::OrderPaid { order_id } => {
-                        if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {
-                            metrics.record_order_paid();
-                        }
-                        tracing::info!(order_id, "OrderPaid event received");
                     }
                     BusinessEvent::ChatMessage {
                         conversation_id,
@@ -175,16 +168,6 @@ mod tests {
         assert!(json.contains("buyer-456"));
         assert!(json.contains("seller-789"));
         assert!(json.contains("4999"));
-    }
-
-    #[test]
-    fn test_business_event_order_paid_serialization() {
-        let event = BusinessEvent::OrderPaid {
-            order_id: "order-abc".to_string(),
-        };
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("OrderPaid"));
-        assert!(json.contains("order-abc"));
     }
 
     #[test]

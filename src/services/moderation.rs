@@ -1,7 +1,13 @@
 //! Content moderation service — text and image.
 //!
-//! Provides text keyword filtering, contact-info detection, and async image
+//! Provides text safety checks, contact-info detection, and async image
 //! moderation job submission for user-generated content.
+//!
+//! The built-in text rules focus on marketplace and campus-community safety:
+//! illegal goods, adult content, gambling, fraud, violence/extremism, hate or
+//! harassment, privacy leakage, off-platform contact, and external links. Local
+//! policy-sensitive words should stay configurable through `BLOCKED_KEYWORDS`
+//! instead of being hard-coded in source.
 
 use crate::config::AppConfig;
 use regex::Regex;
@@ -13,7 +19,23 @@ use sqlx::PgPool;
 #[allow(dead_code)]
 pub enum ModerationCode {
     Ok,
-    /// Blocked keyword detected.
+    /// Operator-configured blocked keyword detected.
+    BlockedKeyword,
+    /// Illegal or controlled goods/services.
+    IllegalGoods,
+    /// Pornographic, vulgar, or explicit adult content.
+    AdultContent,
+    /// Gambling, casino, lottery, or betting content.
+    Gambling,
+    /// Fraud, phishing, credential abuse, or grey-market account trading.
+    Fraud,
+    /// Violence, weapons, terrorism, or self-harm instructions.
+    ViolenceExtremism,
+    /// Hate, harassment, abuse, or humiliating attacks.
+    HateHarassment,
+    /// Personal information leakage or doxxing.
+    PersonalInfo,
+    /// Legacy alias kept for older tests and callers.
     Profanity,
     /// Phone / WeChat / QQ / email detected.
     ContactInfo,
@@ -28,6 +50,14 @@ impl ModerationCode {
     pub fn label(&self) -> &'static str {
         match self {
             ModerationCode::Ok => "ok",
+            ModerationCode::BlockedKeyword => "blocked_keyword",
+            ModerationCode::IllegalGoods => "illegal_goods",
+            ModerationCode::AdultContent => "adult_content",
+            ModerationCode::Gambling => "gambling",
+            ModerationCode::Fraud => "fraud",
+            ModerationCode::ViolenceExtremism => "violence_extremism",
+            ModerationCode::HateHarassment => "hate_harassment",
+            ModerationCode::PersonalInfo => "personal_info",
             ModerationCode::Profanity => "profanity",
             ModerationCode::ContactInfo => "contact_info",
             ModerationCode::ExternalLink => "external_link",
@@ -39,13 +69,212 @@ impl ModerationCode {
     pub fn message(&self) -> &'static str {
         match self {
             ModerationCode::Ok => "",
-            ModerationCode::Profanity => "内容包含违规信息",
+            ModerationCode::BlockedKeyword | ModerationCode::Profanity => "内容包含违规信息",
+            ModerationCode::IllegalGoods => "内容涉及违禁或管制物品",
+            ModerationCode::AdultContent => "内容包含低俗或成人信息",
+            ModerationCode::Gambling => "内容涉及赌博或博彩信息",
+            ModerationCode::Fraud => "内容疑似诈骗、钓鱼或灰产交易",
+            ModerationCode::ViolenceExtremism => "内容涉及暴力、武器或极端风险",
+            ModerationCode::HateHarassment => "内容包含攻击、辱骂或歧视信息",
+            ModerationCode::PersonalInfo => "内容包含他人隐私或敏感个人信息",
             ModerationCode::ContactInfo => "内容包含联系方式",
             ModerationCode::ExternalLink => "内容包含外部链接",
             ModerationCode::InappropriateImage => "图片内容不合规",
         }
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+struct BuiltinTextRule {
+    code: ModerationCode,
+    phrase: &'static str,
+}
+
+const BUILTIN_TEXT_RULES: &[BuiltinTextRule] = &[
+    // Illegal or controlled goods and services.
+    BuiltinTextRule {
+        code: ModerationCode::IllegalGoods,
+        phrase: "毒品",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::IllegalGoods,
+        phrase: "冰毒",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::IllegalGoods,
+        phrase: "麻古",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::IllegalGoods,
+        phrase: "摇头丸",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::IllegalGoods,
+        phrase: "大麻",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::IllegalGoods,
+        phrase: "k粉",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::IllegalGoods,
+        phrase: "枪支",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::IllegalGoods,
+        phrase: "仿真枪",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::IllegalGoods,
+        phrase: "管制刀具",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::IllegalGoods,
+        phrase: "代开发票",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::IllegalGoods,
+        phrase: "假证",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::IllegalGoods,
+        phrase: "代办证",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::IllegalGoods,
+        phrase: "考试答案",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::IllegalGoods,
+        phrase: "代考",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::IllegalGoods,
+        phrase: "代写论文",
+    },
+    // Adult or vulgar content.
+    BuiltinTextRule {
+        code: ModerationCode::AdultContent,
+        phrase: "色情",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::AdultContent,
+        phrase: "裸聊",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::AdultContent,
+        phrase: "约炮",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::AdultContent,
+        phrase: "成人视频",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::AdultContent,
+        phrase: "援交",
+    },
+    // Gambling and betting.
+    BuiltinTextRule {
+        code: ModerationCode::Gambling,
+        phrase: "赌博",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::Gambling,
+        phrase: "博彩",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::Gambling,
+        phrase: "赌球",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::Gambling,
+        phrase: "彩票站",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::Gambling,
+        phrase: "老虎机",
+    },
+    // Fraud, account abuse, and grey-market services.
+    BuiltinTextRule {
+        code: ModerationCode::Fraud,
+        phrase: "刷单",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::Fraud,
+        phrase: "跑分",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::Fraud,
+        phrase: "洗钱",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::Fraud,
+        phrase: "套现",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::Fraud,
+        phrase: "钓鱼链接",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::Fraud,
+        phrase: "出售账号",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::Fraud,
+        phrase: "买卖账号",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::Fraud,
+        phrase: "校园贷",
+    },
+    // Violence, weapons, extremism, or self-harm instructions.
+    BuiltinTextRule {
+        code: ModerationCode::ViolenceExtremism,
+        phrase: "炸药",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::ViolenceExtremism,
+        phrase: "爆炸物",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::ViolenceExtremism,
+        phrase: "杀人教程",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::ViolenceExtremism,
+        phrase: "自杀教程",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::ViolenceExtremism,
+        phrase: "恐怖主义",
+    },
+    // Hate, harassment, and humiliating attacks.
+    BuiltinTextRule {
+        code: ModerationCode::HateHarassment,
+        phrase: "人肉搜索",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::HateHarassment,
+        phrase: "开盒挂人",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::HateHarassment,
+        phrase: "网暴",
+    },
+    // Privacy leakage.
+    BuiltinTextRule {
+        code: ModerationCode::PersonalInfo,
+        phrase: "身份证号",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::PersonalInfo,
+        phrase: "银行卡号",
+    },
+    BuiltinTextRule {
+        code: ModerationCode::PersonalInfo,
+        phrase: "家庭住址",
+    },
+];
 
 /// Moderation check result.
 #[derive(Debug, Clone)]
@@ -111,8 +340,14 @@ pub struct ImageModerationJob {
 pub struct ModerationService {
     /// Blocked keywords loaded from config.
     blocked_keywords: Vec<String>,
+    /// Normalized blocked keywords for obfuscation-resistant matching.
+    normalized_blocked_keywords: Vec<String>,
     /// Pre-built contact-info regexes.
     phone_re: Regex,
+    /// Mainland China resident ID number pattern.
+    id_card_re: Regex,
+    /// Bank card-like long digit sequence.
+    bank_card_re: Regex,
     /// WeChat: 微信/微信号 followed by content.
     wechat_re: Regex,
     /// QQ number pattern.
@@ -135,6 +370,11 @@ impl ModerationService {
     /// Build a new ModerationService from app config.
     pub fn new(config: &AppConfig) -> Self {
         let phone_re = Regex::new(r"1[3-9]\d{9}").expect("valid phone regex");
+        let id_card_re = Regex::new(
+            r"\d{6}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]",
+        )
+        .expect("valid id card regex");
+        let bank_card_re = Regex::new(r"(?:\d[ -]?){16,19}").expect("valid bank card regex");
         // WeChat: explicit "微信" or "微信号" followed by at least one separator then ID (5-20 alphanum).
         // Separator is mandatory to avoid false positives on words like "微号" in product descriptions.
         let wechat_re = Regex::new(r"(?:微 ?信|微 ?信 ?号)\s*[:：\s　]+[A-Za-z0-9_\-]{5,20}")
@@ -144,10 +384,19 @@ impl ModerationService {
         let email_re = Regex::new(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
             .expect("valid email regex");
         let url_re = Regex::new(r"https?://[^\s　]+").expect("valid url regex");
+        let normalized_blocked_keywords = config
+            .blocked_keywords
+            .iter()
+            .map(|keyword| normalize_for_moderation(keyword))
+            .filter(|keyword| !keyword.is_empty())
+            .collect();
 
         Self {
             blocked_keywords: config.blocked_keywords.clone(),
+            normalized_blocked_keywords,
             phone_re,
+            id_card_re,
+            bank_card_re,
             wechat_re,
             qq_re,
             email_re,
@@ -161,20 +410,53 @@ impl ModerationService {
     /// Synchronously check text content.
     /// Returns `Ok(ModerationResult)` — errors are logged, never returned.
     pub fn check_text(&self, text: &str) -> ModerationResult {
-        if text.is_empty() {
+        if text.trim().is_empty() {
             return ModerationResult::passed();
         }
 
-        // 1. Blocked keywords (case-insensitive)
+        let normalized = normalize_for_moderation(text);
+
+        // 1. Operator-configured blocked keywords. Match both raw lowercase
+        // text and normalized text so "毒 品" and full-width variants are
+        // treated the same as "毒品".
         let lower = text.to_lowercase();
-        for kw in &self.blocked_keywords {
-            if lower.contains(&kw.to_lowercase()) {
+        for (index, kw) in self.blocked_keywords.iter().enumerate() {
+            let normalized_kw = self
+                .normalized_blocked_keywords
+                .get(index)
+                .map(String::as_str)
+                .unwrap_or_default();
+            if lower.contains(&kw.to_lowercase())
+                || (!normalized_kw.is_empty() && normalized.contains(normalized_kw))
+            {
                 tracing::debug!(keyword = %kw, "blocked keyword detected");
-                return ModerationResult::rejected(ModerationCode::Profanity);
+                return ModerationResult::rejected(ModerationCode::BlockedKeyword);
             }
         }
 
-        // 2. Contact info
+        // 2. Built-in mainland marketplace safety rules. These are deliberately
+        // broad, high-risk categories; more local policy terms belong in config.
+        for rule in BUILTIN_TEXT_RULES {
+            let normalized_phrase = normalize_for_moderation(rule.phrase);
+            if normalized.contains(&normalized_phrase) {
+                tracing::debug!(
+                    code = rule.code.label(),
+                    phrase = rule.phrase,
+                    "builtin moderation rule detected"
+                );
+                return ModerationResult::rejected(rule.code);
+            }
+        }
+
+        // 3. Personal information and contact info.
+        if self.id_card_re.is_match(text) {
+            tracing::debug!("mainland id card number detected");
+            return ModerationResult::rejected(ModerationCode::PersonalInfo);
+        }
+        if self.bank_card_re.is_match(text) {
+            tracing::debug!("bank card number detected");
+            return ModerationResult::rejected(ModerationCode::PersonalInfo);
+        }
         if self.phone_re.is_match(text) {
             tracing::debug!("phone number detected");
             return ModerationResult::rejected(ModerationCode::ContactInfo);
@@ -192,7 +474,7 @@ impl ModerationService {
             return ModerationResult::rejected(ModerationCode::ContactInfo);
         }
 
-        // 3. External URLs
+        // 4. External URLs.
         if self.url_re.is_match(text) {
             tracing::debug!("external URL detected");
             return ModerationResult::rejected(ModerationCode::ExternalLink);
@@ -232,6 +514,58 @@ impl ModerationService {
     #[allow(dead_code)]
     pub fn is_image_enabled(&self) -> bool {
         self.image_enabled
+    }
+}
+
+fn normalize_for_moderation(text: &str) -> String {
+    text.chars()
+        .filter_map(normalize_char_for_moderation)
+        .collect::<String>()
+        .to_lowercase()
+}
+
+fn normalize_char_for_moderation(ch: char) -> Option<char> {
+    let normalized = match ch {
+        '\u{200b}' | '\u{200c}' | '\u{200d}' | '\u{feff}' => return None,
+        '\u{3000}' => return None,
+        // Full-width ASCII range.
+        '\u{ff01}'..='\u{ff5e}' => char::from_u32(ch as u32 - 0xfee0).unwrap_or(ch),
+        _ => ch,
+    };
+
+    if normalized.is_ascii_punctuation()
+        || normalized.is_ascii_whitespace()
+        || matches!(
+            normalized,
+            '，' | '。'
+                | '、'
+                | '；'
+                | '：'
+                | '！'
+                | '？'
+                | '（'
+                | '）'
+                | '【'
+                | '】'
+                | '《'
+                | '》'
+                | '“'
+                | '”'
+                | '‘'
+                | '’'
+                | '￥'
+                | '·'
+                | '…'
+                | '—'
+                | ' '
+                | '\t'
+                | '\n'
+                | '\r'
+        )
+    {
+        None
+    } else {
+        Some(normalized)
     }
 }
 
@@ -292,16 +626,81 @@ mod tests {
     #[test]
     fn test_check_text_blocked_keyword() {
         let svc = ModerationService::new(&make_config(vec!["毒品".into(), "gun".into()]));
-        let r = svc.check_text("出售毒品，量大从优");
+        let r = svc.check_text("出售自定义违禁词毒品，量大从优");
         assert!(!r.passed);
-        assert_eq!(r.code, ModerationCode::Profanity);
+        assert_eq!(r.code, ModerationCode::BlockedKeyword);
 
         let r2 = svc.check_text("This is a gun for sale");
         assert!(!r2.passed);
-        assert_eq!(r2.code, ModerationCode::Profanity);
+        assert_eq!(r2.code, ModerationCode::BlockedKeyword);
 
         let r3 = svc.check_text("正常商品描述，没问题");
         assert!(r3.passed);
+    }
+
+    #[test]
+    fn test_check_text_normalizes_obfuscated_keywords() {
+        let svc = ModerationService::new(&make_config(vec!["违禁测试词".into()]));
+
+        let r = svc.check_text("违 禁　测-试_词");
+        assert!(!r.passed);
+        assert_eq!(r.code, ModerationCode::BlockedKeyword);
+
+        let r2 = svc.check_text("ＶＩＰ 会员卡，正常转让");
+        assert!(r2.passed);
+    }
+
+    #[test]
+    fn test_check_text_builtin_illegal_goods() {
+        let svc = ModerationService::new(&make_config(vec![]));
+        let r = svc.check_text("出一个管 制 刀 具，寝室自提");
+        assert!(!r.passed);
+        assert_eq!(r.code, ModerationCode::IllegalGoods);
+
+        let r2 = svc.check_text("出售考试答案和资料");
+        assert!(!r2.passed);
+        assert_eq!(r2.code, ModerationCode::IllegalGoods);
+    }
+
+    #[test]
+    fn test_check_text_builtin_adult_gambling_fraud_and_violence() {
+        let svc = ModerationService::new(&make_config(vec![]));
+
+        let adult = svc.check_text("提供裸 聊服务");
+        assert!(!adult.passed);
+        assert_eq!(adult.code, ModerationCode::AdultContent);
+
+        let gambling = svc.check_text("赌球平台优惠");
+        assert!(!gambling.passed);
+        assert_eq!(gambling.code, ModerationCode::Gambling);
+
+        let fraud = svc.check_text("刷单兼职，日结");
+        assert!(!fraud.passed);
+        assert_eq!(fraud.code, ModerationCode::Fraud);
+
+        let violence = svc.check_text("自杀教程资料");
+        assert!(!violence.passed);
+        assert_eq!(violence.code, ModerationCode::ViolenceExtremism);
+    }
+
+    #[test]
+    fn test_check_text_builtin_harassment_and_privacy() {
+        let svc = ModerationService::new(&make_config(vec![]));
+
+        let harassment = svc.check_text("帮忙人肉搜索一个同学");
+        assert!(!harassment.passed);
+        assert_eq!(harassment.code, ModerationCode::HateHarassment);
+
+        let open_box_listing = svc.check_text("耳机仅开盒检查，配件齐全");
+        assert!(open_box_listing.passed);
+
+        let privacy = svc.check_text("身份证号 110105199001011234");
+        assert!(!privacy.passed);
+        assert_eq!(privacy.code, ModerationCode::PersonalInfo);
+
+        let bank_card = svc.check_text("银行卡 6222 0202 0000 0000 000");
+        assert!(!bank_card.passed);
+        assert_eq!(bank_card.code, ModerationCode::PersonalInfo);
     }
 
     #[test]
@@ -381,6 +780,13 @@ mod tests {
         let r = svc.check_text("毒品 毒品 电话 13812345678");
         assert!(!r.passed);
         // Order: keyword first
-        assert_eq!(r.code, ModerationCode::Profanity);
+        assert_eq!(r.code, ModerationCode::BlockedKeyword);
+    }
+
+    #[test]
+    fn test_normalize_for_moderation_removes_common_separators() {
+        assert_eq!(normalize_for_moderation("毒 品"), "毒品");
+        assert_eq!(normalize_for_moderation("管-制_刀　具"), "管制刀具");
+        assert_eq!(normalize_for_moderation("ＡＢＣ１２３"), "abc123");
     }
 }
