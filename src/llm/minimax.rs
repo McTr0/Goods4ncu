@@ -1,6 +1,6 @@
 use super::{
-    CircuitBreaker, MarketplaceAgent, NegotiateAgent, LLM_CIRCUIT_BREAKER, NEGOTIATION_PREAMBLE,
-    PREAMBLE,
+    CircuitBreaker, MarketplaceAgent, NegotiateAgent, ReplyAssistant, LLM_CIRCUIT_BREAKER,
+    NEGOTIATION_PREAMBLE, PREAMBLE, REPLY_ASSISTANT_PREAMBLE,
 };
 use crate::agents::models::Document;
 use crate::agents::tools::{EmbedUpdater, ToolContext, ToolError};
@@ -204,6 +204,15 @@ impl super::LlmProvider for MiniMaxProvider {
 
         Ok(Box::new(MiniMaxNegotiateAgent(agent)))
     }
+
+    async fn create_reply_assistant(self: Arc<Self>) -> anyhow::Result<Box<dyn ReplyAssistant>> {
+        let agent = self
+            .chat_client
+            .agent(&self.model)
+            .preamble(REPLY_ASSISTANT_PREAMBLE)
+            .build();
+        Ok(Box::new(MiniMaxReplyAssistant(agent)))
+    }
 }
 
 pub struct MiniMaxMarketplaceAgent(
@@ -360,6 +369,17 @@ pub struct MiniMaxNegotiateAgent(
 
 #[async_trait]
 impl NegotiateAgent for MiniMaxNegotiateAgent {
+    async fn prompt(&self, msg: String) -> anyhow::Result<String> {
+        Ok(self.0.prompt(msg).await?)
+    }
+}
+
+pub struct MiniMaxReplyAssistant(
+    Agent<openai::responses_api::ResponsesCompletionModel<reqwest::Client>>,
+);
+
+#[async_trait]
+impl ReplyAssistant for MiniMaxReplyAssistant {
     async fn prompt(&self, msg: String) -> anyhow::Result<String> {
         Ok(self.0.prompt(msg).await?)
     }

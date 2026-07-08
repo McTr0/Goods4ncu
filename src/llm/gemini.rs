@@ -1,6 +1,6 @@
 use super::{
-    CircuitBreaker, MarketplaceAgent, NegotiateAgent, LLM_CIRCUIT_BREAKER, NEGOTIATION_PREAMBLE,
-    PREAMBLE,
+    CircuitBreaker, MarketplaceAgent, NegotiateAgent, ReplyAssistant, LLM_CIRCUIT_BREAKER,
+    NEGOTIATION_PREAMBLE, PREAMBLE, REPLY_ASSISTANT_PREAMBLE,
 };
 use crate::agents::models::Document;
 use crate::agents::tools::{EmbedUpdater, ToolContext, ToolError};
@@ -183,6 +183,15 @@ impl super::LlmProvider for GeminiProvider {
 
         Ok(Box::new(GeminiNegotiateAgent(agent)))
     }
+
+    async fn create_reply_assistant(self: Arc<Self>) -> anyhow::Result<Box<dyn ReplyAssistant>> {
+        let agent = self
+            .client
+            .agent(&self.model)
+            .preamble(REPLY_ASSISTANT_PREAMBLE)
+            .build();
+        Ok(Box::new(GeminiReplyAssistant(agent)))
+    }
 }
 
 pub struct GeminiMarketplaceAgent(Agent<gemini::completion::CompletionModel<reqwest::Client>>);
@@ -330,6 +339,15 @@ pub struct GeminiNegotiateAgent(Agent<gemini::completion::CompletionModel<reqwes
 
 #[async_trait]
 impl NegotiateAgent for GeminiNegotiateAgent {
+    async fn prompt(&self, msg: String) -> anyhow::Result<String> {
+        Ok(self.0.prompt(msg).await?)
+    }
+}
+
+pub struct GeminiReplyAssistant(Agent<gemini::completion::CompletionModel<reqwest::Client>>);
+
+#[async_trait]
+impl ReplyAssistant for GeminiReplyAssistant {
     async fn prompt(&self, msg: String) -> anyhow::Result<String> {
         Ok(self.0.prompt(msg).await?)
     }

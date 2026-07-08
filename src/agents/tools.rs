@@ -119,6 +119,7 @@ impl Tool for CreateListingTool {
             suggested_price_cny: args.suggested_price_cny as f64 / 100.0,
             defects: args.defects.clone(),
             description: args.original_description.clone(),
+            image_url: None,
             owner_id: owner.clone(),
         };
 
@@ -688,12 +689,13 @@ impl Tool for PurchaseItemIntentTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: "purchase_item".to_string(),
-            description: "发起购买意向，创建订单。当用户确认购买某个商品时使用。".to_string(),
+            description: "发起线下成交意向。平台只记录意向，不托管资金；卖家确认后才视为成交。"
+                .to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "listing_id": { "type": "string", "description": "The listing ID to purchase" },
-                    "offered_price": { "type": "number", "description": "The offered purchase price in CNY" }
+                    "listing_id": { "type": "string", "description": "The listing ID for the deal intent" },
+                    "offered_price": { "type": "number", "description": "The proposed offline deal price in CNY" }
                 },
                 "required": ["listing_id", "offered_price"]
             }),
@@ -707,8 +709,8 @@ impl Tool for PurchaseItemIntentTool {
             .clone()
             .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
 
-        // OrderService performs the final active->sold transition and order insert
-        // in one transaction. This read is only for user-facing validation.
+        // The service creates only an intent; seller confirmation performs any
+        // optional delisting later.
         let listing = sqlx::query_as::<_, ListingCheckRow>(
             "SELECT id, owner_id, suggested_price_cny, status FROM inventory WHERE id = $1",
         )
@@ -769,7 +771,7 @@ impl Tool for PurchaseItemIntentTool {
             })?;
 
         Ok(format!(
-            "Order created! Order ID: {}. Listing: '{}'. Buyer: {}, Seller: {}, Price: {:.2} CNY",
+            "Deal intent sent! Record ID: {}. Listing: '{}'. Buyer: {}, Seller: {}, Price: {:.2} CNY. The seller must confirm before the item is considered sold; Good4NCU does not escrow funds.",
             order_id,
             args.listing_id,
             buyer_id,
@@ -1210,7 +1212,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn purchase_item_tool_creates_order_synchronously_and_marks_listing_sold() {
+    async fn purchase_item_tool_creates_deal_intent_without_marking_listing_sold() {
         with_test_pool(|pool| async move {
             let seller_id = Uuid::new_v4().to_string();
             let buyer_id = Uuid::new_v4().to_string();
@@ -1232,8 +1234,8 @@ mod tests {
                 .await
                 .expect("purchase listing");
 
-            assert!(result.contains("Order created!"));
-            assert!(result.contains("Order ID:"));
+            assert!(result.contains("Deal intent sent!"));
+            assert!(result.contains("Record ID:"));
 
             let order = sqlx::query(
                 "SELECT listing_id, buyer_id, seller_id, final_price, status FROM orders WHERE listing_id = $1",
@@ -1247,7 +1249,7 @@ mod tests {
             assert_eq!(order.get::<String, _>("buyer_id"), buyer_id);
             assert_eq!(order.get::<String, _>("seller_id"), seller_id);
             assert_eq!(order.get::<i64, _>("final_price"), 10_000);
-            assert_eq!(order.get::<String, _>("status"), "pending");
+            assert_eq!(order.get::<String, _>("status"), "intent_pending");
 
             let listing_status: String =
                 sqlx::query_scalar("SELECT status FROM inventory WHERE id = $1")
@@ -1255,7 +1257,7 @@ mod tests {
                     .fetch_one(&pool)
                     .await
                     .expect("select listing status");
-            assert_eq!(listing_status, "sold");
+            assert_eq!(listing_status, "active");
         })
         .await;
     }

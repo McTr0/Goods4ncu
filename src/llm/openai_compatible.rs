@@ -1,6 +1,6 @@
 use super::{
-    CircuitBreaker, MarketplaceAgent, NegotiateAgent, LLM_CIRCUIT_BREAKER, NEGOTIATION_PREAMBLE,
-    PREAMBLE,
+    CircuitBreaker, MarketplaceAgent, NegotiateAgent, ReplyAssistant, LLM_CIRCUIT_BREAKER,
+    NEGOTIATION_PREAMBLE, PREAMBLE, REPLY_ASSISTANT_PREAMBLE,
 };
 use crate::agents::models::Document;
 use crate::agents::tools::{EmbedUpdater, ToolContext, ToolError};
@@ -190,6 +190,15 @@ impl super::LlmProvider for OpenAiCompatibleProvider {
 
         Ok(Box::new(OpenAiCompatibleNegotiateAgent(agent)))
     }
+
+    async fn create_reply_assistant(self: Arc<Self>) -> anyhow::Result<Box<dyn ReplyAssistant>> {
+        let agent = self
+            .chat_client
+            .agent(&self.model)
+            .preamble(REPLY_ASSISTANT_PREAMBLE)
+            .build();
+        Ok(Box::new(OpenAiCompatibleReplyAssistant(agent)))
+    }
 }
 
 pub struct OpenAiCompatibleMarketplaceAgent(
@@ -344,6 +353,17 @@ pub struct OpenAiCompatibleNegotiateAgent(
 
 #[async_trait]
 impl NegotiateAgent for OpenAiCompatibleNegotiateAgent {
+    async fn prompt(&self, msg: String) -> anyhow::Result<String> {
+        Ok(self.0.prompt(msg).await?)
+    }
+}
+
+pub struct OpenAiCompatibleReplyAssistant(
+    Agent<openai::completion::CompletionModel<reqwest::Client>>,
+);
+
+#[async_trait]
+impl ReplyAssistant for OpenAiCompatibleReplyAssistant {
     async fn prompt(&self, msg: String) -> anyhow::Result<String> {
         Ok(self.0.prompt(msg).await?)
     }
