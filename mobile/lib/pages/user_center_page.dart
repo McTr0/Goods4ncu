@@ -4,6 +4,7 @@ import '../services/api_service.dart';
 import '../services/admin_role_cache.dart';
 import '../services/token_storage.dart';
 import '../theme/app_theme.dart';
+import '../utils/category_utils.dart';
 import 'login_page.dart';
 
 class UserCenterPage extends StatefulWidget {
@@ -194,7 +195,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
                           ),
                           title: Text(item['title'] ?? 'Untitled'),
                           subtitle: Text(
-                            '${item['category']} · ${item['brand']} · ¥${item['suggested_price_cny']}',
+                            '${localizedCategoryLabel(context, item['category']?.toString())} · ${item['brand']} · ¥${item['suggested_price_cny']}',
                           ),
                           trailing: Chip(
                             label: Text(

@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
+import '../components/payment_qr_image.dart';
 import '../l10n/app_localizations.dart';
 import '../services/locale_service.dart';
 import '../services/user_service.dart';
@@ -121,6 +122,15 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   const SizedBox(height: 12),
 
+                  _buildDiscoverySettings(),
+                  const SizedBox(height: 12),
+
+                  _buildReadReceiptSettings(),
+                  const SizedBox(height: 12),
+
+                  _buildPaymentQrSettings(),
+                  const SizedBox(height: 12),
+
                   // Language
                   _SettingsCard(
                     icon: Icons.language,
@@ -201,10 +211,317 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Future<void> _pickAndUploadAvatar(BuildContext context) async {
+  Widget _buildDiscoverySettings() {
+    final l = AppLocalizations.of(context)!;
+    final discoverability =
+        (_profile?['discoverability'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+    final email = _profile?['email'] as String?;
+    final studentId = _profile?['student_id'] as String?;
+    final canUseStudentId = studentId != null && studentId.isNotEmpty;
+    final usernameEnabled = discoverability['username'] != false;
+    final emailEnabled = discoverability['email'] == true;
+    final studentIdEnabled =
+        canUseStudentId && discoverability['student_id'] == true;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader(title: l.discoverabilitySettingsTitle),
+        const SizedBox(height: 8),
+        _DiscoverySwitchCard(
+          icon: Icons.badge_outlined,
+          title: l.discoverByUsernameTitle,
+          subtitle: l.discoverByUsernameSubtitle,
+          value: usernameEnabled,
+          onChanged: (value) => _updateDiscoverySetting('username', value),
+        ),
+        const SizedBox(height: 8),
+        _DiscoverySwitchCard(
+          icon: Icons.alternate_email_rounded,
+          title: l.discoverByEmailTitle,
+          subtitle: email == null || email.isEmpty
+              ? l.discoverByEmailMissingSubtitle
+              : l.discoverByEmailSubtitle(email),
+          value: emailEnabled,
+          onChanged: email == null || email.isEmpty
+              ? null
+              : (value) => _updateDiscoverySetting('email', value),
+        ),
+        const SizedBox(height: 8),
+        _DiscoverySwitchCard(
+          icon: Icons.school_outlined,
+          title: l.discoverByStudentIdTitle,
+          subtitle: canUseStudentId
+              ? l.discoverByStudentIdSubtitle(studentId)
+              : l.discoverByStudentIdMissingSubtitle,
+          value: studentIdEnabled,
+          onChanged: canUseStudentId
+              ? (value) => _updateDiscoverySetting('student_id', value)
+              : null,
+        ),
+      ],
+    );
+  }
+
+  Future<void> _updateDiscoverySetting(String key, bool value) async {
     final l = AppLocalizations.of(context)!;
     final messenger = ScaffoldMessenger.of(context);
-    final source = await showModalBottomSheet<ImageSource>(
+    try {
+      final updated = await _userService.updateProfile(
+        discoverability: {key: value},
+      );
+      if (!mounted) return;
+      setState(() => _profile = updated);
+      messenger.showSnackBar(SnackBar(content: Text(l.discoverabilityUpdated)));
+    } catch (error) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(l.settingsUpdateFailed(error.toString()))),
+      );
+    }
+  }
+
+  Widget _buildReadReceiptSettings() {
+    final l = AppLocalizations.of(context)!;
+    final mode = _profile?['chat_read_receipt_mode']?.toString() ?? 'auto';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader(title: l.chatReadReceiptSettingsTitle),
+        const SizedBox(height: 8),
+        _SettingsCard(
+          icon: Icons.mark_chat_read_outlined,
+          title: l.chatReadReceiptDefaultTitle,
+          subtitle: mode == 'manual'
+              ? l.chatReadReceiptManualCurrent
+              : l.chatReadReceiptAutoCurrent,
+          trailing: Text(
+            mode == 'manual'
+                ? l.chatReadReceiptManualTitle
+                : l.chatReadReceiptAutoTitle,
+            style: const TextStyle(color: AppTheme.textSecondary),
+          ),
+          onTap: _showReadReceiptDialog,
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showReadReceiptDialog() async {
+    final l = AppLocalizations.of(context)!;
+    final current = _profile?['chat_read_receipt_mode']?.toString() ?? 'auto';
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(
+                current == 'auto'
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_unchecked,
+                color: current == 'auto'
+                    ? AppTheme.primary
+                    : AppTheme.textSecondary,
+              ),
+              title: Text(l.chatReadReceiptAutoTitle),
+              subtitle: Text(l.chatReadReceiptAutoSubtitle),
+              onTap: () => Navigator.pop(sheetContext, 'auto'),
+            ),
+            ListTile(
+              leading: Icon(
+                current == 'manual'
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_unchecked,
+                color: current == 'manual'
+                    ? AppTheme.primary
+                    : AppTheme.textSecondary,
+              ),
+              title: Text(l.chatReadReceiptManualTitle),
+              subtitle: Text(l.chatReadReceiptManualSubtitle),
+              onTap: () => Navigator.pop(sheetContext, 'manual'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (selected == null || selected == current) return;
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final updated = await _userService.updateProfile(
+        chatReadReceiptMode: selected,
+      );
+      if (!mounted) return;
+      setState(() => _profile = updated);
+      messenger.showSnackBar(SnackBar(content: Text(l.chatReadReceiptUpdated)));
+    } catch (error) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(l.settingsUpdateFailed(error.toString()))),
+      );
+    }
+  }
+
+  Widget _buildPaymentQrSettings() {
+    final l = AppLocalizations.of(context)!;
+    final paymentQr =
+        (_profile?['payment_qr'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+    final wechatUrl = paymentQr['wechat_url'] as String?;
+    final alipayUrl = paymentQr['alipay_url'] as String?;
+    final showWechat = paymentQr['show_wechat'] == true;
+    final showAlipay = paymentQr['show_alipay'] == true;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader(title: l.paymentQrSettingsTitle),
+        const SizedBox(height: 8),
+        Text(
+          l.paymentQrSettingsSubtitle,
+          style: const TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 12,
+            height: 1.4,
+          ),
+        ),
+        const SizedBox(height: 8),
+        _PaymentQrCard(
+          icon: Icons.qr_code_2_rounded,
+          title: l.wechatPayQr,
+          uploadLabel: l.uploadWechatQr,
+          showLabel: l.showWechatQr,
+          imageUrl: wechatUrl,
+          visible: showWechat,
+          onUpload: () => _pickAndUploadPaymentQr('wechat'),
+          onClear: wechatUrl == null || wechatUrl.isEmpty
+              ? null
+              : () => _clearPaymentQr('wechat'),
+          onVisibilityChanged: (value) =>
+              _updatePaymentQrVisibility('wechat', value),
+        ),
+        const SizedBox(height: 8),
+        _PaymentQrCard(
+          icon: Icons.account_balance_wallet_outlined,
+          title: l.alipayQr,
+          uploadLabel: l.uploadAlipayQr,
+          showLabel: l.showAlipayQr,
+          imageUrl: alipayUrl,
+          visible: showAlipay,
+          onUpload: () => _pickAndUploadPaymentQr('alipay'),
+          onClear: alipayUrl == null || alipayUrl.isEmpty
+              ? null
+              : () => _clearPaymentQr('alipay'),
+          onVisibilityChanged: (value) =>
+              _updatePaymentQrVisibility('alipay', value),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          l.paymentQrSafetyHint,
+          style: const TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 12,
+            height: 1.35,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _updatePaymentQrVisibility(String provider, bool value) async {
+    final l = AppLocalizations.of(context)!;
+    final messenger = ScaffoldMessenger.of(context);
+    final paymentQr =
+        (_profile?['payment_qr'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+    final urlKey = provider == 'wechat' ? 'wechat_url' : 'alipay_url';
+    final showKey = provider == 'wechat' ? 'show_wechat' : 'show_alipay';
+    final url = paymentQr[urlKey] as String?;
+    if (value && (url == null || url.isEmpty)) {
+      messenger.showSnackBar(SnackBar(content: Text(l.paymentQrMissingHint)));
+      return;
+    }
+
+    try {
+      final updated = await _userService.updateProfile(
+        paymentQr: {showKey: value},
+      );
+      if (!mounted) return;
+      setState(() => _profile = updated);
+      messenger.showSnackBar(SnackBar(content: Text(l.paymentQrUpdated)));
+    } catch (error) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(l.operationFailed(error.toString()))),
+      );
+    }
+  }
+
+  Future<void> _clearPaymentQr(String provider) async {
+    final l = AppLocalizations.of(context)!;
+    final messenger = ScaffoldMessenger.of(context);
+    final urlKey = provider == 'wechat' ? 'wechat_url' : 'alipay_url';
+    final showKey = provider == 'wechat' ? 'show_wechat' : 'show_alipay';
+    try {
+      final updated = await _userService.updateProfile(
+        paymentQr: {urlKey: '', showKey: false},
+      );
+      if (!mounted) return;
+      setState(() => _profile = updated);
+      messenger.showSnackBar(SnackBar(content: Text(l.paymentQrCleared)));
+    } catch (error) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(l.operationFailed(error.toString()))),
+      );
+    }
+  }
+
+  Future<void> _pickAndUploadPaymentQr(String provider) async {
+    final l = AppLocalizations.of(context)!;
+    final messenger = ScaffoldMessenger.of(context);
+    final source = await _pickImageSource(context);
+    if (source == null) return;
+
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(
+      source: source,
+      maxWidth: 1024,
+      maxHeight: 1024,
+      imageQuality: 92,
+    );
+    if (pickedFile == null) return;
+
+    try {
+      messenger.showSnackBar(SnackBar(content: Text('${l.uploading}...')));
+      final url = await _uploadImageToOss(
+        pickedFile,
+        folder: 'payment_qr',
+        prefix: provider,
+      );
+      final updated = await _userService.updateProfile(
+        paymentQr: provider == 'wechat'
+            ? {'wechat_url': url, 'show_wechat': true}
+            : {'alipay_url': url, 'show_alipay': true},
+      );
+      if (!mounted) return;
+      setState(() => _profile = updated);
+      messenger.showSnackBar(SnackBar(content: Text(l.paymentQrUpdated)));
+    } catch (error) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('${l.uploadFailed}: $error')),
+      );
+    }
+  }
+
+  Future<ImageSource?> _pickImageSource(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    return showModalBottomSheet<ImageSource>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(
@@ -224,6 +541,59 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
       ),
     );
+  }
+
+  Future<String> _uploadImageToOss(
+    XFile pickedFile, {
+    required String folder,
+    required String prefix,
+  }) async {
+    final stsToken = await _userService.getUploadToken();
+    final imageBytes = await pickedFile.readAsBytes();
+    final userId = _profile?['user_id'] ?? 'unknown';
+    final ext = pickedFile.path.split('.').last.toLowerCase();
+    final objectKey = '$folder/$userId/$prefix-${const Uuid().v4()}.$ext';
+    final endpointHost = stsToken.endpoint
+        .replaceFirst(RegExp(r'^https?://'), '')
+        .replaceAll(RegExp(r'/$'), '');
+    final ossUrl = Uri.https('${stsToken.bucket}.$endpointHost', objectKey);
+    final contentType = 'image/${ext == 'jpg' ? 'jpeg' : ext}';
+    final ossDate = _buildOssDateHeader();
+    final authorization = _buildOssAuthorization(
+      method: 'PUT',
+      contentType: contentType,
+      date: ossDate,
+      bucket: stsToken.bucket,
+      objectKey: objectKey,
+      accessKeyId: stsToken.accessKeyId,
+      accessKeySecret: stsToken.accessKeySecret,
+      securityToken: stsToken.securityToken,
+    );
+
+    final ossResponse = await http
+        .put(
+          ossUrl,
+          headers: {
+            'Date': ossDate,
+            'Authorization': authorization,
+            'x-oss-security-token': stsToken.securityToken,
+            'Content-Type': contentType,
+          },
+          body: imageBytes,
+        )
+        .timeout(const Duration(seconds: 30));
+
+    if (ossResponse.statusCode != 200) {
+      throw Exception('OSS upload failed: ${ossResponse.statusCode}');
+    }
+
+    return ossUrl.toString();
+  }
+
+  Future<void> _pickAndUploadAvatar(BuildContext context) async {
+    final l = AppLocalizations.of(context)!;
+    final messenger = ScaffoldMessenger.of(context);
+    final source = await _pickImageSource(context);
     if (source == null) return;
 
     final picker = ImagePicker();
@@ -238,56 +608,11 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       messenger.showSnackBar(SnackBar(content: Text('${l.uploading}...')));
 
-      // 1. Get STS token
-      final stsToken = await _userService.getUploadToken();
-
-      // 2. Read image bytes (works on mobile and web)
-      final imageBytes = await pickedFile.readAsBytes();
-
-      // 3. Generate object key
-      final userId = _profile?['user_id'] ?? 'unknown';
-      final ext = pickedFile.path.split('.').last.toLowerCase();
-      final objectKey = 'avatars/$userId/${const Uuid().v4()}.$ext';
-
-      // 4. Build OSS URL (endpoint may already include protocol)
-      final endpointHost = stsToken.endpoint
-          .replaceFirst(RegExp(r'^https?://'), '')
-          .replaceAll(RegExp(r'/$'), '');
-      final ossUrl = Uri.https('${stsToken.bucket}.$endpointHost', objectKey);
-
-      final contentType = 'image/${ext == 'jpg' ? 'jpeg' : ext}';
-      final ossDate = _buildOssDateHeader();
-      final authorization = _buildOssAuthorization(
-        method: 'PUT',
-        contentType: contentType,
-        date: ossDate,
-        bucket: stsToken.bucket,
-        objectKey: objectKey,
-        accessKeyId: stsToken.accessKeyId,
-        accessKeySecret: stsToken.accessKeySecret,
-        securityToken: stsToken.securityToken,
+      final avatarUrl = await _uploadImageToOss(
+        pickedFile,
+        folder: 'avatars',
+        prefix: 'avatar',
       );
-
-      // 5. PUT to OSS with STS token header
-      final ossResponse = await http
-          .put(
-            ossUrl,
-            headers: {
-              'Date': ossDate,
-              'Authorization': authorization,
-              'x-oss-security-token': stsToken.securityToken,
-              'Content-Type': contentType,
-            },
-            body: imageBytes,
-          )
-          .timeout(const Duration(seconds: 30));
-
-      if (ossResponse.statusCode != 200) {
-        throw Exception('OSS upload failed: ${ossResponse.statusCode}');
-      }
-
-      // 6. Update profile with avatar URL
-      final avatarUrl = ossUrl.toString();
       final updated = await _userService.updateProfile(avatarUrl: avatarUrl);
       if (mounted) {
         setState(() => _profile = updated);
@@ -594,6 +919,168 @@ class _SettingsCard extends StatelessWidget {
             trailing ??
             const Icon(Icons.chevron_right, color: AppTheme.textSecondary),
         onTap: onTap,
+      ),
+    );
+  }
+}
+
+class _DiscoverySwitchCard extends StatelessWidget {
+  const _DiscoverySwitchCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onChanged != null;
+    return Card(
+      margin: EdgeInsets.zero,
+      child: SwitchListTile(
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: AppTheme.sp16,
+          vertical: AppTheme.sp6,
+        ),
+        secondary: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: AppTheme.primary.withValues(alpha: enabled ? 0.1 : 0.04),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(
+            icon,
+            color: enabled ? AppTheme.primary : AppTheme.textSecondary,
+          ),
+        ),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Text(
+          subtitle,
+          style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+        ),
+        value: enabled && value,
+        onChanged: onChanged,
+      ),
+    );
+  }
+}
+
+class _PaymentQrCard extends StatelessWidget {
+  const _PaymentQrCard({
+    required this.icon,
+    required this.title,
+    required this.uploadLabel,
+    required this.showLabel,
+    required this.imageUrl,
+    required this.visible,
+    required this.onUpload,
+    required this.onClear,
+    required this.onVisibilityChanged,
+  });
+
+  final IconData icon;
+  final String title;
+  final String uploadLabel;
+  final String showLabel;
+  final String? imageUrl;
+  final bool visible;
+  final VoidCallback onUpload;
+  final VoidCallback? onClear;
+  final ValueChanged<bool> onVisibilityChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    final hasImage = imageUrl != null && imageUrl!.isNotEmpty;
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(AppTheme.sp12),
+        child: Column(
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                    border: Border.all(color: AppTheme.borderLight),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: hasImage
+                      ? PaymentQrImage(
+                          url: imageUrl!,
+                          label: title,
+                          fit: BoxFit.cover,
+                        )
+                      : Icon(icon, color: AppTheme.primary),
+                ),
+                const SizedBox(width: AppTheme.sp12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        hasImage ? uploadLabel : '$uploadLabel · ${l.notSet}',
+                        style: const TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: AppTheme.sp8),
+                      Wrap(
+                        spacing: AppTheme.sp8,
+                        runSpacing: AppTheme.sp8,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: onUpload,
+                            icon: const Icon(Icons.upload_file_rounded),
+                            label: Text(uploadLabel),
+                          ),
+                          if (hasImage)
+                            TextButton.icon(
+                              onPressed: onClear,
+                              icon: const Icon(Icons.delete_outline),
+                              label: Text(l.delete),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 20),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(showLabel),
+              subtitle: Text(
+                hasImage ? l.paymentQrSafetyHint : l.paymentQrMissingHint,
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
+              value: visible && hasImage,
+              onChanged: onVisibilityChanged,
+            ),
+          ],
+        ),
       ),
     );
   }

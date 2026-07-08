@@ -7,6 +7,7 @@ import '../services/admin_role_cache.dart';
 import '../services/ws_service.dart';
 import '../services/token_storage.dart';
 import '../theme/app_theme.dart';
+import '../theme/responsive.dart';
 
 class ProfilePage extends StatefulWidget {
   final ApiService? apiService;
@@ -127,110 +128,111 @@ class _ProfilePageState extends State<ProfilePage> {
     final username = _profile?['username'] ?? l.profile;
     final createdAt = _profile?['created_at'];
     final avatarUrl = _profile?['avatar_url'] as String?;
+    final isAdmin = _profile?['role'] == 'admin';
+    final userId = _profile?['user_id']?.toString();
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(AppTheme.sp16),
-      child: Column(
-        children: [
-          const SizedBox(height: AppTheme.sp16),
-          CircleAvatar(
-            radius: 52,
-            backgroundColor: AppTheme.primary.withValues(alpha: 0.15),
-            backgroundImage: avatarUrl != null && avatarUrl.isNotEmpty
-                ? NetworkImage(avatarUrl)
-                : null,
-            child: avatarUrl == null || avatarUrl.isEmpty
-                ? Text(
-                    username.isNotEmpty ? username[0].toUpperCase() : '?',
-                    style: const TextStyle(
-                      fontSize: 40,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.primary,
-                    ),
-                  )
-                : null,
-          ),
-          const SizedBox(height: AppTheme.sp16),
-          Text(
-            username,
-            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-          ),
-          if (createdAt != null && createdAt.toString().isNotEmpty) ...[
-            const SizedBox(height: 4),
+    return ResponsiveContent(
+      maxWidth: 760,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(AppTheme.sp16),
+        child: Column(
+          children: [
+            const SizedBox(height: AppTheme.sp16),
+            CircleAvatar(
+              radius: 52,
+              backgroundColor: AppTheme.primary.withValues(alpha: 0.15),
+              backgroundImage: avatarUrl != null && avatarUrl.isNotEmpty
+                  ? NetworkImage(avatarUrl)
+                  : null,
+              child: avatarUrl == null || avatarUrl.isEmpty
+                  ? Text(
+                      username.isNotEmpty ? username[0].toUpperCase() : '?',
+                      style: const TextStyle(
+                        fontSize: 40,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.primary,
+                      ),
+                    )
+                  : null,
+            ),
+            const SizedBox(height: AppTheme.sp16),
             Text(
-              l.memberSince(_formatDate(createdAt.toString())),
-              style: const TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 13,
-              ),
+              username,
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
-          ],
-          const SizedBox(height: AppTheme.sp32),
+            if (createdAt != null && createdAt.toString().isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                l.memberSince(_formatDate(createdAt.toString())),
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+            const SizedBox(height: AppTheme.sp32),
 
-          _MenuCard(
-            icon: Icons.inventory_2_outlined,
-            title: l.myListings,
-            subtitle: l.myListingsMenu,
-            onTap: () => context.push('/my-listings'),
-          ),
-          _MenuCard(
-            icon: Icons.shopping_bag_outlined,
-            title: l.myOrders,
-            subtitle: l.myOrdersSubtitle,
-            onTap: () => context.push('/orders'),
-          ),
-          _MenuCard(
-            icon: Icons.favorite_border,
-            title: l.myFavorites,
-            subtitle: l.myFavoritesSubtitle,
-            onTap: () => context.push('/watchlist'),
-          ),
-          _MenuCard(
-            icon: Icons.notifications_none,
-            title: l.notificationsCenter,
-            subtitle: l.notificationsCenterSubtitle,
-            onTap: () => context.push('/notifications'),
-          ),
-          _MenuCard(
-            icon: Icons.admin_panel_settings_outlined,
-            title: l.adminConsole,
-            subtitle: l.adminConsoleSubtitle,
-            onTap: () {
-              final isAdmin = _profile?['role'] == 'admin';
-              if (!isAdmin) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(l.adminOnly),
-                    backgroundColor: Colors.orange,
-                  ),
-                );
-                return;
-              }
-              context.push('/admin');
-            },
-          ),
-          _MenuCard(
-            icon: Icons.settings_outlined,
-            title: l.settings,
-            subtitle: l.settingsSubtitle,
-            onTap: () => context.push('/settings'),
-          ),
-          const SizedBox(height: AppTheme.sp16),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _logout,
-              icon: const Icon(Icons.logout, color: AppTheme.error),
-              label: Text(l.logout),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.error,
-                side: const BorderSide(color: AppTheme.error),
-                padding: const EdgeInsets.symmetric(vertical: 14),
+            if (userId != null && userId.isNotEmpty)
+              _MenuCard(
+                icon: Icons.account_circle_outlined,
+                title: l.myPublicProfile,
+                subtitle: l.myPublicProfileSubtitle,
+                onTap: () => context.push('/users/$userId'),
+              ),
+            _MenuCard(
+              icon: Icons.inventory_2_outlined,
+              title: l.myListings,
+              subtitle: l.myListingsMenu,
+              onTap: () => context.push('/my-listings'),
+            ),
+            _MenuCard(
+              icon: Icons.shopping_bag_outlined,
+              title: l.myOrders,
+              subtitle: l.myOrdersSubtitle,
+              onTap: () => context.push('/orders'),
+            ),
+            _MenuCard(
+              icon: Icons.favorite_border,
+              title: l.myFavorites,
+              subtitle: l.myFavoritesSubtitle,
+              onTap: () => context.push('/watchlist'),
+            ),
+            _MenuCard(
+              icon: Icons.notifications_none,
+              title: l.notificationsCenter,
+              subtitle: l.notificationsCenterSubtitle,
+              onTap: () => context.push('/notifications'),
+            ),
+            if (isAdmin)
+              _MenuCard(
+                icon: Icons.admin_panel_settings_outlined,
+                title: l.adminConsole,
+                subtitle: l.adminConsoleSubtitle,
+                onTap: () => context.push('/admin'),
+              ),
+            _MenuCard(
+              icon: Icons.settings_outlined,
+              title: l.settings,
+              subtitle: l.settingsSubtitle,
+              onTap: () => context.push('/settings'),
+            ),
+            const SizedBox(height: AppTheme.sp16),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _logout,
+                icon: const Icon(Icons.logout, color: AppTheme.error),
+                label: Text(l.logout),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.error,
+                  side: const BorderSide(color: AppTheme.error),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: AppTheme.sp32),
-        ],
+            const SizedBox(height: AppTheme.sp32),
+          ],
+        ),
       ),
     );
   }

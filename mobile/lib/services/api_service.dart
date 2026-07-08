@@ -83,17 +83,21 @@ class ApiService extends BaseService {
   Future<ConversationMessage> sendMessage(
     String conversationId, {
     required String content,
+    String? replyToMessageId,
     String? imageBase64,
     String? audioBase64,
     String? imageUrl,
     String? audioUrl,
+    Map<String, String>? quote,
   }) => _chatService.sendMessage(
     conversationId,
     content: content,
+    replyToMessageId: replyToMessageId,
     imageBase64: imageBase64,
     audioBase64: audioBase64,
     imageUrl: imageUrl,
     audioUrl: audioUrl,
+    quote: quote,
   );
 
   Future<ConversationMessage> editMessage(String messageId, String content) =>
@@ -254,8 +258,17 @@ class ApiService extends BaseService {
     offset: offset,
   );
 
-  Future<void> updateAdminOrderStatus(String orderId, String status) =>
-      _adminService.updateAdminOrderStatus(orderId, status);
+  Future<void> updateAdminOrderStatus(
+    String orderId,
+    String status, {
+    bool? autoDelist,
+    String? reason,
+  }) => _adminService.updateAdminOrderStatus(
+    orderId,
+    status,
+    autoDelist: autoDelist,
+    reason: reason,
+  );
 
   Future<Map<String, dynamic>> getAdminUsers({
     String? q,

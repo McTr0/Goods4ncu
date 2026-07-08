@@ -9,7 +9,9 @@ use sqlx::Row;
 use crate::api::auth::extract_user_id_from_token_with_fallback;
 use crate::api::error::ApiError;
 use crate::api::AppState;
-use crate::repositories::{Listing, UserProfile, UserRepository};
+use crate::repositories::{
+    Listing, UserLookupMethod, UserLookupResult, UserProfile, UserRepository,
+};
 
 // ---------------------------------------------------------------------------
 // Response types
@@ -26,6 +28,7 @@ pub struct ListingItem {
     pub condition_score: i32,
     pub suggested_price_cny: f64,
     pub description: Option<String>,
+    pub image_url: Option<String>,
     pub status: String,
 }
 
@@ -72,6 +75,39 @@ pub struct UpdateProfileRequest {
     pub username: Option<String>,
     pub email: Option<String>,
     pub avatar_url: Option<String>,
+    pub discoverability: Option<UpdateDiscoverabilityRequest>,
+    pub chat_read_receipt_mode: Option<String>,
+    pub payment_qr: Option<UpdatePaymentQrRequest>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateDiscoverabilityRequest {
+    pub username: Option<bool>,
+    pub email: Option<bool>,
+    pub student_id: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdatePaymentQrRequest {
+    pub wechat_url: Option<String>,
+    pub alipay_url: Option<String>,
+    pub show_wechat: Option<bool>,
+    pub show_alipay: Option<bool>,
+}
+
+fn validate_optional_image_url(value: &str, label: &str) -> Result<(), ApiError> {
+    if value.is_empty() {
+        return Ok(());
+    }
+    if value.len() > 2048 {
+        return Err(ApiError::BadRequest(format!(
+            "{label}URL不能超过2048个字符"
+        )));
+    }
+    if !value.starts_with("http://") && !value.starts_with("https://") {
+        return Err(ApiError::BadRequest(format!("{label}URL格式无效")));
+    }
+    Ok(())
 }
 
 pub async fn update_profile(
@@ -118,6 +154,25 @@ pub async fn update_profile(
         state.user_repo.update_email(&user_id, email).await?;
     }
 
+    if let Some(discoverability) = &body.discoverability {
+        state
+            .user_repo
+            .update_discoverability(
+                &user_id,
+                discoverability.username,
+                discoverability.email,
+                discoverability.student_id,
+            )
+            .await?;
+    }
+
+    if let Some(mode) = &body.chat_read_receipt_mode {
+        state
+            .user_repo
+            .update_chat_read_receipt_mode(&user_id, mode)
+            .await?;
+    }
+
     if let Some(avatar_url) = &body.avatar_url {
         if avatar_url.is_empty() {
             return Err(ApiError::BadRequest("头像URL不能为空".to_string()));
@@ -134,6 +189,25 @@ pub async fn update_profile(
             .await
             .ok();
         state.user_repo.update_avatar(&user_id, avatar_url).await?;
+    }
+
+    if let Some(payment_qr) = &body.payment_qr {
+        if let Some(url) = &payment_qr.wechat_url {
+            validate_optional_image_url(url, "微信收款码")?;
+        }
+        if let Some(url) = &payment_qr.alipay_url {
+            validate_optional_image_url(url, "支付宝收款码")?;
+        }
+        state
+            .user_repo
+            .update_payment_qr(
+                &user_id,
+                payment_qr.wechat_url.as_deref(),
+                payment_qr.alipay_url.as_deref(),
+                payment_qr.show_wechat,
+                payment_qr.show_alipay,
+            )
+            .await?;
     }
 
     let profile = state.user_repo.get_profile(&user_id).await?;
@@ -189,6 +263,7 @@ pub async fn get_user_listings(
                 condition_score: listing.condition_score,
                 suggested_price_cny: listing.suggested_price_cny as f64 / 100.0,
                 description,
+                image_url: listing.image_url,
                 status: listing.status,
             }
         })
@@ -220,6 +295,18 @@ pub struct UserSummary {
 pub struct UserSearchResponse {
     pub items: Vec<UserSummary>,
     pub total: i64,
+}
+
+#[derive(Deserialize)]
+pub struct UserLookupQuery {
+    pub q: String,
+    pub method: Option<String>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Serialize)]
+pub struct UserLookupResponse {
+    pub items: Vec<UserLookupResult>,
 }
 
 /// GET /api/users/search?q=keyword - search/browse users
@@ -257,12 +344,72 @@ pub async fn search_users(
     Ok(Json(UserSearchResponse { items, total }))
 }
 
+/// GET /api/users/lookup?q=keyword&method=auto|username|email|student_id
+pub async fn lookup_users(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<UserLookupQuery>,
+) -> Result<Json<UserLookupResponse>, ApiError> {
+    let requester_id = extract_user_id_from_token_with_fallback(
+        &headers,
+        &state.secrets.jwt_secret,
+        state.secrets.jwt_secret_old.as_deref(),
+    )
+    .map_err(|_| ApiError::Unauthorized)?;
+
+    let query = params.q.trim();
+    if query.is_empty() {
+        return Ok(Json(UserLookupResponse { items: Vec::new() }));
+    }
+    if query.len() > 100 {
+        return Err(ApiError::BadRequest(
+            "搜索关键词不能超过100个字符".to_string(),
+        ));
+    }
+
+    let method = match params.method.as_deref().unwrap_or("auto") {
+        "auto" => UserLookupMethod::Auto,
+        "username" => UserLookupMethod::Username,
+        "email" => UserLookupMethod::Email,
+        "student_id" => UserLookupMethod::StudentId,
+        _ => {
+            return Err(ApiError::BadRequest(
+                "无效的 method 参数，可选值：auto, username, email, student_id".to_string(),
+            ))
+        }
+    };
+
+    if matches!(method, UserLookupMethod::Email) && !query.contains('@') {
+        return Ok(Json(UserLookupResponse { items: Vec::new() }));
+    }
+    if matches!(method, UserLookupMethod::StudentId)
+        && !((8..=12).contains(&query.len()) && query.chars().all(|ch| ch.is_ascii_digit()))
+    {
+        return Ok(Json(UserLookupResponse { items: Vec::new() }));
+    }
+
+    let items = state
+        .user_repo
+        .lookup_users(&requester_id, query, method, params.limit.unwrap_or(10))
+        .await?;
+
+    Ok(Json(UserLookupResponse { items }))
+}
+
 #[derive(Serialize)]
 pub struct UserPublicProfile {
     pub user_id: String,
     pub username: String,
+    pub avatar_url: Option<String>,
     pub listing_count: i64,
     pub joined_at: String,
+    pub payment_qr: UserPublicPaymentQr,
+}
+
+#[derive(Serialize)]
+pub struct UserPublicPaymentQr {
+    pub wechat_url: Option<String>,
+    pub alipay_url: Option<String>,
 }
 
 /// GET /api/users/:id - public user profile (no auth required)
@@ -273,11 +420,22 @@ pub async fn get_user_profile(
     let row = sqlx::query(
         r#"
         SELECT u.id as user_id, u.username, u.created_at,
+               u.avatar_url,
+               CASE
+                   WHEN u.show_wechat_pay_qr = TRUE THEN u.wechat_pay_qr_url
+                   ELSE NULL
+               END AS public_wechat_pay_qr_url,
+               CASE
+                   WHEN u.show_alipay_qr = TRUE THEN u.alipay_qr_url
+                   ELSE NULL
+               END AS public_alipay_qr_url,
                COUNT(i.id) as listing_count
         FROM users u
         LEFT JOIN inventory i ON u.id = i.owner_id AND i.status = 'active'
         WHERE u.id = $1
-        GROUP BY u.id, u.username, u.created_at
+        GROUP BY u.id, u.username, u.created_at, u.avatar_url,
+                 u.show_wechat_pay_qr, u.wechat_pay_qr_url,
+                 u.show_alipay_qr, u.alipay_qr_url
         "#,
     )
     .bind(&user_id)
@@ -294,8 +452,55 @@ pub async fn get_user_profile(
     Ok(Json(UserPublicProfile {
         user_id: row.get("user_id"),
         username: row.get("username"),
+        avatar_url: row.get("avatar_url"),
         listing_count: row.get("listing_count"),
         joined_at: created_at,
+        payment_qr: UserPublicPaymentQr {
+            wechat_url: row.get("public_wechat_pay_qr_url"),
+            alipay_url: row.get("public_alipay_qr_url"),
+        },
+    }))
+}
+
+/// GET /api/users/:id/listings - public active listings for a user
+pub async fn get_public_user_listings(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    Query(params): Query<PaginationParams>,
+) -> Result<Json<PaginatedListings>, ApiError> {
+    let limit = params.limit.unwrap_or(20).clamp(1, 50);
+    let offset = params.offset.unwrap_or(0).max(0);
+    let (listings, total) = state
+        .user_repo
+        .get_user_listings(&user_id, limit, offset, "active")
+        .await?;
+
+    let items = listings
+        .into_iter()
+        .map(|listing| {
+            let description = listing
+                .defects
+                .and_then(|d| serde_json::from_str::<Vec<String>>(&d).ok())
+                .map(|defects| defects.join(", "));
+            ListingItem {
+                id: listing.id,
+                title: listing.title,
+                category: listing.category,
+                brand: listing.brand.unwrap_or_default(),
+                condition_score: listing.condition_score,
+                suggested_price_cny: listing.suggested_price_cny as f64 / 100.0,
+                description,
+                image_url: listing.image_url,
+                status: listing.status,
+            }
+        })
+        .collect();
+
+    Ok(Json(PaginatedListings {
+        items,
+        total,
+        limit,
+        offset,
     }))
 }
 
@@ -339,7 +544,20 @@ mod tests {
             user_id: "user-123".to_string(),
             username: "testuser".to_string(),
             email: Some("test@email.ncu.edu.cn".to_string()),
+            student_id: None,
+            discoverability: crate::repositories::UserDiscoverability {
+                username: true,
+                email: false,
+                student_id: false,
+            },
+            chat_read_receipt_mode: "auto".to_string(),
             avatar_url: None,
+            payment_qr: crate::repositories::UserPaymentQr {
+                wechat_url: None,
+                alipay_url: None,
+                show_wechat: false,
+                show_alipay: false,
+            },
             role: "user".to_string(),
             created_at: "2024-01-01T00:00:00Z".to_string(),
         };
@@ -359,6 +577,7 @@ mod tests {
             condition_score: 8,
             suggested_price_cny: 4999.0,
             description: Some("Good condition".to_string()),
+            image_url: Some("https://cdn.example.test/item.jpg".to_string()),
             status: "active".to_string(),
         };
         let json = serde_json::to_string(&item).unwrap();
@@ -377,6 +596,7 @@ mod tests {
             condition_score: 5,
             suggested_price_cny: 99.0,
             description: None,
+            image_url: None,
             status: "active".to_string(),
         };
         let json = serde_json::to_string(&item).unwrap();
@@ -426,13 +646,19 @@ mod tests {
         let profile = UserPublicProfile {
             user_id: "user-789".to_string(),
             username: "publicuser".to_string(),
+            avatar_url: Some("https://cdn.example.test/avatar.jpg".to_string()),
             listing_count: 5,
             joined_at: "2024-01-15T00:00:00Z".to_string(),
+            payment_qr: UserPublicPaymentQr {
+                wechat_url: Some("https://cdn.example.test/wechat.jpg".to_string()),
+                alipay_url: None,
+            },
         };
         let json = serde_json::to_string(&profile).unwrap();
         assert!(json.contains("user-789"));
         assert!(json.contains("publicuser"));
         assert!(json.contains("\"listing_count\":5"));
         assert!(json.contains("joined_at"));
+        assert!(json.contains("wechat_url"));
     }
 }
