@@ -81,6 +81,64 @@ Content-Type: application/json
 }
 ```
 
+## Users
+
+### GET `/api/user/profile`
+
+需要登录。返回当前用户资料，包括 `user_id`、`username`、`email`、`student_id`、`avatar_url`、`role`、`created_at`、`chat_read_receipt_mode` 和 `discoverability`。
+
+`student_id` 是只读派生字段：当学校邮箱形如 `{8-12位数字}@email.ncu.edu.cn` 时，后端从邮箱本地部分推断；否则为 `null`。`discoverability.username` 默认 `true`，`discoverability.email` 和 `discoverability.student_id` 默认 `false`。
+
+### PATCH `/api/user/profile`
+
+需要登录。可更新昵称、学校邮箱、头像 URL、查找设置和全局聊天已读策略。邮箱更新后会同步重新推断 `student_id`。`chat_read_receipt_mode` 可选 `auto` 或 `manual`，默认 `auto`。
+
+```json
+{
+  "username": "alice",
+  "email": "2024123456@email.ncu.edu.cn",
+  "chat_read_receipt_mode": "manual",
+  "discoverability": {
+    "username": true,
+    "email": false,
+    "student_id": true
+  }
+}
+```
+
+### GET `/api/users/lookup`
+
+需要登录。用于“找同学并发起会话”，不会返回当前用户自己。query：
+
+| 参数 | 说明 |
+| --- | --- |
+| `q` | 必填。用户名片段、完整邮箱或完整学号。 |
+| `method` | `auto`、`username`、`email`、`student_id`，默认 `auto`。 |
+| `limit` | 默认 10，最大 10。 |
+
+用户名支持模糊匹配，但只返回开启 `discover_by_username` 的用户。邮箱和学号只支持完整精确匹配，并分别要求对方开启对应查找。被屏蔽关系返回空结果，避免泄露屏蔽状态。
+
+返回：
+
+```json
+{
+  "items": [
+    {
+      "user_id": "target-user-id",
+      "username": "alice",
+      "matched_by": "student_id",
+      "masked_identifier": "2024****",
+      "listing_count": 3,
+      "can_start_conversation": true
+    }
+  ]
+}
+```
+
+### GET `/api/users/{id}/listings`
+
+公开查看某个用户的 active 在售商品。支持 `limit` 和 `offset`，返回结构与商品列表相同的 `items/total/limit/offset` envelope。这个接口用于“找同学”结果里的“查看TA的在售”，不会返回 deleted 或 sold 商品。
+
 ## Listings
 
 ### GET `/api/listings`
@@ -178,63 +236,95 @@ Content-Type: application/json
 
 ## User Chat
 
-### POST `/api/chat/connect/request`
+用户直聊已经从“永久好友连接”改为“每次联系创建独立会话”。会话有两种模式：
 
-需要登录。发起直聊连接。不能给自己发起连接。
+- `realtime`：TCP 式三次握手，`syn_sent -> syn_ack -> active`，只显示本次沟通。
+- `mail`：异步留言，创建后直接 `open`，不展示在线、typing 或已读给发件人。
+
+公共会话字段包括 `id`、`mode`、`state`、`initiator_id`、`recipient_id`、`other_user_id`、`other_username`、`listing_id`、`subject`、`last_message`、`unread_count`、`read_receipt_mode`、`effective_read_receipt_mode`、`expires_at`、`is_blocked` 和 `capabilities`。`read_receipt_mode` 是本会话覆盖项，可为 `inherit`、`auto` 或 `manual`；`effective_read_receipt_mode` 是后端合并全局默认后的实际行为。`capabilities` 告诉移动端当前用户是否可以 `respond`、`ack`、`send`、`close`、`archive` 或 `restart`。
+
+非法状态转换返回 `409 invalid_conversation_state`。重复创建和重复发送依赖客户端 UUID 幂等。
+
+### POST `/api/chat/conversations`
+
+需要登录。创建实时会话或留言线程。不能联系自己；被屏蔽关系不能创建新会话。`realtime` 模式下同一“用户对 + 商品”如果已有未结束会话，会直接返回已有会话；双方同时发起时视为 mutual intent，直接进入 `active`。
 
 ```json
 {
-  "receiver_id": "seller-user-id",
-  "listing_id": "optional-listing-id"
+  "client_request_id": "uuid-from-client",
+  "recipient_id": "seller-user-id",
+  "listing_id": "optional-listing-id",
+  "mode": "realtime",
+  "subject": null,
+  "content": "你好，我想问下这个还在吗？"
 }
 ```
 
-返回：
+邮件必须填写 `subject`，长度 1 到 120 字；正文长度 1 到 2000 字。实时模式不使用主题。
+
+### GET `/api/chat/conversations`
+
+需要登录。收件箱分页，默认返回全部未归档会话。query：
+
+| 参数 | 说明 |
+| --- | --- |
+| `mode` | 可选 `realtime` 或 `mail`；不传表示全部。 |
+| `cursor` | 上一页最后一条会话 id。 |
+| `limit` | 1 到 50，默认 30。 |
+
+返回 `items` 和 `next_cursor`。客户端按 `last_activity_at` 排序展示，等待当前用户处理的实时邀请应置顶。
+
+### GET `/api/chat/conversations/{id}`
+
+需要登录且必须是会话成员。返回会话状态、倒计时、成员上下文、商品上下文和能力。
+
+### POST `/api/chat/conversations/{id}/respond`
+
+需要登录且必须是接收方。只适用于 `realtime/syn_sent`。
 
 ```json
 {
-  "connection_id": "connection-id",
-  "status": "pending"
+  "decision": "accept"
 }
 ```
 
-### POST `/api/chat/connect/accept`
+`accept` 将状态改为 `syn_ack`，等待发起方 ACK；`decline` 将状态改为 `declined`。
 
-需要登录且必须是接收方。接受 pending 连接。
+### POST `/api/chat/conversations/{id}/ack`
+
+需要登录且必须是发起方。只适用于 `realtime/syn_ack`，成功后进入 `active`。发起方在 `syn_ack` 状态直接发消息时，后端会在同一事务中完成 ACK 和消息写入。
+
+### POST `/api/chat/conversations/{id}/close`
+
+需要登录且必须是会话成员。`syn_sent` 发起方关闭会变成 `cancelled`；`syn_ack` 或 `active` 关闭会变成 `closed`。终态会话不能继续发送。
+
+### POST `/api/chat/conversations/{id}/archive`
+
+需要登录且必须是会话成员。归档是成员级状态，不影响对方。
 
 ```json
 {
-  "connection_id": "connection-id"
+  "archived": true
 }
 ```
 
-返回 `status` 和 `established_at`。
+### GET `/api/chat/conversations/{id}/messages`
 
-### POST `/api/chat/connect/reject`
+需要登录且必须是会话成员。支持 `limit`、`offset`。返回 `conversation_id`、`messages` 和 `total`。消息字段包括 `id`、`client_message_id`、`sender`、`content`、`timestamp`、`read_at`、`image_url`、`audio_url`、Base64 fallback 字段、`reply_to_message_id`、`reply_preview`、`quote`、`status`、`kind` 和 `edited_at`。
 
-需要登录且必须是接收方。拒绝 pending 连接。
+### POST `/api/chat/conversations/{id}/messages`
 
-```json
-{
-  "connection_id": "connection-id"
-}
-```
-
-### GET `/api/chat/connections`
-
-需要登录。返回当前用户所有连接，包括 `other_user_id`、`other_username`、`status`、`unread_count`、`is_receiver`。
-
-### GET `/api/chat/conversations/{connection_id}/messages`
-
-需要登录且必须属于该连接。支持 `limit`、`offset`。返回 `conversation_id`、`messages` 和 `total`。消息字段包括 `id`、`sender`、`content`、`timestamp`、`read_at`、`image_url`、`audio_url`、Base64 fallback 字段和 `status`。
-
-### POST `/api/chat/conversations/{connection_id}/messages`
-
-需要登录且连接必须是 connected。优先使用 URL 媒体字段。
+需要登录且必须是会话成员。邮件 `open` 时可发送；实时会话只有 `active` 可发送，但发起方在 `syn_ack` 直接发送会自动完成 ACK。优先使用 URL 媒体字段。
 
 ```json
 {
+  "client_message_id": "uuid-from-client",
   "content": "你好，这个还在吗？",
+  "reply_to_message_id": "optional-message-id",
+  "quote": {
+    "kind": "listing",
+    "ref_id": "listing-id"
+  },
   "image_url": "https://example.com/photo.jpg",
   "audio_url": null,
   "image_base64": null,
@@ -242,15 +332,27 @@ Content-Type: application/json
 }
 ```
 
-返回字段兼容移动端 `ConversationMessage.fromJson`，消息 id 字段名为 `id`。
+`reply_to_message_id` 用于回复同一会话内的历史消息。`quote` 用于引用结构化事实，`kind` 可为 `listing`、`order` 或 `hitl_offer`。前端只提交 `kind/ref_id`，服务端会校验权限并生成快照，例如商品标题、价格、状态和主图；前端传入的伪造快照会被忽略。快照是发送时事实，不会因后续商品价格、订单状态或议价状态变化而改写。
 
-### POST `/api/chat/messages/{id}/read`
+### POST `/api/chat/conversations/{id}/read`
 
-需要登录。标记单条消息已读，返回 `message_id` 和 `read_at`。
+需要登录且必须是会话成员。批量标记当前用户收到的未读消息，返回 `conversation_id` 和 `marked_count`。邮件不会向发件人推送已读事件；实时 `active` 会话会通过 WebSocket 推送 `message_read`。
+
+### POST `/api/chat/conversations/{id}/read-preference`
+
+需要登录且必须是会话成员。设置单个会话的已读策略覆盖项。
+
+```json
+{
+  "mode": "inherit"
+}
+```
+
+`inherit` 表示跟随用户全局 `chat_read_receipt_mode`，`auto` 表示打开 active realtime 会话后自动标记已读，`manual` 表示只有显式调用 read API 才标记已读。返回更新后的会话对象。
 
 ### PATCH `/api/chat/messages/{id}`
 
-需要登录且必须是发送者。发送后 15 分钟内可以编辑内容。
+需要登录且必须是发送者。只有 `realtime/active` 中普通 `message` 可在发送后 15 分钟内编辑；邮件和开场消息不可编辑。
 
 ```json
 {
@@ -258,21 +360,39 @@ Content-Type: application/json
 }
 ```
 
-### POST `/api/chat/typing`
+### POST `/api/chat/conversations/{id}/typing`
 
-需要登录。发送 typing indicator。
+需要登录且必须是会话成员。只适用于 `realtime/active`。邮件不发送 typing 事件。
+
+### POST `/api/chat/conversations/{id}/reply-suggestions`
+
+需要登录且必须是会话成员。读取最近 12 条纯文本消息，返回三条草稿：`direct`、`warm`、`reserved`。Reply Assistant 不挂载搜索、下单或议价工具，不会自动发送。
+
+### GET `/api/chat/blocks`
+
+需要登录。返回当前用户屏蔽列表。
+
+### POST `/api/chat/blocks`
+
+需要登录。屏蔽某用户。屏蔽后双方不能新建会话或继续发送；旧历史保持只读。
 
 ```json
 {
-  "conversation_id": "connection-id"
+  "user_id": "blocked-user-id"
 }
 ```
 
-### POST `/api/chat/connection/{id}/read`
+### DELETE `/api/chat/blocks/{id}`
 
-需要登录。批量标记一个连接内的消息为已读。
+需要登录。取消屏蔽指定用户。
 
 ## AI Chat
+
+移动端把“小帮”作为收件箱中的虚拟系统会话，但它不属于 `chat_conversations` 的 `realtime` 或 `mail` 状态机。客户端使用公共会话标识 `__agent__`；后端根据 JWT 将它映射到当前用户专属的内部会话，因此不同账号不会共享历史。
+
+### GET `/api/chat/assistant`
+
+需要登录。读取当前用户最近的小帮消息。支持 `limit`（1–100，默认 50）和 `offset`。返回 `conversation_id: "__agent__"`、`messages` 和 `total`；每条消息包含 `id`、`role`（`user` 或 `assistant`）、`content`、可选媒体 URL 和 `timestamp`。
 
 ### POST `/api/chat`
 
@@ -284,7 +404,7 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 
 ### POST `/api/chat/stream`
 
-推荐的 SSE 路径，使用 JSON body，适合认证上下文和移动端流式显示。
+推荐的 SSE 路径，使用 JSON body，适合认证上下文和移动端流式显示。小帮请求必须携带 `conversation_id: "__agent__"`。服务端先读取该用户此前的最近历史，再保存当前用户消息；流式响应正常结束后保存完整 AI 回复。中断或 provider 失败时不保存不完整的 AI 回复，但已经提交的用户消息仍会保留。
 
 ## WebSocket
 
@@ -309,7 +429,7 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 
 ### POST `/api/orders`
 
-需要登录。直接按报价创建订单。买家不能买自己的商品，报价必须在建议价的正负 50% 范围内。
+需要登录。按报价创建线下成交意向。买家不能买自己的商品，报价必须在建议价的正负 50% 范围内。创建后状态为 `intent_pending`，商品仍然保持原状态，等待卖家确认。
 
 ```json
 {
@@ -322,25 +442,33 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 
 ```json
 {
-  "id": "order-id"
+  "id": "order-id",
+  "status": "intent_pending",
+  "message": "成交意向已发送，等待卖家确认"
 }
 ```
 
 ### POST `/api/orders/{id}/pay`
 
-需要登录且必须是 buyer。`pending -> paid`。
+兼容旧客户端入口。平台不负责资金中转，调用会返回明确错误提示，不改变订单状态。
 
 ### POST `/api/orders/{id}/ship`
 
-需要登录且必须是 seller。`paid -> shipped`。
+兼容旧客户端入口。平台不追踪物流或交接，调用会返回明确错误提示，不改变订单状态。
 
 ### POST `/api/orders/{id}/confirm`
 
-需要登录且必须是 buyer。`shipped -> completed`。
+需要登录且必须是 seller。确认线下成交，状态从 `intent_pending` 进入 `confirmed`。请求体可选 `auto_delist`，默认 `true`；开启时会在同一事务中把商品下架为 `sold`。
+
+```json
+{
+  "auto_delist": true
+}
+```
 
 ### POST `/api/orders/{id}/cancel`
 
-需要登录且必须属于订单。允许在 `pending` 或 `paid` 等早期状态取消。
+需要登录且必须属于订单。普通用户只能取消 `intent_pending`；管理员可按后台规则取消异常记录。
 
 ```json
 {

@@ -26,7 +26,7 @@
 | `REDIS_URL` | 可选 | 分布式限流后端；不设置时使用本地限流。 |
 | `RATE_LIMIT_MAX_REQUESTS` | 可选 | 每窗口最大请求数。 |
 | `RATE_LIMIT_WINDOW_SECS` | 可选 | 限流窗口秒数。 |
-| `BLOCKED_KEYWORDS` | 可选 | 逗号分隔内容审核关键词。 |
+| `BLOCKED_KEYWORDS` | 可选 | 逗号分隔本地策略关键词。内置规则已覆盖违禁交易、低俗成人、博彩、诈骗、暴力风险、骚扰、隐私泄露、联系方式和外链。 |
 | `MODERATION_IMAGE_ENABLED` | 可选 | 是否启用图片审核。 |
 | `MODERATION_IMAGE_API_URL` | 图片审核需要 | 图片审核 API URL。 |
 | `MODERATION_IMAGE_API_KEY` | 图片审核需要 | 图片审核 API key。 |
@@ -101,12 +101,23 @@ CORS_ORIGINS=https://your-app.example.com
 | `documents` | RAG 文档是否存在，embedding 是否非空，维度是否匹配。 |
 | `orders` | 状态、buyer/seller、listing、金额和时间戳。 |
 | `hitl_requests` | pending/countered/expired 状态、counter_price、expires_at。 |
-| `chat_connections` | requester/receiver、status、established_at、唯一关系。 |
-| `chat_messages` | conversation_id、sender、read_at、media URL/Base64、edited_at。 |
+| `chat_conversations` | mode、state、initiator/recipient、listing、subject、过期时间、close_reason。 |
+| `chat_conversation_members` | 每个成员的 unread_count、last_read_message_id、archived_at。 |
+| `chat_conversation_events` | 握手、ACK、关闭、过期等状态事件时间线。 |
+| `chat_blocks` | blocker/blocked 屏蔽关系。 |
+| `chat_messages` | conversation_id、direct_conversation_id、sender、receiver、read_at、media URL/Base64、edited_at。 |
 | `watchlist` | 用户和商品关系，是否收藏自己的商品。 |
 | `notifications` | unread、event_type、related_order/listing、是否已推送但未读。 |
 | `admin_audit_logs` | 管理员操作是否有审计记录。 |
 | `moderation_jobs` | 图片审核任务是否 pending、failed 或 completed。 |
+
+## 内容审核策略
+
+文本审核由后端 `ModerationService` 同步执行，商品发布/更新、用户名修改、用户直聊、留言主题和 AI 聊天入口都会先过审再持久化或调用 LLM。内置规则只覆盖校园二手交易里明显高风险的安全和合规类别：违禁或管制物品、低俗成人内容、博彩、诈骗灰产、暴力/极端风险、骚扰开盒、隐私泄露、联系方式和外部链接。
+
+本地政策词、校内临时专项词或法务要求的词不要写死进源码，优先通过 `BLOCKED_KEYWORDS` 或 `[moderation].blocked_keywords` 配置。返回给用户的错误只说明类别，不暴露具体命中词，避免教用户绕过。
+
+图片审核仍是异步任务：业务接口保存媒体 URL 后写入 `moderation_jobs`，后台 Worker 调外部图片审核 API 并回写资源状态。生产环境应配置 `MODERATION_IMAGE_API_URL` 和 `MODERATION_IMAGE_API_KEY`，否则只能完成文本审核。
 
 ## 常见排错
 
@@ -130,7 +141,11 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 
 ### 聊天消息异常
 
-先确认连接状态是否是 `connected`。pending 或 rejected 连接不应允许发消息。然后检查 `chat_messages` 的 `conversation_id` 是否对应连接 id，sender 是否是连接成员，媒体 URL/Base64 字段是否符合当前 URL-first 约定。
+先确认 `chat_conversations.mode` 和 `state`。`mail/open` 可以异步发送；`realtime` 只有 `active` 可发送，但发起方在 `syn_ack` 直接发送时会自动 ACK。`syn_sent`、`declined`、`cancelled`、`expired`、`closed` 都不应允许普通发送。
+
+如果消息看起来丢了，先查 `chat_messages.direct_conversation_id` 是否等于会话 id，再查 sender/receiver 是否是会话成员。未读数量来自 `chat_conversation_members.unread_count`，不是全局字段。排查状态跳转时看 `chat_conversation_events`，它能说明会话是被接通、关闭、屏蔽还是 worker 过期。
+
+如果实时信号异常，确认 WebSocket 收到的是 `conversation_created`、`conversation_state_changed`、`new_message`、`message_read` 或 `typing`。邮件不会向发件人发送 typing/read 事件。媒体问题仍按 URL-first 检查 `image_url`、`audio_url`，Base64 字段只是兼容 fallback。
 
 ### 语义搜索或推荐异常
 
@@ -138,7 +153,7 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 
 ### 订单状态不对
 
-先查 `orders.status` 和各时间戳，再查商品 `inventory.status`。创建订单必须同时把商品从 active 改为 sold；如果两者不一致，重点看事务路径。状态转换只允许 `pending -> paid -> shipped -> completed` 以及早期 cancel。
+先查 `orders.status`、`confirmed_at`、`auto_delist` 和 `auto_delisted_at`，再查商品 `inventory.status`。创建成交意向只应写入 `intent_pending`，不应立即把商品改为 sold；卖家确认且 `auto_delist = true` 时，订单确认和商品下架必须在同一事务中完成。常规状态只允许 `intent_pending -> confirmed`、`intent_pending -> cancelled`，管理员可按后台规则处理异常记录。
 
 ### HITL 议价卡住
 

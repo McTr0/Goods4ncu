@@ -84,10 +84,14 @@ categories = [
 # -----------------------------------------------------------------------
 # Content Moderation
 # -----------------------------------------------------------------------
-# Blocked keywords come from BLOCKED_KEYWORDS env var (safer than file).
-# If you must list them here, keep the file permissions restrictive (chmod 600).
+# Built-in text rules cover illegal goods, adult content, gambling, fraud,
+# violence/extremism, harassment, privacy leakage, contact info, and external
+# links. Put campus/local policy keywords in BLOCKED_KEYWORDS when possible
+# because environment variables are safer for sensitive rule lists than files.
+# If you must list local policy keywords here, keep the file permissions
+# restrictive (chmod 600).
 [moderation]
-# blocked_keywords = ["毒品", "武器"]
+# blocked_keywords = ["本地违规词1", "本地违规词2"]
 
 # -----------------------------------------------------------------------
 # CORS

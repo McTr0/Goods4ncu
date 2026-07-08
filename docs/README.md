@@ -25,6 +25,7 @@ Good4NCU 是一个面向南昌大学校园二手交易场景的全栈工程：Fl
 | [业务流程](domain-flows.md) | 串联认证、商品、直聊、AI Agent、订单、HITL 议价、内容审核和媒体上传的业务状态流。 |
 | [API 参考](api-reference.md) | 记录常用接口的请求形状、响应边界、权限要求和行为约束。 |
 | [运行、配置与排错](operations.md) | 说明环境变量、TOML 搜索顺序、数据库要求、迁移、CORS、metrics、日志、表地图和排错路径。 |
+| [Codex Browser 集成测试](integration-testing.md) | 说明如何用 Codex Browser 和 API driver 模拟真实用户日常使用、聊天、交易、故障和响应式验收。 |
 | [路线图与架构风险](roadmap.md) | 记录当前工程重点、UUID 迁移专项、下一步清理方向和需要持续关注的架构风险。 |
 | [贡献指南](contributing.md) | 说明分支命名、Conventional Commits、PR 内容、合并前检查和新人第一个 PR 的选择。 |
 

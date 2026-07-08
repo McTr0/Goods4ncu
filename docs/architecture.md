@@ -77,6 +77,8 @@ AI 相关流程有两条线：自然语言交互和语义检索。
 
 自然语言交互从 `src/api/chat.rs` 进入。后端先持久化用户消息，再进行意图路由。明显违规或可直接回答的请求可以不调用 LLM；需要工具执行时进入 `src/agents/`；需要模型生成时进入 `src/llm/`。LLM provider 负责把不同供应商的 API 差异包起来，外层尽量只依赖统一接口。
 
+移动端收件箱中的“小帮”是虚拟系统会话，不应伪装成普通用户，也不写入 `chat_conversations`。客户端只认识 `__agent__`，后端把它映射为 `agent:<当前用户 ID>` 后再读写 `chat_messages`。这个映射必须发生在认证之后，保证两个用户即使都使用相同公共标识，也不会进入同一段模型上下文。SSE 正常完成时才持久化完整助手回复。
+
 语义检索依赖 `documents` 表。商品发布或更新后，应把可搜索文本写成 document，并生成 embedding。推荐和相似搜索用 pgvector 的距离计算找到相近商品。这个路径常见失败点包括：文档没有写入、embedding 维度不匹配、provider key 不可用、向量索引异常、商品状态过滤不正确。
 
 AI 不是可信权限边界。AI 工具要像普通 API 一样校验用户、商品 owner、价格范围、商品状态和订单约束。模型说“帮我买这个”并不代表可以绕过 service 层。
@@ -91,8 +93,11 @@ AI 不是可信权限边界。AI 工具要像普通 API 一样校验用户、商
 | `documents` | 商品语义检索文档和 pgvector embedding。 |
 | `orders` | 订单事实，包含 buyer、seller、listing、价格和状态时间戳。 |
 | `hitl_requests` | HITL 议价请求，记录 pending、approved、rejected、countered、expired 等状态。 |
-| `chat_connections` | 用户直聊连接关系和握手状态。 |
-| `chat_messages` | 用户消息、AI/system 消息、媒体 URL/Base64 兼容字段和已读状态。 |
+| `chat_conversations` | 用户直聊会话事实，保存 `realtime`/`mail` 模式、状态、参与者、主题、过期时间和版本。 |
+| `chat_conversation_members` | 每个会话成员自己的未读数、归档状态和最后阅读位置。 |
+| `chat_conversation_events` | 会话创建、接通、ACK、关闭、过期等状态事件时间线。 |
+| `chat_blocks` | 用户屏蔽关系；屏蔽后不能新建会话或继续发送。 |
+| `chat_messages` | 用户消息、AI/system 消息、直聊 `direct_conversation_id`、媒体 URL/Base64 兼容字段和已读状态。 |
 | `watchlist` | 用户收藏商品。 |
 | `notifications` | 可持久化通知，WebSocket 只是实时推送通道。 |
 | `admin_audit_logs` | 管理员关键操作审计。 |
@@ -104,7 +109,7 @@ AI 不是可信权限边界。AI 工具要像普通 API 一样校验用户、商
 
 第一，核心 ID 正处在 UUID 迁移方向上。新代码要优先兼容 UUID 读写，不要把 TEXT 旧 ID 假设继续扩散。专项计划见 [路线图与架构风险](roadmap.md)。
 
-第二，移动端 `chat_page.dart` 和后端 `src/api/user_chat/message.rs` 承担了较多职责。改聊天功能时要格外注意不要把媒体、已读、编辑、typing、WebSocket 刷新全揉成一个更大的函数。
+第二，移动端 `user_chat_page.dart` 和后端 `src/api/user_chat/message.rs` 承担了较多职责。改聊天功能时要格外注意不要把媒体、已读、编辑、typing、WebSocket 刷新全揉成一个更大的函数。状态转换必须留在 `ChatConversationService`，handler 不应直接写会话状态 SQL。
 
 第三，聊天媒体正在从 Base64 fallback 走向 URL-first。新路径应优先使用 `image_url`、`audio_url`，Base64 字段只是兼容旧客户端或失败兜底。
 
