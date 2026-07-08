@@ -10,9 +10,6 @@ use crate::api::auth::{generate_access_token, revoke_access_token_jti};
 use crate::api::error::ApiError;
 use crate::api::AppState;
 use crate::middleware::admin::require_admin;
-use crate::repositories::{
-    OrderTimestampField, PostgresListingRepository, PostgresOrderRepository,
-};
 use crate::services::order::OrderStatus;
 
 use crate::repositories::traits::{
@@ -83,6 +80,7 @@ pub struct CategoryCount {
 pub struct AdminListQuery {
     pub offset: Option<i64>,
     pub limit: Option<i64>,
+    pub status: Option<String>,
 }
 
 impl AdminListQuery {
@@ -243,7 +241,7 @@ pub async fn get_admin_orders(
     let (items, total) = state
         .infra
         .order_service
-        .admin_list_orders(query.limit(), query.offset())
+        .admin_list_orders(query.status.as_deref(), query.limit(), query.offset())
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("Failed to fetch orders: {}", e)))?;
 
@@ -259,6 +257,10 @@ pub async fn get_admin_orders(
             seller_username: r.seller_username,
             final_price: r.final_price as f64 / 100.0,
             status: r.status,
+            auto_delist: r.auto_delist,
+            confirmed_at: r.confirmed_at,
+            auto_delisted_at: r.auto_delisted_at,
+            listing_status: r.listing_status,
             created_at: r.created_at,
         })
         .collect();
@@ -284,6 +286,10 @@ pub struct OrderInfo {
     pub seller_username: String,
     pub final_price: f64,
     pub status: String,
+    pub auto_delist: bool,
+    pub confirmed_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub auto_delisted_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub listing_status: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -527,6 +533,8 @@ pub async fn revoke_token(
 #[allow(dead_code)]
 pub struct UpdateOrderStatusRequest {
     pub status: String,
+    pub auto_delist: Option<bool>,
+    pub reason: Option<String>,
 }
 
 /// POST /api/admin/orders/:order_id/status - admin force-sets order status
@@ -542,94 +550,71 @@ pub async fn update_order_status(
         state.secrets.jwt_secret_old.as_deref(),
     )?;
 
-    let requested_status = payload.status.trim().to_ascii_lowercase();
-    let next_status = OrderStatus::parse_status(&requested_status).ok_or_else(|| {
-        ApiError::BadRequest(
-            "Invalid status: must be one of pending, paid, shipped, completed, cancelled"
-                .to_string(),
-        )
+    let requested_status_raw = payload.status.trim();
+    let requested_status = match requested_status_raw {
+        "completed" => "confirmed",
+        value => value,
+    };
+    let next_status = OrderStatus::parse_status(requested_status).ok_or_else(|| {
+        ApiError::BadRequest("Invalid status: must be confirmed or cancelled".to_string())
     })?;
 
-    if next_status == OrderStatus::Pending {
+    if next_status == OrderStatus::IntentPending {
         return Err(ApiError::BadRequest(
-            "Admin endpoint does not support transitioning orders back to pending".to_string(),
+            "Admin endpoint does not support moving records back to pending".to_string(),
         ));
     }
 
-    let timestamp_field = match next_status {
-        OrderStatus::Paid => OrderTimestampField::Paid,
-        OrderStatus::Shipped => OrderTimestampField::Shipped,
-        OrderStatus::Completed => OrderTimestampField::Completed,
-        OrderStatus::Cancelled => OrderTimestampField::Cancelled,
-        OrderStatus::Pending => unreachable!("pending is rejected above"),
-    };
-    let order_repo = PostgresOrderRepository::new(state.infra.db.clone());
-    let listing_repo = PostgresListingRepository::new(state.infra.db.clone());
+    if matches!(requested_status_raw, "paid" | "shipped") {
+        return Err(ApiError::BadRequest(
+            "平台不负责资金中转或物流状态，后台只能确认成交或取消记录".to_string(),
+        ));
+    }
 
-    let mut tx = state
-        .infra
-        .db
-        .begin()
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-    let order_row = sqlx::query("SELECT status, listing_id FROM orders WHERE id = $1 FOR UPDATE")
+    let current_status_raw: String = sqlx::query_scalar("SELECT status FROM orders WHERE id = $1")
         .bind(&order_id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&state.infra.db)
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
         .ok_or(ApiError::NotFound)?;
 
-    let current_status_raw: String = order_row.get("status");
-
-    let current_status = OrderStatus::parse_status(&current_status_raw).ok_or_else(|| {
-        ApiError::Internal(anyhow::anyhow!(
-            "Unknown order status in DB for {}: {}",
-            order_id,
-            current_status_raw
-        ))
+    let success = match next_status {
+        OrderStatus::Confirmed => {
+            state
+                .infra
+                .order_service
+                .confirm_order(
+                    &order_id,
+                    &admin_id,
+                    payload.auto_delist.unwrap_or(true),
+                    true,
+                )
+                .await
+        }
+        OrderStatus::Cancelled => {
+            state
+                .infra
+                .order_service
+                .cancel_order(&order_id, &admin_id, payload.reason.as_deref(), true, true)
+                .await
+        }
+        OrderStatus::IntentPending => unreachable!("pending is rejected above"),
+    }
+    .map_err(|e| match e {
+        crate::services::order::OrderError::NotFound => ApiError::NotFound,
+        crate::services::order::OrderError::AlreadySold => {
+            ApiError::Conflict("此商品已经不可售".to_string())
+        }
+        other => {
+            tracing::error!("admin update_order_status error: {}", other);
+            ApiError::Internal(anyhow::anyhow!("Failed to update order status"))
+        }
     })?;
 
-    if !current_status.can_transition_to(&next_status) {
-        return Err(ApiError::BadRequest(format!(
-            "Illegal status transition: {} -> {}",
-            current_status_raw, requested_status
-        )));
-    }
-
-    let updated_listing_id = order_repo
-        .update_status_in_tx(
-            &mut tx,
-            &order_id,
-            &current_status_raw,
-            &requested_status,
-            timestamp_field,
-            None,
-        )
-        .await?;
-
-    let Some(updated_listing_id) = updated_listing_id else {
-        return Err(ApiError::NotFound);
-    };
-
-    if next_status == OrderStatus::Cancelled {
-        let _ = listing_repo
-            .relist_if_no_open_orders_in_tx(&mut tx, &updated_listing_id)
-            .await?;
-    }
-
-    tx.commit()
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-    if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {
-        match next_status {
-            OrderStatus::Paid => metrics.record_order_paid(),
-            OrderStatus::Shipped => metrics.record_order_shipped(),
-            OrderStatus::Completed => metrics.record_order_completed(),
-            OrderStatus::Cancelled => metrics.record_order_cancelled(),
-            OrderStatus::Pending => {}
-        }
+    if !success {
+        return Err(ApiError::Conflict(
+            "当前成交记录状态不可执行该操作".to_string(),
+        ));
     }
 
     // Log audit trail
@@ -641,7 +626,7 @@ pub async fn update_order_status(
             "update_order_status",
             Some(&order_id),
             Some(&current_status_raw),
-            Some(&requested_status),
+            Some(requested_status),
             None,
         )
         .await;
@@ -654,7 +639,7 @@ pub async fn update_order_status(
     );
 
     Ok(Json(
-        serde_json::json!({ "message": "订单状态已更新", "status": requested_status }),
+        serde_json::json!({ "message": "成交记录状态已更新", "status": requested_status }),
     ))
 }
 

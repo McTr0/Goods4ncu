@@ -5,6 +5,7 @@ use sqlx::Row;
 use tokio::try_join;
 
 use crate::api::AppState;
+use crate::categories::normalize_category_or_other;
 
 #[derive(Serialize)]
 pub struct MarketplaceStats {
@@ -52,13 +53,23 @@ pub async fn get_stats(
     .await
     .map_err(|e| crate::api::error::ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
-    let categories: Vec<CategoryCount> = category_rows
-        .iter()
-        .map(|row| CategoryCount {
-            category: row.get("category"),
-            count: row.get("cnt"),
-        })
+    let mut merged = std::collections::BTreeMap::<String, i64>::new();
+    for row in category_rows {
+        let category: String = row.get("category");
+        let count: i64 = row.get("cnt");
+        *merged
+            .entry(normalize_category_or_other(&category).to_string())
+            .or_default() += count;
+    }
+    let mut categories: Vec<CategoryCount> = merged
+        .into_iter()
+        .map(|(category, count)| CategoryCount { category, count })
         .collect();
+    categories.sort_by(|a, b| {
+        b.count
+            .cmp(&a.count)
+            .then_with(|| a.category.cmp(&b.category))
+    });
 
     Ok(Json(MarketplaceStats {
         total_listings,

@@ -7,23 +7,26 @@ class AdminService extends BaseService {
   /// GET /api/admin/stats
   Future<Map<String, dynamic>> getAdminStats() async {
     final headers = await authHeaders();
-    final response = await get(
-      Uri.parse('$baseUrl/api/admin/stats'),
-      headers,
-    );
+    final response = await get(Uri.parse('$baseUrl/api/admin/stats'), headers);
     return handleResponse(response, (data) => data as Map<String, dynamic>);
   }
 
   /// Get all users with optional search query.
   /// GET /api/admin/users
-  Future<Map<String, dynamic>> getAllUsers({String? q, int limit = 20, int offset = 0}) async {
+  Future<Map<String, dynamic>> getAllUsers({
+    String? q,
+    int limit = 20,
+    int offset = 0,
+  }) async {
     final headers = await authHeaders();
     final queryParams = <String, String>{
       'limit': limit.toString(),
       'offset': offset.toString(),
     };
     if (q != null && q.isNotEmpty) queryParams['q'] = q;
-    final uri = Uri.parse('$baseUrl/api/admin/users').replace(queryParameters: queryParams);
+    final uri = Uri.parse(
+      '$baseUrl/api/admin/users',
+    ).replace(queryParameters: queryParams);
     final response = await get(uri, headers);
     return handleResponse(response, (data) => data as Map<String, dynamic>);
   }
@@ -120,14 +123,20 @@ class AdminService extends BaseService {
 
   /// Get all listings (admin view).
   /// GET /api/admin/listings
-  Future<Map<String, dynamic>> getAdminListings({String? status, int limit = 50, int offset = 0}) async {
+  Future<Map<String, dynamic>> getAdminListings({
+    String? status,
+    int limit = 50,
+    int offset = 0,
+  }) async {
     final headers = await authHeaders();
     final queryParams = <String, String>{
       'limit': limit.toString(),
       'offset': offset.toString(),
     };
     if (status != null) queryParams['status'] = status;
-    final uri = Uri.parse('$baseUrl/api/admin/listings').replace(queryParameters: queryParams);
+    final uri = Uri.parse(
+      '$baseUrl/api/admin/listings',
+    ).replace(queryParameters: queryParams);
     final response = await get(uri, headers);
     return handleResponse(response, (data) => data as Map<String, dynamic>);
   }
@@ -146,26 +155,40 @@ class AdminService extends BaseService {
 
   /// Get paginated orders (admin view).
   /// GET /api/admin/orders
-  Future<Map<String, dynamic>> getAdminOrders({String? status, int limit = 50, int offset = 0}) async {
+  Future<Map<String, dynamic>> getAdminOrders({
+    String? status,
+    int limit = 50,
+    int offset = 0,
+  }) async {
     final headers = await authHeaders();
     final queryParams = <String, String>{
       'limit': limit.toString(),
       'offset': offset.toString(),
     };
     if (status != null) queryParams['status'] = status;
-    final uri = Uri.parse('$baseUrl/api/admin/orders').replace(queryParameters: queryParams);
+    final uri = Uri.parse(
+      '$baseUrl/api/admin/orders',
+    ).replace(queryParameters: queryParams);
     final response = await get(uri, headers);
     return handleResponse(response, (data) => data as Map<String, dynamic>);
   }
 
   /// Update order status (admin).
   /// POST /api/admin/orders/{id}/status
-  Future<void> updateAdminOrderStatus(String orderId, String status) async {
+  Future<void> updateAdminOrderStatus(
+    String orderId,
+    String status, {
+    bool? autoDelist,
+    String? reason,
+  }) async {
     final headers = await authHeaders();
+    final body = <String, dynamic>{'status': status};
+    if (autoDelist != null) body['auto_delist'] = autoDelist;
+    if (reason != null) body['reason'] = reason;
     final response = await post(
       Uri.parse('$baseUrl/api/admin/orders/$orderId/status'),
       headers,
-      jsonEncode({'status': status}),
+      jsonEncode(body),
     );
     handleResponse(response, (_) {});
   }

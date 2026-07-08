@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/category_utils.dart';
 
 class AdminStatsTab extends StatefulWidget {
   final ApiService apiService;
@@ -121,7 +122,9 @@ class _AdminStatsTabState extends State<AdminStatsTab> {
           ...categories.map(
             (c) => ListTile(
               leading: const Icon(Icons.category, color: AppTheme.primary),
-              title: Text(c['category'] ?? l.unknown),
+              title: Text(
+                localizedCategoryLabel(context, c['category']?.toString()),
+              ),
               trailing: Chip(label: Text('${c['count']}')),
             ),
           ),

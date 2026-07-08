@@ -6,6 +6,7 @@ use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum OrderTimestampField {
     Paid,
     Shipped,
@@ -13,6 +14,7 @@ pub enum OrderTimestampField {
     Cancelled,
 }
 
+#[allow(dead_code)]
 impl OrderTimestampField {
     fn as_sql(self) -> &'static str {
         match self {
@@ -94,7 +96,7 @@ impl PostgresOrderRepository {
                 seller_id, new_seller_id,
                 final_price, status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'intent_pending')
             "#,
         )
         .bind(id)
@@ -113,6 +115,7 @@ impl PostgresOrderRepository {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn update_status_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -178,7 +181,7 @@ impl OrderRepository for PostgresOrderRepository {
                 $3, (SELECT new_id FROM inventory WHERE id = $3),
                 $4, (SELECT new_id FROM users WHERE id = $4),
                 $5, (SELECT new_id FROM users WHERE id = $5),
-                $6, 'pending'
+                $6, 'intent_pending'
             )
             "#,
         )

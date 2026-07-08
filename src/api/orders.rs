@@ -30,6 +30,10 @@ pub struct OrderSummary {
     pub seller_username: String,
     pub final_price_cny: f64,
     pub status: String,
+    pub auto_delist: bool,
+    pub confirmed_at: Option<String>,
+    pub auto_delisted_at: Option<String>,
+    pub listing_status: String,
     pub created_at: String,
 }
 
@@ -45,6 +49,10 @@ impl From<crate::services::order::OrderSummaryRow> for OrderSummary {
             seller_username: r.seller_username,
             final_price_cny: r.final_price as f64 / 100.0,
             status: r.status,
+            auto_delist: r.auto_delist,
+            confirmed_at: r.confirmed_at.map(|dt| dt.to_rfc3339()),
+            auto_delisted_at: r.auto_delisted_at.map(|dt| dt.to_rfc3339()),
+            listing_status: r.listing_status,
             created_at: r.created_at.to_rfc3339(),
         }
     }
@@ -59,6 +67,13 @@ pub struct OrdersResponse {
 }
 
 #[derive(Serialize)]
+pub struct OrderCapabilities {
+    pub can_confirm: bool,
+    pub can_cancel: bool,
+    pub can_choose_auto_delist: bool,
+}
+
+#[derive(Serialize)]
 pub struct OrderDetail {
     pub id: String,
     pub listing_id: String,
@@ -69,16 +84,27 @@ pub struct OrderDetail {
     pub seller_username: String,
     pub final_price_cny: f64,
     pub status: String,
+    pub auto_delist: bool,
+    pub confirmed_at: Option<String>,
+    pub confirmed_by: Option<String>,
+    pub auto_delisted_at: Option<String>,
+    pub listing_status: String,
     pub created_at: String,
     pub paid_at: Option<String>,
     pub shipped_at: Option<String>,
     pub completed_at: Option<String>,
     pub cancelled_at: Option<String>,
     pub cancellation_reason: Option<String>,
+    pub capabilities: OrderCapabilities,
 }
 
-impl From<crate::services::order::SqlxOrderRow> for OrderDetail {
-    fn from(r: crate::services::order::SqlxOrderRow) -> Self {
+impl OrderDetail {
+    fn from_row(r: crate::services::order::SqlxOrderRow, viewer_id: &str) -> Self {
+        let is_buyer = r.buyer_id == viewer_id;
+        let is_seller = r.seller_id == viewer_id;
+        let can_confirm = is_seller && r.status == "intent_pending";
+        let can_cancel = (is_buyer || is_seller) && r.status == "intent_pending";
+
         Self {
             id: r.id,
             listing_id: r.listing_id,
@@ -89,17 +115,26 @@ impl From<crate::services::order::SqlxOrderRow> for OrderDetail {
             seller_username: r.seller_username,
             final_price_cny: r.final_price as f64 / 100.0,
             status: r.status,
+            auto_delist: r.auto_delist,
+            confirmed_at: r.confirmed_at.map(|dt| dt.to_rfc3339()),
+            confirmed_by: r.confirmed_by,
+            auto_delisted_at: r.auto_delisted_at.map(|dt| dt.to_rfc3339()),
+            listing_status: r.listing_status,
             created_at: r.created_at.to_rfc3339(),
             paid_at: r.paid_at.map(|dt| dt.to_rfc3339()),
             shipped_at: r.shipped_at.map(|dt| dt.to_rfc3339()),
             completed_at: r.completed_at.map(|dt| dt.to_rfc3339()),
             cancelled_at: r.cancelled_at.map(|dt| dt.to_rfc3339()),
             cancellation_reason: r.cancellation_reason,
+            capabilities: OrderCapabilities {
+                can_confirm,
+                can_cancel,
+                can_choose_auto_delist: can_confirm,
+            },
         }
     }
 }
 
-/// GET /api/orders - list orders for current user
 pub async fn get_orders(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -125,17 +160,14 @@ pub async fn get_orders(
             ApiError::Internal(anyhow::anyhow!("Failed to fetch orders"))
         })?;
 
-    let items: Vec<OrderSummary> = items.into_iter().map(OrderSummary::from).collect();
-
     Ok(Json(OrdersResponse {
-        items,
+        items: items.into_iter().map(OrderSummary::from).collect(),
         total,
         limit,
         offset,
     }))
 }
 
-/// GET /api/orders/:id - get order details
 pub async fn get_order(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -173,16 +205,16 @@ pub async fn get_order(
         })?
         .ok_or(ApiError::NotFound)?;
 
-    Ok(Json(OrderDetail::from(order)))
+    Ok(Json(OrderDetail::from_row(order, &user_id)))
 }
 
 #[derive(Deserialize)]
 pub struct CreateOrderRequest {
     pub listing_id: String,
     pub offered_price_cny: f64,
+    pub message: Option<String>,
 }
 
-/// POST /api/orders - create an order directly (buyer purchases at offered price)
 pub async fn create_order(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -195,9 +227,8 @@ pub async fn create_order(
     )
     .map_err(|_| ApiError::Unauthorized)?;
 
-    // Fetch listing to get seller_id and validate
     let listing_row =
-        sqlx::query("SELECT owner_id, suggested_price_cny FROM inventory WHERE id = $1")
+        sqlx::query("SELECT owner_id, suggested_price_cny, status FROM inventory WHERE id = $1")
             .bind(&payload.listing_id)
             .fetch_optional(&state.infra.db)
             .await
@@ -206,18 +237,31 @@ pub async fn create_order(
                 ApiError::Internal(anyhow::anyhow!("Failed to fetch listing"))
             })?;
 
-    let (seller_id, suggested_price): (String, i64) = match listing_row {
-        Some(row) => (row.get("owner_id"), row.get("suggested_price_cny")),
+    let (seller_id, suggested_price, listing_status): (String, i64, String) = match listing_row {
+        Some(row) => (
+            row.get("owner_id"),
+            row.get("suggested_price_cny"),
+            row.get("status"),
+        ),
         None => return Err(ApiError::NotFound),
     };
 
     if seller_id == buyer_id {
         return Err(ApiError::BadRequest(
-            "Cannot order your own listing".to_string(),
+            "Cannot create a deal intent for your own listing".to_string(),
         ));
     }
+    if listing_status != "active" {
+        return Err(ApiError::Conflict("此商品暂不可发起成交意向".to_string()));
+    }
+    if let Some(message) = payload.message.as_deref() {
+        if message.len() > 1000 {
+            return Err(ApiError::BadRequest(
+                "成交意向备注不能超过1000个字符".to_string(),
+            ));
+        }
+    }
 
-    // Validate offered price is within ±50% of suggested price (same logic as LLM tools)
     let final_price_cents = (payload.offered_price_cny * 100.0).round() as i64;
     const PRICE_TOLERANCE: f64 = 0.50;
     let min_price = (suggested_price as f64 * (1.0 - PRICE_TOLERANCE)) as i64;
@@ -240,16 +284,20 @@ pub async fn create_order(
             final_price_cents,
         )
         .await
-        .map_err(|e| {
-            tracing::error!("create_order error: {}", e);
-            if matches!(e, OrderError::AlreadySold) {
-                ApiError::Conflict("此商品已经售出".to_string())
-            } else {
-                ApiError::Internal(anyhow::anyhow!("Failed to create order"))
+        .map_err(|e| match e {
+            OrderError::AlreadySold => ApiError::Conflict("此商品暂不可发起成交意向".to_string()),
+            OrderError::NotFound => ApiError::NotFound,
+            other => {
+                tracing::error!("create_order error: {}", other);
+                ApiError::Internal(anyhow::anyhow!("Failed to create deal intent"))
             }
         })?;
 
-    Ok(Json(serde_json::json!({ "id": order_id })))
+    Ok(Json(serde_json::json!({
+        "id": order_id,
+        "status": "intent_pending",
+        "message": "成交意向已发送，等待卖家确认"
+    })))
 }
 
 #[derive(Deserialize)]
@@ -257,143 +305,36 @@ pub struct OrderActionRequest {
     pub reason: Option<String>,
 }
 
-/// Transition helper: verifies access + does status transition atomically.
-async fn transition_order(
-    state: &AppState,
-    order_id: &str,
-    user_id: &str,
-    expected_current: &str,
-    new_status: &str,
-    cancellation_reason: Option<&str>,
-) -> Result<(), ApiError> {
-    // Buyer can: pay (pending→paid), confirm (shipped→completed), cancel (pending/paid→cancelled)
-    // Seller can: ship (paid→shipped), cancel (pending/paid→cancelled)
-
-    // Verify access
-    let has_access = state
-        .infra
-        .order_service
-        .verify_order_access(order_id, user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!("verify_order_access error: {}", e);
-            ApiError::Internal(anyhow::anyhow!("Failed to verify order access"))
-        })?;
-
-    if !has_access {
-        return Err(ApiError::Forbidden);
-    }
-
-    // Fetch current status
-    let (current_status, _) = state
-        .infra
-        .order_service
-        .get_order_meta(order_id)
-        .await
-        .map_err(|e| {
-            tracing::error!("get_order_meta error: {}", e);
-            ApiError::Internal(anyhow::anyhow!("Failed to fetch order status"))
-        })?
-        .ok_or(ApiError::NotFound)?;
-
-    // Role-based permission check
-    let (buyer_id, seller_id) = {
-        let row = sqlx::query("SELECT buyer_id, seller_id FROM orders WHERE id = $1")
-            .bind(order_id)
-            .fetch_optional(&state.infra.db)
-            .await
-            .map_err(|e| {
-                tracing::error!("fetch order meta error: {}", e);
-                ApiError::Internal(anyhow::anyhow!("Failed to fetch order"))
-            })?
-            .ok_or(ApiError::NotFound)?;
-        (
-            row.get::<String, _>("buyer_id"),
-            row.get::<String, _>("seller_id"),
-        )
-    };
-
-    let is_buyer = buyer_id == user_id;
-    let is_seller = seller_id == user_id;
-
-    let allowed = matches!(
-        (new_status, is_buyer, is_seller),
-        ("paid", true, _)
-            | ("shipped", _, true)
-            | ("completed", true, _)
-            | ("cancelled", true, _)
-            | ("cancelled", _, true)
-    );
-
-    if !allowed {
-        return Err(ApiError::Forbidden);
-    }
-
-    if current_status != expected_current {
-        return Err(ApiError::BadRequest(format!(
-            "Order status is '{}', expected '{}'",
-            current_status, expected_current
-        )));
-    }
-
-    let success = state
-        .infra
-        .order_service
-        .transition_order_status(order_id, expected_current, new_status, cancellation_reason)
-        .await
-        .map_err(|e| {
-            tracing::error!("transition_order_status error: {}", e);
-            ApiError::Internal(anyhow::anyhow!("Failed to update order status"))
-        })?;
-
-    if !success {
-        return Err(ApiError::BadRequest("Status transition failed".to_string()));
-    }
-
-    Ok(())
+#[derive(Deserialize, Default)]
+pub struct ConfirmOrderRequest {
+    pub auto_delist: Option<bool>,
 }
 
-/// POST /api/orders/:id/pay - buyer pays for order
 pub async fn pay_order(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(order_id): Path<String>,
+    State(_state): State<AppState>,
+    _headers: HeaderMap,
+    Path(_order_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
-
-    transition_order(&state, &order_id, &user_id, "pending", "paid", None).await?;
-
-    Ok(Json(serde_json::json!({ "status": "paid" })))
+    Err(ApiError::BadRequest(
+        "平台不负责资金中转，请在线下自行确认付款方式".to_string(),
+    ))
 }
 
-/// POST /api/orders/:id/ship - seller ships order
 pub async fn ship_order(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(order_id): Path<String>,
+    State(_state): State<AppState>,
+    _headers: HeaderMap,
+    Path(_order_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
-
-    transition_order(&state, &order_id, &user_id, "paid", "shipped", None).await?;
-
-    Ok(Json(serde_json::json!({ "status": "shipped" })))
+    Err(ApiError::BadRequest(
+        "平台不跟踪物流发货，请双方在线下约定交接方式".to_string(),
+    ))
 }
 
-/// POST /api/orders/:id/confirm - buyer confirms receipt
 pub async fn confirm_order(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(order_id): Path<String>,
+    payload: Option<Json<ConfirmOrderRequest>>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user_id = extract_user_id_from_token_with_fallback(
         &headers,
@@ -402,12 +343,35 @@ pub async fn confirm_order(
     )
     .map_err(|_| ApiError::Unauthorized)?;
 
-    transition_order(&state, &order_id, &user_id, "shipped", "completed", None).await?;
+    let auto_delist = payload
+        .map(|Json(payload)| payload.auto_delist.unwrap_or(true))
+        .unwrap_or(true);
 
-    Ok(Json(serde_json::json!({ "status": "completed" })))
+    let success = state
+        .infra
+        .order_service
+        .confirm_order(&order_id, &user_id, auto_delist, false)
+        .await
+        .map_err(|e| match e {
+            OrderError::NotFound => ApiError::NotFound,
+            OrderError::Forbidden => ApiError::Forbidden,
+            OrderError::AlreadySold => ApiError::Conflict("此商品已经不可售".to_string()),
+            other => {
+                tracing::error!("confirm_order error: {}", other);
+                ApiError::Internal(anyhow::anyhow!("Failed to confirm deal intent"))
+            }
+        })?;
+
+    if !success {
+        return Err(ApiError::Conflict("当前成交意向状态不可确认".to_string()));
+    }
+
+    Ok(Json(serde_json::json!({
+        "status": "confirmed",
+        "auto_delist": auto_delist
+    })))
 }
 
-/// POST /api/orders/:id/cancel - buyer or seller cancels order
 pub async fn cancel_order(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -421,37 +385,23 @@ pub async fn cancel_order(
     )
     .map_err(|_| ApiError::Unauthorized)?;
 
-    // Fetch current status to determine which transition to attempt
-    let current_status = state
+    let success = state
         .infra
         .order_service
-        .get_order_meta(&order_id)
+        .cancel_order(&order_id, &user_id, payload.reason.as_deref(), false, false)
         .await
-        .map_err(|e| {
-            tracing::error!("get_order_meta error: {}", e);
-            ApiError::Internal(anyhow::anyhow!("Failed to fetch order status"))
-        })?
-        .map(|(s, _)| s)
-        .ok_or(ApiError::NotFound)?;
+        .map_err(|e| match e {
+            OrderError::NotFound => ApiError::NotFound,
+            OrderError::Forbidden => ApiError::Forbidden,
+            other => {
+                tracing::error!("cancel_order error: {}", other);
+                ApiError::Internal(anyhow::anyhow!("Failed to cancel deal intent"))
+            }
+        })?;
 
-    let target_status = match current_status.as_str() {
-        "pending" | "paid" => "cancelled",
-        _ => {
-            return Err(ApiError::BadRequest(
-                "Only pending or paid orders can be cancelled".to_string(),
-            ))
-        }
-    };
-
-    transition_order(
-        &state,
-        &order_id,
-        &user_id,
-        &current_status,
-        target_status,
-        payload.reason.as_deref(),
-    )
-    .await?;
+    if !success {
+        return Err(ApiError::Conflict("当前成交意向状态不可取消".to_string()));
+    }
 
     Ok(Json(serde_json::json!({ "status": "cancelled" })))
 }
@@ -468,15 +418,20 @@ mod tests {
             listing_title: "iPhone 13".into(),
             buyer_id: "buyer-1".into(),
             seller_id: "seller-1".into(),
-            final_price: 499900, // 4999.00 CNY in cents
-            status: "pending".into(),
+            final_price: 499900,
+            status: "intent_pending".into(),
+            auto_delist: true,
+            confirmed_at: None,
+            auto_delisted_at: None,
             created_at: chrono::Utc::now(),
             buyer_username: "buyeruser".into(),
             seller_username: "selleruser".into(),
+            listing_status: "active".into(),
         };
         let summary = OrderSummary::from(row);
         assert_eq!(summary.final_price_cny, 4999.0);
-        assert_eq!(summary.status, "pending");
+        assert_eq!(summary.status, "intent_pending");
+        assert_eq!(summary.listing_status, "active");
     }
 
     #[test]

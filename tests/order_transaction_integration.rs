@@ -104,7 +104,7 @@ async fn create_order_rolls_back_listing_status_when_order_insert_fails() {
 }
 
 #[tokio::test]
-async fn cancelling_order_relists_listing_when_no_other_open_orders_exist() {
+async fn cancelling_order_does_not_relist_listing_automatically() {
     with_test_pool(|pool| async move {
         for (id, username) in [("seller-1", "seller"), ("buyer-1", "buyer")] {
             sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')")
@@ -153,7 +153,7 @@ async fn cancelling_order_relists_listing_when_no_other_open_orders_exist() {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(listing.get::<String, _>("status"), "active");
+        assert_eq!(listing.get::<String, _>("status"), "sold");
     })
     .await;
 }

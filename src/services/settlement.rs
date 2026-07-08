@@ -4,13 +4,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 #[allow(dead_code)]
 pub enum SettlementError {
-    #[error("Order not found")]
-    OrderNotFound,
-    #[error("Order already paid or completed")]
-    AlreadySettled,
-    #[error("Invalid order state: {0}")]
-    InvalidState(String),
-    #[error("Settlement is disabled")]
+    #[error("Platform settlement is disabled")]
     Disabled,
     #[error("Database error: {0}")]
     DbError(#[from] sqlx::Error),
@@ -27,22 +21,12 @@ impl SettlementService {
         Self { db }
     }
 
-    /// Returns an error indicating settlement is disabled.
+    /// Returns an error indicating platform-side settlement is disabled.
     #[allow(dead_code)]
-    pub async fn finalize_payment(&self, order_id: &str) -> Result<(), SettlementError> {
+    pub async fn reject_platform_settlement(&self, order_id: &str) -> Result<(), SettlementError> {
         tracing::warn!(
             order_id,
-            "Settlement finalize_payment called but settlement is disabled"
-        );
-        Err(SettlementError::Disabled)
-    }
-
-    /// Verify payment can be processed for an order (pre-flight check).
-    #[allow(dead_code)]
-    pub async fn verify_order_for_payment(&self, order_id: &str) -> Result<(), SettlementError> {
-        tracing::warn!(
-            order_id,
-            "Settlement verify_order_for_payment called but settlement is disabled"
+            "Platform settlement path called but settlement is disabled"
         );
         Err(SettlementError::Disabled)
     }
@@ -55,28 +39,16 @@ mod unit_tests {
     #[test]
     fn test_settlement_error_display() {
         assert_eq!(
-            SettlementError::OrderNotFound.to_string(),
-            "Order not found"
-        );
-        assert_eq!(
-            SettlementError::InvalidState("pending".to_string()).to_string(),
-            "Invalid order state: pending"
-        );
-        assert_eq!(
-            SettlementError::AlreadySettled.to_string(),
-            "Order already paid or completed"
-        );
-        assert_eq!(
             SettlementError::Disabled.to_string(),
-            "Settlement is disabled"
+            "Platform settlement is disabled"
         );
     }
 
     #[test]
     fn test_settlement_error_debug() {
-        let error = SettlementError::OrderNotFound;
+        let error = SettlementError::Disabled;
         let debug_str = format!("{:?}", error);
-        assert!(debug_str.contains("OrderNotFound"));
+        assert!(debug_str.contains("Disabled"));
     }
 
     #[test]
@@ -88,24 +60,8 @@ mod unit_tests {
     }
 
     #[test]
-    fn test_verify_order_for_payment_idempotent_behavior() {
-        // Test that AlreadySettled is the correct variant for paid orders
-        let result: Result<(), SettlementError> = Err(SettlementError::AlreadySettled);
-        assert!(matches!(result, Err(SettlementError::AlreadySettled)));
-    }
-
-    #[test]
-    fn test_verify_order_for_payment_pending_behavior() {
-        // Test that pending orders are valid for payment
-        let result: Result<(), SettlementError> = Ok(());
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_verify_order_for_payment_invalid_state() {
-        // Test that cancelled orders return InvalidState
-        let error = SettlementError::InvalidState("cancelled".to_string());
-        assert!(matches!(error, SettlementError::InvalidState(_)));
-        assert!(error.to_string().contains("cancelled"));
+    fn test_settlement_disabled_result_shape() {
+        let result: Result<(), SettlementError> = Err(SettlementError::Disabled);
+        assert!(matches!(result, Err(SettlementError::Disabled)));
     }
 }

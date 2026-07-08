@@ -22,6 +22,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
   bool _loading = true;
   String? _error;
   bool _acting = false;
+  bool _autoDelist = true;
 
   @override
   void initState() {
@@ -40,6 +41,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       if (mounted) {
         setState(() {
           _order = OrderDetail.fromJson(data);
+          _autoDelist = _order?.autoDelist ?? true;
           _loading = false;
         });
       }
@@ -155,26 +157,20 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                   title: l.orderDetail,
                   children: [
                     _TimelineRow(
-                      label: l.orderDetail,
+                      label: l.dealIntentCreated,
                       time: order.createdAt,
                       done: true,
                     ),
-                    if (order.paidAt != null)
+                    if (order.confirmedAt != null)
                       _TimelineRow(
-                        label: l.markPaid,
-                        time: order.paidAt!,
+                        label: l.sellerConfirmedDeal,
+                        time: order.confirmedAt!,
                         done: true,
                       ),
-                    if (order.shippedAt != null)
+                    if (order.autoDelistedAt != null)
                       _TimelineRow(
-                        label: l.markShipped,
-                        time: order.shippedAt!,
-                        done: true,
-                      ),
-                    if (order.completedAt != null)
-                      _TimelineRow(
-                        label: l.markCompleted,
-                        time: order.completedAt!,
+                        label: l.itemAutoDelisted,
+                        time: order.autoDelistedAt!,
                         done: true,
                       ),
                     if (order.cancelledAt != null)
@@ -219,50 +215,20 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     final l = AppLocalizations.of(context)!;
     final actions = <Widget>[];
 
-    if (order.canPay) {
-      actions.add(
-        Expanded(
-          child: ElevatedButton(
-            onPressed: () => _doAction(() => _orderService.payOrder(order.id)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-            child: Text(l.pay),
-          ),
-        ),
-      );
-    }
-
-    if (order.canShip) {
-      actions.add(
-        Expanded(
-          child: ElevatedButton(
-            onPressed: () => _doAction(() => _orderService.shipOrder(order.id)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-            child: Text(l.markShipped),
-          ),
-        ),
-      );
-    }
-
     if (order.canConfirm) {
       actions.add(
         Expanded(
           child: ElevatedButton(
-            onPressed: () =>
-                _doAction(() => _orderService.confirmOrder(order.id)),
+            onPressed: () => _doAction(
+              () =>
+                  _orderService.confirmOrder(order.id, autoDelist: _autoDelist),
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 14),
             ),
-            child: Text(l.markCompleted),
+            child: Text(l.confirmOfflineDeal),
           ),
         ),
       );
@@ -290,7 +256,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     return Container(
       padding: const EdgeInsets.all(AppTheme.sp16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardTheme.color,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
@@ -299,7 +265,25 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           ),
         ],
       ),
-      child: SafeArea(top: false, child: Row(children: actions)),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (order.canChooseAutoDelist)
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _autoDelist,
+                onChanged: _acting
+                    ? null
+                    : (value) => setState(() => _autoDelist = value),
+                title: Text(l.autoDelistAfterConfirm),
+                subtitle: Text(l.autoDelistAfterConfirmSubtitle),
+              ),
+            Row(children: actions),
+          ],
+        ),
+      ),
     );
   }
 
@@ -366,7 +350,7 @@ class _StatusCard extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  _statusHint(order.status),
+                  _statusHint(context, order.status),
                   style: TextStyle(
                     color: order.statusColor.withValues(alpha: 0.8),
                     fontSize: 13,
@@ -383,12 +367,12 @@ class _StatusCard extends StatelessWidget {
   IconData _statusIcon(String status) {
     switch (status) {
       case 'pending':
+      case 'intent_pending':
         return Icons.hourglass_empty;
       case 'paid':
-        return Icons.paid_outlined;
       case 'shipped':
-        return Icons.local_shipping_outlined;
       case 'completed':
+      case 'confirmed':
         return Icons.check_circle_outline;
       case 'cancelled':
         return Icons.cancel_outlined;
@@ -397,18 +381,18 @@ class _StatusCard extends StatelessWidget {
     }
   }
 
-  String _statusHint(String status) {
+  String _statusHint(BuildContext context, String status) {
     switch (status) {
       case 'pending':
-        return 'Waiting for buyer to pay';
+      case 'intent_pending':
+        return AppLocalizations.of(context)!.awaitingSellerConfirm;
       case 'paid':
-        return 'Waiting for seller to ship';
       case 'shipped':
-        return 'Waiting for buyer to confirm receipt';
       case 'completed':
-        return 'Order completed';
+      case 'confirmed':
+        return AppLocalizations.of(context)!.dealConfirmed;
       case 'cancelled':
-        return 'Order cancelled';
+        return AppLocalizations.of(context)!.dealCancelled;
       default:
         return '';
     }
