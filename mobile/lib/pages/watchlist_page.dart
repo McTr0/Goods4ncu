@@ -7,6 +7,7 @@ import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../services/watchlist_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/category_utils.dart';
 
 class WatchlistPage extends StatefulWidget {
   final WatchlistService? watchlistService;
@@ -346,9 +347,10 @@ class _WatchlistCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final category = localizedCategoryLabel(context, item.category);
     final categoryBrand = item.brand.isEmpty
-        ? item.category
-        : '${item.category} · ${item.brand}';
+        ? category
+        : '$category · ${item.brand}';
 
     return Card(
       margin: EdgeInsets.zero,

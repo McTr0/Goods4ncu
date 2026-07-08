@@ -6,7 +6,7 @@
 //!
 //! Key metrics:
 //! - HTTP request counts and latencies per endpoint
-//! - Order lifecycle events (created, paid, shipped, completed, cancelled)
+//! - Offline deal events (intent created, confirmed, cancelled)
 //! - Chat message counts
 //! - Rate limit rejections
 //! - LLM call counts and errors
@@ -24,17 +24,10 @@ pub struct MetricsService {
     // HTTP
     pub http_requests_total: CounterVec,
     pub http_request_duration_seconds: HistogramVec,
-    // Business (order metrics are disabled but fields remain for API compatibility)
-    #[allow(dead_code)]
-    pub orders_created_total: Counter,
-    #[allow(dead_code)]
-    pub orders_paid_total: Counter,
-    #[allow(dead_code)]
-    pub orders_shipped_total: Counter,
-    #[allow(dead_code)]
-    pub orders_completed_total: Counter,
-    #[allow(dead_code)]
-    pub orders_cancelled_total: Counter,
+    // Business
+    pub deal_intents_created_total: Counter,
+    pub deals_confirmed_total: Counter,
+    pub deals_cancelled_total: Counter,
     pub chat_messages_total: Counter,
     // Infrastructure
     pub rate_limit_rejected_total: Counter,
@@ -71,18 +64,19 @@ impl MetricsService {
         )
         .expect("metric definition is valid");
 
-        let orders_created_total = Counter::new("orders_created_total", "Total orders created")
-            .expect("metric definition is valid");
-        let orders_paid_total = Counter::new("orders_paid_total", "Total orders marked as paid")
-            .expect("metric definition is valid");
-        let orders_shipped_total = Counter::new("orders_shipped_total", "Total orders shipped")
-            .expect("metric definition is valid");
-        let orders_completed_total =
-            Counter::new("orders_completed_total", "Total orders completed")
+        let deal_intents_created_total = Counter::new(
+            "deal_intents_created_total",
+            "Total offline deal intents created",
+        )
+        .expect("metric definition is valid");
+        let deals_confirmed_total =
+            Counter::new("deals_confirmed_total", "Total offline deals confirmed")
                 .expect("metric definition is valid");
-        let orders_cancelled_total =
-            Counter::new("orders_cancelled_total", "Total orders cancelled")
-                .expect("metric definition is valid");
+        let deals_cancelled_total = Counter::new(
+            "deals_cancelled_total",
+            "Total offline deal records cancelled",
+        )
+        .expect("metric definition is valid");
         let chat_messages_total =
             Counter::new("chat_messages_total", "Total chat messages processed")
                 .expect("metric definition is valid");
@@ -124,19 +118,13 @@ impl MetricsService {
             .register(Box::new(http_request_duration_seconds.clone()))
             .expect("metric is unique");
         registry
-            .register(Box::new(orders_created_total.clone()))
+            .register(Box::new(deal_intents_created_total.clone()))
             .expect("metric is unique");
         registry
-            .register(Box::new(orders_paid_total.clone()))
+            .register(Box::new(deals_confirmed_total.clone()))
             .expect("metric is unique");
         registry
-            .register(Box::new(orders_shipped_total.clone()))
-            .expect("metric is unique");
-        registry
-            .register(Box::new(orders_completed_total.clone()))
-            .expect("metric is unique");
-        registry
-            .register(Box::new(orders_cancelled_total.clone()))
+            .register(Box::new(deals_cancelled_total.clone()))
             .expect("metric is unique");
         registry
             .register(Box::new(chat_messages_total.clone()))
@@ -167,11 +155,9 @@ impl MetricsService {
             registry,
             http_requests_total,
             http_request_duration_seconds,
-            orders_created_total,
-            orders_paid_total,
-            orders_shipped_total,
-            orders_completed_total,
-            orders_cancelled_total,
+            deal_intents_created_total,
+            deals_confirmed_total,
+            deals_cancelled_total,
             chat_messages_total,
             rate_limit_rejected_total,
             llm_calls_total,
@@ -195,24 +181,16 @@ impl MetricsService {
             .observe(duration.as_secs_f64());
     }
 
-    pub fn record_order_created(&self) {
-        self.orders_created_total.inc();
+    pub fn record_deal_intent_created(&self) {
+        self.deal_intents_created_total.inc();
     }
 
-    pub fn record_order_paid(&self) {
-        self.orders_paid_total.inc();
+    pub fn record_deal_confirmed(&self) {
+        self.deals_confirmed_total.inc();
     }
 
-    pub fn record_order_shipped(&self) {
-        self.orders_shipped_total.inc();
-    }
-
-    pub fn record_order_completed(&self) {
-        self.orders_completed_total.inc();
-    }
-
-    pub fn record_order_cancelled(&self) {
-        self.orders_cancelled_total.inc();
+    pub fn record_deal_cancelled(&self) {
+        self.deals_cancelled_total.inc();
     }
 
     /// Record a chat message processed.

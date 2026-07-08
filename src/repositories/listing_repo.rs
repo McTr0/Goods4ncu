@@ -1,6 +1,7 @@
 //! PostgreSQL implementation of the ListingRepository trait.
 
 use crate::api::error::ApiError;
+use crate::categories::{normalize_category, normalize_category_list, normalize_category_or_other};
 use crate::repositories::{CreateListingInput, Listing, ListingRepository, UpdateListingInput};
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
@@ -54,11 +55,11 @@ impl PostgresListingRepository {
             INSERT INTO inventory (
                 id, new_id,
                 title, category, brand, condition_score,
-                suggested_price_cny, defects, description,
+                suggested_price_cny, defects, description, image_url,
                 owner_id, new_owner_id, status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                    (SELECT new_id FROM users WHERE id = $10), 'active')
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+                    (SELECT new_id FROM users WHERE id = $11), 'active')
             "#,
         )
         .bind(&listing_id)
@@ -70,6 +71,7 @@ impl PostgresListingRepository {
         .bind(price_cents)
         .bind(&defects_json)
         .bind(&input.description)
+        .bind(&input.image_url)
         .bind(&input.owner_id)
         .execute(&mut **tx)
         .await
@@ -177,6 +179,7 @@ impl PostgresListingRepository {
         Ok(query)
     }
 
+    #[allow(dead_code)]
     pub async fn mark_sold_if_active_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -192,6 +195,7 @@ impl PostgresListingRepository {
         Ok(updated.rows_affected() > 0)
     }
 
+    #[allow(dead_code)]
     pub async fn relist_if_no_open_orders_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -293,7 +297,7 @@ impl ListingRepository for PostgresListingRepository {
     ) -> Result<(Vec<Listing>, i64), ApiError> {
         let mut query = String::from(
             "SELECT id, title, category, brand, condition_score, suggested_price_cny, \
-             defects, description, owner_id, status, created_at \
+             defects, description, image_url, owner_id, status, created_at \
              FROM inventory WHERE status = 'active'",
         );
         let mut count_query =
@@ -302,24 +306,30 @@ impl ListingRepository for PostgresListingRepository {
         // Single category filter (preferred when both are provided)
         if let Some(cat) = category {
             if !cat.is_empty() && cat != "all" && categories.is_none() {
-                query = format!("{} AND category = '{}'", query, cat.replace('\'', "''"));
-                count_query = format!(
-                    "{} AND category = '{}'",
-                    count_query,
-                    cat.replace('\'', "''")
-                );
+                if let Some(normalized) = normalize_category(cat) {
+                    query = format!("{} AND category = '{}'", query, normalized);
+                    count_query = format!("{} AND category = '{}'", count_query, normalized);
+                } else {
+                    query = format!("{} AND FALSE", query);
+                    count_query = format!("{} AND FALSE", count_query);
+                }
             }
         }
 
         // Multi-category: comma-separated, e.g. "electronics,books" -> category IN ('electronics','books')
         if let Some(cats) = categories {
             if !cats.is_empty() && category.is_none() {
-                let parts: Vec<String> = cats
-                    .split(',')
-                    .map(|s| format!("'{}'", s.trim().replace('\'', "''")))
+                let parts: Vec<String> = normalize_category_list(cats)
+                    .into_iter()
+                    .map(|category| format!("'{}'", category))
                     .collect();
-                query = format!("{} AND category IN ({})", query, parts.join(","));
-                count_query = format!("{} AND category IN ({})", count_query, parts.join(","));
+                if parts.is_empty() {
+                    query = format!("{} AND FALSE", query);
+                    count_query = format!("{} AND FALSE", count_query);
+                } else {
+                    query = format!("{} AND category IN ({})", query, parts.join(","));
+                    count_query = format!("{} AND category IN ({})", count_query, parts.join(","));
+                }
             }
         }
 
@@ -383,7 +393,7 @@ impl ListingRepository for PostgresListingRepository {
     async fn find_by_id(&self, id: &str) -> Result<Option<Listing>, ApiError> {
         let row = sqlx::query_as::<_, Listing>(
             "SELECT id, title, category, brand, condition_score, suggested_price_cny, \
-             defects, description, owner_id, status, created_at \
+             defects, description, image_url, owner_id, status, created_at \
              FROM inventory WHERE id = $1",
         )
         .bind(id)
@@ -399,7 +409,7 @@ impl ListingRepository for PostgresListingRepository {
     ) -> Result<Option<(Listing, Option<String>)>, ApiError> {
         let row = sqlx::query(
             "SELECT i.id, i.title, i.category, i.brand, i.condition_score, i.suggested_price_cny, \
-             i.defects, i.description, i.owner_id, i.status, i.created_at, \
+             i.defects, i.description, i.image_url, i.owner_id, i.status, i.created_at, \
              u.username as owner_username \
              FROM inventory i \
              LEFT JOIN users u ON i.owner_id = u.id \
@@ -421,6 +431,7 @@ impl ListingRepository for PostgresListingRepository {
                     suggested_price_cny: r.get("suggested_price_cny"),
                     defects: r.get("defects"),
                     description: r.get("description"),
+                    image_url: r.get("image_url"),
                     owner_id: r.get("owner_id"),
                     status: r.get("status"),
                     created_at: r.get("created_at"),
@@ -569,10 +580,16 @@ impl ListingRepository for PostgresListingRepository {
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
-        let stats = rows
-            .iter()
-            .map(|r| (r.get("category"), r.get(1))) // 1 is cnt
-            .collect();
+        let mut merged = std::collections::BTreeMap::<String, i64>::new();
+        for row in rows {
+            let category: String = row.get("category");
+            let count: i64 = row.get("cnt");
+            let normalized = normalize_category_or_other(&category).to_string();
+            *merged.entry(normalized).or_default() += count;
+        }
+
+        let mut stats: Vec<(String, i64)> = merged.into_iter().collect();
+        stats.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
         Ok(stats)
     }
@@ -704,6 +721,7 @@ mod tests {
                     suggested_price_cny: 123.45,
                     defects: vec!["scratch".to_string()],
                     description: "usable".to_string(),
+                    image_url: Some("https://cdn.example.com/desk.jpg".to_string()),
                     owner_id: "listing-owner".to_string(),
                 })
                 .await

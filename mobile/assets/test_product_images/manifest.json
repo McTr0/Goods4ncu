@@ -1,0 +1,104 @@
+{
+  "source": "DummyJSON public product API",
+  "source_catalog": "https://dummyjson.com/products",
+  "fetched_at": "2026-06-28",
+  "purpose": "Local Good4NCU development fixtures; not production catalog data.",
+  "items": [
+    {
+      "demo_id": "d0000000-0000-4000-8000-000000000001",
+      "source_id": 1,
+      "title": "Essence Mascara Lash Princess",
+      "source": "https://dummyjson.com/products/1",
+      "original_image": "https://cdn.dummyjson.com/product-images/beauty/essence-mascara-lash-princess/thumbnail.webp",
+      "local_file": "good4ncu-demo-01.webp"
+    },
+    {
+      "demo_id": "d0000000-0000-4000-8000-000000000002",
+      "source_id": 13,
+      "title": "Bedside Table African Cherry",
+      "source": "https://dummyjson.com/products/13",
+      "original_image": "https://cdn.dummyjson.com/product-images/furniture/bedside-table-african-cherry/thumbnail.webp",
+      "local_file": "good4ncu-demo-02.webp"
+    },
+    {
+      "demo_id": "d0000000-0000-4000-8000-000000000003",
+      "source_id": 34,
+      "title": "Nescafe Coffee",
+      "source": "https://dummyjson.com/products/34",
+      "original_image": "https://cdn.dummyjson.com/product-images/groceries/nescafe-coffee/thumbnail.webp",
+      "local_file": "good4ncu-demo-03.webp"
+    },
+    {
+      "demo_id": "d0000000-0000-4000-8000-000000000004",
+      "source_id": 47,
+      "title": "Table Lamp",
+      "source": "https://dummyjson.com/products/47",
+      "original_image": "https://cdn.dummyjson.com/product-images/home-decoration/table-lamp/thumbnail.webp",
+      "local_file": "good4ncu-demo-04.webp"
+    },
+    {
+      "demo_id": "d0000000-0000-4000-8000-000000000005",
+      "source_id": 51,
+      "title": "Boxed Blender",
+      "source": "https://dummyjson.com/products/51",
+      "original_image": "https://cdn.dummyjson.com/product-images/kitchen-accessories/boxed-blender/thumbnail.webp",
+      "local_file": "good4ncu-demo-05.webp"
+    },
+    {
+      "demo_id": "d0000000-0000-4000-8000-000000000006",
+      "source_id": 66,
+      "title": "Microwave Oven",
+      "source": "https://dummyjson.com/products/66",
+      "original_image": "https://cdn.dummyjson.com/product-images/kitchen-accessories/microwave-oven/thumbnail.webp",
+      "local_file": "good4ncu-demo-06.webp"
+    },
+    {
+      "demo_id": "d0000000-0000-4000-8000-000000000007",
+      "source_id": 78,
+      "title": "Apple MacBook Pro 14 Inch Space Grey",
+      "source": "https://dummyjson.com/products/78",
+      "original_image": "https://cdn.dummyjson.com/product-images/laptops/apple-macbook-pro-14-inch-space-grey/thumbnail.webp",
+      "local_file": "good4ncu-demo-07.webp"
+    },
+    {
+      "demo_id": "d0000000-0000-4000-8000-000000000008",
+      "source_id": 83,
+      "title": "Blue & Black Check Shirt",
+      "source": "https://dummyjson.com/products/83",
+      "original_image": "https://cdn.dummyjson.com/product-images/mens-shirts/blue-&-black-check-shirt/thumbnail.webp",
+      "local_file": "good4ncu-demo-08.webp"
+    },
+    {
+      "demo_id": "d0000000-0000-4000-8000-000000000009",
+      "source_id": 88,
+      "title": "Nike Air Jordan 1 Red And Black",
+      "source": "https://dummyjson.com/products/88",
+      "original_image": "https://cdn.dummyjson.com/product-images/mens-shoes/nike-air-jordan-1-red-and-black/thumbnail.webp",
+      "local_file": "good4ncu-demo-09.webp"
+    },
+    {
+      "demo_id": "d0000000-0000-4000-8000-000000000010",
+      "source_id": 93,
+      "title": "Brown Leather Belt Watch",
+      "source": "https://dummyjson.com/products/93",
+      "original_image": "https://cdn.dummyjson.com/product-images/mens-watches/brown-leather-belt-watch/thumbnail.webp",
+      "local_file": "good4ncu-demo-10.webp"
+    },
+    {
+      "demo_id": "d0000000-0000-4000-8000-000000000011",
+      "source_id": 99,
+      "title": "Amazon Echo Plus",
+      "source": "https://dummyjson.com/products/99",
+      "original_image": "https://cdn.dummyjson.com/product-images/mobile-accessories/amazon-echo-plus/thumbnail.webp",
+      "local_file": "good4ncu-demo-11.webp"
+    },
+    {
+      "demo_id": "d0000000-0000-4000-8000-000000000012",
+      "source_id": 100,
+      "title": "Apple Airpods",
+      "source": "https://dummyjson.com/products/100",
+      "original_image": "https://cdn.dummyjson.com/product-images/mobile-accessories/apple-airpods/thumbnail.webp",
+      "local_file": "good4ncu-demo-12.webp"
+    }
+  ]
+}

@@ -2,28 +2,19 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../utils/platform_utils.dart';
 import '../models/models.dart';
-import 'token_storage.dart';
 
 /// Service for fetching personalized recommendations via embedding similarity.
 class RecommendationService {
   static String get _baseUrl => getApiBaseUrl();
 
-  Future<Map<String, String>> _authHeaders() async {
-    final token = await TokenStorage.instance.getAccessToken();
-    final headers = <String, String>{'Content-Type': 'application/json'};
-    if (token != null) {
-      headers['Authorization'] = 'Bearer $token';
-    }
-    return headers;
-  }
+  Future<http.Response> _getPublicRecommendation(Uri uri) =>
+      http.get(uri, headers: const {'Accept': 'application/json'});
 
   /// GET /api/recommendations/similar?listing_id=xxx
   /// Returns Top-10 similar listings based on pgvector cosine similarity.
   Future<List<Listing>> getSimilarListings(String listingId) async {
-    final headers = await _authHeaders();
-    final response = await http.get(
+    final response = await _getPublicRecommendation(
       Uri.parse('$_baseUrl/api/recommendations/similar?listing_id=$listingId'),
-      headers: headers,
     );
 
     if (response.statusCode == 401) {
@@ -42,11 +33,14 @@ class RecommendationService {
 
   /// GET /api/recommendations/feed
   /// Returns personalized recommendation feed for the home page.
-  Future<List<Listing>> getRecommendationFeed({int limit = 20, int offset = 0}) async {
-    final headers = await _authHeaders();
-    final response = await http.get(
-      Uri.parse('$_baseUrl/api/recommendations/feed?limit=$limit&offset=$offset'),
-      headers: headers,
+  Future<List<Listing>> getRecommendationFeed({
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final response = await _getPublicRecommendation(
+      Uri.parse(
+        '$_baseUrl/api/recommendations/feed?limit=$limit&offset=$offset',
+      ),
     );
 
     if (response.statusCode == 401) {

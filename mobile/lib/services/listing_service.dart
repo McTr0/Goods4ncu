@@ -37,10 +37,13 @@ class ListingService extends BaseService {
     }
     if (sort != 'newest') queryParams['sort'] = sort;
 
-    final uri = Uri.parse('$baseUrl/api/listings').replace(
-      queryParameters: queryParams,
-    );
-    final response = await get(uri, headers);
+    final uri = Uri.parse(
+      '$baseUrl/api/listings',
+    ).replace(queryParameters: queryParams);
+    var response = await get(uri, headers);
+    if (response.statusCode == 401 && headers.containsKey('Authorization')) {
+      response = await get(uri, const {'Accept': 'application/json'});
+    }
     return handleResponse(response, (data) => ListingsResponse.fromJson(data));
   }
 
@@ -48,12 +51,15 @@ class ListingService extends BaseService {
   /// GET /api/listings/{id}
   Future<Listing> getListingDetail(String id) async {
     final headers = await authHeaders();
-    final response = await get(
-      Uri.parse('$baseUrl/api/listings/$id'),
-      headers,
-    );
+    final uri = Uri.parse('$baseUrl/api/listings/$id');
+    var response = await get(uri, headers);
+    if (response.statusCode == 401 && headers.containsKey('Authorization')) {
+      response = await get(uri, const {'Accept': 'application/json'});
+    }
     return handleResponse(
-        response, (data) => Listing.fromJson(data as Map<String, dynamic>));
+      response,
+      (data) => Listing.fromJson(data as Map<String, dynamic>),
+    );
   }
 
   /// Create new listing.
@@ -144,7 +150,8 @@ class RecognizedItem {
       category: json['category'] ?? 'other',
       brand: json['brand'] ?? '',
       conditionScore: json['condition_score'] ?? 5,
-      defects: (json['defects'] as List<dynamic>?)
+      defects:
+          (json['defects'] as List<dynamic>?)
               ?.map((e) => e.toString())
               .toList() ??
           [],

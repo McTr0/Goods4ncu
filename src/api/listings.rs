@@ -8,18 +8,9 @@ use serde::{Deserialize, Serialize};
 use crate::api::auth::extract_user_id_from_token_with_fallback;
 use crate::api::error::ApiError;
 use crate::api::AppState;
+use crate::categories::{normalize_category, valid_category_message, MARKETPLACE_CATEGORIES};
 use crate::repositories::{CreateListingInput, ListingRepository, UpdateListingInput};
 use crate::utils::cents_to_yuan;
-
-/// Valid marketplace categories for listings.
-pub const MARKETPLACE_CATEGORIES: &[&str] = &[
-    "electronics",
-    "books",
-    "digitalAccessories",
-    "dailyGoods",
-    "clothingShoes",
-    "other",
-];
 
 // ---------------------------------------------------------------------------
 // Query params
@@ -55,6 +46,7 @@ pub struct ListingSummary {
     pub condition_score: i32,
     pub suggested_price_cny: f64,
     pub status: String,
+    pub image_url: Option<String>,
     /// First defect description, useful as a quick condition hint for buyers.
     pub defect_hint: Option<String>,
 }
@@ -78,6 +70,7 @@ pub struct ListingDetail {
     pub suggested_price_cny: f64,
     pub defects: Vec<String>,
     pub description: Option<String>,
+    pub image_url: Option<String>,
     /// Only visible to the listing owner; None for other viewers.
     pub owner_id: Option<String>,
     pub owner_username: Option<String>,
@@ -169,6 +162,7 @@ pub async fn get_listings(
                 condition_score: listing.condition_score,
                 suggested_price_cny: cents_to_yuan(listing.suggested_price_cny as i64),
                 status: listing.status,
+                image_url: listing.image_url,
                 defect_hint,
             }
         })
@@ -221,6 +215,7 @@ pub async fn get_listing(
         suggested_price_cny: cents_to_yuan(listing.suggested_price_cny as i64),
         defects,
         description: listing.description,
+        image_url: listing.image_url,
         // Reveal owner_id to all authenticated users so they can contact the seller via chat
         owner_id: viewer_id.as_ref().map(|_| listing.owner_id.clone()),
         owner_username,
@@ -259,12 +254,9 @@ pub async fn create_listing(
             "brand must be 100 characters or fewer".to_string(),
         ));
     }
-    if !MARKETPLACE_CATEGORIES.contains(&payload.category.as_str()) {
-        return Err(ApiError::BadRequest(format!(
-            "category must be one of: {}",
-            MARKETPLACE_CATEGORIES.join(", ")
-        )));
-    }
+    let category = normalize_category(&payload.category)
+        .ok_or_else(|| ApiError::BadRequest(valid_category_message()))?
+        .to_string();
     if payload.condition_score < 1 || payload.condition_score > 10 {
         return Err(ApiError::BadRequest(
             "condition_score must be between 1 and 10".to_string(),
@@ -311,12 +303,13 @@ pub async fn create_listing(
         .listing_repo
         .create(CreateListingInput {
             title: payload.title,
-            category: payload.category,
+            category,
             brand: Some(payload.brand),
             condition_score: payload.condition_score,
             suggested_price_cny: payload.suggested_price_cny,
             defects: payload.defects,
             description: payload.description.unwrap_or_default(),
+            image_url: payload.image_url.clone(),
             owner_id: user_id,
         })
         .await
@@ -364,14 +357,15 @@ pub async fn update_listing(
             ));
         }
     }
-    if let Some(ref category) = payload.category {
-        if !MARKETPLACE_CATEGORIES.contains(&category.as_str()) {
-            return Err(ApiError::BadRequest(format!(
-                "category must be one of: {}",
-                MARKETPLACE_CATEGORIES.join(", ")
-            )));
-        }
-    }
+    let category = payload
+        .category
+        .as_deref()
+        .map(|category| {
+            normalize_category(category)
+                .map(str::to_string)
+                .ok_or_else(|| ApiError::BadRequest(valid_category_message()))
+        })
+        .transpose()?;
     if let Some(ref brand) = payload.brand {
         if brand.is_empty() {
             return Err(ApiError::BadRequest("brand cannot be empty".to_string()));
@@ -434,7 +428,7 @@ pub async fn update_listing(
             &user_id,
             UpdateListingInput {
                 title: payload.title,
-                category: payload.category,
+                category,
                 brand: payload.brand,
                 condition_score: payload.condition_score,
                 suggested_price_cny: payload.suggested_price_cny,
@@ -774,12 +768,14 @@ mod tests {
             condition_score: 9,
             suggested_price_cny: 12999.0,
             status: "active".to_string(),
+            image_url: Some("https://cdn.example.com/macbook.jpg".to_string()),
             defect_hint: Some("屏幕有轻微划痕".to_string()),
         };
         let json = serde_json::to_string(&summary).unwrap();
         assert!(json.contains("MacBook Pro"));
         assert!(json.contains("Apple"));
         assert!(json.contains("\"status\":\"active\""));
+        assert!(json.contains("\"image_url\":\"https://cdn.example.com/macbook.jpg\""));
         assert!(json.contains("12999"));
         assert!(json.contains("defect_hint"));
         assert!(json.contains("屏幕有轻微划痕"));
@@ -795,6 +791,7 @@ mod tests {
             condition_score: 5,
             suggested_price_cny: 99.0,
             status: "active".to_string(),
+            image_url: None,
             defect_hint: None,
         };
         let json = serde_json::to_string(&summary).unwrap();
@@ -826,6 +823,7 @@ mod tests {
             suggested_price_cny: 7999.0,
             defects: vec!["None".to_string()],
             description: Some("Brand new".to_string()),
+            image_url: Some("https://cdn.example.com/iphone.jpg".to_string()),
             owner_id: Some("user-owner".to_string()),
             owner_username: Some("seller1".to_string()),
             status: "active".to_string(),
@@ -834,6 +832,7 @@ mod tests {
         let json = serde_json::to_string(&detail).unwrap();
         assert!(json.contains("iPhone 15"));
         assert!(json.contains("seller1"));
+        assert!(json.contains("https://cdn.example.com/iphone.jpg"));
         assert!(json.contains("\"defects\":[\"None\"]"));
     }
 

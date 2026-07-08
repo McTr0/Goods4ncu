@@ -191,23 +191,36 @@ async fn insert_hitl_request(pool: &sqlx::PgPool, fixture: HitlRequestFixture<'_
     .expect("insert hitl request");
 }
 
-async fn insert_connection(
+async fn insert_realtime_conversation(
     pool: &sqlx::PgPool,
-    connection_id: Uuid,
-    requester_id: &str,
-    receiver_id: &str,
+    conversation_id: Uuid,
+    initiator_id: &str,
+    recipient_id: &str,
     status: &str,
 ) {
     sqlx::query(
-        "INSERT INTO chat_connections (id, requester_id, receiver_id, status) VALUES ($1, $2, $3, $4)",
+        "INSERT INTO chat_conversations (
+            id, client_request_id, mode, state, initiator_id, recipient_id
+         ) VALUES ($1, $1, 'realtime', $2, $3, $4)",
     )
-    .bind(connection_id)
-    .bind(requester_id)
-    .bind(receiver_id)
+    .bind(conversation_id)
     .bind(status)
+    .bind(initiator_id)
+    .bind(recipient_id)
     .execute(pool)
     .await
-    .expect("insert connection");
+    .expect("insert realtime conversation");
+
+    sqlx::query(
+        "INSERT INTO chat_conversation_members (conversation_id, user_id)
+         VALUES ($1, $2), ($1, $3)",
+    )
+    .bind(conversation_id)
+    .bind(initiator_id)
+    .bind(recipient_id)
+    .execute(pool)
+    .await
+    .expect("insert conversation members");
 }
 
 async fn insert_refresh_token(pool: &sqlx::PgPool, user_id: &str, token: &str) {
@@ -623,7 +636,7 @@ async fn seller_approval_creates_order_before_reporting_success() {
         assert_eq!(order.get::<String, _>("buyer_id"), "nego-buyer-1");
         assert_eq!(order.get::<String, _>("seller_id"), "nego-seller-1");
         assert_eq!(order.get::<i64, _>("final_price"), 9_000);
-        assert_eq!(order.get::<String, _>("status"), "pending");
+        assert_eq!(order.get::<String, _>("status"), "confirmed");
 
         let hitl = sqlx::query("SELECT status, resolved_at FROM hitl_requests WHERE id = $1")
             .bind("nego-request-1")
@@ -814,7 +827,7 @@ async fn buyer_accept_counter_creates_order_and_finalizes_negotiation() {
         assert_eq!(order.get::<String, _>("buyer_id"), "nego-counter-buyer-1");
         assert_eq!(order.get::<String, _>("seller_id"), "nego-counter-seller-1");
         assert_eq!(order.get::<i64, _>("final_price"), 11_000);
-        assert_eq!(order.get::<String, _>("status"), "pending");
+        assert_eq!(order.get::<String, _>("status"), "confirmed");
 
         let hitl = sqlx::query(
             "SELECT status, buyer_action, resolved_at FROM hitl_requests WHERE id = $1",
@@ -951,18 +964,18 @@ async fn buyer_reject_counter_finalizes_negotiation_without_order() {
 }
 
 #[tokio::test]
-async fn typing_indicator_requires_connected_conversation() {
+async fn typing_indicator_requires_active_realtime_conversation() {
     with_test_pool(|pool| async move {
         insert_user(&pool, "typing-user-a", "typing_a", "hash", "user", "active").await;
         insert_user(&pool, "typing-user-b", "typing_b", "hash", "user", "active").await;
 
-        let connection_id = Uuid::new_v4();
-        insert_connection(
+        let conversation_id = Uuid::new_v4();
+        insert_realtime_conversation(
             &pool,
-            connection_id,
+            conversation_id,
             "typing-user-a",
             "typing-user-b",
-            "pending",
+            "syn_sent",
         )
         .await;
 
@@ -978,16 +991,14 @@ async fn typing_indicator_requires_connected_conversation() {
 
         let req = Request::builder()
             .method("POST")
-            .uri("/api/chat/typing")
+            .uri(format!("/api/chat/conversations/{conversation_id}/typing"))
             .header("Authorization", bearer(&token))
             .header("Content-Type", "application/json")
-            .body(Body::from(
-                json!({ "conversation_id": connection_id.to_string() }).to_string(),
-            ))
+            .body(Body::empty())
             .unwrap();
 
         let resp = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
     })
     .await;
 }

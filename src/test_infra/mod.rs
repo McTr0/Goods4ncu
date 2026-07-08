@@ -224,8 +224,9 @@ where
 
     sqlx::query(
         "TRUNCATE TABLE \
-            chat_messages, hitl_requests, notifications, watchlist, \
-            chat_connections, orders, inventory, documents, refresh_tokens, users \
+            chat_messages, chat_conversation_events, chat_conversation_members, chat_blocks, \
+            chat_conversations, hitl_requests, notifications, watchlist, orders, inventory, \
+            documents, refresh_tokens, users \
          RESTART IDENTITY CASCADE",
     )
     .execute(&pool)

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/category_utils.dart';
 
 class AdminListingsTab extends StatefulWidget {
   final ApiService apiService;
@@ -139,7 +140,7 @@ class _AdminListingsTabState extends State<AdminListingsTab> {
             ),
             title: Text(item['title'] ?? ''),
             subtitle: Text(
-              '${item['category']} · ¥${item['suggested_price_cny'] ?? 0} · ${item['status']}',
+              '${localizedCategoryLabel(context, item['category']?.toString())} · ¥${item['suggested_price_cny'] ?? 0} · ${item['status']}',
             ),
             trailing: isTakedown
                 ? Chip(
@@ -176,7 +177,9 @@ class _AdminListingsTabState extends State<AdminListingsTab> {
             ),
             const SizedBox(height: 8),
             Text('${l.idLabel} ${item['id']}'),
-            Text('${l.categoryLabel}: ${item['category']}'),
+            Text(
+              '${l.categoryLabel}: ${localizedCategoryLabel(context, item['category']?.toString())}',
+            ),
             Text('${l.brandLabel}: ${item['brand'] ?? l.unknown}'),
             Text('${l.priceLabel}: ¥${item['suggested_price_cny'] ?? 0}'),
             Text('${l.conditionLabel}: ${item['condition_score'] ?? 0}'),

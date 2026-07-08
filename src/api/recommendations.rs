@@ -35,6 +35,7 @@ pub struct RecommendationItem {
     pub condition_score: i32,
     pub suggested_price_cny: f64,
     pub status: String,
+    pub image_url: Option<String>,
     pub defect_hint: Option<String>,
 }
 
@@ -77,7 +78,8 @@ pub async fn get_similar_listings(
     let rows = sqlx::query(
         r#"
         SELECT i.id, i.title, i.category, i.brand,
-               i.condition_score, i.suggested_price_cny, i.status, i.defects
+               i.condition_score, i.suggested_price_cny, i.status,
+               i.image_url, i.defects
         FROM inventory i
         JOIN documents d ON d.id = i.id
         WHERE i.id != $1 AND i.status = 'active'
@@ -108,6 +110,7 @@ pub async fn get_similar_listings(
                     row.get::<i32, _>("suggested_price_cny") as i64,
                 ),
                 status: row.get("status"),
+                image_url: row.get("image_url"),
                 defect_hint,
             }
         })
@@ -128,7 +131,7 @@ pub async fn get_recommendation_feed(
     let rows = sqlx::query(
         r#"
         SELECT id, title, category, brand, condition_score,
-               suggested_price_cny, status, defects
+               suggested_price_cny, status, image_url, defects
         FROM inventory
         WHERE status = 'active'
         ORDER BY created_at DESC
@@ -157,10 +160,34 @@ pub async fn get_recommendation_feed(
                     row.get::<i32, _>("suggested_price_cny") as i64,
                 ),
                 status: row.get("status"),
+                image_url: row.get("image_url"),
                 defect_hint,
             }
         })
         .collect();
 
     Ok(Json(RecommendationResponse { items }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recommendation_item_serializes_image_url() {
+        let item = RecommendationItem {
+            id: "listing-1".to_string(),
+            title: "Demo listing".to_string(),
+            category: "electronics".to_string(),
+            brand: "Demo".to_string(),
+            condition_score: 9,
+            suggested_price_cny: 299.0,
+            status: "active".to_string(),
+            image_url: Some("http://localhost/image.webp".to_string()),
+            defect_hint: None,
+        };
+
+        let json = serde_json::to_value(item).expect("recommendation should serialize");
+        assert_eq!(json["image_url"], "http://localhost/image.webp");
+    }
 }

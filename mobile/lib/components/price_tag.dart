@@ -3,6 +3,8 @@ import 'package:intl/intl.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
+import '../utils/category_utils.dart';
+import '../utils/platform_utils.dart';
 
 class PriceTag extends StatelessWidget {
   final double priceCny;
@@ -25,7 +27,8 @@ class PriceTag extends StatelessWidget {
       style: TextStyle(
         fontSize: fontSize,
         fontWeight: fontWeight,
-        color: AppTheme.primary,
+        color: AppTheme.accent,
+        letterSpacing: -0.3,
       ),
     );
   }
@@ -35,11 +38,7 @@ class ConditionBadge extends StatelessWidget {
   final int score;
   final Color color;
 
-  const ConditionBadge({
-    super.key,
-    required this.score,
-    required this.color,
-  });
+  const ConditionBadge({super.key, required this.score, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -57,8 +56,9 @@ class ConditionBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
       ),
       child: Text(
         label,
@@ -90,81 +90,254 @@ class ListingCard extends StatelessWidget {
   final Listing listing;
   final VoidCallback onTap;
 
-  const ListingCard({
-    super.key,
-    required this.listing,
-    required this.onTap,
+  const ListingCard({super.key, required this.listing, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final category = listing.category.trim();
+    final categoryLabel = localizedCategoryLabel(context, category);
+    final brand = listing.brand.trim();
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        mouseCursor: SystemMouseCursors.click,
+        onTap: onTap,
+        child: Ink(
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardTheme.color,
+            borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+            border: Border.all(
+              color: Theme.of(context).dividerColor.withValues(alpha: 0.82),
+              width: 1,
+            ),
+            boxShadow: AppTheme.softShadow,
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: _ListingImageHeader(
+                    imageUrl: listing.imageUrl,
+                    category: categoryLabel,
+                    icon: _iconForCategory(category),
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppTheme.sp12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          listing.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13,
+                            height: 1.25,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                        if (brand.isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            brand,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                        const Spacer(),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Flexible(
+                              child: PriceTag(
+                                priceCny: listing.suggestedPriceCny,
+                                fontSize: 15,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            conditionBadgeFromScore(listing.conditionScore),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _iconForCategory(String category) {
+    final normalized = category.toLowerCase();
+    if (normalized.contains('书') || normalized.contains('book')) {
+      return Icons.menu_book_outlined;
+    }
+    if (normalized.contains('电') ||
+        normalized.contains('数码') ||
+        normalized.contains('tech')) {
+      return Icons.devices_other_outlined;
+    }
+    if (normalized.contains('衣') || normalized.contains('服')) {
+      return Icons.checkroom_outlined;
+    }
+    if (normalized.contains('车') || normalized.contains('bike')) {
+      return Icons.pedal_bike_outlined;
+    }
+    if (normalized.contains('家具') || normalized.contains('home')) {
+      return Icons.chair_outlined;
+    }
+    return Icons.inventory_2_outlined;
+  }
+}
+
+class _ListingImageHeader extends StatelessWidget {
+  final String? imageUrl;
+  final String category;
+  final IconData icon;
+
+  const _ListingImageHeader({
+    required this.imageUrl,
+    required this.category,
+    required this.icon,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardTheme.color,
-          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-          border: Border.all(
-            color: Theme.of(context).dividerColor,
-            width: 1,
+    final url = imageUrl == null ? null : resolveDisplayUrl(imageUrl!);
+    final hasImage = url != null && url.isNotEmpty;
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (hasImage)
+          Image.network(
+            url,
+            fit: BoxFit.cover,
+            errorBuilder: (context, error, stackTrace) =>
+                _ListingImageFallback(icon: icon),
+            loadingBuilder: (context, child, progress) {
+              if (progress == null) return child;
+              return _ListingImageFallback(icon: icon);
+            },
+          )
+        else
+          _ListingImageFallback(icon: icon),
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.transparent,
+                  Colors.black.withValues(alpha: hasImage ? 0.18 : 0),
+                ],
+              ),
+            ),
           ),
         ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Thumbnail placeholder
-            Expanded(
-              flex: 3,
-              child: Container(
-                width: double.infinity,
-                color: AppTheme.primary.withValues(alpha: 0.08),
-                child: Center(
-                  child: Icon(
-                    Icons.inventory_2_outlined,
-                    size: 48,
-                    color: AppTheme.primary.withValues(alpha: 0.4),
-                  ),
-                ),
+        Positioned(
+          left: AppTheme.sp12,
+          top: AppTheme.sp12,
+          child: _ListingPill(label: category.isEmpty ? '闲置好物' : category),
+        ),
+      ],
+    );
+  }
+}
+
+class _ListingImageFallback extends StatelessWidget {
+  final IconData icon;
+
+  const _ListingImageFallback({required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppTheme.mint, AppTheme.sand, AppTheme.accentSoft],
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -18,
+            top: -18,
+            child: Container(
+              width: 84,
+              height: 84,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.48),
+                shape: BoxShape.circle,
               ),
             ),
-            // Info
-            Expanded(
-              flex: 2,
-              child: Padding(
-                padding: const EdgeInsets.all(AppTheme.sp8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      listing.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                        height: 1.3,
-                      ),
-                    ),
-                    const Spacer(),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Flexible(
-                          child: PriceTag(
-                            priceCny: listing.suggestedPriceCny,
-                            fontSize: 15,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        conditionBadgeFromScore(listing.conditionScore),
-                      ],
-                    ),
-                  ],
-                ),
+          ),
+          Center(
+            child: Container(
+              width: 70,
+              height: 70,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.72),
+                borderRadius: BorderRadius.circular(AppTheme.radiusXl),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.78)),
+              ),
+              child: Icon(
+                icon,
+                size: 36,
+                color: AppTheme.primaryDark.withValues(alpha: 0.72),
               ),
             ),
-          ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ListingPill extends StatelessWidget {
+  final String label;
+
+  const _ListingPill({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 92),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.82),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.86)),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: AppTheme.primaryDark,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
         ),
       ),
     );
