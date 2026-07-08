@@ -1,16 +1,23 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+
 import '../l10n/app_localizations.dart';
-import 'package:go_router/go_router.dart';
 import '../services/api_service.dart';
+import '../services/listing_service.dart';
 import '../theme/app_theme.dart';
+import '../theme/responsive.dart';
+
+typedef ImageBase64Picker = Future<String?> Function(ImageSource source);
 
 class CreateListingPage extends StatefulWidget {
   final ApiService? apiService;
+  final ImageBase64Picker? imageBase64Picker;
 
-  const CreateListingPage({super.key, this.apiService});
+  const CreateListingPage({super.key, this.apiService, this.imageBase64Picker});
 
   @override
   State<CreateListingPage> createState() => _CreateListingPageState();
@@ -25,14 +32,15 @@ class _CreateListingPageState extends State<CreateListingPage> {
   final _brandController = TextEditingController();
   final _priceController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final _defectController = TextEditingController();
 
   String _category = 'electronics';
   int _conditionScore = 7;
   final List<String> _defects = [];
-  final _defectController = TextEditingController();
   bool _isLoading = false;
   bool _isRecognizing = false;
   String? _imageBase64;
+  String? _recognitionError;
 
   static const _categoryKeys = [
     'electronics',
@@ -43,34 +51,20 @@ class _CreateListingPageState extends State<CreateListingPage> {
     'other',
   ];
 
-  String _getCategoryDisplayName(BuildContext context, String key) {
-    final l = AppLocalizations.of(context)!;
-    switch (key) {
-      case 'electronics':
-        return l.electronics;
-      case 'books':
-        return l.books;
-      case 'digitalAccessories':
-        return l.digitalAccessories;
-      case 'dailyGoods':
-        return l.dailyGoods;
-      case 'clothingShoes':
-        return l.clothingShoes;
-      case 'other':
-        return l.other;
-      default:
-        return key;
-    }
-  }
-
   @override
   void initState() {
     super.initState();
     _apiService = widget.apiService ?? context.read<ApiService>();
+    _titleController.addListener(_refreshRequiredSummary);
+    _brandController.addListener(_refreshRequiredSummary);
+    _priceController.addListener(_refreshRequiredSummary);
   }
 
   @override
   void dispose() {
+    _titleController.removeListener(_refreshRequiredSummary);
+    _brandController.removeListener(_refreshRequiredSummary);
+    _priceController.removeListener(_refreshRequiredSummary);
     _titleController.dispose();
     _brandController.dispose();
     _priceController.dispose();
@@ -79,95 +73,96 @@ class _CreateListingPageState extends State<CreateListingPage> {
     super.dispose();
   }
 
-  Future<void> _takePhotoAndRecognize() async {
+  void _refreshRequiredSummary() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _takePhotoAndRecognize() =>
+      _selectImageAndRecognize(ImageSource.camera);
+
+  Future<void> _pickAndRecognize() =>
+      _selectImageAndRecognize(ImageSource.gallery);
+
+  Future<void> _selectImageAndRecognize(ImageSource source) async {
+    final base64 =
+        await (widget.imageBase64Picker?.call(source) ??
+            _pickImageAsBase64(source));
+    if (base64 == null) return;
+    await _recognizeBase64(base64);
+  }
+
+  Future<String?> _pickImageAsBase64(ImageSource source) async {
+    final image = await _imagePicker.pickImage(
+      source: source,
+      imageQuality: 80,
+      maxWidth: 1024,
+    );
+    if (image == null) return null;
+
+    final bytes = await image.readAsBytes();
+    return base64Encode(bytes);
+  }
+
+  Future<void> _retryRecognition() async {
+    final imageBase64 = _imageBase64;
+    if (imageBase64 == null) return;
+    await _recognizeBase64(imageBase64);
+  }
+
+  Future<void> _recognizeBase64(String base64) async {
+    if (!mounted) return;
+    setState(() {
+      _isRecognizing = true;
+      _imageBase64 = base64;
+      _recognitionError = null;
+    });
+
     try {
-      final XFile? image = await _imagePicker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 80,
-        maxWidth: 1024,
-      );
-
-      if (image == null) return;
-
-      final bytes = await image.readAsBytes();
-      final base64 = base64Encode(bytes);
-
-      setState(() {
-        _isRecognizing = true;
-        _imageBase64 = base64;
-      });
-
       final result = await _apiService.recognizeItem(base64);
+      if (!mounted) return;
 
       setState(() {
-        _titleController.text = result.title;
-        _brandController.text = result.brand;
-        _category = result.category;
-        _conditionScore = result.conditionScore.clamp(1, 10);
-        _defects.clear();
-        _defects.addAll(result.defects);
-        _descriptionController.text = result.description;
+        _applyRecognizedResult(result);
         _isRecognizing = false;
       });
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('识别成功，已自动填充信息')),
-        );
-      }
+      final l = AppLocalizations.of(context)!;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.recognitionSuccess)));
     } catch (e) {
-      setState(() => _isRecognizing = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('识别失败: $e')),
-        );
-      }
+      if (!mounted) return;
+      final l = AppLocalizations.of(context)!;
+      final message = l.recognitionFailed(e.toString());
+      setState(() {
+        _isRecognizing = false;
+        _recognitionError = message;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
-  Future<void> _pickAndRecognize() async {
-    try {
-      final XFile? image = await _imagePicker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 80,
-        maxWidth: 1024,
-      );
-
-      if (image == null) return;
-
-      final bytes = await image.readAsBytes();
-      final base64 = base64Encode(bytes);
-
-      setState(() {
-        _isRecognizing = true;
-        _imageBase64 = base64;
-      });
-
-      final result = await _apiService.recognizeItem(base64);
-
-      setState(() {
-        _titleController.text = result.title;
-        _brandController.text = result.brand;
-        _category = result.category;
-        _conditionScore = result.conditionScore.clamp(1, 10);
-        _defects.clear();
-        _defects.addAll(result.defects);
-        _descriptionController.text = result.description;
-        _isRecognizing = false;
-      });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('识别成功，已自动填充信息')),
-        );
-      }
-    } catch (e) {
-      setState(() => _isRecognizing = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('识别失败: $e')),
-        );
-      }
+  void _applyRecognizedResult(RecognizedItem result) {
+    if (_titleController.text.trim().isEmpty &&
+        result.title.trim().isNotEmpty) {
+      _titleController.text = result.title.trim();
+    }
+    if (_brandController.text.trim().isEmpty &&
+        result.brand.trim().isNotEmpty) {
+      _brandController.text = result.brand.trim();
+    }
+    if (_descriptionController.text.trim().isEmpty &&
+        result.description.trim().isNotEmpty) {
+      _descriptionController.text = result.description.trim();
+    }
+    if (_categoryKeys.contains(result.category)) {
+      _category = result.category;
+    }
+    _conditionScore = result.conditionScore.clamp(1, 10);
+    if (_defects.isEmpty) {
+      _defects.addAll(result.defects.where((d) => d.trim().isNotEmpty));
     }
   }
 
@@ -190,362 +185,984 @@ class _CreateListingPageState extends State<CreateListingPage> {
             : _descriptionController.text.trim(),
       );
 
-      if (mounted) {
-        final l = AppLocalizations.of(context)!;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l.createSuccess)),
-        );
-        context.go('/listing/$id');
-      }
+      if (!mounted) return;
+      final l = AppLocalizations.of(context)!;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.createSuccess)));
+      context.go('/listing/$id');
     } catch (e) {
-      if (mounted) {
-        final l = AppLocalizations.of(context)!;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${l.createError}: $e')),
-        );
-        setState(() => _isLoading = false);
-      }
+      if (!mounted) return;
+      final l = AppLocalizations.of(context)!;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('${l.createError}: $e')));
+      setState(() => _isLoading = false);
     }
   }
 
   void _addDefect() {
     final text = _defectController.text.trim();
-    if (text.isNotEmpty && !_defects.contains(text)) {
-      setState(() => _defects.add(text));
-      _defectController.clear();
+    if (text.isEmpty || _defects.contains(text)) return;
+
+    setState(() => _defects.add(text));
+    _defectController.clear();
+  }
+
+  String _getCategoryDisplayName(BuildContext context, String key) {
+    final l = AppLocalizations.of(context)!;
+    switch (key) {
+      case 'electronics':
+        return l.electronics;
+      case 'books':
+        return l.books;
+      case 'digitalAccessories':
+        return l.digitalAccessories;
+      case 'dailyGoods':
+        return l.dailyGoods;
+      case 'clothingShoes':
+        return l.clothingShoes;
+      case 'other':
+        return l.other;
+      default:
+        return key;
     }
   }
 
-  String _getConditionLabel() {
-    if (_conditionScore >= 9) return 'Like New';
-    if (_conditionScore >= 7) return 'Good';
-    if (_conditionScore >= 5) return 'Fair';
-    return 'Poor';
+  String _conditionDisplayLabel(AppLocalizations l) {
+    if (_conditionScore >= 9) return l.conditionLikeNew;
+    if (_conditionScore >= 7) return l.conditionGood;
+    if (_conditionScore >= 5) return l.conditionFair;
+    return l.conditionPoor;
   }
 
   Color get _conditionColor => AppTheme.conditionColor(_conditionScore);
 
+  bool get _hasValidPrice {
+    final raw = _priceController.text.trim();
+    return raw.isNotEmpty && double.tryParse(raw) != null;
+  }
+
+  List<String> _missingRequiredFields(AppLocalizations l) {
+    final fields = <String>[];
+    if (_titleController.text.trim().isEmpty) fields.add(l.title);
+    if (_brandController.text.trim().isEmpty) fields.add(l.brand);
+    if (!_hasValidPrice) fields.add(l.price);
+    return fields;
+  }
+
+  Widget _buildSectionHeader(String title, IconData icon, {String? subtitle}) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppTheme.sp12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: colorScheme.primary.withValues(alpha: 0.11),
+              borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+            ),
+            child: Icon(icon, size: 20, color: colorScheme.primary),
+          ),
+          const SizedBox(width: AppTheme.sp12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCard({required Widget child}) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppTheme.sp20),
+      decoration: BoxDecoration(
+        color: theme.cardTheme.color,
+        borderRadius: BorderRadius.circular(AppTheme.radiusXl),
+        boxShadow: AppTheme.softShadow,
+        border: Border.all(color: theme.dividerColor.withValues(alpha: 0.58)),
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildAiCapturePanel({bool compact = false}) {
+    final l = AppLocalizations.of(context)!;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final onGradientText = isDark ? Colors.white : AppTheme.primaryDark;
+    final secondaryText = isDark
+        ? Colors.white.withValues(alpha: 0.76)
+        : AppTheme.textSecondary;
+
+    return Container(
+      key: const ValueKey('create-ai-capture-panel'),
+      width: double.infinity,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppTheme.radius2xl),
+        gradient: LinearGradient(
+          colors: isDark
+              ? [AppTheme.primaryDark, const Color(0xFF0B3B39)]
+              : [AppTheme.mint, AppTheme.sand],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.22)),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.10),
+            blurRadius: 28,
+            offset: const Offset(0, 16),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          if (_imageBase64 == null)
+            Padding(
+              padding: EdgeInsets.all(compact ? AppTheme.sp20 : AppTheme.sp24),
+              child: Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(AppTheme.sp16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(
+                        alpha: isDark ? 0.12 : 0.7,
+                      ),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.auto_awesome,
+                      size: compact ? 40 : 48,
+                      color: isDark ? AppTheme.primaryLight : AppTheme.primary,
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.sp16),
+                  Text(
+                    l.createListingAiTitle,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: onGradientText,
+                      letterSpacing: -0.4,
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.sp8),
+                  Text(
+                    l.createListingAiSubtitle,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: secondaryText,
+                      height: 1.45,
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.sp20),
+                  _buildImageActionButtons(),
+                  if (_isRecognizing) _buildRecognizingIndicator(),
+                ],
+              ),
+            )
+          else
+            _buildImagePreview(compact: compact),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImagePreview({required bool compact}) {
+    final l = AppLocalizations.of(context)!;
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Stack(
+          children: [
+            AspectRatio(
+              aspectRatio: compact ? 16 / 9 : 4 / 3,
+              child: Image.memory(
+                base64Decode(_imageBase64!),
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+              ),
+            ),
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withValues(alpha: 0.72),
+                    ],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: AppTheme.sp12,
+              right: AppTheme.sp12,
+              child: IconButton.filled(
+                tooltip: l.createListingChangeImage,
+                onPressed: _isRecognizing
+                    ? null
+                    : () => setState(() {
+                        _imageBase64 = null;
+                        _recognitionError = null;
+                      }),
+                icon: const Icon(Icons.close, size: 20),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.black54,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ),
+            Positioned(
+              left: AppTheme.sp16,
+              right: AppTheme.sp16,
+              bottom: AppTheme.sp16,
+              child: Wrap(
+                spacing: AppTheme.sp8,
+                runSpacing: AppTheme.sp8,
+                children: [
+                  _buildStatusPill(
+                    icon: _recognitionError == null
+                        ? Icons.check_circle
+                        : Icons.error_outline,
+                    label: _recognitionError == null
+                        ? l.createListingAiReady
+                        : l.createListingAiNeedsRetry,
+                    color: _recognitionError == null
+                        ? AppTheme.success
+                        : AppTheme.error,
+                  ),
+                  if (_isRecognizing)
+                    _buildStatusPill(
+                      icon: Icons.auto_awesome,
+                      label: l.createListingAiRecognizing,
+                      color: AppTheme.info,
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        if (_recognitionError != null || _isRecognizing)
+          Container(
+            padding: const EdgeInsets.all(AppTheme.sp16),
+            color: theme.cardTheme.color?.withValues(alpha: 0.72),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_recognitionError != null)
+                  Text(
+                    _recognitionError!,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.error,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                if (_isRecognizing) _buildRecognizingIndicator(compact: true),
+                if (_recognitionError != null) ...[
+                  const SizedBox(height: AppTheme.sp12),
+                  Wrap(
+                    spacing: AppTheme.sp8,
+                    runSpacing: AppTheme.sp8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _retryRecognition,
+                        icon: const Icon(Icons.refresh),
+                        label: Text(l.retry),
+                      ),
+                      FilledButton.tonalIcon(
+                        onPressed: _pickAndRecognize,
+                        icon: const Icon(Icons.photo_library_outlined),
+                        label: Text(l.createListingChangeImage),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildStatusPill({
+    required IconData icon,
+    required String label,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTheme.sp12,
+        vertical: AppTheme.sp8,
+      ),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: Colors.white),
+          const SizedBox(width: AppTheme.sp6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImageActionButtons() {
+    final l = AppLocalizations.of(context)!;
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: AppTheme.sp12,
+      runSpacing: AppTheme.sp12,
+      children: [
+        FilledButton.icon(
+          key: const ValueKey('create-camera-button'),
+          onPressed: _isRecognizing ? null : _takePhotoAndRecognize,
+          icon: const Icon(Icons.camera_alt_outlined),
+          label: Text(l.takePhoto),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.primary,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppTheme.sp24,
+              vertical: AppTheme.sp14,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+            ),
+          ),
+        ),
+        FilledButton.tonalIcon(
+          key: const ValueKey('create-gallery-button'),
+          onPressed: _isRecognizing ? null : _pickAndRecognize,
+          icon: const Icon(Icons.photo_library_outlined),
+          label: Text(l.fromGallery),
+          style: FilledButton.styleFrom(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppTheme.sp24,
+              vertical: AppTheme.sp14,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRecognizingIndicator({bool compact = false}) {
+    final l = AppLocalizations.of(context)!;
+    return Padding(
+      padding: EdgeInsets.only(top: compact ? 0 : AppTheme.sp16),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2.4),
+          ),
+          const SizedBox(width: AppTheme.sp8),
+          Flexible(
+            child: Text(
+              l.createListingAiRecognizing,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProgressCard() {
+    final l = AppLocalizations.of(context)!;
+    final basicsDone =
+        _titleController.text.trim().isNotEmpty &&
+        _brandController.text.trim().isNotEmpty &&
+        _hasValidPrice;
+
+    return _buildCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            l.createListingProgressTitle,
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: AppTheme.sp6),
+          Text(
+            l.createListingProgressSubtitle,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: AppTheme.sp16),
+          _buildProgressItem(
+            complete: _imageBase64 != null,
+            label: l.createListingProgressImage,
+          ),
+          _buildProgressItem(
+            complete: basicsDone,
+            label: l.createListingProgressBasics,
+          ),
+          _buildProgressItem(
+            complete: true,
+            label: l.createListingProgressCondition,
+          ),
+          _buildProgressItem(
+            complete:
+                _descriptionController.text.trim().isNotEmpty ||
+                _defects.isNotEmpty,
+            label: l.createListingProgressDescription,
+            optional: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProgressItem({
+    required bool complete,
+    required String label,
+    bool optional = false,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final color = complete ? AppTheme.success : colorScheme.onSurfaceVariant;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppTheme.sp6),
+      child: Row(
+        children: [
+          Icon(
+            complete ? Icons.check_circle : Icons.radio_button_unchecked,
+            size: 18,
+            color: color,
+          ),
+          const SizedBox(width: AppTheme.sp8),
+          Expanded(
+            child: Text(
+              optional
+                  ? '$label · ${AppLocalizations.of(context)!.optional}'
+                  : label,
+              style: TextStyle(
+                color: color,
+                fontWeight: complete ? FontWeight.w800 : FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBasicsSection() {
+    final l = AppLocalizations.of(context)!;
+    return Column(
+      key: const ValueKey('create-basics-section'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(
+          l.createListingBasicInfo,
+          Icons.info_outline,
+          subtitle: l.createListingBasicInfoSubtitle,
+        ),
+        _buildCard(
+          child: Column(
+            children: [
+              TextFormField(
+                key: const ValueKey('create-title-field'),
+                controller: _titleController,
+                decoration: InputDecoration(
+                  labelText: '${l.title} *',
+                  hintText: l.createListingTitleHint,
+                  prefixIcon: const Icon(Icons.title),
+                ),
+                validator: (v) =>
+                    v == null || v.trim().isEmpty ? l.titleRequired : null,
+              ),
+              const SizedBox(height: AppTheme.sp16),
+              DropdownButtonFormField<String>(
+                initialValue: _category,
+                decoration: InputDecoration(
+                  labelText: '${l.category} *',
+                  prefixIcon: const Icon(Icons.category_outlined),
+                ),
+                items: _categoryKeys
+                    .map(
+                      (c) => DropdownMenuItem(
+                        value: c,
+                        child: Text(_getCategoryDisplayName(context, c)),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) setState(() => _category = v);
+                },
+                icon: const Icon(Icons.keyboard_arrow_down),
+                borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+              ),
+              const SizedBox(height: AppTheme.sp16),
+              TextFormField(
+                key: const ValueKey('create-brand-field'),
+                controller: _brandController,
+                decoration: InputDecoration(
+                  labelText: '${l.brand} *',
+                  hintText: l.createListingBrandHint,
+                  prefixIcon: const Icon(Icons.branding_watermark_outlined),
+                ),
+                validator: (v) => v == null || v.trim().isEmpty
+                    ? l.createListingBrandRequired
+                    : null,
+              ),
+              const SizedBox(height: AppTheme.sp16),
+              TextFormField(
+                key: const ValueKey('create-price-field'),
+                controller: _priceController,
+                decoration: InputDecoration(
+                  labelText: l.createListingPriceLabel,
+                  hintText: '0.00',
+                  prefixIcon: const Icon(Icons.currency_yuan),
+                ),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) {
+                    return l.createListingPriceRequired;
+                  }
+                  if (double.tryParse(v.trim()) == null) {
+                    return l.createListingPriceInvalid;
+                  }
+                  return null;
+                },
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildConditionSection() {
+    final l = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(
+          l.createListingConditionSection,
+          Icons.health_and_safety_outlined,
+          subtitle: l.createListingConditionSubtitle,
+        ),
+        _buildCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    l.condition,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppTheme.sp12,
+                      vertical: AppTheme.sp8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _conditionColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '$_conditionScore/10 ${_conditionDisplayLabel(l)}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: _conditionColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppTheme.sp16),
+              SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  activeTrackColor: _conditionColor,
+                  inactiveTrackColor: _conditionColor.withValues(alpha: 0.22),
+                  thumbColor: _conditionColor,
+                  overlayColor: _conditionColor.withValues(alpha: 0.1),
+                  trackHeight: 8,
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 12,
+                  ),
+                  overlayShape: const RoundSliderOverlayShape(
+                    overlayRadius: 24,
+                  ),
+                ),
+                child: Slider(
+                  value: _conditionScore.toDouble(),
+                  min: 1,
+                  max: 10,
+                  divisions: 9,
+                  onChanged: (v) => setState(() => _conditionScore = v.round()),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppTheme.sp8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      l.conditionPoor,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    Text(
+                      l.conditionLikeNew,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: AppTheme.sp24),
+              Text(
+                l.defects,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: AppTheme.sp12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _defectController,
+                      decoration: InputDecoration(
+                        hintText: l.createListingDefectHint,
+                        prefixIcon: const Icon(Icons.report_problem_outlined),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: AppTheme.sp16,
+                          vertical: AppTheme.sp12,
+                        ),
+                      ),
+                      onSubmitted: (_) => _addDefect(),
+                    ),
+                  ),
+                  const SizedBox(width: AppTheme.sp12),
+                  FilledButton(
+                    onPressed: _addDefect,
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.all(AppTheme.sp14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                      ),
+                    ),
+                    child: const Icon(Icons.add),
+                  ),
+                ],
+              ),
+              if (_defects.isNotEmpty) ...[
+                const SizedBox(height: AppTheme.sp16),
+                Wrap(
+                  spacing: AppTheme.sp8,
+                  runSpacing: AppTheme.sp8,
+                  children: _defects
+                      .map(
+                        (d) => Chip(
+                          label: Text(d),
+                          deleteIcon: const Icon(Icons.cancel, size: 18),
+                          onDeleted: () => setState(() => _defects.remove(d)),
+                          backgroundColor: AppTheme.error.withValues(
+                            alpha: 0.10,
+                          ),
+                          labelStyle: const TextStyle(
+                            color: AppTheme.error,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          side: BorderSide.none,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDescriptionSection() {
+    final l = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(
+          l.createListingDescriptionSection,
+          Icons.description_outlined,
+          subtitle: l.createListingDescriptionSubtitle,
+        ),
+        _buildCard(
+          child: TextFormField(
+            controller: _descriptionController,
+            decoration: InputDecoration(
+              labelText: l.createListingDescriptionLabel,
+              hintText: l.createListingDescriptionHint,
+              alignLabelWithHint: true,
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              filled: false,
+            ),
+            maxLines: 5,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileWorkspace() {
+    return ListView(
+      key: const ValueKey('create-mobile-workspace'),
+      padding: const EdgeInsets.fromLTRB(
+        AppTheme.sp16,
+        AppTheme.sp24,
+        AppTheme.sp16,
+        AppTheme.sp32,
+      ),
+      children: [
+        _buildAiCapturePanel(compact: true),
+        const SizedBox(height: AppTheme.sp24),
+        _buildBasicsSection(),
+        const SizedBox(height: AppTheme.sp24),
+        _buildConditionSection(),
+        const SizedBox(height: AppTheme.sp24),
+        _buildDescriptionSection(),
+      ],
+    );
+  }
+
+  Widget _buildDesktopWorkspace() {
+    return SingleChildScrollView(
+      key: const ValueKey('create-desktop-workspace'),
+      padding: const EdgeInsets.fromLTRB(
+        AppTheme.sp24,
+        AppTheme.sp32,
+        AppTheme.sp24,
+        AppTheme.sp32,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 380,
+            child: Column(
+              children: [
+                _buildAiCapturePanel(),
+                const SizedBox(height: AppTheme.sp20),
+                _buildProgressCard(),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppTheme.sp24),
+          Expanded(
+            child: Column(
+              children: [
+                _buildBasicsSection(),
+                const SizedBox(height: AppTheme.sp24),
+                _buildConditionSection(),
+                const SizedBox(height: AppTheme.sp24),
+                _buildDescriptionSection(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStickySubmitBar() {
+    final l = AppLocalizations.of(context)!;
+    final theme = Theme.of(context);
+    final missingFields = _missingRequiredFields(l);
+    final summary = missingFields.isEmpty
+        ? l.createListingReadyHint
+        : l.createListingMissingFields(missingFields.join(l.listSeparator));
+
+    return SafeArea(
+      top: false,
+      child: Container(
+        key: const ValueKey('create-sticky-submit'),
+        padding: const EdgeInsets.fromLTRB(
+          AppTheme.sp16,
+          AppTheme.sp12,
+          AppTheme.sp16,
+          AppTheme.sp14,
+        ),
+        decoration: BoxDecoration(
+          color: theme.cardTheme.color?.withValues(alpha: 0.96),
+          border: Border(
+            top: BorderSide(color: theme.dividerColor.withValues(alpha: 0.7)),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(
+                alpha: theme.brightness == Brightness.dark ? 0.32 : 0.08,
+              ),
+              blurRadius: 18,
+              offset: const Offset(0, -8),
+            ),
+          ],
+        ),
+        child: ResponsiveContent(
+          maxWidth: 1180,
+          child: Row(
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    Icon(
+                      missingFields.isEmpty
+                          ? Icons.check_circle
+                          : Icons.edit_note,
+                      color: missingFields.isEmpty
+                          ? AppTheme.success
+                          : theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: AppTheme.sp8),
+                    Expanded(
+                      child: Text(
+                        summary,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppTheme.sp12),
+              SizedBox(
+                height: 52,
+                child: ElevatedButton.icon(
+                  key: const ValueKey('create-submit-button'),
+                  onPressed: _isLoading ? null : _submit,
+                  icon: _isLoading
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.4,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.publish_outlined, size: 20),
+                  label: Text(l.submit),
+                  style: ElevatedButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(AppTheme.radiusXl),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(l.createListing),
+        backgroundColor: Theme.of(
+          context,
+        ).scaffoldBackgroundColor.withValues(alpha: 0.92),
+        elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.close),
           onPressed: () => context.pop(),
         ),
-        actions: [
-          if (_isRecognizing)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            )
-          else
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.camera_alt),
-              tooltip: 'AI识别',
-              onSelected: (value) {
-                if (value == 'camera') {
-                  _takePhotoAndRecognize();
-                } else if (value == 'gallery') {
-                  _pickAndRecognize();
-                }
-              },
-              itemBuilder: (context) => [
-                PopupMenuItem(
-                  value: 'camera',
-                  child: Row(
-                    children: [
-                      const Icon(Icons.camera_alt, size: 20),
-                      const SizedBox(width: 8),
-                      Text('拍照识别'),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'gallery',
-                  child: Row(
-                    children: [
-                      const Icon(Icons.photo_library, size: 20),
-                      const SizedBox(width: 8),
-                      Text('相册识别'),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-        ],
       ),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(AppTheme.sp16),
+      body: SafeArea(
+        top: false,
+        child: Column(
           children: [
-            // AI recognition hint
-            if (_imageBase64 == null)
-              Container(
-                padding: const EdgeInsets.all(AppTheme.sp16),
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-                  border: Border.all(
-                    color: AppTheme.primary.withValues(alpha: 0.2),
-                    style: BorderStyle.solid,
-                  ),
-                ),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.auto_awesome,
-                      size: 40,
-                      color: AppTheme.primary.withValues(alpha: 0.6),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '点击右上角相机图标拍照或选择图片',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppTheme.primary.withValues(alpha: 0.8),
-                        fontSize: 14,
-                      ),
-                    ),
-                    Text(
-                      'AI将自动识别商品信息',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppTheme.primary.withValues(alpha: 0.6),
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        TextButton.icon(
-                          onPressed: _takePhotoAndRecognize,
-                          icon: const Icon(Icons.camera_alt, size: 18),
-                          label: const Text('拍照'),
-                        ),
-                        const SizedBox(width: 16),
-                        TextButton.icon(
-                          onPressed: _pickAndRecognize,
-                          icon: const Icon(Icons.photo_library, size: 18),
-                          label: const Text('相册'),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              )
-            else
-              Container(
-                height: 120,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-                  color: AppTheme.success.withValues(alpha: 0.1),
-                ),
-                child: Stack(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-                      child: Image.memory(
-                        base64Decode(_imageBase64!),
-                        height: 120,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                    Positioned(
-                      top: 8,
-                      right: 8,
-                      child: IconButton.filled(
-                        onPressed: () => setState(() => _imageBase64 = null),
-                        icon: const Icon(Icons.close, size: 18),
-                        style: IconButton.styleFrom(
-                          backgroundColor: Colors.black54,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.all(4),
-                          minimumSize: const Size(28, 28),
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      bottom: 8,
-                      left: 8,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: AppTheme.success,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.check_circle, size: 14, color: Colors.white),
-                            SizedBox(width: 4),
-                            Text(
-                              '已识别',
-                              style: TextStyle(color: Colors.white, fontSize: 12),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
+            Expanded(
+              child: Form(
+                key: _formKey,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isDesktop =
+                        constraints.maxWidth >= AppBreakpoints.desktop;
+                    return ResponsiveContent(
+                      maxWidth: isDesktop ? 1180 : 860,
+                      child: isDesktop
+                          ? _buildDesktopWorkspace()
+                          : _buildMobileWorkspace(),
+                    );
+                  },
                 ),
               ),
-            const SizedBox(height: AppTheme.sp16),
-            TextFormField(
-              controller: _titleController,
-              decoration: InputDecoration(
-                labelText: '${l.title} *',
-                hintText: 'e.g. iPhone 13 Pro Max 256G',
-              ),
-              validator: (v) => v == null || v.trim().isEmpty ? l.titleRequired : null,
             ),
-            const SizedBox(height: AppTheme.sp16),
-            DropdownButtonFormField<String>(
-              // ignore: deprecated_member_use
-              value: _category,
-              decoration: InputDecoration(labelText: '${l.category} *'),
-              items: _categoryKeys
-                  .map((c) => DropdownMenuItem(value: c, child: Text(_getCategoryDisplayName(context, c))))
-                  .toList(),
-              onChanged: (v) => setState(() => _category = v!),
-            ),
-            const SizedBox(height: AppTheme.sp16),
-            TextFormField(
-              controller: _brandController,
-              decoration: InputDecoration(
-                labelText: '${l.brand} *',
-                hintText: 'e.g. Apple',
-              ),
-              validator: (v) => v == null || v.trim().isEmpty ? 'Please enter brand' : null,
-            ),
-            const SizedBox(height: AppTheme.sp16),
-            TextFormField(
-              controller: _priceController,
-              decoration: InputDecoration(
-                labelText: '${l.price} (CNY) *',
-                hintText: '0.00',
-                prefixText: '¥ ',
-              ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              validator: (v) {
-                if (v == null || v.isEmpty) return 'Please enter price';
-                if (double.tryParse(v) == null) return 'Please enter a valid price';
-                return null;
-              },
-            ),
-            const SizedBox(height: AppTheme.sp20),
-            Text(
-              l.condition,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: Slider(
-                    value: _conditionScore.toDouble(),
-                    min: 1,
-                    max: 10,
-                    divisions: 9,
-                    label: '$_conditionScore/10',
-                    onChanged: (v) => setState(() => _conditionScore = v.round()),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: _conditionColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    '$_conditionScore/10 ${_getConditionLabel()}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: _conditionColor,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppTheme.sp20),
-            Text(
-              l.defects,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _defectController,
-                    decoration: const InputDecoration(
-                      hintText: 'e.g. Minor screen scratch',
-                    ),
-                    onSubmitted: (_) => _addDefect(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  onPressed: _addDefect,
-                  icon: const Icon(Icons.add),
-                ),
-              ],
-            ),
-            if (_defects.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _defects
-                    .map((d) => Chip(
-                          label: Text(d),
-                          deleteIcon: const Icon(Icons.close, size: 16),
-                          onDeleted: () => setState(() => _defects.remove(d)),
-                          backgroundColor: AppTheme.error.withValues(alpha: 0.1),
-                          labelStyle: const TextStyle(color: AppTheme.error),
-                          side: BorderSide.none,
-                        ))
-                    .toList(),
-              ),
-            ],
-            const SizedBox(height: AppTheme.sp16),
-            TextFormField(
-              controller: _descriptionController,
-              decoration: InputDecoration(
-                labelText: '${l.description} (optional)',
-                hintText: 'Describe the item condition, usage, etc.',
-                alignLabelWithHint: true,
-              ),
-              maxLines: 4,
-            ),
-            const SizedBox(height: AppTheme.sp32),
-            SizedBox(
-              height: 52,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _submit,
-                child: _isLoading
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : Text(l.submit),
-              ),
-            ),
-            const SizedBox(height: AppTheme.sp32),
+            _buildStickySubmitBar(),
           ],
         ),
       ),

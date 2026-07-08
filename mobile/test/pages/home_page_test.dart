@@ -1,0 +1,139 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+import 'package:good4ncu_mobile/l10n/app_localizations.dart';
+import 'package:good4ncu_mobile/models/models.dart';
+import 'package:good4ncu_mobile/pages/home_page.dart';
+import 'package:good4ncu_mobile/services/recommendation_service.dart';
+import 'package:good4ncu_mobile/theme/app_theme.dart';
+import 'package:provider/provider.dart';
+
+class _FakeRecommendationService extends RecommendationService {
+  @override
+  Future<List<Listing>> getRecommendationFeed({
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    return [
+      Listing(
+        id: 'listing-1',
+        title: '程序设计教材',
+        category: 'books',
+        brand: 'NCU',
+        conditionScore: 8,
+        suggestedPriceCny: 35,
+        status: 'active',
+      ),
+    ];
+  }
+}
+
+Widget _buildApp({
+  Locale locale = const Locale('zh'),
+  ThemeMode themeMode = ThemeMode.light,
+}) {
+  final router = GoRouter(
+    routes: [
+      GoRoute(path: '/', builder: (context, state) => const HomePage()),
+      GoRoute(
+        path: '/chat',
+        builder: (context, state) =>
+            Text('chat prompt: ${state.uri.queryParameters['prompt'] ?? ''}'),
+      ),
+      GoRoute(
+        path: '/listing/:id',
+        builder: (context, state) =>
+            Text('listing ${state.pathParameters['id'] ?? ''}'),
+      ),
+    ],
+  );
+
+  return Provider<RecommendationService>.value(
+    value: _FakeRecommendationService(),
+    child: MaterialApp.router(
+      theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: themeMode,
+      locale: locale,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      routerConfig: router,
+    ),
+  );
+}
+
+void main() {
+  testWidgets('home page keeps the customer entry simple', (tester) async {
+    await tester.pumpWidget(_buildApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('今天想淘点什么？'), findsOneWidget);
+    expect(find.text('试试这样开始'), findsOneWidget);
+    expect(find.text('推荐怎么来'), findsNothing);
+    expect(find.textContaining('相关度'), findsNothing);
+    expect(find.textContaining('新鲜度'), findsNothing);
+    expect(find.textContaining('轻量排序'), findsNothing);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('home-agent-prompt')),
+      '帮我找一本高数教材',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('chat prompt: 帮我找一本高数教材'), findsOneWidget);
+  });
+
+  testWidgets('home page shows a simple marketplace feed', (tester) async {
+    await tester.pumpWidget(_buildApp());
+    await tester.pumpAndSettle();
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -700));
+    await tester.pumpAndSettle();
+
+    expect(find.text('最近上新'), findsOneWidget);
+    expect(find.text('看看同学们正在出什么闲置。'), findsOneWidget);
+    expect(find.text('可解释排序'), findsNothing);
+    expect(find.text('程序设计教材'), findsOneWidget);
+  });
+
+  testWidgets('home page localizes the entry in English', (tester) async {
+    await tester.pumpWidget(_buildApp(locale: const Locale('en')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('What are you looking for today?'), findsOneWidget);
+    expect(find.text('Try starting with'), findsOneWidget);
+    expect(find.text('今天想淘点什么？'), findsNothing);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('home-agent-prompt')),
+      'help me find a laptop',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('chat prompt: help me find a laptop'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('home page uses the dark surface gradient in dark mode', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_buildApp(themeMode: ThemeMode.dark));
+    await tester.pumpAndSettle();
+
+    final decoratedBox = tester
+        .widgetList<DecoratedBox>(find.byType(DecoratedBox))
+        .firstWhere((box) {
+          final decoration = box.decoration;
+          return decoration is BoxDecoration &&
+              decoration.gradient is LinearGradient;
+        });
+    final gradient =
+        (decoratedBox.decoration as BoxDecoration).gradient! as LinearGradient;
+
+    expect(gradient.colors.first, AppTheme.surfaceDark);
+  });
+}
