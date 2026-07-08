@@ -14,6 +14,7 @@ pub struct Notification {
     pub body: String,
     pub related_order_id: Option<String>,
     pub related_listing_id: Option<String>,
+    pub related_conversation_id: Option<String>,
     pub is_read: bool,
     pub created_at: String,
 }
@@ -53,10 +54,56 @@ impl NotificationService {
         related_order_id: Option<&str>,
         related_listing_id: Option<&str>,
     ) -> Result<String> {
+        self.create_internal(
+            user_id,
+            event_type,
+            title,
+            body,
+            related_order_id,
+            related_listing_id,
+            None,
+        )
+        .await
+    }
+
+    pub async fn create_for_conversation(
+        &self,
+        user_id: &str,
+        event_type: &str,
+        title: &str,
+        body: &str,
+        related_listing_id: Option<&str>,
+        related_conversation_id: &str,
+    ) -> Result<String> {
+        self.create_internal(
+            user_id,
+            event_type,
+            title,
+            body,
+            None,
+            related_listing_id,
+            Some(related_conversation_id),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn create_internal(
+        &self,
+        user_id: &str,
+        event_type: &str,
+        title: &str,
+        body: &str,
+        related_order_id: Option<&str>,
+        related_listing_id: Option<&str>,
+        related_conversation_id: Option<&str>,
+    ) -> Result<String> {
         let id = Uuid::new_v4().to_string();
         sqlx::query(
-            "INSERT INTO notifications (id, user_id, event_type, title, body, related_order_id, related_listing_id) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            "INSERT INTO notifications (
+                id, user_id, event_type, title, body, related_order_id,
+                related_listing_id, related_conversation_id
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uuid)",
         )
         .bind(&id)
         .bind(user_id)
@@ -65,6 +112,7 @@ impl NotificationService {
         .bind(body)
         .bind(related_order_id)
         .bind(related_listing_id)
+        .bind(related_conversation_id)
         .execute(&self.db)
         .await?;
 
@@ -74,6 +122,8 @@ impl NotificationService {
             "event_type": event_type,
             "title": title,
             "body": body,
+            "related_listing_id": related_listing_id,
+            "related_conversation_id": related_conversation_id,
         })
         .to_string();
         (self.broadcast)(user_id.to_string(), payload);
@@ -96,7 +146,7 @@ impl NotificationService {
 
         let rows = sqlx::query(
             r#"SELECT id, user_id, event_type, title, body, related_order_id,
-                      related_listing_id, is_read, created_at
+                      related_listing_id, related_conversation_id, is_read, created_at
                FROM notifications
                WHERE user_id = $1
                ORDER BY created_at DESC
@@ -125,6 +175,11 @@ impl NotificationService {
                     body: row.get("body"),
                     related_order_id: row.try_get("related_order_id").ok(),
                     related_listing_id: row.try_get("related_listing_id").ok(),
+                    related_conversation_id: row
+                        .try_get::<Option<uuid::Uuid>, _>("related_conversation_id")
+                        .ok()
+                        .flatten()
+                        .map(|value| value.to_string()),
                     is_read: row.get("is_read"),
                     created_at,
                 }
@@ -151,7 +206,7 @@ impl NotificationService {
 
         let rows = sqlx::query(
             r#"SELECT id, user_id, event_type, title, body, related_order_id,
-                      related_listing_id, is_read, created_at
+                      related_listing_id, related_conversation_id, is_read, created_at
                FROM notifications
                WHERE user_id = $1 AND is_read = FALSE
                ORDER BY created_at DESC
@@ -180,6 +235,11 @@ impl NotificationService {
                     body: row.get("body"),
                     related_order_id: row.try_get("related_order_id").ok(),
                     related_listing_id: row.try_get("related_listing_id").ok(),
+                    related_conversation_id: row
+                        .try_get::<Option<uuid::Uuid>, _>("related_conversation_id")
+                        .ok()
+                        .flatten()
+                        .map(|value| value.to_string()),
                     is_read: row.get("is_read"),
                     created_at,
                 }

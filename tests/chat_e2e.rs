@@ -1,29 +1,28 @@
-//! End-to-end tests for the private chat flow (user-to-user direct chat).
+//! End-to-end tests for user-to-user chat conversations.
 //!
-//! Tests the three-way handshake connection lifecycle, message sending,
-//! message editing, read receipts, and typing indicators.
+//! These tests exercise the public HTTP API for the TCP-style realtime
+//! conversation lifecycle, message sending, editing, read receipts, and typing
+//! indicators.
 //!
 //! Run with: `cargo test --test chat_e2e`
 //! Enforce required mode: `CHAT_E2E_REQUIRED=true cargo test --test chat_e2e`
 //!
-//! Requires a running PostgreSQL database with `DATABASE_URL` env var set.
-//! Tests are independent and clean up their data in the drop step.
+//! Requires a running backend plus `TEST_BASE_URL`. The suite is optional by
+//! default so normal `cargo test` can run without starting the app server.
 
 use axum::http::{HeaderMap, StatusCode};
 use good4ncu::test_infra::db_safety;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use std::time::Duration;
 use uuid::Uuid;
 
-/// Test user credentials
 struct TestUser {
     user_id: String,
-    username: String,
     token: String,
 }
 
-/// Registers a new user and returns the auth response.
 async fn register_user(
     client: &Client,
     base_url: &str,
@@ -48,7 +47,6 @@ async fn register_user(
     Ok(response.json::<AuthResponse>().await?)
 }
 
-/// Logs in a user and returns the auth response.
 async fn login_user(
     client: &Client,
     base_url: &str,
@@ -73,7 +71,6 @@ async fn login_user(
     Ok(response.json::<AuthResponse>().await?)
 }
 
-/// Creates a test user by registering and logging in, returning the user details and token.
 async fn create_test_user(
     client: &Client,
     base_url: &str,
@@ -84,141 +81,102 @@ async fn create_test_user(
     let username = format!("{}_{}", prefix, unique_suffix);
     let password = "testpass123".to_string();
 
-    // Register the user
-    let _reg_response = register_user(client, base_url, &username, &password).await?;
-
-    // Log in to get the token
+    let _ = register_user(client, base_url, &username, &password).await?;
     let login_response = login_user(client, base_url, &username, &password).await?;
 
     Ok(TestUser {
         user_id: login_response.user_id,
-        username,
         token: login_response.token,
     })
 }
 
-// ---------------------------------------------------------------------------
-// Request/Response types
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Deserialize)]
-pub struct AuthResponse {
-    pub token: String,
-    pub refresh_token: String,
-    pub user_id: String,
-    pub username: String,
-    pub message: String,
+#[allow(dead_code)]
+struct AuthResponse {
+    token: String,
+    refresh_token: String,
+    user_id: String,
+    username: String,
+    message: String,
 }
 
 #[derive(Debug, Serialize)]
-struct ConnectRequestBody {
-    receiver_id: String,
+struct CreateConversationBody {
+    client_request_id: String,
+    recipient_id: String,
     listing_id: Option<String>,
+    mode: String,
+    subject: Option<String>,
+    content: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct ConnectRequestResponse {
-    pub connection_id: String,
-    pub status: String,
+struct CreateConversationResponse {
+    conversation: ConversationEntry,
+    created: bool,
+    mutual_open: bool,
 }
 
 #[derive(Debug, Serialize)]
-struct ConnectAcceptBody {
-    connection_id: String,
+struct RespondConversationBody {
+    decision: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct ConnectAcceptResponse {
-    pub status: String,
-    #[allow(dead_code)]
-    pub established_at: String,
-}
-
-#[derive(Debug, Serialize)]
-struct ConnectRejectBody {
-    connection_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ConnectRejectResponse {
-    pub status: String,
+#[allow(dead_code)]
+struct ConversationEntry {
+    id: String,
+    mode: String,
+    state: String,
+    initiator_id: String,
+    recipient_id: String,
+    unread_count: i32,
+    is_initiator: bool,
 }
 
 #[derive(Debug, Deserialize)]
-struct ConnectionEntry {
-    pub id: String,
-    #[allow(dead_code)]
-    pub requester_id: String,
-    #[allow(dead_code)]
-    pub other_user_id: String,
-    #[allow(dead_code)]
-    pub other_username: Option<String>,
-    pub status: String,
-    #[allow(dead_code)]
-    pub established_at: Option<String>,
-    #[allow(dead_code)]
-    pub created_at: String,
-    #[allow(dead_code)]
-    pub unread_count: i32,
-    pub is_receiver: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct ConnectionListResponse {
-    pub items: Vec<ConnectionEntry>,
+struct ConversationListResponse {
+    items: Vec<ConversationEntry>,
+    next_cursor: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct SendMessageBody {
+    client_message_id: String,
     content: String,
     image_base64: Option<String>,
     audio_base64: Option<String>,
+    image_url: Option<String>,
+    audio_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct SendMessageResponse {
-    pub message_id: i64,
-    pub sender: String,
-    pub content: String,
-    pub conversation_id: String,
-    #[allow(dead_code)]
-    pub timestamp: String,
-    #[allow(dead_code)]
-    pub read_at: Option<String>,
-    #[allow(dead_code)]
-    pub image_data: Option<String>,
-    #[allow(dead_code)]
-    pub audio_data: Option<String>,
-    pub status: String,
-}
-
-#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct MessageEntry {
-    pub id: i64,
-    pub sender: String,
-    pub sender_username: Option<String>,
-    pub content: String,
-    #[allow(dead_code)]
-    pub is_agent: bool,
-    pub timestamp: String,
-    pub read_at: Option<String>,
-    pub read_by: Option<String>,
-    #[allow(dead_code)]
-    pub image_data: Option<String>,
-    #[allow(dead_code)]
-    pub audio_data: Option<String>,
-    #[allow(dead_code)]
-    pub status: String,
-    pub edited_at: Option<String>,
+    id: i64,
+    client_message_id: Option<String>,
+    conversation_id: String,
+    sender: String,
+    content: String,
+    timestamp: String,
+    read_at: Option<String>,
+    image_data: Option<String>,
+    audio_data: Option<String>,
+    image_url: Option<String>,
+    audio_url: Option<String>,
+    status: String,
+    kind: String,
+    edited_at: Option<String>,
 }
+
+type SendMessageResponse = MessageEntry;
+type EditMessageResponse = MessageEntry;
 
 #[derive(Debug, Deserialize)]
 struct MessageListResponse {
-    #[allow(dead_code)]
-    pub conversation_id: String,
-    pub messages: Vec<MessageEntry>,
-    #[allow(dead_code)]
-    pub total: i64,
+    conversation_id: String,
+    messages: Vec<MessageEntry>,
+    total: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -227,27 +185,10 @@ struct EditMessageBody {
 }
 
 #[derive(Debug, Deserialize)]
-struct EditMessageResponse {
-    #[allow(dead_code)]
-    pub message_id: i64,
-    pub content: String,
-    pub edited_at: String,
-}
-
-#[derive(Debug, Deserialize)]
 struct MarkReadResponse {
-    pub message_id: i64,
-    pub read_at: String,
-}
-
-#[derive(Debug, Serialize)]
-struct TypingBody {
     conversation_id: String,
+    marked_count: i64,
 }
-
-// ---------------------------------------------------------------------------
-// Test helpers
-// ---------------------------------------------------------------------------
 
 fn auth_headers(token: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
@@ -311,6 +252,153 @@ async fn resolve_base_url(client: &Client) -> anyhow::Result<Option<String>> {
     }
 }
 
+async fn cleanup_pair(pool: &PgPool, user_a: &str, user_b: &str) -> anyhow::Result<()> {
+    sqlx::query(
+        "DELETE FROM chat_blocks
+         WHERE (blocker_id = $1 AND blocked_id = $2)
+            OR (blocker_id = $2 AND blocked_id = $1)",
+    )
+    .bind(user_a)
+    .bind(user_b)
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "DELETE FROM chat_conversations
+         WHERE (initiator_id = $1 AND recipient_id = $2)
+            OR (initiator_id = $2 AND recipient_id = $1)",
+    )
+    .bind(user_a)
+    .bind(user_b)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn create_realtime_conversation(
+    client: &Client,
+    base_url: &str,
+    initiator: &TestUser,
+    recipient: &TestUser,
+    content: &str,
+) -> anyhow::Result<ConversationEntry> {
+    let response = client
+        .post(format!("{}/api/chat/conversations", base_url))
+        .headers(auth_headers(&initiator.token))
+        .json(&CreateConversationBody {
+            client_request_id: Uuid::new_v4().to_string(),
+            recipient_id: recipient.user_id.clone(),
+            listing_id: None,
+            mode: "realtime".to_string(),
+            subject: None,
+            content: content.to_string(),
+        })
+        .send()
+        .await?;
+
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "Create conversation failed: {:?}",
+        response.text().await?
+    );
+    let body = response.json::<CreateConversationResponse>().await?;
+    assert!(body.created);
+    assert!(!body.mutual_open);
+    Ok(body.conversation)
+}
+
+async fn create_active_realtime_conversation(
+    client: &Client,
+    base_url: &str,
+    initiator: &TestUser,
+    recipient: &TestUser,
+) -> anyhow::Result<String> {
+    let conversation = create_realtime_conversation(
+        client,
+        base_url,
+        initiator,
+        recipient,
+        "你好，我想聊聊这件商品。",
+    )
+    .await?;
+    assert_eq!(conversation.state, "syn_sent");
+
+    let accept_response = client
+        .post(format!(
+            "{}/api/chat/conversations/{}/respond",
+            base_url, conversation.id
+        ))
+        .headers(auth_headers(&recipient.token))
+        .json(&RespondConversationBody {
+            decision: "accept".to_string(),
+        })
+        .send()
+        .await?;
+
+    assert_eq!(
+        accept_response.status(),
+        StatusCode::OK,
+        "Accept conversation failed: {:?}",
+        accept_response.text().await?
+    );
+    let accepted = accept_response.json::<ConversationEntry>().await?;
+    assert_eq!(accepted.state, "syn_ack");
+
+    let ack_response = client
+        .post(format!(
+            "{}/api/chat/conversations/{}/ack",
+            base_url, conversation.id
+        ))
+        .headers(auth_headers(&initiator.token))
+        .send()
+        .await?;
+
+    assert_eq!(
+        ack_response.status(),
+        StatusCode::OK,
+        "Ack conversation failed: {:?}",
+        ack_response.text().await?
+    );
+    let acked = ack_response.json::<ConversationEntry>().await?;
+    assert_eq!(acked.state, "active");
+
+    Ok(conversation.id)
+}
+
+async fn send_text_message(
+    client: &Client,
+    base_url: &str,
+    token: &str,
+    conversation_id: &str,
+    content: &str,
+) -> anyhow::Result<SendMessageResponse> {
+    let response = client
+        .post(format!(
+            "{}/api/chat/conversations/{}/messages",
+            base_url, conversation_id
+        ))
+        .headers(auth_headers(token))
+        .json(&SendMessageBody {
+            client_message_id: Uuid::new_v4().to_string(),
+            content: content.to_string(),
+            image_base64: None,
+            audio_base64: None,
+            image_url: None,
+            audio_url: None,
+        })
+        .send()
+        .await?;
+
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "Send message failed: {:?}",
+        response.text().await?
+    );
+    Ok(response.json::<SendMessageResponse>().await?)
+}
+
 #[test]
 fn test_should_require_chat_e2e_true_values() {
     assert!(should_require_chat_e2e(Some("1")));
@@ -329,343 +417,197 @@ fn test_should_require_chat_e2e_false_values() {
     assert!(!should_require_chat_e2e(Some("no")));
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-/// Test 1: Connection lifecycle - request, accept, reject
 #[tokio::test]
-async fn test_connection_lifecycle() -> anyhow::Result<()> {
+async fn test_realtime_conversation_lifecycle() -> anyhow::Result<()> {
     let database_url = db_safety::resolve_test_database_url();
+    let pool = PgPool::connect(&database_url).await?;
     let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
     let Some(base_url) = resolve_base_url(&client).await? else {
         return Ok(());
     };
 
-    // Create two test users
     let user_a = create_test_user(&client, &base_url, "user_a").await?;
     let user_b = create_test_user(&client, &base_url, "user_b").await?;
+    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
 
-    // Clean up any existing connections between these users
-    sqlx::query(
-        "DELETE FROM chat_connections WHERE (requester_id = $1 AND receiver_id = $2) OR (requester_id = $2 AND receiver_id = $1)"
-    )
-    .bind(&user_a.user_id)
-    .bind(&user_b.user_id)
-    .execute(&sqlx::PgPool::connect(&database_url).await?)
-    .await?;
-
-    // Step 1: User A sends connection request to User B
-    let request_response = client
-        .post(format!("{}/api/chat/connect/request", base_url))
-        .headers(auth_headers(&user_a.token))
-        .json(&ConnectRequestBody {
-            receiver_id: user_b.user_id.clone(),
-            listing_id: None,
-        })
-        .send()
-        .await?;
-
-    assert_eq!(
-        request_response.status(),
-        StatusCode::OK,
-        "Connect request failed: {:?}",
-        request_response.text().await?
-    );
-    let request_body = request_response.json::<ConnectRequestResponse>().await?;
-    assert_eq!(request_body.status, "pending");
-    let connection_id = request_body.connection_id;
-
-    // Verify User B can see the pending connection
-    let list_response_b = client
-        .get(format!("{}/api/chat/connections", base_url))
-        .headers(auth_headers(&user_b.token))
-        .send()
-        .await?;
-
-    assert_eq!(list_response_b.status(), StatusCode::OK);
-    let connections_b = list_response_b.json::<ConnectionListResponse>().await?;
-    let found_connection = connections_b.items.iter().find(|c| c.id == connection_id);
-    assert!(
-        found_connection.is_some(),
-        "User B should see the pending connection"
-    );
-    let conn_entry = found_connection.unwrap();
-    assert_eq!(conn_entry.status, "pending");
-    assert!(conn_entry.is_receiver, "User B should be the receiver");
-
-    // Step 2a: User B accepts the connection
-    let accept_response = client
-        .post(format!("{}/api/chat/connect/accept", base_url))
-        .headers(auth_headers(&user_b.token))
-        .json(&ConnectAcceptBody {
-            connection_id: connection_id.clone(),
-        })
-        .send()
-        .await?;
-
-    assert_eq!(
-        accept_response.status(),
-        StatusCode::OK,
-        "Accept failed: {:?}",
-        accept_response.text().await?
-    );
-    let accept_body = accept_response.json::<ConnectAcceptResponse>().await?;
-    assert_eq!(accept_body.status, "connected");
-
-    // Verify both users see the connection as connected
-    for user_token in [&user_a.token, &user_b.token] {
-        let list_response = client
-            .get(format!("{}/api/chat/connections", base_url))
-            .headers(auth_headers(user_token))
-            .send()
+    let conversation =
+        create_realtime_conversation(&client, &base_url, &user_a, &user_b, "现在方便聊聊吗？")
             .await?;
+    assert_eq!(conversation.mode, "realtime");
+    assert_eq!(conversation.state, "syn_sent");
+    assert_eq!(conversation.initiator_id, user_a.user_id);
+    assert_eq!(conversation.recipient_id, user_b.user_id);
 
-        assert_eq!(list_response.status(), StatusCode::OK);
-        let connections = list_response.json::<ConnectionListResponse>().await?;
-        let found = connections.items.iter().find(|c| c.id == connection_id);
-        assert!(found.is_some(), "Connection should be visible");
-        assert_eq!(found.unwrap().status, "connected");
-    }
-
-    // Step 2b: Create a second connection request to test rejection
-    let request_response2 = client
-        .post(format!("{}/api/chat/connect/request", base_url))
-        .headers(auth_headers(&user_a.token))
-        .json(&ConnectRequestBody {
-            receiver_id: user_b.user_id.clone(),
-            listing_id: None,
-        })
-        .send()
-        .await?;
-
-    let request_body2 = request_response2.json::<ConnectRequestResponse>().await?;
-    let connection_id2 = request_body2.connection_id;
-
-    // User B rejects the second request
-    let reject_response = client
-        .post(format!("{}/api/chat/connect/reject", base_url))
+    let list_response_b = client
+        .get(format!("{}/api/chat/conversations?mode=realtime", base_url))
         .headers(auth_headers(&user_b.token))
-        .json(&ConnectRejectBody {
-            connection_id: connection_id2.clone(),
+        .send()
+        .await?;
+    assert_eq!(list_response_b.status(), StatusCode::OK);
+    let conversations_b = list_response_b.json::<ConversationListResponse>().await?;
+    let found = conversations_b
+        .items
+        .iter()
+        .find(|item| item.id == conversation.id)
+        .expect("receiver should see the realtime invitation");
+    assert_eq!(found.state, "syn_sent");
+    assert!(!found.is_initiator);
+    assert!(found.unread_count >= 1);
+    assert!(conversations_b.next_cursor.is_none());
+
+    let accept_response = client
+        .post(format!(
+            "{}/api/chat/conversations/{}/respond",
+            base_url, conversation.id
+        ))
+        .headers(auth_headers(&user_b.token))
+        .json(&RespondConversationBody {
+            decision: "accept".to_string(),
         })
         .send()
         .await?;
+    assert_eq!(accept_response.status(), StatusCode::OK);
+    let accepted = accept_response.json::<ConversationEntry>().await?;
+    assert_eq!(accepted.state, "syn_ack");
 
-    assert_eq!(reject_response.status(), StatusCode::OK);
-    let reject_body = reject_response.json::<ConnectRejectResponse>().await?;
-    assert_eq!(reject_body.status, "rejected");
-
-    // Clean up
-    sqlx::query("DELETE FROM chat_messages WHERE conversation_id = ANY($1)")
-        .bind(&[connection_id.clone(), connection_id2.clone()])
-        .execute(&sqlx::PgPool::connect(&database_url).await?)
+    let ack_response = client
+        .post(format!(
+            "{}/api/chat/conversations/{}/ack",
+            base_url, conversation.id
+        ))
+        .headers(auth_headers(&user_a.token))
+        .send()
         .await?;
-    sqlx::query("DELETE FROM chat_connections WHERE id = ANY($1)")
-        .bind(&[connection_id.clone(), connection_id2])
-        .execute(&sqlx::PgPool::connect(&database_url).await?)
-        .await?;
+    assert_eq!(ack_response.status(), StatusCode::OK);
+    let active = ack_response.json::<ConversationEntry>().await?;
+    assert_eq!(active.state, "active");
 
+    let close_response = client
+        .post(format!(
+            "{}/api/chat/conversations/{}/close",
+            base_url, conversation.id
+        ))
+        .headers(auth_headers(&user_a.token))
+        .send()
+        .await?;
+    assert_eq!(close_response.status(), StatusCode::OK);
+    let closed = close_response.json::<ConversationEntry>().await?;
+    assert_eq!(closed.state, "closed");
+
+    let declined_invite =
+        create_realtime_conversation(&client, &base_url, &user_a, &user_b, "不急，有空再聊。")
+            .await?;
+    let decline_response = client
+        .post(format!(
+            "{}/api/chat/conversations/{}/respond",
+            base_url, declined_invite.id
+        ))
+        .headers(auth_headers(&user_b.token))
+        .json(&RespondConversationBody {
+            decision: "decline".to_string(),
+        })
+        .send()
+        .await?;
+    assert_eq!(decline_response.status(), StatusCode::OK);
+    let declined = decline_response.json::<ConversationEntry>().await?;
+    assert_eq!(declined.state, "declined");
+
+    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
     Ok(())
 }
 
-/// Test 2: Message sending and receiving
 #[tokio::test]
 async fn test_message_sending() -> anyhow::Result<()> {
     let database_url = db_safety::resolve_test_database_url();
+    let pool = PgPool::connect(&database_url).await?;
     let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
     let Some(base_url) = resolve_base_url(&client).await? else {
         return Ok(());
     };
 
-    // Create two test users
     let user_a = create_test_user(&client, &base_url, "msg_a").await?;
     let user_b = create_test_user(&client, &base_url, "msg_b").await?;
+    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
+    let conversation_id =
+        create_active_realtime_conversation(&client, &base_url, &user_a, &user_b).await?;
 
-    // Clean up
-    sqlx::query(
-        "DELETE FROM chat_connections WHERE (requester_id = $1 AND receiver_id = $2) OR (requester_id = $2 AND receiver_id = $1)"
-    )
-    .bind(&user_a.user_id)
-    .bind(&user_b.user_id)
-    .execute(&sqlx::PgPool::connect(&database_url).await?)
-    .await?;
-
-    // Create and accept connection
-    let request_response = client
-        .post(format!("{}/api/chat/connect/request", base_url))
-        .headers(auth_headers(&user_a.token))
-        .json(&ConnectRequestBody {
-            receiver_id: user_b.user_id.clone(),
-            listing_id: None,
-        })
-        .send()
-        .await?;
-
-    let request_body = request_response.json::<ConnectRequestResponse>().await?;
-    let connection_id = request_body.connection_id;
-
-    client
-        .post(format!("{}/api/chat/connect/accept", base_url))
-        .headers(auth_headers(&user_b.token))
-        .json(&ConnectAcceptBody {
-            connection_id: connection_id.clone(),
-        })
-        .send()
-        .await?;
-
-    // Step 1: User A sends a message
     let message_content = "Hello, this is a test message!";
-    let send_response = client
-        .post(format!(
-            "{}/api/chat/conversations/{}/messages",
-            base_url, connection_id
-        ))
-        .headers(auth_headers(&user_a.token))
-        .json(&SendMessageBody {
-            content: message_content.to_string(),
-            image_base64: None,
-            audio_base64: None,
-        })
-        .send()
-        .await?;
-
-    assert_eq!(
-        send_response.status(),
-        StatusCode::OK,
-        "Send message failed: {:?}",
-        send_response.text().await?
-    );
-    let sent_message = send_response.json::<SendMessageResponse>().await?;
+    let sent_message = send_text_message(
+        &client,
+        &base_url,
+        &user_a.token,
+        &conversation_id,
+        message_content,
+    )
+    .await?;
     assert_eq!(sent_message.sender, user_a.user_id);
     assert_eq!(sent_message.content, message_content);
-    assert_eq!(sent_message.conversation_id, connection_id);
+    assert_eq!(sent_message.conversation_id, conversation_id);
     assert_eq!(sent_message.status, "sent");
+    assert_eq!(sent_message.kind, "message");
 
-    // Step 2: User B receives the message via GET endpoint
     let get_response = client
         .get(format!(
             "{}/api/chat/conversations/{}/messages",
-            base_url, connection_id
+            base_url, conversation_id
         ))
         .headers(auth_headers(&user_b.token))
         .send()
         .await?;
-
     assert_eq!(get_response.status(), StatusCode::OK);
     let messages_response = get_response.json::<MessageListResponse>().await?;
-    assert!(
-        !messages_response.messages.is_empty(),
-        "Should have at least one message"
-    );
+    assert_eq!(messages_response.conversation_id, conversation_id);
+    assert!(messages_response.total >= 2);
 
-    // Find our message (messages are returned in reverse chronological order)
-    let found_message = messages_response
+    let received_msg = messages_response
         .messages
         .iter()
-        .find(|m| m.id == sent_message.message_id);
-    assert!(found_message.is_some(), "Message should be retrievable");
-    let received_msg = found_message.unwrap();
+        .find(|message| message.id == sent_message.id)
+        .expect("message should be retrievable");
     assert_eq!(received_msg.sender, user_a.user_id);
-    assert_eq!(
-        received_msg.sender_username.as_deref(),
-        Some(user_a.username.as_str())
-    );
     assert_eq!(received_msg.content, message_content);
-    assert!(
-        !received_msg.timestamp.is_empty(),
-        "Timestamp should be set"
-    );
+    assert!(!received_msg.timestamp.is_empty());
 
-    // Clean up
-    sqlx::query("DELETE FROM chat_messages WHERE conversation_id = $1")
-        .bind(&connection_id)
-        .execute(&sqlx::PgPool::connect(&database_url).await?)
-        .await?;
-    sqlx::query("DELETE FROM chat_connections WHERE id = $1")
-        .bind(&connection_id)
-        .execute(&sqlx::PgPool::connect(&database_url).await?)
-        .await?;
-
+    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
     Ok(())
 }
 
-/// Test 3: Message editing within 15-minute window and 403 for editing other's messages
 #[tokio::test]
 async fn test_message_editing() -> anyhow::Result<()> {
     let database_url = db_safety::resolve_test_database_url();
+    let pool = PgPool::connect(&database_url).await?;
     let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
     let Some(base_url) = resolve_base_url(&client).await? else {
         return Ok(());
     };
 
-    // Create two test users
     let user_a = create_test_user(&client, &base_url, "edit_a").await?;
     let user_b = create_test_user(&client, &base_url, "edit_b").await?;
+    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
+    let conversation_id =
+        create_active_realtime_conversation(&client, &base_url, &user_a, &user_b).await?;
 
-    // Clean up
-    sqlx::query(
-        "DELETE FROM chat_connections WHERE (requester_id = $1 AND receiver_id = $2) OR (requester_id = $2 AND receiver_id = $1)"
+    let sent_message = send_text_message(
+        &client,
+        &base_url,
+        &user_a.token,
+        &conversation_id,
+        "Original message content",
     )
-    .bind(&user_a.user_id)
-    .bind(&user_b.user_id)
-    .execute(&sqlx::PgPool::connect(&database_url).await?)
     .await?;
 
-    // Create and accept connection
-    let request_response = client
-        .post(format!("{}/api/chat/connect/request", base_url))
-        .headers(auth_headers(&user_a.token))
-        .json(&ConnectRequestBody {
-            receiver_id: user_b.user_id.clone(),
-            listing_id: None,
-        })
-        .send()
-        .await?;
-
-    let connection_id = request_response
-        .json::<ConnectRequestResponse>()
-        .await?
-        .connection_id;
-
-    client
-        .post(format!("{}/api/chat/connect/accept", base_url))
-        .headers(auth_headers(&user_b.token))
-        .json(&ConnectAcceptBody {
-            connection_id: connection_id.clone(),
-        })
-        .send()
-        .await?;
-
-    // User A sends a message
-    let send_response = client
-        .post(format!(
-            "{}/api/chat/conversations/{}/messages",
-            base_url, connection_id
-        ))
-        .headers(auth_headers(&user_a.token))
-        .json(&SendMessageBody {
-            content: "Original message content".to_string(),
-            image_base64: None,
-            audio_base64: None,
-        })
-        .send()
-        .await?;
-
-    let sent_message = send_response.json::<SendMessageResponse>().await?;
-    let message_id = sent_message.message_id;
-
-    // Step 1: User A edits their own message within 15-minute window
     let edited_content = "Edited message content";
     let edit_response = client
-        .patch(format!("{}/api/chat/messages/{}", base_url, message_id))
+        .patch(format!(
+            "{}/api/chat/messages/{}",
+            base_url, sent_message.id
+        ))
         .headers(auth_headers(&user_a.token))
         .json(&EditMessageBody {
             content: edited_content.to_string(),
         })
         .send()
         .await?;
-
     assert_eq!(
         edit_response.status(),
         StatusCode::OK,
@@ -674,156 +616,63 @@ async fn test_message_editing() -> anyhow::Result<()> {
     );
     let edit_result = edit_response.json::<EditMessageResponse>().await?;
     assert_eq!(edit_result.content, edited_content);
-    assert!(!edit_result.edited_at.is_empty(), "edited_at should be set");
+    assert!(edit_result.edited_at.is_some());
 
-    // Verify edit is reflected in subsequent GET
-    let get_response = client
-        .get(format!(
-            "{}/api/chat/conversations/{}/messages",
-            base_url, connection_id
-        ))
-        .headers(auth_headers(&user_a.token))
-        .send()
-        .await?;
-
-    let messages = get_response.json::<MessageListResponse>().await?;
-    let edited_msg = messages.messages.iter().find(|m| m.id == message_id);
-    assert!(edited_msg.is_some());
-    assert_eq!(edited_msg.unwrap().content, edited_content);
-    assert!(
-        edited_msg.unwrap().edited_at.is_some(),
-        "edited_at should be set"
-    );
-
-    // Step 2: User A cannot edit User B's messages (403 Forbidden)
-    // First, User B sends a message
-    let b_send_response = client
-        .post(format!(
-            "{}/api/chat/conversations/{}/messages",
-            base_url, connection_id
-        ))
-        .headers(auth_headers(&user_b.token))
-        .json(&SendMessageBody {
-            content: "Message from User B".to_string(),
-            image_base64: None,
-            audio_base64: None,
-        })
-        .send()
-        .await?;
-
-    let b_message_id = b_send_response
-        .json::<SendMessageResponse>()
-        .await?
-        .message_id;
-
-    // User A tries to edit User B's message
+    let b_message = send_text_message(
+        &client,
+        &base_url,
+        &user_b.token,
+        &conversation_id,
+        "Message from User B",
+    )
+    .await?;
     let edit_b_response = client
-        .patch(format!("{}/api/chat/messages/{}", base_url, b_message_id))
+        .patch(format!("{}/api/chat/messages/{}", base_url, b_message.id))
         .headers(auth_headers(&user_a.token))
         .json(&EditMessageBody {
             content: "Trying to edit User B's message".to_string(),
         })
         .send()
         .await?;
+    assert_eq!(edit_b_response.status(), StatusCode::FORBIDDEN);
 
-    assert_eq!(
-        edit_b_response.status(),
-        StatusCode::FORBIDDEN,
-        "Should not allow editing other's messages"
-    );
-
-    // Clean up
-    sqlx::query("DELETE FROM chat_messages WHERE conversation_id = $1")
-        .bind(&connection_id)
-        .execute(&sqlx::PgPool::connect(&database_url).await?)
-        .await?;
-    sqlx::query("DELETE FROM chat_connections WHERE id = $1")
-        .bind(&connection_id)
-        .execute(&sqlx::PgPool::connect(&database_url).await?)
-        .await?;
-
+    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
     Ok(())
 }
 
-/// Test 4: Read receipts - marking messages as read
 #[tokio::test]
 async fn test_read_receipts() -> anyhow::Result<()> {
     let database_url = db_safety::resolve_test_database_url();
+    let pool = PgPool::connect(&database_url).await?;
     let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
     let Some(base_url) = resolve_base_url(&client).await? else {
         return Ok(());
     };
 
-    // Create two test users
     let user_a = create_test_user(&client, &base_url, "read_a").await?;
     let user_b = create_test_user(&client, &base_url, "read_b").await?;
+    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
+    let conversation_id =
+        create_active_realtime_conversation(&client, &base_url, &user_a, &user_b).await?;
 
-    // Clean up
-    sqlx::query(
-        "DELETE FROM chat_connections WHERE (requester_id = $1 AND receiver_id = $2) OR (requester_id = $2 AND receiver_id = $1)"
+    let sent_message = send_text_message(
+        &client,
+        &base_url,
+        &user_a.token,
+        &conversation_id,
+        "Message for read receipt test",
     )
-    .bind(&user_a.user_id)
-    .bind(&user_b.user_id)
-    .execute(&sqlx::PgPool::connect(&database_url).await?)
     .await?;
+    assert!(sent_message.read_at.is_none());
 
-    // Create and accept connection
-    let request_response = client
-        .post(format!("{}/api/chat/connect/request", base_url))
-        .headers(auth_headers(&user_a.token))
-        .json(&ConnectRequestBody {
-            receiver_id: user_b.user_id.clone(),
-            listing_id: None,
-        })
-        .send()
-        .await?;
-
-    let connection_id = request_response
-        .json::<ConnectRequestResponse>()
-        .await?
-        .connection_id;
-
-    client
-        .post(format!("{}/api/chat/connect/accept", base_url))
-        .headers(auth_headers(&user_b.token))
-        .json(&ConnectAcceptBody {
-            connection_id: connection_id.clone(),
-        })
-        .send()
-        .await?;
-
-    // User A sends a message
-    let send_response = client
-        .post(format!(
-            "{}/api/chat/conversations/{}/messages",
-            base_url, connection_id
-        ))
-        .headers(auth_headers(&user_a.token))
-        .json(&SendMessageBody {
-            content: "Message for read receipt test".to_string(),
-            image_base64: None,
-            audio_base64: None,
-        })
-        .send()
-        .await?;
-
-    let sent_message = send_response.json::<SendMessageResponse>().await?;
-    let message_id = sent_message.message_id;
-    assert!(
-        sent_message.read_at.is_none(),
-        "newly sent message should not start as read"
-    );
-
-    // User B marks the message as read
     let read_response = client
         .post(format!(
-            "{}/api/chat/messages/{}/read",
-            base_url, message_id
+            "{}/api/chat/conversations/{}/read",
+            base_url, conversation_id
         ))
         .headers(auth_headers(&user_b.token))
         .send()
         .await?;
-
     assert_eq!(
         read_response.status(),
         StatusCode::OK,
@@ -831,100 +680,52 @@ async fn test_read_receipts() -> anyhow::Result<()> {
         read_response.text().await?
     );
     let read_result = read_response.json::<MarkReadResponse>().await?;
-    assert_eq!(read_result.message_id, message_id);
-    assert!(!read_result.read_at.is_empty(), "read_at should be set");
+    assert_eq!(read_result.conversation_id, conversation_id);
+    assert!(read_result.marked_count >= 1);
 
-    // Verify the message now has a read_at timestamp
     let get_response = client
         .get(format!(
             "{}/api/chat/conversations/{}/messages",
-            base_url, connection_id
+            base_url, conversation_id
         ))
         .headers(auth_headers(&user_b.token))
         .send()
         .await?;
-
     let messages = get_response.json::<MessageListResponse>().await?;
-    let read_msg = messages.messages.iter().find(|m| m.id == message_id);
-    assert!(read_msg.is_some());
-    let read_msg = read_msg.unwrap();
-    assert!(
-        read_msg.read_at.is_some(),
-        "Message should have read_at set"
-    );
-    assert_eq!(read_msg.read_by.as_deref(), Some(user_b.user_id.as_str()));
+    let read_msg = messages
+        .messages
+        .iter()
+        .find(|message| message.id == sent_message.id)
+        .expect("sent message should still be listed");
+    assert!(read_msg.read_at.is_some());
 
-    // Clean up
-    sqlx::query("DELETE FROM chat_messages WHERE conversation_id = $1")
-        .bind(&connection_id)
-        .execute(&sqlx::PgPool::connect(&database_url).await?)
-        .await?;
-    sqlx::query("DELETE FROM chat_connections WHERE id = $1")
-        .bind(&connection_id)
-        .execute(&sqlx::PgPool::connect(&database_url).await?)
-        .await?;
-
+    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
     Ok(())
 }
 
-/// Test 5: Typing indicator - endpoint returns 200 OK when called
 #[tokio::test]
 async fn test_typing_indicator() -> anyhow::Result<()> {
     let database_url = db_safety::resolve_test_database_url();
+    let pool = PgPool::connect(&database_url).await?;
     let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
     let Some(base_url) = resolve_base_url(&client).await? else {
         return Ok(());
     };
 
-    // Create two test users
     let user_a = create_test_user(&client, &base_url, "typing_a").await?;
     let user_b = create_test_user(&client, &base_url, "typing_b").await?;
+    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
+    let conversation_id =
+        create_active_realtime_conversation(&client, &base_url, &user_a, &user_b).await?;
 
-    // Clean up
-    sqlx::query(
-        "DELETE FROM chat_connections WHERE (requester_id = $1 AND receiver_id = $2) OR (requester_id = $2 AND receiver_id = $1)"
-    )
-    .bind(&user_a.user_id)
-    .bind(&user_b.user_id)
-    .execute(&sqlx::PgPool::connect(&database_url).await?)
-    .await?;
-
-    // Create and accept connection
-    let request_response = client
-        .post(format!("{}/api/chat/connect/request", base_url))
-        .headers(auth_headers(&user_a.token))
-        .json(&ConnectRequestBody {
-            receiver_id: user_b.user_id.clone(),
-            listing_id: None,
-        })
-        .send()
-        .await?;
-
-    let connection_id = request_response
-        .json::<ConnectRequestResponse>()
-        .await?
-        .connection_id;
-
-    client
-        .post(format!("{}/api/chat/connect/accept", base_url))
-        .headers(auth_headers(&user_b.token))
-        .json(&ConnectAcceptBody {
-            connection_id: connection_id.clone(),
-        })
-        .send()
-        .await?;
-
-    // User A sends typing indicator
     let typing_response = client
-        .post(format!("{}/api/chat/typing", base_url))
+        .post(format!(
+            "{}/api/chat/conversations/{}/typing",
+            base_url, conversation_id
+        ))
         .headers(auth_headers(&user_a.token))
-        .json(&TypingBody {
-            conversation_id: connection_id.clone(),
-        })
         .send()
         .await?;
-
-    // The typing indicator endpoint returns 200 OK on success (WS broadcast is fire-and-forget)
     assert_eq!(
         typing_response.status(),
         StatusCode::OK,
@@ -932,122 +733,70 @@ async fn test_typing_indicator() -> anyhow::Result<()> {
         typing_response.text().await?
     );
 
-    // Clean up
-    sqlx::query("DELETE FROM chat_messages WHERE conversation_id = $1")
-        .bind(&connection_id)
-        .execute(&sqlx::PgPool::connect(&database_url).await?)
-        .await?;
-    sqlx::query("DELETE FROM chat_connections WHERE id = $1")
-        .bind(&connection_id)
-        .execute(&sqlx::PgPool::connect(&database_url).await?)
-        .await?;
-
+    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
     Ok(())
 }
 
-/// Test 6: Cannot send messages to non-connected users (connection must be "connected")
 #[tokio::test]
-async fn test_cannot_send_to_non_connected() -> anyhow::Result<()> {
+async fn test_cannot_send_to_non_active_realtime_conversation() -> anyhow::Result<()> {
     let database_url = db_safety::resolve_test_database_url();
+    let pool = PgPool::connect(&database_url).await?;
     let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
     let Some(base_url) = resolve_base_url(&client).await? else {
         return Ok(());
     };
 
-    // Create two test users
     let user_a = create_test_user(&client, &base_url, "noconn_a").await?;
     let user_b = create_test_user(&client, &base_url, "noconn_b").await?;
+    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
+    let conversation =
+        create_realtime_conversation(&client, &base_url, &user_a, &user_b, "This is still SYN.")
+            .await?;
 
-    // Clean up
-    sqlx::query(
-        "DELETE FROM chat_connections WHERE (requester_id = $1 AND receiver_id = $2) OR (requester_id = $2 AND receiver_id = $1)"
-    )
-    .bind(&user_a.user_id)
-    .bind(&user_b.user_id)
-    .execute(&sqlx::PgPool::connect(&database_url).await?)
-    .await?;
-
-    // Create connection but DON'T accept it
-    let request_response = client
-        .post(format!("{}/api/chat/connect/request", base_url))
-        .headers(auth_headers(&user_a.token))
-        .json(&ConnectRequestBody {
-            receiver_id: user_b.user_id.clone(),
-            listing_id: None,
-        })
-        .send()
-        .await?;
-
-    let connection_id = request_response
-        .json::<ConnectRequestResponse>()
-        .await?
-        .connection_id;
-
-    // Try to send a message (should fail because connection is not "connected")
     let send_response = client
         .post(format!(
             "{}/api/chat/conversations/{}/messages",
-            base_url, connection_id
+            base_url, conversation.id
         ))
         .headers(auth_headers(&user_a.token))
         .json(&SendMessageBody {
+            client_message_id: Uuid::new_v4().to_string(),
             content: "This should fail".to_string(),
             image_base64: None,
             audio_base64: None,
+            image_url: None,
+            audio_url: None,
         })
         .send()
         .await?;
+    assert_eq!(send_response.status(), StatusCode::CONFLICT);
 
-    assert_eq!(
-        send_response.status(),
-        StatusCode::BAD_REQUEST,
-        "Should not allow sending to non-connected users"
-    );
-
-    // Clean up
-    sqlx::query("DELETE FROM chat_connections WHERE id = $1")
-        .bind(&connection_id)
-        .execute(&sqlx::PgPool::connect(&database_url).await?)
-        .await?;
-
+    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
     Ok(())
 }
 
-/// Test 7: Cannot accept own connection request (must be receiver)
 #[tokio::test]
-async fn test_cannot_accept_own_request() -> anyhow::Result<()> {
-    let database_url = db_safety::resolve_test_database_url();
+async fn test_cannot_create_self_conversation() -> anyhow::Result<()> {
     let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
     let Some(base_url) = resolve_base_url(&client).await? else {
         return Ok(());
     };
 
-    // Create one test user
-    let user_a = create_test_user(&client, &base_url, "self_accept").await?;
-
-    // Clean up
-    sqlx::query("DELETE FROM chat_connections WHERE requester_id = $1 OR receiver_id = $1")
-        .bind(&user_a.user_id)
-        .execute(&sqlx::PgPool::connect(&database_url).await?)
-        .await?;
-
-    // User A sends a connection request to themselves (this is prevented at request time)
-    let request_response = client
-        .post(format!("{}/api/chat/connect/request", base_url))
+    let user_a = create_test_user(&client, &base_url, "self_chat").await?;
+    let response = client
+        .post(format!("{}/api/chat/conversations", base_url))
         .headers(auth_headers(&user_a.token))
-        .json(&ConnectRequestBody {
-            receiver_id: user_a.user_id.clone(),
+        .json(&CreateConversationBody {
+            client_request_id: Uuid::new_v4().to_string(),
+            recipient_id: user_a.user_id.clone(),
             listing_id: None,
+            mode: "realtime".to_string(),
+            subject: None,
+            content: "Trying to talk to myself".to_string(),
         })
         .send()
         .await?;
 
-    // Should fail because you can't send a connection request to yourself
-    assert_eq!(
-        request_response.status(),
-        StatusCode::BAD_REQUEST,
-        "Should not allow self-connection"
-    );
-
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     Ok(())
 }

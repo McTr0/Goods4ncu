@@ -1,41 +1,27 @@
-//! User-to-user direct chat with connection handshake.
-//!
-//! Implements a three-way handshake for establishing chat connections:
-//! 1. Requester sends POST /api/chat/connect/request → status=pending
-//! 2. Receiver accepts via POST /api/chat/connect/accept → status=connected
-//!    (or rejects via POST /api/chat/connect/reject → status=rejected)
-//! 3. Once connected, messages can be exchanged via POST /api/chat/conversations/{id}/messages
-//!
-//! WebSocket events pushed to participants:
-//! - `connection_request` — new connection request received
-//! - `connection_established` — connection accepted and established
-//! - `new_message` — new direct message
-//! - `message_read` — a message was marked as read
-
-mod models;
-
-pub use models::{
-    ConnectAcceptBody, ConnectAcceptResponse, ConnectRejectBody, ConnectRejectResponse,
-    ConnectRequestBody, ConnectRequestResponse, ConnectionEntry, ConnectionListResponse,
-    EditMessageBody, EditMessageResponse, MarkReadResponse, MessageEntry, MessageListQuery,
-    MessageListResponse, SendMessageBody, SendMessageResponse, TypingBody,
-};
+//! User-to-user conversations with short-lived realtime handshakes and mail threads.
 
 mod connection;
-mod context;
-mod events;
 mod message;
+mod models;
+mod reply;
+mod telegram;
 
-pub use connection::{connect_accept, connect_reject, connect_request, list_connections};
+pub use connection::{
+    acknowledge_conversation, archive_conversation, block_user, close_conversation,
+    create_conversation, get_conversation, get_thread, list_blocks, list_conversations,
+    list_threads, respond_conversation, set_read_preference, unblock_user,
+};
 pub use message::{
-    edit_message, get_connection_messages, mark_connection_read, mark_message_read,
-    send_connection_message, typing_indicator,
+    delete_message_reaction, edit_message, get_conversation_messages, hide_message,
+    mark_conversation_read, report_message, send_conversation_message, set_message_reaction,
+    typing_indicator,
+};
+pub use reply::reply_suggestions;
+pub use telegram::{
+    add_space_member, answer_call, create_call, create_secret_session, create_space, end_call,
+    get_space, list_secret_messages, list_space_messages, list_spaces, remove_space_member,
+    send_secret_message, send_space_message,
 };
 
-pub(crate) use events::{
-    WsConnectionEstablishedEvent, WsConnectionRejectedEvent, WsConnectionRequestEvent,
-    WsMessageReadEvent, WsNewMessageEvent, WsTypingEvent,
-};
-
-#[cfg(test)]
-mod tests;
+pub(crate) use connection::{authenticated_user, moderate_text};
+pub(crate) use models::*;

@@ -11,6 +11,7 @@ class Listing {
   final String? description;
   final String status;
   final String? thumbnailHint;
+  final String? imageUrl;
   final List<String>? defects;
   final String? ownerId;
   final String? ownerUsername;
@@ -26,6 +27,7 @@ class Listing {
     this.description,
     required this.status,
     this.thumbnailHint,
+    this.imageUrl,
     this.defects,
     this.ownerId,
     this.ownerUsername,
@@ -43,6 +45,7 @@ class Listing {
       description: json['description'],
       status: json['status'] ?? 'active',
       thumbnailHint: json['thumbnail_hint'],
+      imageUrl: json['image_url'],
       defects: json['defect_hint'] != null
           ? [json['defect_hint'] as String]
           : (json['defects'] != null
@@ -284,71 +287,416 @@ class ChatMessage {
     'image_url': imageUrl,
     'audio_url': audioUrl,
   };
+
+  factory ChatMessage.fromAssistantJson(Map<String, dynamic> json) {
+    return ChatMessage(
+      sender: json['role'] == 'assistant' ? 'bot' : 'user',
+      content: json['content']?.toString() ?? '',
+      imageUrl: json['image_url']?.toString(),
+      audioUrl: json['audio_url']?.toString(),
+      timestamp:
+          DateTime.tryParse(json['timestamp']?.toString() ?? '') ??
+          DateTime.now(),
+    );
+  }
 }
 
-/// 连接状态类型
-enum ConnectionStatusType {
-  online, // connected + established
-  offline, // connected but not established
-  pending, // pending
+class AssistantConversationHistory {
+  const AssistantConversationHistory({
+    required this.messages,
+    required this.total,
+  });
+
+  final List<ChatMessage> messages;
+  final int total;
+
+  ChatMessage? get latest => messages.isEmpty ? null : messages.last;
+
+  factory AssistantConversationHistory.fromJson(Map<String, dynamic> json) {
+    return AssistantConversationHistory(
+      messages: (json['messages'] as List<dynamic>? ?? const [])
+          .map(
+            (item) =>
+                ChatMessage.fromAssistantJson(item as Map<String, dynamic>),
+          )
+          .toList(),
+      total: (json['total'] as num?)?.toInt() ?? 0,
+    );
+  }
 }
 
-/// 会话信息
+enum ConversationMode {
+  realtime,
+  mail;
+
+  String get wireValue => name;
+
+  static ConversationMode parse(Object? value) =>
+      value == 'mail' ? ConversationMode.mail : ConversationMode.realtime;
+}
+
+enum ConversationState {
+  synSent('syn_sent'),
+  synAck('syn_ack'),
+  active('active'),
+  declined('declined'),
+  cancelled('cancelled'),
+  expired('expired'),
+  closed('closed'),
+  open('open');
+
+  const ConversationState(this.wireValue);
+  final String wireValue;
+
+  bool get isLiveRealtime =>
+      this == synSent || this == synAck || this == active;
+
+  bool get isTerminal =>
+      this == declined ||
+      this == cancelled ||
+      this == expired ||
+      this == closed;
+
+  static ConversationState parse(Object? value) {
+    final wire = value?.toString();
+    return ConversationState.values.firstWhere(
+      (state) => state.wireValue == wire,
+      orElse: () {
+        switch (wire) {
+          case 'connected':
+          case 'established':
+            return ConversationState.active;
+          case 'pending':
+            return ConversationState.synSent;
+          case 'rejected':
+            return ConversationState.declined;
+          default:
+            return ConversationState.synSent;
+        }
+      },
+    );
+  }
+}
+
+class ConversationCapabilities {
+  const ConversationCapabilities({
+    this.canRespond = false,
+    this.canAck = false,
+    this.canSend = false,
+    this.canClose = false,
+    this.canArchive = true,
+    this.canRestart = false,
+  });
+
+  final bool canRespond;
+  final bool canAck;
+  final bool canSend;
+  final bool canClose;
+  final bool canArchive;
+  final bool canRestart;
+
+  factory ConversationCapabilities.fromJson(Map<String, dynamic>? json) {
+    return ConversationCapabilities(
+      canRespond: json?['can_respond'] == true,
+      canAck: json?['can_ack'] == true,
+      canSend: json?['can_send'] == true,
+      canClose: json?['can_close'] == true,
+      canArchive: json?['can_archive'] != false,
+      canRestart: json?['can_restart'] == true,
+    );
+  }
+}
+
+enum ConnectionStatusType { online, offline, pending }
+
 class Conversation {
-  final String id;
-
-  /// The user who initiated the connection request
-  final String requesterId;
-  final String otherUserId;
-  final String otherUsername;
-  final String status; // 'connected' | 'pending' | 'established'
-  final String? lastMessage;
-  final DateTime? lastMessageAt;
-
-  /// 未读消息数
-  final int unreadCount;
-
-  /// Whether current user is the receiver of this connection request
-  final bool isReceiver;
-
   Conversation({
     required this.id,
-    required this.requesterId,
+    String? initiatorId,
+    String? requesterId,
+    this.recipientId = '',
     required this.otherUserId,
     required this.otherUsername,
-    required this.status,
+    ConversationMode? mode,
+    ConversationState? state,
+    String? status,
+    this.listingId,
+    this.listingTitle,
+    this.subject,
     this.lastMessage,
     this.lastMessageAt,
     this.unreadCount = 0,
-    this.isReceiver = false,
-  });
+    this.readReceiptMode = 'inherit',
+    this.effectiveReadReceiptMode = 'auto',
+    this.archived = false,
+    this.expiresAt,
+    this.establishedAt,
+    this.closedAt,
+    this.closeReason,
+    this.createdAt,
+    this.updatedAt,
+    this.version = 1,
+    bool? isInitiator,
+    bool? isReceiver,
+    this.isBlocked = false,
+    ConversationCapabilities? capabilities,
+  }) : initiatorId = initiatorId ?? requesterId ?? '',
+       mode = mode ?? ConversationMode.realtime,
+       state = state ?? ConversationState.parse(status),
+       isInitiator = isInitiator ?? !(isReceiver ?? false),
+       capabilities =
+           capabilities ??
+           ConversationCapabilities(
+             canRespond:
+                 (state ?? ConversationState.parse(status)) ==
+                     ConversationState.synSent &&
+                 (isReceiver ?? false),
+             canSend:
+                 (state ?? ConversationState.parse(status)) ==
+                 ConversationState.active,
+             canClose:
+                 (state ?? ConversationState.parse(status)).isLiveRealtime,
+             canRestart: false,
+           );
 
-  /// Current user can accept/reject this connection (true only for pending incoming requests)
-  bool get canRespond => status == 'pending' && isReceiver;
+  final String id;
+  final ConversationMode mode;
+  final ConversationState state;
+  final String initiatorId;
+  final String recipientId;
+  final String otherUserId;
+  final String otherUsername;
+  final String? listingId;
+  final String? listingTitle;
+  final String? subject;
+  final String? lastMessage;
+  final DateTime? lastMessageAt;
+  final int unreadCount;
+  final String readReceiptMode;
+  final String effectiveReadReceiptMode;
+  final bool archived;
+  final DateTime? expiresAt;
+  final DateTime? establishedAt;
+  final DateTime? closedAt;
+  final String? closeReason;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+  final int version;
+  final bool isInitiator;
+  final bool isBlocked;
+  final ConversationCapabilities capabilities;
+
+  String get requesterId => initiatorId;
+  String get status => state.wireValue;
+  bool get isReceiver => !isInitiator;
+  bool get canRespond => capabilities.canRespond;
 
   factory Conversation.fromJson(Map<String, dynamic> json) {
+    DateTime? date(String key) =>
+        json[key] == null ? null : DateTime.tryParse(json[key].toString());
     return Conversation(
       id: json['id']?.toString() ?? '',
-      requesterId: json['requester_id']?.toString() ?? '',
+      mode: ConversationMode.parse(json['mode']),
+      state: ConversationState.parse(json['state'] ?? json['status']),
+      initiatorId:
+          json['initiator_id']?.toString() ??
+          json['requester_id']?.toString() ??
+          '',
+      recipientId: json['recipient_id']?.toString() ?? '',
       otherUserId: json['other_user_id']?.toString() ?? '',
-      otherUsername: json['other_username'] ?? '',
-      status: json['status'] ?? 'pending',
-      lastMessage: json['last_message'],
-      lastMessageAt: json['last_message_at'] != null
-          ? DateTime.tryParse(json['last_message_at'].toString())
+      otherUsername: json['other_username']?.toString() ?? '',
+      listingId: json['listing_id']?.toString(),
+      listingTitle: json['listing_title']?.toString(),
+      subject: json['subject']?.toString(),
+      lastMessage: json['last_message']?.toString(),
+      lastMessageAt: date('last_message_at'),
+      unreadCount: (json['unread_count'] as num?)?.toInt() ?? 0,
+      readReceiptMode: json['read_receipt_mode']?.toString() ?? 'inherit',
+      effectiveReadReceiptMode:
+          json['effective_read_receipt_mode']?.toString() ?? 'auto',
+      archived: json['archived'] == true,
+      expiresAt: date('expires_at'),
+      establishedAt: date('established_at'),
+      closedAt: date('closed_at'),
+      closeReason: json['close_reason']?.toString(),
+      createdAt: date('created_at'),
+      updatedAt: date('updated_at'),
+      version: (json['version'] as num?)?.toInt() ?? 1,
+      isInitiator: json.containsKey('is_initiator')
+          ? json['is_initiator'] == true
+          : json['is_receiver'] != true,
+      isReceiver: json['is_receiver'] == true,
+      isBlocked: json['is_blocked'] == true,
+      capabilities: json['capabilities'] is Map<String, dynamic>
+          ? ConversationCapabilities.fromJson(
+              json['capabilities'] as Map<String, dynamic>,
+            )
           : null,
-      unreadCount: json['unread_count'] ?? 0,
-      isReceiver: json['is_receiver'] ?? false,
     );
   }
 
   ConnectionStatusType get connectionStatus {
-    if (status == 'pending') return ConnectionStatusType.pending;
-    // 'connected' and 'established' both mean the connection is active
-    if (status == 'connected' || status == 'established') {
-      return ConnectionStatusType.online;
+    if (state == ConversationState.synSent ||
+        state == ConversationState.synAck) {
+      return ConnectionStatusType.pending;
     }
-    return ConnectionStatusType.offline;
+    return state == ConversationState.active
+        ? ConnectionStatusType.online
+        : ConnectionStatusType.offline;
+  }
+}
+
+class ChatThread {
+  const ChatThread({
+    required this.peerUserId,
+    required this.peerUsername,
+    required this.latestActivityAt,
+    this.latestPreview,
+    this.unreadCount = 0,
+    this.conversationCount = 0,
+    this.mailCount = 0,
+    this.realtimeCount = 0,
+    this.pendingCount = 0,
+    this.hasActiveRealtime = false,
+    this.latestListingTitle,
+  });
+
+  final String peerUserId;
+  final String peerUsername;
+  final DateTime latestActivityAt;
+  final String? latestPreview;
+  final int unreadCount;
+  final int conversationCount;
+  final int mailCount;
+  final int realtimeCount;
+  final int pendingCount;
+  final bool hasActiveRealtime;
+  final String? latestListingTitle;
+
+  factory ChatThread.fromJson(Map<String, dynamic> json) {
+    return ChatThread(
+      peerUserId: json['peer_user_id']?.toString() ?? '',
+      peerUsername: json['peer_username']?.toString() ?? '',
+      latestActivityAt:
+          DateTime.tryParse(json['latest_activity_at']?.toString() ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      latestPreview: json['latest_preview']?.toString(),
+      unreadCount: (json['unread_count'] as num?)?.toInt() ?? 0,
+      conversationCount: (json['conversation_count'] as num?)?.toInt() ?? 0,
+      mailCount: (json['mail_count'] as num?)?.toInt() ?? 0,
+      realtimeCount: (json['realtime_count'] as num?)?.toInt() ?? 0,
+      pendingCount: (json['pending_count'] as num?)?.toInt() ?? 0,
+      hasActiveRealtime: json['has_active_realtime'] == true,
+      latestListingTitle: json['latest_listing_title']?.toString(),
+    );
+  }
+}
+
+class ChatThreadDetail {
+  const ChatThreadDetail({required this.thread, required this.conversations});
+
+  final ChatThread thread;
+  final List<Conversation> conversations;
+
+  factory ChatThreadDetail.fromJson(Map<String, dynamic> json) {
+    return ChatThreadDetail(
+      thread: ChatThread.fromJson(json['thread'] as Map<String, dynamic>),
+      conversations: (json['conversations'] as List<dynamic>? ?? const [])
+          .map((item) => Conversation.fromJson(item as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+class ReplySuggestion {
+  const ReplySuggestion({required this.tone, required this.text});
+  final String tone;
+  final String text;
+
+  factory ReplySuggestion.fromJson(Map<String, dynamic> json) =>
+      ReplySuggestion(
+        tone: json['tone']?.toString() ?? '',
+        text: json['text']?.toString() ?? '',
+      );
+}
+
+class MessageReplyPreview {
+  final String id;
+  final String senderId;
+  final String content;
+  final String kind;
+
+  const MessageReplyPreview({
+    required this.id,
+    required this.senderId,
+    required this.content,
+    required this.kind,
+  });
+
+  factory MessageReplyPreview.fromJson(Map<String, dynamic> json) {
+    return MessageReplyPreview(
+      id: json['id']?.toString() ?? '',
+      senderId: json['sender']?.toString() ?? '',
+      content: json['content']?.toString() ?? '',
+      kind: json['kind']?.toString() ?? 'message',
+    );
+  }
+}
+
+class MessageReactionSummary {
+  final String emoji;
+  final int count;
+  final bool reactedByMe;
+
+  const MessageReactionSummary({
+    required this.emoji,
+    required this.count,
+    required this.reactedByMe,
+  });
+
+  factory MessageReactionSummary.fromJson(Map<String, dynamic> json) {
+    return MessageReactionSummary(
+      emoji: json['emoji']?.toString() ?? '',
+      count: (json['count'] as num?)?.toInt() ?? 0,
+      reactedByMe: json['reacted_by_me'] == true,
+    );
+  }
+}
+
+class MessageStructuredQuote {
+  final String kind;
+  final String refId;
+  final Map<String, dynamic> snapshot;
+
+  const MessageStructuredQuote({
+    required this.kind,
+    required this.refId,
+    required this.snapshot,
+  });
+
+  factory MessageStructuredQuote.fromJson(Map<String, dynamic> json) {
+    return MessageStructuredQuote(
+      kind: json['kind']?.toString() ?? '',
+      refId: json['ref_id']?.toString() ?? '',
+      snapshot: (json['snapshot'] as Map?)?.cast<String, dynamic>() ?? const {},
+    );
+  }
+
+  String get title {
+    return snapshot['title']?.toString() ??
+        snapshot['listing_title']?.toString() ??
+        refId;
+  }
+
+  String? get status => snapshot['status']?.toString();
+
+  num? get primaryPrice {
+    final value =
+        snapshot['final_price_cny'] ??
+        snapshot['counter_price_cny'] ??
+        snapshot['proposed_price_cny'] ??
+        snapshot['price_cny'];
+    return value is num ? value : num.tryParse(value?.toString() ?? '');
   }
 }
 
@@ -364,12 +712,22 @@ class ConversationMessage {
   final String? audioUrl;
   final DateTime sentAt;
   final DateTime? readAt;
+  final String? replyToMessageId;
+  final MessageReplyPreview? replyPreview;
+  final MessageStructuredQuote? quote;
+  final List<MessageReactionSummary> reactions;
+  final bool hiddenForMe;
+  final bool canHide;
+  final bool canReact;
+  final bool canReport;
 
   /// 消息状态: sending | sent | delivered | read | failed
   final String status;
 
   /// 已编辑时间
   final DateTime? editedAt;
+  final String? clientMessageId;
+  final String kind;
 
   ConversationMessage({
     required this.id,
@@ -382,8 +740,18 @@ class ConversationMessage {
     this.audioUrl,
     required this.sentAt,
     this.readAt,
+    this.replyToMessageId,
+    this.replyPreview,
+    this.quote,
+    this.reactions = const [],
+    this.hiddenForMe = false,
+    this.canHide = true,
+    this.canReact = true,
+    this.canReport = true,
     this.status = 'sent',
     this.editedAt,
+    this.clientMessageId,
+    this.kind = 'message',
   });
 
   factory ConversationMessage.fromJson(Map<String, dynamic> json) {
@@ -404,10 +772,30 @@ class ConversationMessage {
       readAt: json['read_at'] != null
           ? DateTime.tryParse(json['read_at'].toString())
           : null,
+      replyToMessageId: json['reply_to_message_id']?.toString(),
+      replyPreview: json['reply_preview'] is Map<String, dynamic>
+          ? MessageReplyPreview.fromJson(
+              json['reply_preview'] as Map<String, dynamic>,
+            )
+          : null,
+      quote: json['quote'] is Map<String, dynamic>
+          ? MessageStructuredQuote.fromJson(
+              json['quote'] as Map<String, dynamic>,
+            )
+          : null,
+      reactions: (json['reactions'] as List<dynamic>? ?? const []).map((item) {
+        return MessageReactionSummary.fromJson(item as Map<String, dynamic>);
+      }).toList(),
+      hiddenForMe: json['hidden_for_me'] == true,
+      canHide: json['can_hide'] != false,
+      canReact: json['can_react'] != false,
+      canReport: json['can_report'] != false,
       status: json['status'] ?? 'sent',
       editedAt: json['edited_at'] != null
           ? DateTime.tryParse(json['edited_at'].toString())
           : null,
+      clientMessageId: json['client_message_id']?.toString(),
+      kind: json['kind']?.toString() ?? 'message',
     );
   }
 
@@ -435,8 +823,18 @@ class ConversationMessage {
     String? audioUrl,
     DateTime? sentAt,
     DateTime? readAt,
+    String? replyToMessageId,
+    MessageReplyPreview? replyPreview,
+    MessageStructuredQuote? quote,
+    List<MessageReactionSummary>? reactions,
+    bool? hiddenForMe,
+    bool? canHide,
+    bool? canReact,
+    bool? canReport,
     String? status,
     DateTime? editedAt,
+    String? clientMessageId,
+    String? kind,
   }) {
     return ConversationMessage(
       id: id ?? this.id,
@@ -449,8 +847,18 @@ class ConversationMessage {
       audioUrl: audioUrl ?? this.audioUrl,
       sentAt: sentAt ?? this.sentAt,
       readAt: readAt ?? this.readAt,
+      replyToMessageId: replyToMessageId ?? this.replyToMessageId,
+      replyPreview: replyPreview ?? this.replyPreview,
+      quote: quote ?? this.quote,
+      reactions: reactions ?? this.reactions,
+      hiddenForMe: hiddenForMe ?? this.hiddenForMe,
+      canHide: canHide ?? this.canHide,
+      canReact: canReact ?? this.canReact,
+      canReport: canReport ?? this.canReport,
       status: status ?? this.status,
       editedAt: editedAt ?? this.editedAt,
+      clientMessageId: clientMessageId ?? this.clientMessageId,
+      kind: kind ?? this.kind,
     );
   }
 }
@@ -512,6 +920,10 @@ class Order {
   final String sellerUsername;
   final double finalPriceCny;
   final String status;
+  final bool autoDelist;
+  final String? confirmedAt;
+  final String? autoDelistedAt;
+  final String listingStatus;
   final String createdAt;
   final String role;
 
@@ -525,6 +937,10 @@ class Order {
     required this.sellerUsername,
     required this.finalPriceCny,
     required this.status,
+    this.autoDelist = true,
+    this.confirmedAt,
+    this.autoDelistedAt,
+    this.listingStatus = '',
     required this.createdAt,
     required this.role,
   });
@@ -539,7 +955,11 @@ class Order {
       buyerUsername: json['buyer_username'] ?? '',
       sellerUsername: json['seller_username'] ?? '',
       finalPriceCny: (json['final_price_cny'] ?? 0).toDouble(),
-      status: json['status'] ?? 'pending',
+      status: json['status'] ?? 'intent_pending',
+      autoDelist: json['auto_delist'] ?? true,
+      confirmedAt: json['confirmed_at'],
+      autoDelistedAt: json['auto_delisted_at'],
+      listingStatus: json['listing_status'] ?? '',
       createdAt: json['created_at'] ?? '',
       role: json['role'] ?? 'buyer',
     );
@@ -548,13 +968,13 @@ class Order {
   String get statusLabel {
     switch (status) {
       case 'pending':
-        return '待支付';
+      case 'intent_pending':
+        return '待卖家确认';
       case 'paid':
-        return '已支付';
       case 'shipped':
-        return '已发货';
       case 'completed':
-        return '已完成';
+      case 'confirmed':
+        return '已确认成交';
       case 'cancelled':
         return '已取消';
       default:
@@ -565,12 +985,12 @@ class Order {
   Color get statusColor {
     switch (status) {
       case 'pending':
+      case 'intent_pending':
         return const Color(0xFFF59E0B);
       case 'paid':
-        return const Color(0xFF3B82F6);
       case 'shipped':
-        return const Color(0xFF8B5CF6);
       case 'completed':
+      case 'confirmed':
         return const Color(0xFF10B981);
       case 'cancelled':
         return const Color(0xFF6B7280);
@@ -615,12 +1035,20 @@ class OrderDetail {
   final String sellerUsername;
   final double finalPriceCny;
   final String status;
+  final bool autoDelist;
+  final String? confirmedAt;
+  final String? confirmedBy;
+  final String? autoDelistedAt;
+  final String listingStatus;
   final String createdAt;
   final String? paidAt;
   final String? shippedAt;
   final String? completedAt;
   final String? cancelledAt;
   final String? cancellationReason;
+  final bool canConfirmDeal;
+  final bool canCancelDeal;
+  final bool canChooseAutoDelist;
 
   const OrderDetail({
     required this.id,
@@ -632,12 +1060,20 @@ class OrderDetail {
     required this.sellerUsername,
     required this.finalPriceCny,
     required this.status,
+    this.autoDelist = true,
+    this.confirmedAt,
+    this.confirmedBy,
+    this.autoDelistedAt,
+    this.listingStatus = '',
     required this.createdAt,
     this.paidAt,
     this.shippedAt,
     this.completedAt,
     this.cancelledAt,
     this.cancellationReason,
+    this.canConfirmDeal = false,
+    this.canCancelDeal = false,
+    this.canChooseAutoDelist = false,
   });
 
   factory OrderDetail.fromJson(Map<String, dynamic> json) {
@@ -650,26 +1086,35 @@ class OrderDetail {
       buyerUsername: json['buyer_username'] ?? '',
       sellerUsername: json['seller_username'] ?? '',
       finalPriceCny: (json['final_price_cny'] ?? 0).toDouble(),
-      status: json['status'] ?? 'pending',
+      status: json['status'] ?? 'intent_pending',
+      autoDelist: json['auto_delist'] ?? true,
+      confirmedAt: json['confirmed_at'],
+      confirmedBy: json['confirmed_by'],
+      autoDelistedAt: json['auto_delisted_at'],
+      listingStatus: json['listing_status'] ?? '',
       createdAt: json['created_at'] ?? '',
       paidAt: json['paid_at'],
       shippedAt: json['shipped_at'],
       completedAt: json['completed_at'],
       cancelledAt: json['cancelled_at'],
       cancellationReason: json['cancellation_reason'],
+      canConfirmDeal: json['capabilities']?['can_confirm'] ?? false,
+      canCancelDeal: json['capabilities']?['can_cancel'] ?? false,
+      canChooseAutoDelist:
+          json['capabilities']?['can_choose_auto_delist'] ?? false,
     );
   }
 
   String get statusLabel {
     switch (status) {
       case 'pending':
-        return '待支付';
+      case 'intent_pending':
+        return '待卖家确认';
       case 'paid':
-        return '已支付';
       case 'shipped':
-        return '已发货';
       case 'completed':
-        return '已完成';
+      case 'confirmed':
+        return '已确认成交';
       case 'cancelled':
         return '已取消';
       default:
@@ -680,12 +1125,12 @@ class OrderDetail {
   Color get statusColor {
     switch (status) {
       case 'pending':
+      case 'intent_pending':
         return const Color(0xFFF59E0B);
       case 'paid':
-        return const Color(0xFF3B82F6);
       case 'shipped':
-        return const Color(0xFF8B5CF6);
       case 'completed':
+      case 'confirmed':
         return const Color(0xFF10B981);
       case 'cancelled':
         return const Color(0xFF6B7280);
@@ -694,8 +1139,8 @@ class OrderDetail {
     }
   }
 
-  bool get canPay => status == 'pending';
-  bool get canShip => status == 'paid';
-  bool get canConfirm => status == 'shipped';
-  bool get canCancel => status == 'pending' || status == 'paid';
+  bool get canPay => false;
+  bool get canShip => false;
+  bool get canConfirm => canConfirmDeal;
+  bool get canCancel => canCancelDeal;
 }

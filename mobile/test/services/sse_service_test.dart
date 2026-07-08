@@ -30,6 +30,13 @@ http.StreamedResponse _response(int statusCode, {String body = ''}) {
 
 void main() {
   group('SseService', () {
+    test('parses server error events', () {
+      final token = SseToken.fromJson({'error': 'provider unavailable'});
+
+      expect(token.error, 'provider unavailable');
+      expect(token.token, isEmpty);
+    });
+
     test(
       'retries once with refreshed token when first response is 401',
       () async {

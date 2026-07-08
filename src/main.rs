@@ -3,6 +3,7 @@ mod repositories;
 mod services;
 
 mod api;
+mod categories;
 mod cli;
 mod config;
 mod db;
@@ -143,7 +144,7 @@ async fn main() -> Result<(), anyhow::Error> {
         Arc::clone(&broadcast),
     ));
 
-    // Order lifecycle worker: 30-min payment timeout, 7-day auto-confirm.
+    // Order lifecycle worker is a no-op in offline deal mode.
     let order_worker_handle = tokio::spawn(services::order_worker::run(
         db_pool.clone(),
         Arc::clone(&broadcast),
@@ -161,6 +162,10 @@ async fn main() -> Result<(), anyhow::Error> {
 
     // Revoked token cleanup worker: prunes expired DB denylist rows hourly.
     let token_cleanup_handle = tokio::spawn(services::token_denylist::run_cleanup_worker(
+        db_pool.clone(),
+    ));
+
+    let chat_expiry_handle = tokio::spawn(services::chat_expire::run_chat_expiry_worker(
         db_pool.clone(),
     ));
 
@@ -244,6 +249,7 @@ async fn main() -> Result<(), anyhow::Error> {
     order_worker_handle.abort();
     moderation_worker_handle.abort();
     token_cleanup_handle.abort();
+    chat_expiry_handle.abort();
 
     // Gracefully close the DB pool so Postgres can cleanly收回所有连接
     // and flush any pending transaction results in the buffer.

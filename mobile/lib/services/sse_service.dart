@@ -32,6 +32,7 @@ class SseToken {
       token: json['token'] ?? '',
       conversationId: json['conversation_id'] ?? '',
       isComplete: json['is_complete'] as bool? ?? false,
+      error: json['error']?.toString(),
     );
   }
 }

@@ -9,11 +9,13 @@ import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import '../services/api_service.dart';
+import '../services/chat_service.dart';
 import '../services/sse_service.dart';
 import '../services/upload_service.dart';
 import '../services/ws_service.dart';
 import '../models/models.dart';
 import '../components/audio_message_player.dart';
+import '../components/assistant_markdown.dart';
 import 'chat_page_media_sender.dart';
 
 /// Negotiation action card shown in the chat for HITL requests.
@@ -104,6 +106,7 @@ class _SellerPendingCardState extends State<_SellerPendingCard> {
   }
 
   Future<void> _approve() async {
+    final l = AppLocalizations.of(context)!;
     setState(() => _isLoading = true);
     try {
       await widget.apiService.respondNegotiation(
@@ -112,13 +115,14 @@ class _SellerPendingCardState extends State<_SellerPendingCard> {
       );
       widget.onUpdated();
     } catch (e) {
-      _showError('操作失败: $e');
+      _showError(l.operationFailed(e.toString()));
     } finally {
       setState(() => _isLoading = false);
     }
   }
 
   Future<void> _reject() async {
+    final l = AppLocalizations.of(context)!;
     setState(() => _isLoading = true);
     try {
       await widget.apiService.respondNegotiation(
@@ -127,16 +131,17 @@ class _SellerPendingCardState extends State<_SellerPendingCard> {
       );
       widget.onUpdated();
     } catch (e) {
-      _showError('操作失败: $e');
+      _showError(l.operationFailed(e.toString()));
     } finally {
       setState(() => _isLoading = false);
     }
   }
 
   Future<void> _counter() async {
+    final l = AppLocalizations.of(context)!;
     final price = double.tryParse(_counterController.text.trim());
     if (price == null || price <= 0) {
-      _showError('请输入有效的还价金额');
+      _showError(l.enterValidCounterAmount);
       return;
     }
     setState(() => _isLoading = true);
@@ -148,7 +153,7 @@ class _SellerPendingCardState extends State<_SellerPendingCard> {
       );
       widget.onUpdated();
     } catch (e) {
-      _showError('操作失败: $e');
+      _showError(l.operationFailed(e.toString()));
     } finally {
       setState(() => _isLoading = false);
     }
@@ -183,12 +188,14 @@ class _SellerPendingCardState extends State<_SellerPendingCard> {
               ],
             ),
             const SizedBox(height: 8),
-            Text('报价: ¥${widget.request.proposedPrice.toStringAsFixed(2)}'),
+            Text(
+              l.offerPriceLine(widget.request.proposedPrice.toStringAsFixed(2)),
+            ),
             if (widget.request.reason.isNotEmpty)
-              Text('理由: ${widget.request.reason}'),
+              Text(l.reasonLine(widget.request.reason)),
             if (widget.request.expiresAt != null)
               Text(
-                '有效期至: ${_formatExpiry(widget.request.expiresAt!)}',
+                l.expiresAtLine(_formatExpiry(widget.request.expiresAt!)),
                 style: const TextStyle(fontSize: 12, color: Colors.grey),
               ),
             const SizedBox(height: 12),
@@ -201,7 +208,7 @@ class _SellerPendingCardState extends State<_SellerPendingCard> {
                     child: ElevatedButton.icon(
                       onPressed: _approve,
                       icon: const Icon(Icons.check, size: 16),
-                      label: const Text('接受'),
+                      label: Text(l.acceptAction),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
                         foregroundColor: Colors.white,
@@ -213,7 +220,7 @@ class _SellerPendingCardState extends State<_SellerPendingCard> {
                     child: OutlinedButton.icon(
                       onPressed: _reject,
                       icon: const Icon(Icons.close, size: 16),
-                      label: const Text('拒绝'),
+                      label: Text(l.rejectAction),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.red,
                       ),
@@ -235,11 +242,11 @@ class _SellerPendingCardState extends State<_SellerPendingCard> {
                           RegExp(r'^\d*\.?\d{0,2}'),
                         ),
                       ],
-                      decoration: const InputDecoration(
-                        hintText: '还价金额',
+                      decoration: InputDecoration(
+                        hintText: l.counterOfferAmount,
                         isDense: true,
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(
+                        border: const OutlineInputBorder(),
+                        contentPadding: const EdgeInsets.symmetric(
                           horizontal: 12,
                           vertical: 8,
                         ),
@@ -253,7 +260,7 @@ class _SellerPendingCardState extends State<_SellerPendingCard> {
                       backgroundColor: Colors.orange,
                       foregroundColor: Colors.white,
                     ),
-                    child: const Text('还价'),
+                    child: Text(l.counterOfferAction),
                   ),
                 ],
               ),
@@ -293,24 +300,26 @@ class _BuyerCounteredCardState extends State<_BuyerCounteredCard> {
   bool _isLoading = false;
 
   Future<void> _accept() async {
+    final l = AppLocalizations.of(context)!;
     setState(() => _isLoading = true);
     try {
       await widget.apiService.acceptCounterNegotiation(widget.request.id);
       widget.onUpdated();
     } catch (e) {
-      _showError('操作失败: $e');
+      _showError(l.operationFailed(e.toString()));
     } finally {
       setState(() => _isLoading = false);
     }
   }
 
   Future<void> _reject() async {
+    final l = AppLocalizations.of(context)!;
     setState(() => _isLoading = true);
     try {
       await widget.apiService.rejectCounterNegotiation(widget.request.id);
       widget.onUpdated();
     } catch (e) {
-      _showError('操作失败: $e');
+      _showError(l.operationFailed(e.toString()));
     } finally {
       setState(() => _isLoading = false);
     }
@@ -323,6 +332,7 @@ class _BuyerCounteredCardState extends State<_BuyerCounteredCard> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
       color: Colors.orange.shade50,
@@ -336,14 +346,18 @@ class _BuyerCounteredCardState extends State<_BuyerCounteredCard> {
                 const Icon(Icons.countertops, color: Colors.orange, size: 20),
                 const SizedBox(width: 8),
                 Text(
-                  '卖家还价 ¥${widget.request.counterPrice?.toStringAsFixed(2) ?? '?'}',
+                  l.sellerCounterPriceLine(
+                    widget.request.counterPrice?.toStringAsFixed(2) ?? '?',
+                  ),
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Text(
-              '您 original offer: ¥${widget.request.proposedPrice.toStringAsFixed(2)}',
+              l.yourOriginalOfferLine(
+                widget.request.proposedPrice.toStringAsFixed(2),
+              ),
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
             const SizedBox(height: 12),
@@ -356,7 +370,7 @@ class _BuyerCounteredCardState extends State<_BuyerCounteredCard> {
                     child: ElevatedButton.icon(
                       onPressed: _accept,
                       icon: const Icon(Icons.check, size: 16),
-                      label: const Text('接受还价'),
+                      label: Text(l.acceptCounterAction),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
                         foregroundColor: Colors.white,
@@ -368,7 +382,7 @@ class _BuyerCounteredCardState extends State<_BuyerCounteredCard> {
                     child: OutlinedButton.icon(
                       onPressed: _reject,
                       icon: const Icon(Icons.close, size: 16),
-                      label: const Text('拒绝'),
+                      label: Text(l.rejectAction),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.red,
                       ),
@@ -421,16 +435,24 @@ class _StatusBadge extends StatelessWidget {
 
 class ChatPage extends StatefulWidget {
   final ApiService? apiService;
+  final ChatService? chatService;
   final SseService? sseService;
   final UploadService? uploadService;
   final ChatPageMediaSender? mediaSender;
+  final String? initialPrompt;
+  final bool embedded;
+  final VoidCallback? onConversationUpdated;
 
   const ChatPage({
     super.key,
     this.apiService,
+    this.chatService,
     this.sseService,
     this.uploadService,
     this.mediaSender,
+    this.initialPrompt,
+    this.embedded = false,
+    this.onConversationUpdated,
   });
 
   @override
@@ -441,7 +463,9 @@ class _ChatPageState extends State<ChatPage> {
   final TextEditingController _controller = TextEditingController();
   final List<ChatMessage> _messages = [];
   late final ApiService _apiService;
+  late final ChatService _chatService;
   late final SseService _sseService;
+  late final bool _ownsSseService;
   late final UploadService _uploadService;
   late final ChatPageMediaSender _mediaSender;
   final ImagePicker _picker = ImagePicker();
@@ -454,6 +478,8 @@ class _ChatPageState extends State<ChatPage> {
   int _recordingSeconds = 0;
   Timer? _recordingTimer;
   bool _isStreaming = false;
+  bool _isLoadingHistory = true;
+  String? _historyError;
   String? _currentUserId;
 
   // Active HITL requests shown as cards in the chat.
@@ -465,14 +491,21 @@ class _ChatPageState extends State<ChatPage> {
   void initState() {
     super.initState();
     _apiService = widget.apiService ?? context.read<ApiService>();
-    _sseService = widget.sseService ?? context.read<SseService>();
+    _chatService = widget.chatService ?? context.read<ChatService>();
+    _ownsSseService = widget.sseService == null;
+    _sseService = widget.sseService ?? SseService();
     _uploadService = widget.uploadService ?? context.read<UploadService>();
     _mediaSender =
         widget.mediaSender ??
         ChatPageMediaSender(uploadService: _uploadService);
-    _loadCurrentUser();
     _connectWs();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initialize());
+  }
+
+  Future<void> _initialize() async {
+    await Future.wait([_loadCurrentUser(), _loadAssistantHistory()]);
+    if (!mounted) return;
+    if (_messages.isEmpty) {
       final l = AppLocalizations.of(context)!;
       setState(() {
         _messages.add(
@@ -483,12 +516,38 @@ class _ChatPageState extends State<ChatPage> {
           ),
         );
       });
-    });
+    }
+    final initialPrompt = widget.initialPrompt?.trim();
+    if (initialPrompt != null && initialPrompt.isNotEmpty) {
+      _controller.text = initialPrompt;
+      await _sendMessage();
+    }
+  }
+
+  Future<void> _loadAssistantHistory() async {
+    try {
+      final history = await _chatService.getAssistantHistory();
+      if (!mounted) return;
+      setState(() {
+        _messages
+          ..clear()
+          ..addAll(history.messages);
+        _isLoadingHistory = false;
+        _historyError = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingHistory = false;
+        _historyError = error.toString();
+      });
+    }
   }
 
   Future<void> _loadCurrentUser() async {
     try {
       final profile = await _apiService.getUserProfile();
+      if (!mounted) return;
       setState(() {
         _currentUserId = profile['user_id']?.toString();
       });
@@ -522,7 +581,10 @@ class _ChatPageState extends State<ChatPage> {
         content: Text('${notif.title}: ${notif.body}'),
         duration: const Duration(seconds: 4),
         action: notif.negotiationId != null
-            ? SnackBarAction(label: '查看', onPressed: _loadNegotiations)
+            ? SnackBarAction(
+                label: AppLocalizations.of(context)!.viewAction,
+                onPressed: _loadNegotiations,
+              )
             : null,
       ),
     );
@@ -536,7 +598,7 @@ class _ChatPageState extends State<ChatPage> {
   void dispose() {
     _audioRecorder.dispose();
     _controller.dispose();
-    _sseService.dispose();
+    if (_ownsSseService) _sseService.dispose();
     _wsSubscription?.cancel();
     _recordingTimer?.cancel();
     super.dispose();
@@ -652,6 +714,7 @@ class _ChatPageState extends State<ChatPage> {
         await _sseService
             .connect(
               message: userMsg.content,
+              conversationId: '__agent__',
               imageUrl: uploadedMedia.imageUrl,
               audioUrl: uploadedMedia.audioUrl,
             )
@@ -661,9 +724,10 @@ class _ChatPageState extends State<ChatPage> {
         connected = false;
       }
       if (!connected && mounted) {
+        final l = AppLocalizations.of(context)!;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('连接失败，请检查网络'),
+          SnackBar(
+            content: Text(l.connectionFailedNetwork),
             backgroundColor: Colors.red,
           ),
         );
@@ -679,6 +743,9 @@ class _ChatPageState extends State<ChatPage> {
       String fullReply = '';
       await for (final token in _sseService.stream) {
         if (!mounted) break;
+        if (token.error != null) {
+          throw Exception(token.error);
+        }
         fullReply += token.token;
         setState(() {
           if (botMsgIndex < _messages.length) {
@@ -695,7 +762,9 @@ class _ChatPageState extends State<ChatPage> {
         setState(() {
           if (botMsgIndex < _messages.length) {
             _messages[botMsgIndex] = _messages[botMsgIndex].copyWith(
-              content: fullReply.isEmpty ? '（无回复）' : fullReply,
+              content: fullReply.isEmpty
+                  ? AppLocalizations.of(context)!.emptyReplyPlaceholder
+                  : fullReply,
               isPartial: false,
             );
           }
@@ -704,6 +773,7 @@ class _ChatPageState extends State<ChatPage> {
 
       // Refresh negotiations after chat (the agent may have created a HITL request).
       await _loadNegotiations();
+      widget.onConversationUpdated?.call();
     } on ChatPageMediaUploadException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -740,6 +810,17 @@ class _ChatPageState extends State<ChatPage> {
     final l = AppLocalizations.of(context)!;
     return Column(
       children: [
+        _AssistantHeader(embedded: widget.embedded),
+        if (_historyError != null)
+          Container(
+            width: double.infinity,
+            color: const Color(0xFFFFF3CD),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Text(
+              l.assistantHistoryLoadFailed,
+              style: const TextStyle(fontSize: 12, color: Color(0xFF765A16)),
+            ),
+          ),
         // Negotiation cards strip at the top of chat
         if (_hitlRequests.isNotEmpty)
           SizedBox(
@@ -760,43 +841,46 @@ class _ChatPageState extends State<ChatPage> {
               },
             ),
           ),
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: _messages.length + (_isStreaming ? 1 : 0),
-            itemBuilder: (context, index) {
-              if (index == _messages.length && _isStreaming) {
-                return const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Padding(
-                    padding: EdgeInsets.all(8.0),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(strokeWidth: 2),
-                        SizedBox(width: 8),
-                        Text(
-                          'AI 正在输入...',
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      ],
+        if (_isLoadingHistory)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _messages.length + (_isStreaming ? 1 : 0),
+              itemBuilder: (context, index) {
+                if (index == _messages.length && _isStreaming) {
+                  return Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const CircularProgressIndicator(strokeWidth: 2),
+                          const SizedBox(width: 8),
+                          Text(
+                            l.assistantTyping,
+                            style: const TextStyle(color: Colors.grey),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
+                  );
+                }
+                final msg = _messages[index];
+                final isUser = msg.sender == 'user';
+                return _ChatBubble(
+                  message: msg,
+                  isUser: isUser,
+                  hitlRequests: _hitlRequests,
+                  currentUserId: _currentUserId ?? '',
+                  apiService: _apiService,
+                  onHitlUpdated: _loadNegotiations,
                 );
-              }
-              final msg = _messages[index];
-              final isUser = msg.sender == 'user';
-              return _ChatBubble(
-                message: msg,
-                isUser: isUser,
-                hitlRequests: _hitlRequests,
-                currentUserId: _currentUserId ?? '',
-                apiService: _apiService,
-                onHitlUpdated: _loadNegotiations,
-              );
-            },
+              },
+            ),
           ),
-        ),
         if (_selectedImageBytes != null)
           Container(
             padding: const EdgeInsets.all(8),
@@ -827,8 +911,8 @@ class _ChatPageState extends State<ChatPage> {
                 const Icon(Icons.circle, color: Colors.red, size: 12),
                 const SizedBox(width: 8),
                 Text(
-                  '录音中 ${_recordingSeconds}s / 60s',
-                  style: TextStyle(
+                  l.recordingStatus(_recordingSeconds),
+                  style: const TextStyle(
                     color: Colors.red,
                     fontWeight: FontWeight.bold,
                   ),
@@ -907,12 +991,20 @@ class _ChatPageState extends State<ChatPage> {
               ),
             ),
             const SizedBox(height: 12),
-            Text('商品: ${req.listingId}'),
-            Text('买家报价: ¥${req.proposedPrice.toStringAsFixed(2)}'),
-            Text('理由: ${req.reason}'),
-            Text('状态: ${req.status}'),
+            Text(AppLocalizations.of(context)!.listingLine(req.listingId)),
+            Text(
+              AppLocalizations.of(
+                context,
+              )!.buyerOfferLine(req.proposedPrice.toStringAsFixed(2)),
+            ),
+            Text(AppLocalizations.of(context)!.reasonLine(req.reason)),
+            Text(AppLocalizations.of(context)!.statusLine(req.status)),
             if (req.counterPrice != null)
-              Text('还价: ¥${req.counterPrice!.toStringAsFixed(2)}'),
+              Text(
+                AppLocalizations.of(
+                  context,
+                )!.counterPriceLine(req.counterPrice!.toStringAsFixed(2)),
+              ),
             const SizedBox(height: 16),
             if (_currentUserId != null)
               NegotiationCard(
@@ -925,7 +1017,7 @@ class _ChatPageState extends State<ChatPage> {
                 },
               )
             else
-              const Text('加载中...'),
+              Text(AppLocalizations.of(context)!.loading),
           ],
         ),
       ),
@@ -952,7 +1044,7 @@ class _HitlChip extends StatelessWidget {
       label = l.sellerCounterOffered;
     } else {
       tagColor = Colors.grey;
-      label = '议价已${request.status}';
+      label = l.negotiationStatusLine(request.status);
     }
 
     return GestureDetector(
@@ -982,6 +1074,82 @@ class _HitlChip extends StatelessWidget {
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AssistantHeader extends StatelessWidget {
+  const _AssistantHeader({required this.embedded});
+
+  final bool embedded;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.fromLTRB(embedded ? 20 : 16, 14, 16, 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(
+          bottom: BorderSide(color: Theme.of(context).dividerColor),
+        ),
+      ),
+      child: Row(
+        children: [
+          const CircleAvatar(
+            backgroundColor: Color(0xFFE1F4EF),
+            child: Icon(Icons.auto_awesome_rounded, color: Color(0xFF0F766E)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l.assistantName,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  l.assistantHeaderSubtitle,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF64748B),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const _AgentStatusPill(),
+        ],
+      ),
+    );
+  }
+}
+
+class _AgentStatusPill extends StatelessWidget {
+  const _AgentStatusPill();
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE1F4EF),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        l.assistantSystemBadge,
+        style: const TextStyle(
+          color: Color(0xFF0F766E),
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
         ),
       ),
     );
@@ -1089,14 +1257,17 @@ class _ChatBubble extends StatelessWidget {
                     audioBase64: message.audioBase64,
                     isMe: isUser,
                   ),
-                Text(
-                  message.content,
-                  style: TextStyle(
-                    color: isUser ? Colors.white : Colors.black87,
-                    fontSize: 16,
+                if (!isUser && !message.isPartial)
+                  AssistantMarkdown(data: message.content)
+                else
+                  Text(
+                    message.content,
+                    style: TextStyle(
+                      color: isUser ? Colors.white : Colors.black87,
+                      fontSize: 16,
+                    ),
+                    softWrap: true,
                   ),
-                  softWrap: true,
-                ),
                 if (message.isPartial)
                   const Text(
                     '▊',

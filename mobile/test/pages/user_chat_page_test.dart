@@ -280,7 +280,7 @@ void main() {
       );
 
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
-      expect(find.text('发送中'), findsOneWidget);
+      expect(find.text('发送中'), findsNothing);
     });
 
     testWidgets('shows sent status', (tester) async {
@@ -304,7 +304,7 @@ void main() {
         ),
       );
 
-      expect(find.text('已发送'), findsOneWidget);
+      expect(find.byIcon(Icons.done_rounded), findsOneWidget);
     });
 
     testWidgets('shows delivered status', (tester) async {
@@ -328,7 +328,7 @@ void main() {
         ),
       );
 
-      expect(find.text('已送达'), findsOneWidget);
+      expect(find.byIcon(Icons.done_all_rounded), findsOneWidget);
     });
 
     testWidgets('shows read status with success color', (tester) async {
@@ -352,7 +352,8 @@ void main() {
         ),
       );
 
-      expect(find.text('已读'), findsOneWidget);
+      final readIcon = tester.widget<Icon>(find.byIcon(Icons.done_all_rounded));
+      expect(readIcon.color, const Color(0xFF4FC3F7));
     });
 
     testWidgets('shows failed status', (tester) async {
@@ -376,10 +377,12 @@ void main() {
         ),
       );
 
-      expect(find.text('发送失败'), findsOneWidget);
+      expect(find.byIcon(Icons.error_outline_rounded), findsOneWidget);
     });
 
-    testWidgets('does not show status when not connected', (tester) async {
+    testWidgets('shows delivery status even when not connected', (
+      tester,
+    ) async {
       final message = ConversationMessage(
         id: '1',
         conversationId: 'conv-1',
@@ -400,7 +403,7 @@ void main() {
         ),
       );
 
-      expect(find.text('已发送'), findsNothing);
+      expect(find.byIcon(Icons.done_rounded), findsOneWidget);
     });
 
     testWidgets('displays voice message player', (tester) async {
@@ -692,7 +695,7 @@ void main() {
         ),
       );
 
-      expect(find.text('等待对方接受连接'), findsOneWidget);
+      expect(find.text('等待对方接通'), findsOneWidget);
       expect(find.byType(TextField), findsNothing);
     });
 

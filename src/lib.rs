@@ -4,6 +4,7 @@
 
 pub mod agents;
 pub mod api;
+pub mod categories;
 pub mod cli;
 pub mod config;
 pub mod db;

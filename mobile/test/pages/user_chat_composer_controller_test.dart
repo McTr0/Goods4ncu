@@ -41,13 +41,18 @@ class _FakeChatService extends ChatService {
   Future<void> markConnectionAsRead(String conversationId) async {}
 
   @override
+  Future<void> markConversationRead(String conversationId) async {}
+
+  @override
   Future<ConversationMessage> sendMessage(
     String conversationId, {
     required String content,
+    String? replyToMessageId,
     String? imageBase64,
     String? audioBase64,
     String? imageUrl,
     String? audioUrl,
+    Map<String, String>? quote,
   }) async {
     if (throwOnSend) {
       throw Exception('send failed');
@@ -64,7 +69,10 @@ class _FakeChatService extends ChatService {
   }
 
   @override
-  Future<ConversationMessage> editMessage(String messageId, String content) async {
+  Future<ConversationMessage> editMessage(
+    String messageId,
+    String content,
+  ) async {
     if (throwOnEdit) {
       throw Exception('edit failed');
     }
@@ -92,35 +100,49 @@ class _FakeUserService extends UserService {
   Future<Map<String, dynamic>> getUserProfile() async => {'user_id': 'user-me'};
 }
 
+Conversation _activeConversation() {
+  return Conversation(
+    id: 'conv-1',
+    requesterId: 'user-me',
+    otherUserId: 'user-other',
+    otherUsername: 'Other',
+    state: ConversationState.active,
+    capabilities: const ConversationCapabilities(canSend: true),
+  );
+}
+
 void main() {
-  test('startEditMessage and cancelEdit keep text controller in sync', () async {
-    final notifier = ChatNotifier(
-      conversationId: 'conv-1',
-      chatService: _FakeChatService(),
-      userService: _FakeUserService(),
-    );
-    await flushAsync();
-    final controller = UserChatComposerController(chatNotifier: notifier);
+  test(
+    'startEditMessage and cancelEdit keep text controller in sync',
+    () async {
+      final notifier = ChatNotifier(
+        conversationId: 'conv-1',
+        chatService: _FakeChatService(),
+        userService: _FakeUserService(),
+      );
+      await flushAsync();
+      final controller = UserChatComposerController(chatNotifier: notifier);
 
-    final message = ConversationMessage(
-      id: 'm1',
-      conversationId: 'conv-1',
-      senderId: 'user-me',
-      content: 'draft text',
-      sentAt: DateTime.now(),
-    );
+      final message = ConversationMessage(
+        id: 'm1',
+        conversationId: 'conv-1',
+        senderId: 'user-me',
+        content: 'draft text',
+        sentAt: DateTime.now(),
+      );
 
-    controller.startEditMessage(message);
-    expect(controller.textController.text, 'draft text');
-    expect(controller.editingMessageId, 'm1');
+      controller.startEditMessage(message);
+      expect(controller.textController.text, 'draft text');
+      expect(controller.editingMessageId, 'm1');
 
-    controller.cancelEdit();
-    expect(controller.textController.text, isEmpty);
-    expect(controller.editingMessageId, isNull);
+      controller.cancelEdit();
+      expect(controller.textController.text, isEmpty);
+      expect(controller.editingMessageId, isNull);
 
-    controller.dispose();
-    notifier.dispose();
-  });
+      controller.dispose();
+      notifier.dispose();
+    },
+  );
 
   test('confirmEdit returns success message and clears input', () async {
     final chatService = _FakeChatService(
@@ -232,8 +254,8 @@ void main() {
     final controller = UserChatComposerController(chatNotifier: notifier);
     controller.textController.text = 'hello';
 
-    expect(
-      controller.sendMessage,
+    await expectLater(
+      controller.sendMessage(),
       throwsA(
         isA<UserChatComposerException>().having(
           (e) => e.message,
@@ -267,8 +289,8 @@ void main() {
     );
     controller.textController.text = 'after';
 
-    expect(
-      controller.confirmEdit,
+    await expectLater(
+      controller.confirmEdit(),
       throwsA(
         isA<UserChatComposerException>().having(
           (e) => e.message,
@@ -293,8 +315,8 @@ void main() {
     final controller = UserChatComposerController(chatNotifier: notifier);
     controller.textController.text = 'hello';
 
-    expect(
-      controller.sendMessage,
+    await expectLater(
+      controller.sendMessage(),
       throwsA(
         isA<UserChatComposerException>().having(
           (e) => e.message,
@@ -317,6 +339,7 @@ void main() {
     );
     await flushAsync();
     final controller = UserChatComposerController(chatNotifier: notifier);
+    notifier.setConversation(_activeConversation());
 
     controller.sendTypingIndicator();
     await flushAsync();

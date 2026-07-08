@@ -9,6 +9,7 @@ import '../pages/profile_page.dart';
 import '../pages/chat_page.dart';
 import '../pages/conversation_list_page.dart';
 import '../pages/user_chat_page.dart';
+import '../pages/user_home_page.dart';
 import '../pages/login_page.dart';
 import '../pages/my_orders_page.dart';
 import '../pages/order_detail_page.dart';
@@ -16,16 +17,15 @@ import '../pages/admin_page.dart';
 import '../pages/settings_page.dart';
 import '../pages/watchlist_page.dart';
 import '../pages/notifications_page.dart';
+import '../models/models.dart';
 import '../services/base_service.dart';
-import '../services/chat_service.dart';
 import '../services/user_service.dart';
 import '../services/admin_role_cache.dart';
 import '../pages/trust_page.dart';
-import '../services/sse_service.dart';
 import '../services/token_storage.dart';
 import '../services/ws_service.dart';
-import '../components/floating_agent_bubble.dart';
-import '../providers/agent_chat_notifier.dart';
+import '../theme/app_theme.dart';
+import '../theme/responsive.dart';
 import 'package:provider/provider.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = BaseService.navigatorKey;
@@ -114,16 +114,64 @@ final GoRouter appRouter = GoRouter(
       },
     ),
     GoRoute(
-      path: '/chat/:conversationId',
+      path: '/users/:id',
       builder: (context, state) {
+        final id = state.pathParameters['id']!;
+        return UserHomePage(userId: id);
+      },
+    ),
+    GoRoute(
+      path: '/chat/:conversationId',
+      redirect: (context, state) {
+        final id = state.pathParameters['conversationId']!;
+        return Uri(pathSegments: ['user-chat', id]).toString();
+      },
+    ),
+    GoRoute(
+      name: 'user-chat',
+      path: '/user-chat/:conversationId',
+      pageBuilder: (context, state) {
         final id = state.pathParameters['conversationId']!;
         final extra = state.extra as Map<String, dynamic>?;
         final otherUserId = extra?['otherUserId'] as String? ?? '';
         final otherUsername = extra?['otherUsername'] as String? ?? '';
-        return UserChatPage(
-          conversationId: id,
-          otherUserId: otherUserId,
-          otherUsername: otherUsername,
+        return MaterialPage<void>(
+          key: state.pageKey,
+          restorationId: state.pageKey.value,
+          child: UserChatPage(
+            conversationId: id,
+            otherUserId: otherUserId,
+            otherUsername: otherUsername,
+          ),
+        );
+      },
+    ),
+    GoRoute(
+      name: 'chat-thread',
+      path: '/chat/threads/:peerUserId',
+      pageBuilder: (context, state) {
+        final id = state.pathParameters['peerUserId']!;
+        final extra = state.extra as Map<String, dynamic>?;
+        return MaterialPage<void>(
+          key: state.pageKey,
+          restorationId: state.pageKey.value,
+          child: ChatThreadPage(
+            peerUserId: id,
+            initialThread: extra?['thread'] as ChatThread?,
+          ),
+        );
+      },
+    ),
+    GoRoute(
+      name: 'chat-space',
+      path: '/spaces/:spaceId',
+      pageBuilder: (context, state) {
+        final id = state.pathParameters['spaceId']!;
+        final extra = state.extra as Map<String, dynamic>?;
+        return MaterialPage<void>(
+          key: state.pageKey,
+          restorationId: state.pageKey.value,
+          child: SpaceChatPage(spaceId: id, initialSpace: extra),
         );
       },
     ),
@@ -164,8 +212,13 @@ final GoRouter appRouter = GoRouter(
         ),
         GoRoute(
           path: '/chat',
-          pageBuilder: (context, state) =>
-              const NoTransitionPage(child: ChatPage()),
+          pageBuilder: (context, state) {
+            final prompt = state.uri.queryParameters['prompt'];
+            return NoTransitionPage(
+              key: state.pageKey,
+              child: ChatPage(initialPrompt: prompt),
+            );
+          },
         ),
       ],
     ),
@@ -184,33 +237,6 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
   int _currentIndex = 0;
 
   static const _routes = ['/', '/conversations', '/create', '/profile'];
-
-  bool _isLoggedInStatus = false;
-  late final AgentChatNotifier _agentChatNotifier;
-
-  @override
-  void initState() {
-    super.initState();
-    _agentChatNotifier = AgentChatNotifier(
-      sseService: context.read<SseService>(),
-      chatService: context.read<ChatService>(),
-      userService: context.read<UserService>(),
-    );
-    _checkLoginStatus();
-  }
-
-  @override
-  void dispose() {
-    _agentChatNotifier.dispose();
-    super.dispose();
-  }
-
-  Future<void> _checkLoginStatus() async {
-    final loggedIn = await getLoginStatus();
-    if (mounted) {
-      setState(() => _isLoggedInStatus = loggedIn);
-    }
-  }
 
   int _tabIndexForLocation(String location) {
     switch (location) {
@@ -242,46 +268,232 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
       _currentIndex = nextIndex;
     }
 
-    return ChangeNotifierProvider<AgentChatNotifier>.value(
-      value: _agentChatNotifier,
-      child: Scaffold(
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            widget.child,
-            FloatingAgentBubble(isLoggedIn: _isLoggedInStatus),
-          ],
+    void selectDestination(int index) {
+      setState(() => _currentIndex = index);
+      context.go(_routes[index]);
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isDesktop = constraints.maxWidth >= AppBreakpoints.desktop;
+        if (isDesktop) {
+          final extended = constraints.maxWidth >= AppBreakpoints.wideDesktop;
+          return Scaffold(
+            backgroundColor: AppTheme.surface,
+            body: Row(
+              children: [
+                _DesktopNavigation(
+                  selectedIndex: _currentIndex,
+                  extended: extended,
+                  labels: [
+                    l.homeTab,
+                    l.messagesTab,
+                    l.publishTab,
+                    l.profileTab,
+                  ],
+                  onDestinationSelected: selectDestination,
+                ),
+                Expanded(
+                  child: ColoredBox(
+                    color: AppTheme.surface,
+                    child: ResponsiveContent(
+                      child: SizedBox.expand(child: widget.child),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return Scaffold(
+          body: widget.child,
+          bottomNavigationBar: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Theme.of(context).navigationBarTheme.backgroundColor,
+              border: Border(
+                top: BorderSide(
+                  color: Theme.of(context).dividerColor.withValues(alpha: 0.7),
+                ),
+              ),
+              boxShadow: AppTheme.cardShadow,
+            ),
+            child: NavigationBar(
+              selectedIndex: _currentIndex,
+              onDestinationSelected: selectDestination,
+              destinations: [
+                NavigationDestination(
+                  icon: const Icon(Icons.home_outlined),
+                  selectedIcon: const Icon(Icons.home_rounded),
+                  label: l.homeTab,
+                ),
+                NavigationDestination(
+                  icon: const Icon(Icons.chat_bubble_outline),
+                  selectedIcon: const Icon(Icons.chat_bubble_rounded),
+                  label: l.messagesTab,
+                ),
+                NavigationDestination(
+                  icon: const Icon(Icons.add_circle_outline),
+                  selectedIcon: const Icon(Icons.add_circle_rounded),
+                  label: l.publishTab,
+                ),
+                NavigationDestination(
+                  icon: const Icon(Icons.person_outline),
+                  selectedIcon: const Icon(Icons.person_rounded),
+                  label: l.profileTab,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _DesktopNavigation extends StatelessWidget {
+  final int selectedIndex;
+  final bool extended;
+  final List<String> labels;
+  final ValueChanged<int> onDestinationSelected;
+
+  const _DesktopNavigation({
+    required this.selectedIndex,
+    required this.extended,
+    required this.labels,
+    required this.onDestinationSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: extended ? 232 : 88,
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardTheme.color,
+        border: Border(
+          right: BorderSide(
+            color: Theme.of(context).dividerColor.withValues(alpha: 0.75),
+          ),
         ),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: _currentIndex,
-          onDestinationSelected: (i) {
-            setState(() => _currentIndex = i);
-            context.go(_routes[i]);
-          },
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0A0F766E),
+            blurRadius: 24,
+            offset: Offset(8, 0),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        child: NavigationRail(
+          extended: extended,
+          minWidth: 88,
+          minExtendedWidth: 232,
+          backgroundColor: Colors.transparent,
+          selectedIndex: selectedIndex,
+          groupAlignment: -0.56,
+          useIndicator: true,
+          indicatorColor: AppTheme.accentSoft,
+          selectedIconTheme: const IconThemeData(color: AppTheme.primaryDark),
+          unselectedIconTheme: const IconThemeData(
+            color: AppTheme.textSecondary,
+          ),
+          selectedLabelTextStyle: const TextStyle(
+            color: AppTheme.primaryDark,
+            fontWeight: FontWeight.w900,
+          ),
+          unselectedLabelTextStyle: const TextStyle(
+            color: AppTheme.textSecondary,
+            fontWeight: FontWeight.w700,
+          ),
+          onDestinationSelected: onDestinationSelected,
+          leading: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+            child: _DesktopBrand(extended: extended),
+          ),
           destinations: [
-            NavigationDestination(
+            NavigationRailDestination(
               icon: const Icon(Icons.home_outlined),
-              selectedIcon: const Icon(Icons.home),
-              label: l.homeTab,
+              selectedIcon: const Icon(Icons.home_rounded),
+              label: Text(labels[0]),
             ),
-            NavigationDestination(
+            NavigationRailDestination(
               icon: const Icon(Icons.chat_bubble_outline),
-              selectedIcon: const Icon(Icons.chat_bubble),
-              label: l.messagesTab,
+              selectedIcon: const Icon(Icons.chat_bubble_rounded),
+              label: Text(labels[1]),
             ),
-            NavigationDestination(
+            NavigationRailDestination(
               icon: const Icon(Icons.add_circle_outline),
-              selectedIcon: const Icon(Icons.add_circle),
-              label: l.publishTab,
+              selectedIcon: const Icon(Icons.add_circle_rounded),
+              label: Text(labels[2]),
             ),
-            NavigationDestination(
+            NavigationRailDestination(
               icon: const Icon(Icons.person_outline),
-              selectedIcon: const Icon(Icons.person),
-              label: l.profileTab,
+              selectedIcon: const Icon(Icons.person_rounded),
+              label: Text(labels[3]),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _DesktopBrand extends StatelessWidget {
+  final bool extended;
+
+  const _DesktopBrand({required this.extended});
+
+  @override
+  Widget build(BuildContext context) {
+    final mark = Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppTheme.primaryDark, AppTheme.primary],
+        ),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        boxShadow: AppTheme.softShadow,
+      ),
+      child: const Icon(
+        Icons.swap_horiz_rounded,
+        color: Colors.white,
+        size: 28,
+      ),
+    );
+
+    if (!extended) return mark;
+    return Row(
+      children: [
+        mark,
+        const SizedBox(width: AppTheme.sp12),
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Good4NCU',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              Text(
+                '校园循环市集',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

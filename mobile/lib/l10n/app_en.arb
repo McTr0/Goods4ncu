@@ -9,7 +9,7 @@
   "brand": "Brand",
   "brandLabel": "Brand",
   "books": "Books",
-  "buyNow": "Buy Now",
+  "buyNow": "Start deal intent",
   "buyer": "Buyer",
   "cancel": "Cancel",
   "category": "Category",
@@ -37,6 +37,42 @@
   },
   "createError": "Failed to create listing",
   "createListing": "Create Listing",
+  "createListingAiNeedsRetry": "Needs retry",
+  "createListingAiReady": "AI recognition complete",
+  "createListingAiRecognizing": "Assistant is recognizing...",
+  "createListingAiSubtitle": "Take or upload a photo, and the assistant will draft the title, category, brand, and condition for you to confirm.",
+  "createListingAiTitle": "Let the assistant take a look first",
+  "createListingBasicInfo": "Listing basics",
+  "createListingBasicInfoSubtitle": "These details decide whether classmates will open the listing.",
+  "createListingBrandHint": "For example: Apple, Casio, NCU",
+  "createListingBrandRequired": "Please enter the brand or source",
+  "createListingChangeImage": "Change image",
+  "createListingConditionSection": "Condition & defects",
+  "createListingConditionSubtitle": "Being clear about flaws makes the listing easier to trust.",
+  "createListingDefectHint": "For example: minor screen scratch",
+  "createListingDescriptionHint": "Describe purchase time, usage, accessories, pickup location, etc...",
+  "createListingDescriptionLabel": "Description (optional)",
+  "createListingDescriptionSection": "Extra details",
+  "createListingDescriptionSubtitle": "Optional, but concrete details reduce back-and-forth.",
+  "createListingMissingFields": "Missing {fields}",
+  "@createListingMissingFields": {
+    "placeholders": {
+      "fields": {
+        "type": "String"
+      }
+    }
+  },
+  "createListingPriceInvalid": "Please enter a valid price number",
+  "createListingPriceLabel": "Price (CNY) *",
+  "createListingPriceRequired": "Please enter a price",
+  "createListingProgressBasics": "Basics complete",
+  "createListingProgressCondition": "Condition confirmed",
+  "createListingProgressDescription": "Extra details",
+  "createListingProgressImage": "Image-assisted recognition",
+  "createListingProgressSubtitle": "Follow this rhythm and the listing will stay tidy.",
+  "createListingProgressTitle": "Publish progress",
+  "createListingReadyHint": "Everything is ready to publish",
+  "createListingTitleHint": "For example: iPhone 13 Pro Max 256G",
   "createSuccess": "Listing created successfully",
   "dailyGoods": "Daily Goods",
   "defects": "Defects",
@@ -57,6 +93,7 @@
   "fromGallery": "From gallery",
   "homeTab": "Home",
   "language": "Language",
+  "listSeparator": ", ",
   "listingDetail": "Listing Details",
   "loadFailed": "Load failed: {error}",
   "@loadFailed": {
@@ -104,7 +141,7 @@
   "orderAsBuyer": "As Buyer",
   "orderAsSeller": "As Seller",
   "pay": "Pay",
-  "markPaid": "Paid",
+  "markPaid": "Intent confirmed",
   "reason": "Reason (optional)",
   "negotiationDetails": "Negotiation details",
   "negotiationExpired": "Negotiation expired and cancelled",
@@ -122,6 +159,7 @@
     }
   },
   "other": "Other",
+  "optional": "optional",
   "owner": "Owner",
   "pendingNegotiation": "Pending negotiation",
   "password": "Password",
@@ -132,7 +170,7 @@
   "profileTab": "Profile",
   "publishTab": "Publish",
   "purchaseFailed": "Purchase failed, please try again",
-  "purchaseSuccess": "Purchase successful! Order created",
+  "purchaseSuccess": "Deal intent sent. Waiting for seller confirmation.",
   "recognitionFailed": "Recognition failed: {error}",
   "@recognitionFailed": {
     "placeholders": {
@@ -185,8 +223,8 @@
       }
     }
   },
-  "tradeProtection": "Trade protection",
-  "tradeProtectionSubtitle": "Platform escrow + 7-day delivery confirmation",
+  "tradeProtection": "Offline deal reminder",
+  "tradeProtectionSubtitle": "The platform does not escrow funds. Confirm inspection, handoff, and payment with each other.",
   "typeMessage": "Type a message...",
   "uploadFromCamera": "Upload from camera",
   "uploadFromGallery": "Upload from gallery",
@@ -204,8 +242,8 @@
   "adminOrders": "Orders",
   "adminTrend7Days": "Trend (7 days)",
   "changeRole": "Change Role",
-  "markShipped": "Mark Shipped",
-  "markCompleted": "Mark Completed",
+  "markShipped": "Confirm deal",
+  "markCompleted": "Deal confirmed",
   "orderStatusUpdated": "Order status updated",
   "userRoleUpdated": "User role updated",
   "adminTakedown": "Takedown",
@@ -304,5 +342,754 @@
   "emailChangeHint": "Enter @email.ncu.edu.cn email",
   "emailDomainError": "Must use @email.ncu.edu.cn email",
   "emailChangeSuccess": "Email updated",
-  "notSet": "Not set"
+  "notSet": "Not set",
+  "homeHeroEyebrow": "GOOD4NCU CAMPUS MARKET",
+  "homeHeroTitle": "What are you looking for today?",
+  "homeHeroSubtitle": "Tell Xiaobang what you need, your budget, or how you plan to use it. You can also keep scrolling through what classmates just listed.",
+  "homePromptHint": "Find textbooks, lightweight laptops, or ask Xiaobang to help sell an item...",
+  "homePromptSubmitTooltip": "Ask Xiaobang",
+  "homeSuggestionTitle": "Try starting with",
+  "homeThoughtLaptopLabel": "Find a laptop",
+  "homeThoughtLaptopPrompt": "My budget is 3000 yuan. Help me find a lightweight laptop for coding and carrying to class.",
+  "homeThoughtPriceLabel": "Price my item",
+  "homeThoughtPricePrompt": "I have an unused item to sell. Ask me a few questions first, then estimate a fair price.",
+  "homeThoughtCopyLabel": "Write listing copy",
+  "homeThoughtCopyPrompt": "Help me organize the item details step by step and write an honest, trustworthy listing.",
+  "homeThoughtNegotiateLabel": "Negotiate politely",
+  "homeThoughtNegotiatePrompt": "Help me find worthwhile digital items and start a polite negotiation when the price makes sense.",
+  "homeRecentTitle": "Recently Listed",
+  "homeRecentSubtitle": "See what classmates are selling right now.",
+  "conversationLoadFailedTitle": "Messages could not load",
+  "conversationEmptyTitle": "No conversations yet",
+  "conversationEmptySubtitle": "Contact someone from a listing, or search for a classmate to start a conversation.",
+  "findClassmate": "Find classmate",
+  "conversationWaitingCount": "Awaiting your reply · {count}",
+  "@conversationWaitingCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "conversationFilterAll": "All",
+  "conversationFilterRealtime": "Realtime",
+  "conversationFilterMail": "Mail",
+  "lookupDialogTitle": "Find classmate",
+  "lookupDialogSubtitle": "Enter a username, full email, or student ID. If they turned off that discovery method, they will not appear here.",
+  "lookupFieldLabel": "Search value",
+  "lookupFieldHint": "e.g. Alex / 2024123456 / name@email.ncu.edu.cn",
+  "lookupMethodLabel": "Search by",
+  "lookupMethodAuto": "Auto detect",
+  "lookupMethodUsername": "Username",
+  "lookupMethodStudentId": "Student ID",
+  "lookupMethodEmail": "Email",
+  "lookupSearchAction": "Search",
+  "lookupHint": "Tip: email and student ID must be entered fully. Whether someone can be found is controlled by their settings.",
+  "lookupEmpty": "No contactable user found. The input may be incomplete, or the other user may not have enabled this discovery method.",
+  "lookupMatchedWithListings": "Matched by {method} · {count} active listings",
+  "@lookupMatchedWithListings": {
+    "placeholders": {
+      "method": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "lookupMatchedIdentifierWithListings": "Matched by {method}: {identifier} · {count} active listings",
+  "@lookupMatchedIdentifierWithListings": {
+    "placeholders": {
+      "method": {
+        "type": "String"
+      },
+      "identifier": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "viewClassmateListings": "View listings",
+  "contactAction": "Contact",
+  "classmateActiveListingsTitle": "{username}'s listings",
+  "@classmateActiveListingsTitle": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "classmateListingsLoadFailedTitle": "Listings could not load",
+  "classmateListingsEmptyTitle": "No active listings",
+  "classmateListingsEmptySubtitle": "This user does not have public active listings right now.",
+  "unnamedListing": "Untitled listing",
+  "listingPriceLine": "{category} · ¥{price}",
+  "@listingPriceLine": {
+    "placeholders": {
+      "category": {
+        "type": "String"
+      },
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "assistantName": "Xiaobang",
+  "assistantSystemBadge": "AI Assistant",
+  "assistantInboxSubtitle": "Find items, price, publish, and negotiate from here",
+  "assistantHeaderSubtitle": "Your campus trading assistant · important decisions ask for your confirmation first",
+  "assistantHistoryLoadFailed": "History could not load. You can still keep asking Xiaobang.",
+  "assistantTyping": "AI is typing...",
+  "recordingStatus": "Recording {seconds}s / 60s",
+  "@recordingStatus": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "viewAction": "View",
+  "invitationFallbackTitle": "Wants to chat with you now",
+  "declineNow": "Not now",
+  "connectNow": "Connect",
+  "modeRealtime": "Realtime",
+  "modeMail": "Mail",
+  "conversationStateDelivered": "Delivered",
+  "conversationStateSynSent": "Waiting for them to connect",
+  "conversationStateSynAck": "They replied, waiting for confirmation",
+  "conversationStateActive": "This conversation is connected",
+  "conversationStateDeclined": "This time did not connect",
+  "conversationStateCancelled": "Invitation cancelled",
+  "conversationStateExpired": "This conversation has ended",
+  "conversationStateClosed": "This conversation is closed",
+  "conversationChooseTitle": "Choose a conversation",
+  "conversationChooseSubtitle": "Realtime conversations and mail threads stay clearly separated here.",
+  "contactModePromptTitle": "How would you like to reach out?",
+  "contactContextUser": "Contact {username}",
+  "@contactContextUser": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "contactContextListing": "About \"{title}\"",
+  "@contactContextListing": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "contactFallbackUser": "this classmate",
+  "contactModeRealtimeTitle": "Chat now",
+  "contactModeRealtimeDescription": "Send a 10-minute realtime invite. The conversation starts once they connect.",
+  "contactModeMailTitle": "Leave a message",
+  "contactModeMailDescription": "Deliver it directly without online, typing, or read indicators.",
+  "contactOpeningRequired": "Please write what you want to say first.",
+  "contactMailSubjectRequired": "Mail needs a subject.",
+  "contactRealtimeComposerTitle": "Start a realtime invite",
+  "contactMailComposerTitle": "Leave a message",
+  "contactMailSubjectLabel": "Subject",
+  "contactMailSubjectHint": "e.g. Asking about condition",
+  "contactMailBodyLabel": "Body",
+  "contactRealtimeOpeningLabel": "They will see this before connecting",
+  "contactMailBodyHint": "Share your question and when it is convenient to reply...",
+  "contactRealtimeOpeningHint": "Hi, is this item still available?",
+  "contactMailSubmit": "Deliver message",
+  "contactRealtimeSubmit": "Wait for them to connect",
+  "publicProfile": "Classmate Profile",
+  "myPublicProfile": "My public profile",
+  "myPublicProfileSubtitle": "Preview how others see your profile.",
+  "viewPublicProfile": "View profile",
+  "publicProfileLoadFailed": "Profile could not load",
+  "publicProfileListingsTitle": "Active listings",
+  "publicProfileListingsEmpty": "No active listings right now.",
+  "paymentQrSectionTitle": "Offline payment QR codes",
+  "paymentQrSectionSubtitle": "Shown only when the user chooses to make them public. The platform does not process, verify, or escrow payments.",
+  "paymentQrPublicNotice": "Use only after you have confirmed the item and seller. Offline payments are arranged between users.",
+  "wechatPayQr": "WeChat Pay",
+  "alipayQr": "Alipay",
+  "paymentQrSettingsTitle": "Payment QR codes",
+  "paymentQrSettingsSubtitle": "Optional. These are displayed on your public profile only after you turn them on.",
+  "uploadWechatQr": "Upload WeChat Pay code",
+  "uploadAlipayQr": "Upload Alipay code",
+  "showWechatQr": "Show WeChat Pay code",
+  "showAlipayQr": "Show Alipay code",
+  "paymentQrUpdated": "Payment QR settings updated",
+  "paymentQrCleared": "Payment QR code removed",
+  "paymentQrMissingHint": "Upload a QR code before turning on public display.",
+  "paymentQrSafetyHint": "The platform only displays your image and will not confirm whether anyone has paid.",
+  "createDealIntent": "Start deal intent",
+  "dealIntentSent": "Deal intent sent. Waiting for seller confirmation.",
+  "platformNoEscrowShort": "The platform only records offline deal intent. It does not escrow funds or verify payment or handoff. Please confirm inspection, exchange, and payment in chat.",
+  "awaitingSellerConfirm": "Waiting for seller confirmation",
+  "dealConfirmed": "Offline deal confirmed",
+  "dealCancelled": "Deal record cancelled",
+  "confirmOfflineDeal": "Confirm deal",
+  "autoDelistAfterConfirm": "Auto-delist item after confirmation",
+  "autoDelistAfterConfirmSubtitle": "Best for one-off used items. Turn it off if you want the listing to keep receiving intents.",
+  "dealIntentCreated": "Buyer started deal intent",
+  "sellerConfirmedDeal": "Seller confirmed deal",
+  "itemAutoDelisted": "Item auto-delisted",
+  "listingStatus": "Listing status",
+  "chatReadReceiptSettingsTitle": "Chat read receipts",
+  "chatReadReceiptDefaultTitle": "Default read behavior",
+  "chatReadReceiptAutoTitle": "Auto read",
+  "chatReadReceiptManualTitle": "Manual read",
+  "chatReadReceiptAutoSubtitle": "Mark received messages as read when you open an active realtime chat.",
+  "chatReadReceiptManualSubtitle": "They only see read after you tap \"Mark read\".",
+  "chatReadReceiptAutoCurrent": "Auto: opening an active realtime chat marks messages as read.",
+  "chatReadReceiptManualCurrent": "Manual: opening chat does not automatically show read receipts.",
+  "chatReadReceiptUpdated": "Chat read receipt setting updated",
+  "markConversationRead": "Mark read",
+  "markConversationReadSuccess": "Marked as read",
+  "manualReadUnreadOne": "Unread messages are waiting; manual read is on",
+  "manualReadUnreadMany": "{count} unread messages; manual read is on",
+  "@manualReadUnreadMany": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "readPreferenceUpdated": "Read preference updated",
+  "readPreferenceInherit": "Read receipts: inherit default",
+  "readPreferenceAuto": "Read receipts: auto",
+  "readPreferenceManual": "Read receipts: manual",
+  "selectedSuffix": " ✓",
+  "quoteListing": "Listing",
+  "quoteOrder": "Deal record",
+  "quoteHitlOffer": "Negotiation",
+  "quoteGeneric": "Quote",
+  "discoverabilitySettingsTitle": "How others can find me",
+  "discoverByUsernameTitle": "Find me by username",
+  "discoverByUsernameSubtitle": "When off, others cannot find you by username. Required display in listings and existing conversations is not affected.",
+  "discoverByEmailTitle": "Find me by email",
+  "discoverByEmailMissingSubtitle": "Set a campus email first, then choose whether others can find you by entering the full email.",
+  "discoverByEmailSubtitle": "Current email: {email}. When enabled, others must enter the full email to find you.",
+  "@discoverByEmailSubtitle": {
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
+  "discoverByStudentIdTitle": "Find me by student ID",
+  "discoverByStudentIdSubtitle": "Student ID inferred from email: {studentId}. When enabled, others must enter the full student ID to find you.",
+  "@discoverByStudentIdSubtitle": {
+    "placeholders": {
+      "studentId": {
+        "type": "String"
+      }
+    }
+  },
+  "discoverByStudentIdMissingSubtitle": "The current email does not reveal a student ID. Use a campus email that starts with 8-12 digits.",
+  "discoverabilityUpdated": "Discovery settings updated",
+  "settingsUpdateFailed": "Settings update failed: {error}",
+  "@settingsUpdateFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "conversationSectionDirect": "Direct messages",
+  "conversationSectionSpaces": "Campus groups and channels",
+  "conversationSectionTools": "Tools and assistant",
+  "conversationCreateGroupSuccess": "Group created and added to Messages",
+  "conversationCreateChannelSuccess": "Channel created and added to Messages",
+  "conversationCreateFailed": "Create failed: {error}",
+  "@conversationCreateFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "conversationPeerFallback": "Classmate",
+  "conversationThreadLoading": "Loading thread",
+  "conversationThreadStats": "Realtime {realtime} · Mail {mail} · {count} segments",
+  "@conversationThreadStats": {
+    "placeholders": {
+      "realtime": {
+        "type": "int"
+      },
+      "mail": {
+        "type": "int"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "conversationReconnect": "Reconnect",
+  "conversationThreadLoadFailedTitle": "Contact thread could not load",
+  "conversationThreadEmptyTitle": "No visible conversation history yet",
+  "conversationThreadEmptySubtitle": "Reconnect to start a new realtime chat or mail thread.",
+  "conversationMailThreadTitle": "Mail thread",
+  "conversationRealtimeThreadTitle": "Realtime session",
+  "conversationSegmentHistoryHint": "This segment is kept as history. Start a new conversation when you need to continue.",
+  "conversationSegmentOpenHint": "Open this segment to view messages, reply, quote context, or handle connection state.",
+  "conversationViewHistory": "View history",
+  "conversationOpenSegment": "Open this segment",
+  "conversationPendingCount": "Pending {count}",
+  "@conversationPendingCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "conversationTimelineFallback": "View conversation timeline",
+  "conversationRealtimeCount": "Realtime {count}",
+  "@conversationRealtimeCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "conversationMailCount": "Mail {count}",
+  "@conversationMailCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "conversationSegmentCount": "{count} segments",
+  "@conversationSegmentCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "campusCommunicationTitle": "Campus communication",
+  "campusCommunicationSubtitle": "Groups are for discussions, channels are for announcements. One-to-one chats can use call and secret chat MVPs.",
+  "createGroup": "Create group",
+  "createChannel": "Create channel",
+  "spaceNameLabel": "Name",
+  "spaceDescriptionOptionalLabel": "Description (optional)",
+  "createAction": "Create",
+  "unnamedSpace": "Unnamed space",
+  "spaceFallbackTitle": "Campus group",
+  "refresh": "Refresh",
+  "spaceLoadFailedTitle": "Space could not load",
+  "spaceNotFoundTitle": "Space not found",
+  "spaceNotFoundSubtitle": "It may have been deleted, or you may not be a member.",
+  "spaceSendFailed": "Send failed: {error}",
+  "@spaceSendFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "spaceMembersRoleLine": "{count} members · My role {role}",
+  "@spaceMembersRoleLine": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "role": {
+        "type": "String"
+      }
+    }
+  },
+  "spaceMessagesLoadFailedTitle": "Space messages could not load",
+  "spaceChannelCreatedTitle": "Channel created",
+  "spaceGroupCreatedTitle": "Group created",
+  "spaceChannelEmptySubtitle": "Announcements will appear here. Channel members can read, react, and report.",
+  "spaceGroupEmptySubtitle": "It is now in Messages. Send the first note to bring the group to life.",
+  "replyAction": "Reply",
+  "replyPreviewMissing": "Replied to message #{messageId}",
+  "@replyPreviewMissing": {
+    "placeholders": {
+      "messageId": {
+        "type": "int"
+      }
+    }
+  },
+  "spaceChannelReadOnlyNotice": "You are a channel member. You can read, react, and report; only channel owners/admins can post announcements.",
+  "cancelReply": "Cancel reply",
+  "channelComposerHint": "Post an announcement...",
+  "groupComposerHint": "Send a group message...",
+  "spaceFallbackDescription": "{count} members · {kind}",
+  "@spaceFallbackDescription": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "kind": {
+        "type": "String"
+      }
+    }
+  },
+  "spaceKindChannelLong": "Announcement channel",
+  "spaceKindGroupLong": "Campus group",
+  "spaceKindChannel": "Channel",
+  "spaceKindGroup": "Group",
+  "spaceRoleOwner": "Owner",
+  "spaceRoleAdmin": "Admin",
+  "spaceRoleBanned": "Restricted",
+  "spaceRoleMember": "Member",
+  "chatAcceptedLegacy": "Connection accepted",
+  "chatAcceptFailed": "Accept failed: {error}",
+  "@chatAcceptFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "chatRejectedLegacy": "Connection rejected",
+  "chatRejectFailed": "Reject failed: {error}",
+  "@chatRejectFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "replyingToMessage": "Replying to this message",
+  "reactionFailed": "Reaction failed: {error}",
+  "@reactionFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "hideMessageDialogTitle": "Delete from my chat history?",
+  "hideMessageDialogBody": "This only hides the message for you. The other person can still see it.",
+  "deleteAction": "Delete",
+  "messageHiddenForMe": "Hidden from your chat history",
+  "messageHideFailed": "Delete failed: {error}",
+  "@messageHideFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "reportMessageTitle": "Report this message",
+  "reportReasonDefault": "Inappropriate content",
+  "reportReasonLabel": "Reason",
+  "reportDetailsLabel": "Additional details (optional)",
+  "submitAction": "Submit",
+  "acceptAction": "Accept",
+  "rejectAction": "Reject",
+  "reportSubmitted": "Report submitted",
+  "reportFailed": "Report failed: {error}",
+  "@reportFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "markReadFailed": "Mark read failed: {error}",
+  "@markReadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "readPreferenceUpdateFailed": "Read preference update failed: {error}",
+  "@readPreferenceUpdateFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "quoteUnavailable": "This conversation has no listing, order, or negotiation context to quote.",
+  "quotePickerTitle": "Quote related info",
+  "quotePickerSubtitle": "The server creates the fact snapshot, so price, title, and status cannot be forged by the client.",
+  "quoteListingFallback": "Listing linked to this conversation",
+  "quoteListingSubtitle": "Quote a snapshot of the listing title, price, condition, and cover image.",
+  "conversationCannotSendMessage": "This conversation cannot send messages right now",
+  "messageSendFailed": "Send failed: {error}",
+  "@messageSendFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "replyAssistantUnavailable": "Xiaobang is not ready yet. You can still type directly.",
+  "closeConversationFailed": "End conversation failed: {error}",
+  "@closeConversationFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "blockUserTitle": "Block this user?",
+  "blockUserBody": "Neither side will be able to keep sending messages. Existing history will be preserved.",
+  "blockAction": "Block",
+  "blockFailed": "Block failed: {error}",
+  "@blockFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "callRequiresActiveConversation": "You can start a call after the conversation is connected.",
+  "videoCallSignalSent": "Video call signal sent",
+  "audioCallSignalSent": "Audio call signal sent",
+  "callStartFailed": "Start call failed: {error}",
+  "@callStartFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "secretChatCreated": "Secret chat session created. The server only stores ciphertext endpoints.",
+  "secretChatCreateFailed": "Create secret chat failed: {error}",
+  "@secretChatCreateFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "quoteListingLabel": "Quote listing: {title}",
+  "@quoteListingLabel": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "conversationFallbackTitle": "Conversation",
+  "conversationLoadingState": "Loading conversation state",
+  "conversationUnavailable": "This conversation is currently unavailable",
+  "conversationWaitingPeer": "Waiting for them to connect",
+  "conversationAcceptToReply": "Connect to reply",
+  "conversationCompletingHandshake": "Completing connection confirmation",
+  "conversationDeclinedTitle": "This time did not connect",
+  "conversationCancelledTitle": "Invitation cancelled",
+  "conversationExpiredTitle": "This conversation has ended",
+  "conversationClosedTitle": "This conversation is closed",
+  "conversationReadMenuHeader": "Read settings · Current {mode}",
+  "@conversationReadMenuHeader": {
+    "placeholders": {
+      "mode": {
+        "type": "String"
+      }
+    }
+  },
+  "readModeUnknown": "Unknown",
+  "readModeManual": "Manual",
+  "readModeAuto": "Auto",
+  "readModeInherit": "Inherit default",
+  "audioCallMvp": "Audio call MVP",
+  "videoCallMvp": "Video call MVP",
+  "secretChatMvp": "Secret chat MVP",
+  "closeConversationAction": "End this conversation",
+  "replyAssistantButton": "Ask Xiaobang",
+  "mailFallbackTitle": "Mail",
+  "mailProtocolSubtitle": "Async delivery · no online, typing, or read status",
+  "incomingRealtimeTitle": "They want to chat now",
+  "incomingRealtimeSubtitle": "You can choose whether to connect",
+  "incomingRealtimeExpiring": "Invitation expires in {remaining}",
+  "@incomingRealtimeExpiring": {
+    "placeholders": {
+      "remaining": {
+        "type": "String"
+      }
+    }
+  },
+  "notConvenientNow": "Not convenient now",
+  "connectAction": "Connect",
+  "waitingPeerTitle": "Waiting for them to connect",
+  "invitationDelivered": "Invitation delivered",
+  "timeRemaining": "{remaining} left",
+  "@timeRemaining": {
+    "placeholders": {
+      "remaining": {
+        "type": "String"
+      }
+    }
+  },
+  "cancelInvitation": "Cancel invitation",
+  "confirmingConnectionTitle": "Confirming connection",
+  "peerRespondedWaitingTitle": "They responded; waiting for confirmation",
+  "confirmingConnectionSubtitle": "You can chat after confirmation completes.",
+  "connectionReleaseAfter": "This connection releases in {remaining}",
+  "@connectionReleaseAfter": {
+    "placeholders": {
+      "remaining": {
+        "type": "String"
+      }
+    }
+  },
+  "realtimeConnectedTitle": "Conversation connected",
+  "realtimeConnectedSubtitle": "You can chat in realtime now",
+  "realtimeExpiresAfterIdle": "Ends after {remaining} with no new messages",
+  "@realtimeExpiresAfterIdle": {
+    "placeholders": {
+      "remaining": {
+        "type": "String"
+      }
+    }
+  },
+  "endAction": "End",
+  "conversationTerminalSubtitle": "History is kept. Reconnecting starts a new conversation.",
+  "conversationNaturallyEndedTitle": "This conversation ended naturally",
+  "durationHoursMinutes": "{hours}h {minutes}m",
+  "@durationHoursMinutes": {
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      },
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "connectionRequestTitle": "Connection request",
+  "connectionRequestReadReceiptNotice": "{title}\n\n{body}\n\nRead receipts will be enabled after you confirm.",
+  "@connectionRequestReadReceiptNotice": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      },
+      "body": {
+        "type": "String"
+      }
+    }
+  },
+  "offlineStatus": "Offline",
+  "onlineStatus": "Online",
+  "pendingAcceptStatus": "Pending",
+  "connectingStatus": "Connecting...",
+  "replyPreviewGeneric": "Quoted a message",
+  "editedSuffix": "(edited)",
+  "editAction": "Edit",
+  "hideMessageAction": "Delete from my chat history",
+  "hideMessageActionSubtitle": "Only hides it for you; the other person can still see it",
+  "reportAction": "Report",
+  "sendFailedShort": "Send failed",
+  "messageSentStatus": "Sent",
+  "messageReadStatus": "Read",
+  "messageDeliveredStatus": "Delivered",
+  "typingIndicator": "{username} is typing...",
+  "@typingIndicator": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "loadFailedWithError": "Load failed: {error}",
+  "@loadFailedWithError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "noMessagesYet": "No messages yet. Start the conversation.",
+  "stopAction": "Stop",
+  "replyMediaMessage": "Reply to a media message",
+  "cancelQuote": "Cancel quote",
+  "quoteContextTooltip": "Quote a listing, order, or negotiation",
+  "editMessageHint": "Edit message...",
+  "messageInputHint": "Type a message..."
+  ,
+  "offerPriceLine": "Offer: ¥{price}",
+  "@offerPriceLine": {
+    "placeholders": {
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "reasonLine": "Reason: {reason}",
+  "@reasonLine": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "expiresAtLine": "Valid until: {time}",
+  "@expiresAtLine": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "counterOfferAction": "Counter",
+  "acceptCounterAction": "Accept counter",
+  "sellerCounterPriceLine": "Seller countered ¥{price}",
+  "@sellerCounterPriceLine": {
+    "placeholders": {
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "yourOriginalOfferLine": "Your original offer: ¥{price}",
+  "@yourOriginalOfferLine": {
+    "placeholders": {
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "connectionFailedNetwork": "Connection failed. Please check the network.",
+  "emptyReplyPlaceholder": "(no reply)",
+  "listingLine": "Listing: {listingId}",
+  "@listingLine": {
+    "placeholders": {
+      "listingId": {
+        "type": "String"
+      }
+    }
+  },
+  "buyerOfferLine": "Buyer offer: ¥{price}",
+  "@buyerOfferLine": {
+    "placeholders": {
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "statusLine": "Status: {status}",
+  "@statusLine": {
+    "placeholders": {
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "counterPriceLine": "Counter: ¥{price}",
+  "@counterPriceLine": {
+    "placeholders": {
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "loading": "Loading...",
+  "negotiationStatusLine": "Negotiation {status}",
+  "@negotiationStatusLine": {
+    "placeholders": {
+      "status": {
+        "type": "String"
+      }
+    }
+  }
 }

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../components/audio_message_player.dart';
+import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../services/ws_service.dart';
 import '../theme/app_theme.dart';
@@ -21,28 +22,34 @@ Future<void> showUserChatConnectionRequestDialog({
   return showDialog<void>(
     context: context,
     barrierDismissible: false,
-    builder: (ctx) => AlertDialog(
-      title: const Text('连接请求'),
-      content: Text(
-        '${notification.title}\n\n${notification.body}\n\n确认后将开启消息已读功能',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () {
-            Navigator.pop(ctx);
-            onReject(connectionId);
-          },
-          child: const Text('拒绝'),
+    builder: (ctx) {
+      final l = AppLocalizations.of(ctx)!;
+      return AlertDialog(
+        title: Text(l.connectionRequestTitle),
+        content: Text(
+          l.connectionRequestReadReceiptNotice(
+            notification.title,
+            notification.body,
+          ),
         ),
-        ElevatedButton(
-          onPressed: () {
-            Navigator.pop(ctx);
-            onAccept(connectionId);
-          },
-          child: const Text('接受'),
-        ),
-      ],
-    ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              onReject(connectionId);
+            },
+            child: Text(l.rejectAction),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              onAccept(connectionId);
+            },
+            child: Text(l.acceptAction),
+          ),
+        ],
+      );
+    },
   );
 }
 
@@ -81,13 +88,14 @@ class ConnectionIndicatorState extends State<ConnectionIndicator>
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
     Color color;
     String label;
     Widget dot;
 
     if (!widget.isWsConnected) {
       color = Colors.grey;
-      label = '离线';
+      label = l.offlineStatus;
       dot = Container(
         width: 8,
         height: 8,
@@ -97,7 +105,7 @@ class ConnectionIndicatorState extends State<ConnectionIndicator>
       switch (widget.status) {
         case 'connected':
           color = AppTheme.success;
-          label = '在线';
+          label = l.onlineStatus;
           dot = Container(
             width: 8,
             height: 8,
@@ -106,7 +114,7 @@ class ConnectionIndicatorState extends State<ConnectionIndicator>
           break;
         case 'pending':
           color = AppTheme.warning;
-          label = '待接受';
+          label = l.pendingAcceptStatus;
           dot = Container(
             width: 8,
             height: 8,
@@ -115,7 +123,7 @@ class ConnectionIndicatorState extends State<ConnectionIndicator>
           break;
         case 'connecting':
           color = AppTheme.warning;
-          label = '连接中...';
+          label = l.connectingStatus;
           dot = AnimatedBuilder(
             animation: _controller,
             builder: (context, child) => Container(
@@ -130,7 +138,7 @@ class ConnectionIndicatorState extends State<ConnectionIndicator>
           break;
         default:
           color = Colors.grey;
-          label = '离线';
+          label = l.offlineStatus;
           dot = Container(
             width: 8,
             height: 8,
@@ -162,6 +170,11 @@ class MessageBubble extends StatelessWidget {
   final bool isMe;
   final bool isConnected;
   final VoidCallback? onEdit;
+  final VoidCallback? onReply;
+  final ValueChanged<String>? onReact;
+  final VoidCallback? onHide;
+  final VoidCallback? onReport;
+  final bool deliveryOnly;
 
   const MessageBubble({
     super.key,
@@ -169,14 +182,20 @@ class MessageBubble extends StatelessWidget {
     required this.isMe,
     required this.isConnected,
     this.onEdit,
+    this.onReply,
+    this.onReact,
+    this.onHide,
+    this.onReport,
+    this.deliveryOnly = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: GestureDetector(
-        onLongPress: onEdit,
+        onLongPress: () => _showMessageActions(context),
         child: Container(
           constraints: BoxConstraints(
             maxWidth: MediaQuery.of(context).size.width * 0.75,
@@ -240,6 +259,37 @@ class MessageBubble extends StatelessWidget {
                     isMe: isMe,
                   ),
                 ),
+              if (message.replyPreview != null)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: (isMe ? Colors.white : AppTheme.primary).withValues(
+                      alpha: 0.14,
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border(
+                      left: BorderSide(
+                        color: isMe ? Colors.white70 : AppTheme.primary,
+                        width: 3,
+                      ),
+                    ),
+                  ),
+                  child: Text(
+                    message.replyPreview!.content.isEmpty
+                        ? l.replyPreviewGeneric
+                        : message.replyPreview!.content,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isMe ? Colors.white70 : Colors.black54,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              if (message.quote != null)
+                _StructuredQuoteCard(quote: message.quote!, isMe: isMe),
               Text(
                 message.content,
                 style: TextStyle(
@@ -251,12 +301,41 @@ class MessageBubble extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
                   child: Text(
-                    '（已编辑）',
+                    l.editedSuffix,
                     style: TextStyle(
                       fontSize: 10,
                       color: isMe ? Colors.white60 : Colors.black38,
                       fontStyle: FontStyle.italic,
                     ),
+                  ),
+                ),
+              if (message.reactions.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Wrap(
+                    spacing: 4,
+                    runSpacing: 4,
+                    children: message.reactions.map((reaction) {
+                      return Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: reaction.reactedByMe
+                              ? Colors.white.withValues(alpha: 0.28)
+                              : Colors.black.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '${reaction.emoji} ${reaction.count}',
+                          style: TextStyle(
+                            color: isMe ? Colors.white : Colors.black87,
+                            fontSize: 12,
+                          ),
+                        ),
+                      );
+                    }).toList(),
                   ),
                 ),
               const SizedBox(height: 4),
@@ -275,7 +354,7 @@ class MessageBubble extends StatelessWidget {
                     GestureDetector(
                       onTap: onEdit,
                       child: Text(
-                        '编辑',
+                        l.editAction,
                         style: TextStyle(
                           fontSize: 10,
                           color: Colors.white60,
@@ -284,7 +363,10 @@ class MessageBubble extends StatelessWidget {
                       ),
                     ),
                   ],
-                  if (isMe) ...[const SizedBox(width: 4), _buildStatus()],
+                  if (isMe) ...[
+                    const SizedBox(width: 4),
+                    _buildStatus(context),
+                  ],
                 ],
               ),
             ],
@@ -294,9 +376,102 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
-  Widget _buildStatus() {
-    if (!isConnected) {
-      return const SizedBox.shrink();
+  void _showMessageActions(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    final actionsAvailable =
+        onReply != null ||
+        onReact != null ||
+        onEdit != null ||
+        onHide != null ||
+        onReport != null;
+    if (!actionsAvailable) return;
+    if (onEdit != null &&
+        onReply == null &&
+        onReact == null &&
+        onHide == null &&
+        onReport == null) {
+      onEdit?.call();
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (onReply != null)
+              ListTile(
+                leading: const Icon(Icons.reply_rounded),
+                title: Text(l.replyAction),
+                onTap: () {
+                  Navigator.pop(context);
+                  onReply?.call();
+                },
+              ),
+            if (onReact != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                child: Row(
+                  children: ['👍', '❤️', '😂', '😮', '😢', '🙏'].map((emoji) {
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ActionChip(
+                        label: Text(emoji),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          onReact?.call(emoji);
+                        },
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            if (onEdit != null)
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: Text(l.editAction),
+                onTap: () {
+                  Navigator.pop(context);
+                  onEdit?.call();
+                },
+              ),
+            if (onHide != null)
+              ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: Text(l.hideMessageAction),
+                subtitle: Text(l.hideMessageActionSubtitle),
+                onTap: () {
+                  Navigator.pop(context);
+                  onHide?.call();
+                },
+              ),
+            if (onReport != null)
+              ListTile(
+                leading: const Icon(Icons.flag_outlined),
+                title: Text(l.reportAction),
+                onTap: () {
+                  Navigator.pop(context);
+                  onReport?.call();
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatus(BuildContext context) {
+    if (deliveryOnly &&
+        message.status != 'sending' &&
+        message.status != 'failed') {
+      return _DeliveryTicks(
+        status: 'delivered',
+        color: isMe ? Colors.white70 : Colors.black45,
+      );
     }
     switch (message.status) {
       case 'sending':
@@ -312,28 +487,28 @@ class MessageBubble extends StatelessWidget {
               ),
             ),
             SizedBox(width: 2),
-            Text('发送中', style: TextStyle(fontSize: 10, color: Colors.white54)),
           ],
         );
       case 'sent':
-        return const Text(
-          '已发送',
-          style: TextStyle(fontSize: 10, color: Colors.white70),
+        return _DeliveryTicks(
+          status: 'sent',
+          color: isMe ? Colors.white70 : Colors.black45,
         );
       case 'delivered':
-        return const Text(
-          '已送达',
-          style: TextStyle(fontSize: 10, color: Colors.white70),
+        return _DeliveryTicks(
+          status: 'delivered',
+          color: isMe ? Colors.white70 : Colors.black45,
         );
       case 'read':
-        return const Text(
-          '已读',
-          style: TextStyle(fontSize: 10, color: AppTheme.success),
-        );
+        return const _DeliveryTicks(status: 'read', color: Color(0xFF4FC3F7));
       case 'failed':
-        return const Text(
-          '发送失败',
-          style: TextStyle(fontSize: 10, color: Colors.red),
+        return Tooltip(
+          message: AppLocalizations.of(context)!.sendFailedShort,
+          child: const Icon(
+            Icons.error_outline_rounded,
+            size: 14,
+            color: Colors.red,
+          ),
         );
       default:
         return const SizedBox.shrink();
@@ -342,6 +517,30 @@ class MessageBubble extends StatelessWidget {
 
   String _formatTime(DateTime dt) {
     return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+class _DeliveryTicks extends StatelessWidget {
+  const _DeliveryTicks({required this.status, required this.color});
+
+  final String status;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    final (icon, label) = switch (status) {
+      'sent' => (Icons.done_rounded, l.messageSentStatus),
+      'read' => (Icons.done_all_rounded, l.messageReadStatus),
+      _ => (Icons.done_all_rounded, l.messageDeliveredStatus),
+    };
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        label: label,
+        child: Icon(icon, size: 15, color: color),
+      ),
+    );
   }
 }
 
@@ -364,9 +563,76 @@ class UserChatTypingBanner extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Text(
-            '$username 正在输入...',
+            AppLocalizations.of(context)!.typingIndicator(username),
             style: const TextStyle(color: Colors.grey, fontSize: 12),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StructuredQuoteCard extends StatelessWidget {
+  const _StructuredQuoteCard({required this.quote, required this.isMe});
+
+  final MessageStructuredQuote quote;
+  final bool isMe;
+
+  @override
+  Widget build(BuildContext context) {
+    final price = quote.primaryPrice;
+    final status = quote.status;
+    final l = AppLocalizations.of(context)!;
+    final label = switch (quote.kind) {
+      'listing' => l.quoteListing,
+      'order' => l.quoteOrder,
+      'hitl_offer' => l.quoteHitlOffer,
+      _ => l.quoteGeneric,
+    };
+    final foreground = isMe ? Colors.white : AppTheme.textPrimary;
+    final secondary = isMe ? Colors.white70 : AppTheme.textSecondary;
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: (isMe ? Colors.white : AppTheme.accent).withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: (isMe ? Colors.white : AppTheme.accent).withValues(
+            alpha: 0.24,
+          ),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: secondary,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            quote.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: foreground, fontWeight: FontWeight.w800),
+          ),
+          if (price != null || status != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              [
+                if (price != null) '¥${price.toStringAsFixed(2)}',
+                if (status != null && status.isNotEmpty) status,
+              ].join(' · '),
+              style: TextStyle(fontSize: 12, color: secondary),
+            ),
+          ],
         ],
       ),
     );
@@ -382,6 +648,13 @@ class UserChatMessageList extends StatelessWidget {
   final ScrollController scrollController;
   final VoidCallback onRetry;
   final ValueChanged<ConversationMessage> onEditMessage;
+  final ValueChanged<ConversationMessage>? onReplyMessage;
+  final void Function(ConversationMessage message, String emoji)?
+  onReactMessage;
+  final ValueChanged<ConversationMessage>? onHideMessage;
+  final ValueChanged<ConversationMessage>? onReportMessage;
+  final bool allowEditing;
+  final bool deliveryOnly;
 
   const UserChatMessageList({
     super.key,
@@ -393,10 +666,17 @@ class UserChatMessageList extends StatelessWidget {
     required this.scrollController,
     required this.onRetry,
     required this.onEditMessage,
+    this.onReplyMessage,
+    this.onReactMessage,
+    this.onHideMessage,
+    this.onReportMessage,
+    this.allowEditing = true,
+    this.deliveryOnly = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
     if (isLoading && messages.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -405,16 +685,19 @@ class UserChatMessageList extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text('加载失败: $error'),
+            Text(l.loadFailedWithError(error!)),
             const SizedBox(height: 16),
-            ElevatedButton(onPressed: onRetry, child: const Text('重试')),
+            ElevatedButton(onPressed: onRetry, child: Text(l.retry)),
           ],
         ),
       );
     }
     if (messages.isEmpty) {
-      return const Center(
-        child: Text('暂无消息，开始聊天吧', style: TextStyle(color: Colors.grey)),
+      return Center(
+        child: Text(
+          l.noMessagesYet,
+          style: const TextStyle(color: Colors.grey),
+        ),
       );
     }
 
@@ -429,7 +712,20 @@ class UserChatMessageList extends StatelessWidget {
           message: msg,
           isMe: isMe,
           isConnected: connectionStatus == 'connected',
-          onEdit: isMe && msg.canEdit ? () => onEditMessage(msg) : null,
+          deliveryOnly: deliveryOnly,
+          onReply: onReplyMessage == null ? null : () => onReplyMessage!(msg),
+          onReact: msg.canReact && onReactMessage != null
+              ? (emoji) => onReactMessage!(msg, emoji)
+              : null,
+          onHide: msg.canHide && onHideMessage != null
+              ? () => onHideMessage!(msg)
+              : null,
+          onReport: msg.canReport && onReportMessage != null
+              ? () => onReportMessage!(msg)
+              : null,
+          onEdit: isMe && allowEditing && msg.canEdit && msg.kind == 'message'
+              ? () => onEditMessage(msg)
+              : null,
         );
       },
     );
@@ -442,13 +738,19 @@ class UserChatInputArea extends StatelessWidget {
   final int recordingSeconds;
   final bool isSending;
   final bool isEditing;
+  final ConversationMessage? replyingToMessage;
+  final String? structuredQuoteLabel;
   final TextEditingController textController;
   final VoidCallback onPickImage;
   final VoidCallback onToggleRecording;
+  final VoidCallback? onPickQuote;
+  final VoidCallback? onCancelQuote;
   final VoidCallback onCancelEdit;
+  final VoidCallback? onCancelReply;
   final ValueChanged<String> onChanged;
   final ValueChanged<String> onSubmitted;
   final VoidCallback onSend;
+  final String unavailableMessage;
 
   const UserChatInputArea({
     super.key,
@@ -457,17 +759,24 @@ class UserChatInputArea extends StatelessWidget {
     required this.recordingSeconds,
     required this.isSending,
     required this.isEditing,
+    this.replyingToMessage,
+    this.structuredQuoteLabel,
     required this.textController,
     required this.onPickImage,
     required this.onToggleRecording,
+    this.onPickQuote,
+    this.onCancelQuote,
     required this.onCancelEdit,
+    this.onCancelReply,
     required this.onChanged,
     required this.onSubmitted,
     required this.onSend,
+    this.unavailableMessage = '',
   });
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
     if (connectionStatus != 'connected') {
       return Container(
         padding: const EdgeInsets.all(16),
@@ -484,7 +793,15 @@ class UserChatInputArea extends StatelessWidget {
               size: 18,
             ),
             const SizedBox(width: 8),
-            Text('等待对方接受连接', style: TextStyle(color: Colors.orange.shade700)),
+            Flexible(
+              child: Text(
+                unavailableMessage.isEmpty
+                    ? l.conversationWaitingPeer
+                    : unavailableMessage,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.orange.shade700),
+              ),
+            ),
           ],
         ),
       );
@@ -503,14 +820,14 @@ class UserChatInputArea extends StatelessWidget {
             const Icon(Icons.circle, color: Colors.red, size: 12),
             const SizedBox(width: 8),
             Text(
-              '录音中 ${recordingSeconds}s / 60s',
+              l.recordingStatus(recordingSeconds),
               style: TextStyle(
                 color: Colors.red.shade700,
                 fontWeight: FontWeight.bold,
               ),
             ),
             const Spacer(),
-            TextButton(onPressed: onToggleRecording, child: const Text('停止')),
+            TextButton(onPressed: onToggleRecording, child: Text(l.stopAction)),
           ],
         ),
       );
@@ -523,48 +840,116 @@ class UserChatInputArea extends StatelessWidget {
         border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
       ),
       child: SafeArea(
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            IconButton(
-              icon: const Icon(Icons.image),
-              onPressed: isSending ? null : onPickImage,
-            ),
-            IconButton(
-              icon: Icon(
-                isRecording ? Icons.stop : Icons.mic,
-                color: isRecording ? Colors.red : null,
+            if (replyingToMessage != null)
+              Container(
+                margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.reply_rounded, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        replyingToMessage!.content.isEmpty
+                            ? l.replyMediaMessage
+                            : replyingToMessage!.content,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: l.cancelReply,
+                      onPressed: onCancelReply,
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
               ),
-              onPressed: onToggleRecording,
-            ),
-            if (isEditing)
-              IconButton(
-                icon: const Icon(Icons.close, color: Colors.grey),
-                onPressed: onCancelEdit,
+            if (structuredQuoteLabel != null)
+              Container(
+                margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.format_quote_rounded, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        structuredQuoteLabel!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: l.cancelQuote,
+                      onPressed: onCancelQuote,
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
               ),
-            Expanded(
-              child: TextField(
-                controller: textController,
-                decoration: InputDecoration(
-                  hintText: isEditing ? '编辑消息...' : '输入消息...',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
+            Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.image),
+                  onPressed: isSending ? null : onPickImage,
+                ),
+                IconButton(
+                  tooltip: l.quoteContextTooltip,
+                  icon: const Icon(Icons.format_quote_rounded),
+                  onPressed: isSending ? null : onPickQuote,
+                ),
+                IconButton(
+                  icon: Icon(
+                    isRecording ? Icons.stop : Icons.mic,
+                    color: isRecording ? Colors.red : null,
                   ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
+                  onPressed: onToggleRecording,
+                ),
+                if (isEditing)
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.grey),
+                    onPressed: onCancelEdit,
+                  ),
+                Expanded(
+                  child: TextField(
+                    controller: textController,
+                    decoration: InputDecoration(
+                      hintText: isEditing
+                          ? l.editMessageHint
+                          : l.messageInputHint,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                    ),
+                    onChanged: onChanged,
+                    onSubmitted: onSubmitted,
                   ),
                 ),
-                onChanged: onChanged,
-                onSubmitted: onSubmitted,
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton(
-              icon: Icon(
-                isEditing ? Icons.check : Icons.send,
-                color: isEditing ? Colors.green : AppTheme.primary,
-              ),
-              onPressed: onSend,
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: Icon(
+                    isEditing ? Icons.check : Icons.send,
+                    color: isEditing ? Colors.green : AppTheme.primary,
+                  ),
+                  onPressed: onSend,
+                ),
+              ],
             ),
           ],
         ),

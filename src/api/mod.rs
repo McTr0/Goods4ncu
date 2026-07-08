@@ -38,6 +38,7 @@ use std::sync::LazyLock;
 use tokio::sync::mpsc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::services::ServeDir;
 
 use crate::middleware::rate_limit::{is_whitelisted, RateLimitStateHandle};
 use regex::Regex;
@@ -348,6 +349,7 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
     };
 
     Router::new()
+        .nest_service("/uploads", ServeDir::new("uploads"))
         .route("/api/health", get(health_check))
         .route("/api/metrics", get(get_metrics))
         .route("/api/stats", get(stats::get_stats))
@@ -386,6 +388,7 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             "/api/chat/stream",
             get(chat::handle_chat_stream_get).post(chat::handle_chat_stream_post),
         )
+        .route("/api/chat/assistant", get(chat::get_assistant_history))
         .route("/api/auth/register", post(auth::register))
         .route("/api/auth/login", post(auth::login))
         .route("/api/auth/change-password", post(auth::change_password))
@@ -409,6 +412,11 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         )
         .route("/api/user/listings", get(user::get_user_listings))
         .route("/api/users/search", get(user::search_users))
+        .route("/api/users/lookup", get(user::lookup_users))
+        .route(
+            "/api/users/{id}/listings",
+            get(user::get_public_user_listings),
+        )
         .route("/api/users/{id}", get(user::get_user_profile))
         .route(
             "/api/orders",
@@ -454,31 +462,106 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             patch(negotiate::reject_counter_negotiation),
         )
         .route(
-            "/api/chat/connect/request",
-            post(user_chat::connect_request),
+            "/api/chat/conversations",
+            get(user_chat::list_conversations).post(user_chat::create_conversation),
         )
-        .route("/api/chat/connect/accept", post(user_chat::connect_accept))
-        .route("/api/chat/connect/reject", post(user_chat::connect_reject))
-        .route("/api/chat/connections", get(user_chat::list_connections))
+        .route("/api/chat/threads", get(user_chat::list_threads))
+        .route(
+            "/api/chat/threads/{peer_user_id}",
+            get(user_chat::get_thread),
+        )
+        .route(
+            "/api/chat/conversations/{id}",
+            get(user_chat::get_conversation),
+        )
+        .route(
+            "/api/chat/conversations/{id}/respond",
+            post(user_chat::respond_conversation),
+        )
+        .route(
+            "/api/chat/conversations/{id}/ack",
+            post(user_chat::acknowledge_conversation),
+        )
+        .route(
+            "/api/chat/conversations/{id}/close",
+            post(user_chat::close_conversation),
+        )
+        .route(
+            "/api/chat/conversations/{id}/archive",
+            post(user_chat::archive_conversation),
+        )
         .route(
             "/api/chat/conversations/{id}/messages",
-            get(user_chat::get_connection_messages).post(user_chat::send_connection_message),
+            get(user_chat::get_conversation_messages).post(user_chat::send_conversation_message),
         )
         .route(
-            "/api/chat/messages/{id}/read",
-            post(user_chat::mark_message_read),
+            "/api/chat/conversations/{id}/read",
+            post(user_chat::mark_conversation_read),
+        )
+        .route(
+            "/api/chat/conversations/{id}/read-preference",
+            post(user_chat::set_read_preference),
         )
         .route("/api/chat/messages/{id}", patch(user_chat::edit_message))
-        .route("/api/chat/typing", post(user_chat::typing_indicator))
         .route(
-            "/api/chat/connection/{id}/read",
-            post(user_chat::mark_connection_read),
+            "/api/chat/messages/{id}/reaction",
+            post(user_chat::set_message_reaction).delete(user_chat::delete_message_reaction),
+        )
+        .route(
+            "/api/chat/messages/{id}/hide",
+            post(user_chat::hide_message),
+        )
+        .route(
+            "/api/chat/messages/{id}/report",
+            post(user_chat::report_message),
+        )
+        .route(
+            "/api/chat/conversations/{id}/typing",
+            post(user_chat::typing_indicator),
+        )
+        .route(
+            "/api/chat/conversations/{id}/reply-suggestions",
+            post(user_chat::reply_suggestions),
+        )
+        .route(
+            "/api/chat/blocks",
+            get(user_chat::list_blocks).post(user_chat::block_user),
+        )
+        .route(
+            "/api/chat/blocks/{id}",
+            axum::routing::delete(user_chat::unblock_user),
+        )
+        .route(
+            "/api/chat/spaces",
+            get(user_chat::list_spaces).post(user_chat::create_space),
+        )
+        .route("/api/chat/spaces/{id}", get(user_chat::get_space))
+        .route(
+            "/api/chat/spaces/{id}/members",
+            post(user_chat::add_space_member),
+        )
+        .route(
+            "/api/chat/spaces/{id}/members/{user_id}",
+            axum::routing::delete(user_chat::remove_space_member),
+        )
+        .route(
+            "/api/chat/spaces/{id}/messages",
+            get(user_chat::list_space_messages).post(user_chat::send_space_message),
+        )
+        .route("/api/chat/calls", post(user_chat::create_call))
+        .route("/api/chat/calls/{id}/answer", post(user_chat::answer_call))
+        .route("/api/chat/calls/{id}/end", post(user_chat::end_call))
+        .route(
+            "/api/chat/secret-sessions",
+            post(user_chat::create_secret_session),
+        )
+        .route(
+            "/api/chat/secret-sessions/{id}/messages",
+            get(user_chat::list_secret_messages).post(user_chat::send_secret_message),
         )
         .route("/api/upload/token", get(upload::get_upload_token))
         .route("/api/ws", get(ws::ws_handler))
-        .layer(cors)
         .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024))
-        .layer(middleware::from_fn(security_headers_middleware))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             token_denylist_middleware,
@@ -491,6 +574,10 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             state.clone(),
             http_metrics_middleware,
         ))
+        // Security and CORS must wrap auth middleware so rejected browser
+        // requests still expose their status and headers to the web client.
+        .layer(middleware::from_fn(security_headers_middleware))
+        .layer(cors)
         .with_state(state)
 }
 

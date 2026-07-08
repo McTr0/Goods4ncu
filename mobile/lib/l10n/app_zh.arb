@@ -9,7 +9,7 @@
   "brand": "品牌",
   "brandLabel": "品牌",
   "books": "图书",
-  "buyNow": "立即购买",
+  "buyNow": "发起成交意向",
   "buyer": "买家",
   "cancel": "取消",
   "category": "分类",
@@ -37,6 +37,42 @@
   },
   "createError": "发布失败",
   "createListing": "发布商品",
+  "createListingAiNeedsRetry": "需要重试",
+  "createListingAiReady": "AI 识别完成",
+  "createListingAiRecognizing": "小帮正在识别...",
+  "createListingAiSubtitle": "拍照或上传图片，小帮会帮你先填标题、分类、品牌和成色；你只需要确认。",
+  "createListingAiTitle": "先让小帮看一眼",
+  "createListingBasicInfo": "商品基础信息",
+  "createListingBasicInfoSubtitle": "这些信息会直接影响同学是否愿意点进来看。",
+  "createListingBrandHint": "例如：Apple、Casio、NCU",
+  "createListingBrandRequired": "请输入品牌或来源",
+  "createListingChangeImage": "更换图片",
+  "createListingConditionSection": "成色与瑕疵",
+  "createListingConditionSubtitle": "把不完美说清楚，反而更容易成交。",
+  "createListingDefectHint": "例如：屏幕有轻微划痕",
+  "createListingDescriptionHint": "描述一下购买时间、使用频率、配件、取货地点等...",
+  "createListingDescriptionLabel": "描述（选填）",
+  "createListingDescriptionSection": "补充描述",
+  "createListingDescriptionSubtitle": "可选，但越具体越省沟通成本。",
+  "createListingMissingFields": "还差 {fields}",
+  "@createListingMissingFields": {
+    "placeholders": {
+      "fields": {
+        "type": "String"
+      }
+    }
+  },
+  "createListingPriceInvalid": "请输入有效的价格数字",
+  "createListingPriceLabel": "价格（元） *",
+  "createListingPriceRequired": "请输入价格",
+  "createListingProgressBasics": "基础信息完整",
+  "createListingProgressCondition": "成色已确认",
+  "createListingProgressDescription": "补充细节",
+  "createListingProgressImage": "图片辅助识别",
+  "createListingProgressSubtitle": "按这个节奏补齐，发布就不会乱。",
+  "createListingProgressTitle": "发布进度",
+  "createListingReadyHint": "信息齐了，可以发布",
+  "createListingTitleHint": "例如：iPhone 13 Pro Max 256G",
   "createSuccess": "商品发布成功",
   "dailyGoods": "生活用品",
   "defects": "缺陷",
@@ -57,6 +93,7 @@
   "fromGallery": "相册",
   "homeTab": "首页",
   "language": "语言",
+  "listSeparator": "、",
   "listingDetail": "商品详情",
   "loadFailed": "加载失败: {error}",
   "@loadFailed": {
@@ -104,7 +141,7 @@
   "orderAsBuyer": "作为买家",
   "orderAsSeller": "作为卖家",
   "pay": "支付",
-  "markPaid": "已支付",
+  "markPaid": "已确认意向",
   "reason": "取消原因（选填）",
   "negotiationDetails": "议价详情",
   "negotiationExpired": "议价已超时取消",
@@ -122,6 +159,7 @@
     }
   },
   "other": "其他",
+  "optional": "选填",
   "owner": "卖家",
   "pendingNegotiation": "待处理议价",
   "password": "密码",
@@ -132,7 +170,7 @@
   "profileTab": "我的",
   "publishTab": "发布",
   "purchaseFailed": "购买失败，请稍后重试",
-  "purchaseSuccess": "购买成功！订单已创建",
+  "purchaseSuccess": "成交意向已发送，等待卖家确认",
   "recognitionFailed": "识别失败: {error}",
   "@recognitionFailed": {
     "placeholders": {
@@ -185,8 +223,8 @@
       }
     }
   },
-  "tradeProtection": "交易保障",
-  "tradeProtectionSubtitle": "平台托管 + 7天确认收货",
+  "tradeProtection": "线下成交提醒",
+  "tradeProtectionSubtitle": "平台不托管资金，请双方自行确认验货、交接和付款",
   "typeMessage": "输入消息...",
   "uploadFromCamera": "拍照上传",
   "uploadFromGallery": "相册上传",
@@ -204,8 +242,8 @@
   "adminOrders": "订单总数",
   "adminTrend7Days": "趋势 (7日)",
   "changeRole": "修改角色",
-  "markShipped": "标记已发货",
-  "markCompleted": "标记已完成",
+  "markShipped": "确认成交",
+  "markCompleted": "已确认成交",
   "orderStatusUpdated": "订单状态已更新",
   "userRoleUpdated": "用户角色已更新",
   "adminTakedown": "强制下架 (Takedown)",
@@ -304,5 +342,754 @@
   "emailChangeHint": "输入 @email.ncu.edu.cn 邮箱",
   "emailDomainError": "必须使用 @email.ncu.edu.cn 邮箱",
   "emailChangeSuccess": "邮箱已更新",
-  "notSet": "未设置"
+  "notSet": "未设置",
+  "homeHeroEyebrow": "GOOD4NCU CAMPUS MARKET",
+  "homeHeroTitle": "今天想淘点什么？",
+  "homeHeroSubtitle": "输入商品、预算或用途，小帮可以陪你找；也可以直接往下逛同学们刚挂出的闲置。",
+  "homePromptHint": "找二手教材、轻薄本，或让小帮帮你卖闲置…",
+  "homePromptSubmitTooltip": "交给小帮",
+  "homeSuggestionTitle": "试试这样开始",
+  "homeThoughtLaptopLabel": "找轻薄本",
+  "homeThoughtLaptopPrompt": "预算 3000 元，帮我找一台适合写代码、方便带去教室的轻薄本",
+  "homeThoughtPriceLabel": "给闲置估价",
+  "homeThoughtPricePrompt": "我有一件闲置想卖，先问我几个问题，再帮我估一个合理价格",
+  "homeThoughtCopyLabel": "帮我写发布文案",
+  "homeThoughtCopyPrompt": "帮我一步步整理闲置信息，并生成一份真实可信的商品发布文案",
+  "homeThoughtNegotiateLabel": "替我礼貌议价",
+  "homeThoughtNegotiatePrompt": "帮我找值得买的数码好物，并在价格合适时替我发起礼貌议价",
+  "homeRecentTitle": "最近上新",
+  "homeRecentSubtitle": "看看同学们正在出什么闲置。",
+  "conversationLoadFailedTitle": "消息暂时没有加载出来",
+  "conversationEmptyTitle": "还没有会话",
+  "conversationEmptySubtitle": "从商品详情联系，或搜索同学开始一次会话。",
+  "findClassmate": "找同学",
+  "conversationWaitingCount": "等待你回应 · {count}",
+  "@conversationWaitingCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "conversationFilterAll": "全部",
+  "conversationFilterRealtime": "实时",
+  "conversationFilterMail": "留言",
+  "lookupDialogTitle": "找同学",
+  "lookupDialogSubtitle": "输入用户名、完整邮箱或学号。对方关闭某种查找方式时，这里不会显示结果。",
+  "lookupFieldLabel": "查找内容",
+  "lookupFieldHint": "例如：小王 / 2024123456 / name@email.ncu.edu.cn",
+  "lookupMethodLabel": "查找方式",
+  "lookupMethodAuto": "自动识别",
+  "lookupMethodUsername": "用户名",
+  "lookupMethodStudentId": "学号",
+  "lookupMethodEmail": "邮箱",
+  "lookupSearchAction": "查找",
+  "lookupHint": "小提示：邮箱和学号必须完整输入；是否能被找到由对方在设置里决定。",
+  "lookupEmpty": "没有找到可联系的用户。可能是输入不完整，或对方没有开启这种查找方式。",
+  "lookupMatchedWithListings": "通过{method}匹配 · {count} 件在售",
+  "@lookupMatchedWithListings": {
+    "placeholders": {
+      "method": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "lookupMatchedIdentifierWithListings": "通过{method}匹配：{identifier} · {count} 件在售",
+  "@lookupMatchedIdentifierWithListings": {
+    "placeholders": {
+      "method": {
+        "type": "String"
+      },
+      "identifier": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "viewClassmateListings": "查看TA的在售",
+  "contactAction": "联系",
+  "classmateActiveListingsTitle": "{username} 的在售",
+  "@classmateActiveListingsTitle": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "classmateListingsLoadFailedTitle": "在售商品暂时没加载出来",
+  "classmateListingsEmptyTitle": "暂时没有在售商品",
+  "classmateListingsEmptySubtitle": "TA 当前没有公开 active 商品。",
+  "unnamedListing": "未命名商品",
+  "listingPriceLine": "{category} · ¥{price}",
+  "@listingPriceLine": {
+    "placeholders": {
+      "category": {
+        "type": "String"
+      },
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "assistantName": "小帮",
+  "assistantSystemBadge": "AI 助手",
+  "assistantInboxSubtitle": "找货、估价、发布、议价，都可以从这里开始",
+  "assistantHeaderSubtitle": "你的校园交易助手 · 重要决定会先征求你的确认",
+  "assistantHistoryLoadFailed": "历史消息暂时没有加载出来，你仍然可以继续询问小帮。",
+  "assistantTyping": "AI 正在输入...",
+  "recordingStatus": "录音中 {seconds}s / 60s",
+  "@recordingStatus": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "viewAction": "查看",
+  "invitationFallbackTitle": "想和你实时聊聊",
+  "declineNow": "现在不方便",
+  "connectNow": "接通",
+  "modeRealtime": "实时",
+  "modeMail": "留言",
+  "conversationStateDelivered": "已送达",
+  "conversationStateSynSent": "等待对方接通",
+  "conversationStateSynAck": "对方已回应，等待确认",
+  "conversationStateActive": "本次会话已接通",
+  "conversationStateDeclined": "这次没有接通",
+  "conversationStateCancelled": "邀请已取消",
+  "conversationStateExpired": "本次会话已结束",
+  "conversationStateClosed": "本次沟通已结束",
+  "conversationChooseTitle": "选择一段会话",
+  "conversationChooseSubtitle": "实时会话与留言都会在这里保持各自清晰的边界。",
+  "contactModePromptTitle": "你想怎样联系？",
+  "contactContextUser": "联系 {username}",
+  "@contactContextUser": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "contactContextListing": "关于《{title}》",
+  "@contactContextListing": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "contactFallbackUser": "这位同学",
+  "contactModeRealtimeTitle": "现在聊",
+  "contactModeRealtimeDescription": "发起 10 分钟实时邀请，对方接通后开始本次会话",
+  "contactModeMailTitle": "写封留言",
+  "contactModeMailDescription": "直接送达，不显示在线、输入中和已读状态",
+  "contactOpeningRequired": "请先写下你想说的话",
+  "contactMailSubjectRequired": "留言需要一个主题",
+  "contactRealtimeComposerTitle": "发起实时邀请",
+  "contactMailComposerTitle": "写封留言",
+  "contactMailSubjectLabel": "主题",
+  "contactMailSubjectHint": "例如：想了解一下成色",
+  "contactMailBodyLabel": "正文",
+  "contactRealtimeOpeningLabel": "对方接通前会看到这句话",
+  "contactMailBodyHint": "把问题和方便回复的时间一次说清楚…",
+  "contactRealtimeOpeningHint": "你好，请问这件商品现在还在吗？",
+  "contactMailSubmit": "送达留言",
+  "contactRealtimeSubmit": "等待对方接通",
+  "publicProfile": "同学主页",
+  "myPublicProfile": "我的公开主页",
+  "myPublicProfileSubtitle": "预览别人看到你的样子。",
+  "viewPublicProfile": "查看主页",
+  "publicProfileLoadFailed": "用户主页暂时没加载出来",
+  "publicProfileListingsTitle": "在售商品",
+  "publicProfileListingsEmpty": "暂时没有在售商品。",
+  "paymentQrSectionTitle": "线下收款码",
+  "paymentQrSectionSubtitle": "只有用户主动公开后才展示。平台不处理、不验证、不托管付款。",
+  "paymentQrPublicNotice": "请在确认商品和卖家后再线下付款；付款由双方自行约定。",
+  "wechatPayQr": "微信收款码",
+  "alipayQr": "支付宝收款码",
+  "paymentQrSettingsTitle": "收款码",
+  "paymentQrSettingsSubtitle": "可选。只有你开启公开展示后，才会显示在个人主页。",
+  "uploadWechatQr": "上传微信收款码",
+  "uploadAlipayQr": "上传支付宝收款码",
+  "showWechatQr": "展示微信收款码",
+  "showAlipayQr": "展示支付宝收款码",
+  "paymentQrUpdated": "收款码设置已更新",
+  "paymentQrCleared": "收款码已移除",
+  "paymentQrMissingHint": "请先上传收款码，再开启公开展示。",
+  "paymentQrSafetyHint": "平台只展示图片，不会确认对方是否已经付款。",
+  "createDealIntent": "发起成交意向",
+  "dealIntentSent": "成交意向已发送，等待卖家确认",
+  "platformNoEscrowShort": "平台只记录线下成交意向，不托管资金、不确认付款或交付；请通过聊天确认验货、交接和付款方式。",
+  "awaitingSellerConfirm": "等待卖家确认",
+  "dealConfirmed": "已确认线下成交",
+  "dealCancelled": "成交记录已取消",
+  "confirmOfflineDeal": "确认成交",
+  "autoDelistAfterConfirm": "确认后自动下架商品",
+  "autoDelistAfterConfirmSubtitle": "适合单件闲置。关闭后商品会继续展示，方便你继续接收意向。",
+  "dealIntentCreated": "买家发起成交意向",
+  "sellerConfirmedDeal": "卖家确认成交",
+  "itemAutoDelisted": "商品已自动下架",
+  "listingStatus": "商品状态",
+  "chatReadReceiptSettingsTitle": "聊天已读策略",
+  "chatReadReceiptDefaultTitle": "默认已读方式",
+  "chatReadReceiptAutoTitle": "自动已读",
+  "chatReadReceiptManualTitle": "手动已读",
+  "chatReadReceiptAutoSubtitle": "打开实时聊天后自动标记收到的消息。",
+  "chatReadReceiptManualSubtitle": "只有点击“标记已读”后，对方才会看到已读。",
+  "chatReadReceiptAutoCurrent": "自动：打开实时聊天后自动标记已读。",
+  "chatReadReceiptManualCurrent": "手动：打开聊天不会自动让对方看到已读。",
+  "chatReadReceiptUpdated": "聊天已读策略已更新",
+  "markConversationRead": "标记已读",
+  "markConversationReadSuccess": "已标记为已读",
+  "manualReadUnreadOne": "有未读消息，当前为手动已读",
+  "manualReadUnreadMany": "{count} 条未读消息，当前为手动已读",
+  "@manualReadUnreadMany": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "readPreferenceUpdated": "已读策略已更新",
+  "readPreferenceInherit": "已读策略：继承默认",
+  "readPreferenceAuto": "已读策略：自动",
+  "readPreferenceManual": "已读策略：手动",
+  "selectedSuffix": " ✓",
+  "quoteListing": "商品",
+  "quoteOrder": "成交记录",
+  "quoteHitlOffer": "议价",
+  "quoteGeneric": "引用",
+  "discoverabilitySettingsTitle": "别人如何找到我",
+  "discoverByUsernameTitle": "通过用户名找到我",
+  "discoverByUsernameSubtitle": "关闭后，别人不能用用户名搜索到你；商品和既有会话里的必要展示不受影响。",
+  "discoverByEmailTitle": "通过邮箱找到我",
+  "discoverByEmailMissingSubtitle": "先设置学校邮箱后，才能选择是否允许别人用完整邮箱找到你。",
+  "discoverByEmailSubtitle": "当前邮箱：{email}。开启后，别人必须输入完整邮箱才能找到你。",
+  "@discoverByEmailSubtitle": {
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
+  "discoverByStudentIdTitle": "通过学号找到我",
+  "discoverByStudentIdSubtitle": "已从邮箱推断学号：{studentId}。开启后，别人必须输入完整学号才能找到你。",
+  "@discoverByStudentIdSubtitle": {
+    "placeholders": {
+      "studentId": {
+        "type": "String"
+      }
+    }
+  },
+  "discoverByStudentIdMissingSubtitle": "当前邮箱无法识别学号；请使用 8-12 位数字开头的学校邮箱。",
+  "discoverabilityUpdated": "查找设置已更新",
+  "settingsUpdateFailed": "设置失败：{error}",
+  "@settingsUpdateFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "conversationSectionDirect": "同学私聊",
+  "conversationSectionSpaces": "校园群组与频道",
+  "conversationSectionTools": "工具与助手",
+  "conversationCreateGroupSuccess": "群组已创建，已放入消息列表",
+  "conversationCreateChannelSuccess": "频道已创建，已放入消息列表",
+  "conversationCreateFailed": "创建失败：{error}",
+  "@conversationCreateFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "conversationPeerFallback": "同学",
+  "conversationThreadLoading": "读取会话中",
+  "conversationThreadStats": "实时 {realtime} · 留言 {mail} · 共 {count} 段",
+  "@conversationThreadStats": {
+    "placeholders": {
+      "realtime": {
+        "type": "int"
+      },
+      "mail": {
+        "type": "int"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "conversationReconnect": "重新联系",
+  "conversationThreadLoadFailedTitle": "联系人线程暂时没加载出来",
+  "conversationThreadEmptyTitle": "还没有可显示的沟通记录",
+  "conversationThreadEmptySubtitle": "重新联系会创建一段新的实时聊天或留言。",
+  "conversationMailThreadTitle": "留言线程",
+  "conversationRealtimeThreadTitle": "实时会话",
+  "conversationSegmentHistoryHint": "这段沟通已保留为历史记录。需要继续时，请开启一段新的沟通。",
+  "conversationSegmentOpenHint": "进入这段沟通后，可以继续查看消息、回复、引用信息或处理接通状态。",
+  "conversationViewHistory": "查看历史",
+  "conversationOpenSegment": "打开这段沟通",
+  "conversationPendingCount": "待回应 {count}",
+  "@conversationPendingCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "conversationTimelineFallback": "查看沟通时间线",
+  "conversationRealtimeCount": "实时 {count}",
+  "@conversationRealtimeCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "conversationMailCount": "留言 {count}",
+  "@conversationMailCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "conversationSegmentCount": "共 {count} 段",
+  "@conversationSegmentCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "campusCommunicationTitle": "校园通信",
+  "campusCommunicationSubtitle": "群组适合讨论，频道适合公告；一对一会话内可使用通话和加密聊天 MVP。",
+  "createGroup": "创建群组",
+  "createChannel": "创建频道",
+  "spaceNameLabel": "名称",
+  "spaceDescriptionOptionalLabel": "简介（可选）",
+  "createAction": "创建",
+  "unnamedSpace": "未命名空间",
+  "spaceFallbackTitle": "校园群组",
+  "refresh": "刷新",
+  "spaceLoadFailedTitle": "空间暂时没加载出来",
+  "spaceNotFoundTitle": "空间不存在",
+  "spaceNotFoundSubtitle": "它可能已被删除，或你还不是成员。",
+  "spaceSendFailed": "发送失败：{error}",
+  "@spaceSendFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "spaceMembersRoleLine": "{count} 位成员 · 我的角色 {role}",
+  "@spaceMembersRoleLine": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "role": {
+        "type": "String"
+      }
+    }
+  },
+  "spaceMessagesLoadFailedTitle": "空间消息暂时没加载出来",
+  "spaceChannelCreatedTitle": "频道已创建",
+  "spaceGroupCreatedTitle": "群组已创建",
+  "spaceChannelEmptySubtitle": "公告会出现在这里；频道成员可以阅读、反应和举报。",
+  "spaceGroupEmptySubtitle": "现在它已经在消息列表里了。发第一句话，让这个群组真的活起来。",
+  "replyAction": "回复",
+  "replyPreviewMissing": "回复了一条消息 #{messageId}",
+  "@replyPreviewMissing": {
+    "placeholders": {
+      "messageId": {
+        "type": "int"
+      }
+    }
+  },
+  "spaceChannelReadOnlyNotice": "你是频道成员，可以阅读、反应和举报；只有频道 owner/admin 可以发布公告。",
+  "cancelReply": "取消回复",
+  "channelComposerHint": "发布一条公告...",
+  "groupComposerHint": "发一条群消息...",
+  "spaceFallbackDescription": "{count} 位成员 · {kind}",
+  "@spaceFallbackDescription": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "kind": {
+        "type": "String"
+      }
+    }
+  },
+  "spaceKindChannelLong": "公告频道",
+  "spaceKindGroupLong": "校园讨论群",
+  "spaceKindChannel": "频道",
+  "spaceKindGroup": "群组",
+  "spaceRoleOwner": "创建者",
+  "spaceRoleAdmin": "管理员",
+  "spaceRoleBanned": "已限制",
+  "spaceRoleMember": "成员",
+  "chatAcceptedLegacy": "已接受连接",
+  "chatAcceptFailed": "接受失败：{error}",
+  "@chatAcceptFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "chatRejectedLegacy": "已拒绝连接",
+  "chatRejectFailed": "拒绝失败：{error}",
+  "@chatRejectFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "replyingToMessage": "正在回复这条消息",
+  "reactionFailed": "反应失败：{error}",
+  "@reactionFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "hideMessageDialogTitle": "从我的聊天记录删除？",
+  "hideMessageDialogBody": "这只会从你这里隐藏，对方仍然可以看到这条消息。",
+  "deleteAction": "删除",
+  "messageHiddenForMe": "已从你的聊天记录隐藏",
+  "messageHideFailed": "删除失败：{error}",
+  "@messageHideFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "reportMessageTitle": "举报这条消息",
+  "reportReasonDefault": "不当内容",
+  "reportReasonLabel": "原因",
+  "reportDetailsLabel": "补充说明（可选）",
+  "submitAction": "提交",
+  "acceptAction": "接受",
+  "rejectAction": "拒绝",
+  "reportSubmitted": "已提交举报",
+  "reportFailed": "举报失败：{error}",
+  "@reportFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "markReadFailed": "标记已读失败：{error}",
+  "@markReadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "readPreferenceUpdateFailed": "已读策略更新失败：{error}",
+  "@readPreferenceUpdateFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "quoteUnavailable": "当前会话没有可引用的商品、订单或议价信息",
+  "quotePickerTitle": "引用相关信息",
+  "quotePickerSubtitle": "引用会由服务器生成事实快照，价格、标题和状态不会被前端伪造。",
+  "quoteListingFallback": "本次会话关联商品",
+  "quoteListingSubtitle": "发送时引用商品标题、价格、成色和主图快照",
+  "conversationCannotSendMessage": "本次会话暂时不能发送消息",
+  "messageSendFailed": "发送失败：{error}",
+  "@messageSendFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "replyAssistantUnavailable": "小帮暂时没想好，你仍可以直接输入",
+  "closeConversationFailed": "结束会话失败：{error}",
+  "@closeConversationFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "blockUserTitle": "屏蔽这位用户？",
+  "blockUserBody": "双方将不能继续发送消息，已有历史仍会保留。",
+  "blockAction": "屏蔽",
+  "blockFailed": "屏蔽失败：{error}",
+  "@blockFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "callRequiresActiveConversation": "接通后才能发起通话",
+  "videoCallSignalSent": "视频通话信令已发送",
+  "audioCallSignalSent": "语音通话信令已发送",
+  "callStartFailed": "发起通话失败：{error}",
+  "@callStartFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "secretChatCreated": "加密聊天会话已创建，服务器只保存密文接口",
+  "secretChatCreateFailed": "创建加密聊天失败：{error}",
+  "@secretChatCreateFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "quoteListingLabel": "引用商品：{title}",
+  "@quoteListingLabel": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "conversationFallbackTitle": "会话",
+  "conversationLoadingState": "正在读取会话状态",
+  "conversationUnavailable": "这段会话当前不可用",
+  "conversationWaitingPeer": "等待对方接通",
+  "conversationAcceptToReply": "接通后即可回复",
+  "conversationCompletingHandshake": "正在完成接通确认",
+  "conversationDeclinedTitle": "这次没有接通",
+  "conversationCancelledTitle": "邀请已取消",
+  "conversationExpiredTitle": "本次会话已结束",
+  "conversationClosedTitle": "本次沟通已结束",
+  "conversationReadMenuHeader": "已读设置 · 当前{mode}",
+  "@conversationReadMenuHeader": {
+    "placeholders": {
+      "mode": {
+        "type": "String"
+      }
+    }
+  },
+  "readModeUnknown": "未知",
+  "readModeManual": "手动",
+  "readModeAuto": "自动",
+  "readModeInherit": "继承默认",
+  "audioCallMvp": "语音通话 MVP",
+  "videoCallMvp": "视频通话 MVP",
+  "secretChatMvp": "加密聊天 MVP",
+  "closeConversationAction": "结束本次沟通",
+  "replyAssistantButton": "小帮帮我回",
+  "mailFallbackTitle": "留言",
+  "mailProtocolSubtitle": "异步送达 · 不显示在线、输入中和已读状态",
+  "incomingRealtimeTitle": "对方想现在聊聊",
+  "incomingRealtimeSubtitle": "你可以选择是否接通",
+  "incomingRealtimeExpiring": "{remaining} 后邀请失效",
+  "@incomingRealtimeExpiring": {
+    "placeholders": {
+      "remaining": {
+        "type": "String"
+      }
+    }
+  },
+  "notConvenientNow": "现在不方便",
+  "connectAction": "接通",
+  "waitingPeerTitle": "正在等待对方接通",
+  "invitationDelivered": "邀请已送达",
+  "timeRemaining": "还剩 {remaining}",
+  "@timeRemaining": {
+    "placeholders": {
+      "remaining": {
+        "type": "String"
+      }
+    }
+  },
+  "cancelInvitation": "取消邀请",
+  "confirmingConnectionTitle": "正在确认接通",
+  "peerRespondedWaitingTitle": "已回应，等待对方确认",
+  "confirmingConnectionSubtitle": "确认完成后即可聊天",
+  "connectionReleaseAfter": "{remaining} 后释放本次连接",
+  "@connectionReleaseAfter": {
+    "placeholders": {
+      "remaining": {
+        "type": "String"
+      }
+    }
+  },
+  "realtimeConnectedTitle": "本次会话已接通",
+  "realtimeConnectedSubtitle": "双方现在可以实时交流",
+  "realtimeExpiresAfterIdle": "无新消息 {remaining} 后自动结束",
+  "@realtimeExpiresAfterIdle": {
+    "placeholders": {
+      "remaining": {
+        "type": "String"
+      }
+    }
+  },
+  "endAction": "结束",
+  "conversationTerminalSubtitle": "历史会保留；重新联系会开启一段新的沟通。",
+  "conversationNaturallyEndedTitle": "本次会话已自然结束",
+  "durationHoursMinutes": "{hours}小时{minutes}分",
+  "@durationHoursMinutes": {
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      },
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "connectionRequestTitle": "连接请求",
+  "connectionRequestReadReceiptNotice": "{title}\n\n{body}\n\n确认后将开启消息已读功能",
+  "@connectionRequestReadReceiptNotice": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      },
+      "body": {
+        "type": "String"
+      }
+    }
+  },
+  "offlineStatus": "离线",
+  "onlineStatus": "在线",
+  "pendingAcceptStatus": "待接受",
+  "connectingStatus": "连接中...",
+  "replyPreviewGeneric": "引用了一条消息",
+  "editedSuffix": "（已编辑）",
+  "editAction": "编辑",
+  "hideMessageAction": "从我的聊天记录删除",
+  "hideMessageActionSubtitle": "只会从你这里隐藏，对方仍可看到",
+  "reportAction": "举报",
+  "sendFailedShort": "发送失败",
+  "messageSentStatus": "已发送",
+  "messageReadStatus": "已读",
+  "messageDeliveredStatus": "已送达",
+  "typingIndicator": "{username} 正在输入...",
+  "@typingIndicator": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "loadFailedWithError": "加载失败：{error}",
+  "@loadFailedWithError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "noMessagesYet": "暂无消息，开始聊天吧",
+  "stopAction": "停止",
+  "replyMediaMessage": "回复一条媒体消息",
+  "cancelQuote": "取消引用",
+  "quoteContextTooltip": "引用商品、订单或议价",
+  "editMessageHint": "编辑消息...",
+  "messageInputHint": "输入消息..."
+  ,
+  "offerPriceLine": "报价：¥{price}",
+  "@offerPriceLine": {
+    "placeholders": {
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "reasonLine": "理由：{reason}",
+  "@reasonLine": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "expiresAtLine": "有效期至：{time}",
+  "@expiresAtLine": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "counterOfferAction": "还价",
+  "acceptCounterAction": "接受还价",
+  "sellerCounterPriceLine": "卖家还价 ¥{price}",
+  "@sellerCounterPriceLine": {
+    "placeholders": {
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "yourOriginalOfferLine": "你的原始报价：¥{price}",
+  "@yourOriginalOfferLine": {
+    "placeholders": {
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "connectionFailedNetwork": "连接失败，请检查网络",
+  "emptyReplyPlaceholder": "（无回复）",
+  "listingLine": "商品：{listingId}",
+  "@listingLine": {
+    "placeholders": {
+      "listingId": {
+        "type": "String"
+      }
+    }
+  },
+  "buyerOfferLine": "买家报价：¥{price}",
+  "@buyerOfferLine": {
+    "placeholders": {
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "statusLine": "状态：{status}",
+  "@statusLine": {
+    "placeholders": {
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "counterPriceLine": "还价：¥{price}",
+  "@counterPriceLine": {
+    "placeholders": {
+      "price": {
+        "type": "String"
+      }
+    }
+  },
+  "loading": "加载中...",
+  "negotiationStatusLine": "议价已{status}",
+  "@negotiationStatusLine": {
+    "placeholders": {
+      "status": {
+        "type": "String"
+      }
+    }
+  }
 }

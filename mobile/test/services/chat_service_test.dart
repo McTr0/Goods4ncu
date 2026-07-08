@@ -96,7 +96,10 @@ void main() {
           'sent_at': '2024-01-15T10:00:00Z',
         };
 
-        expect(ConversationMessage.fromJson(jsonWithBase64).imageBase64, 'from_base64');
+        expect(
+          ConversationMessage.fromJson(jsonWithBase64).imageBase64,
+          'from_base64',
+        );
 
         final jsonWithData = {
           'id': 'msg-2',
@@ -107,7 +110,10 @@ void main() {
           'sent_at': '2024-01-15T10:00:00Z',
         };
 
-        expect(ConversationMessage.fromJson(jsonWithData).imageBase64, 'from_data');
+        expect(
+          ConversationMessage.fromJson(jsonWithData).imageBase64,
+          'from_data',
+        );
       });
 
       test('handles both audio_base64 and audio_data', () {
@@ -120,7 +126,10 @@ void main() {
           'sent_at': '2024-01-15T10:00:00Z',
         };
 
-        expect(ConversationMessage.fromJson(jsonWithBase64).audioBase64, 'from_base64');
+        expect(
+          ConversationMessage.fromJson(jsonWithBase64).audioBase64,
+          'from_base64',
+        );
 
         final jsonWithData = {
           'id': 'msg-2',
@@ -131,11 +140,40 @@ void main() {
           'sent_at': '2024-01-15T10:00:00Z',
         };
 
-        expect(ConversationMessage.fromJson(jsonWithData).audioBase64, 'from_data');
+        expect(
+          ConversationMessage.fromJson(jsonWithData).audioBase64,
+          'from_data',
+        );
       });
     });
 
     group('ChatMessage', () {
+      test('parses assistant history roles and media', () {
+        final history = AssistantConversationHistory.fromJson({
+          'messages': [
+            {
+              'id': '1',
+              'role': 'user',
+              'content': '帮我找一本高数教材',
+              'timestamp': '2026-07-01T10:00:00Z',
+            },
+            {
+              'id': '2',
+              'role': 'assistant',
+              'content': '我来帮你筛选。',
+              'image_url': 'https://cdn.example.com/book.webp',
+              'timestamp': '2026-07-01T10:00:01Z',
+            },
+          ],
+          'total': 2,
+        });
+
+        expect(history.total, 2);
+        expect(history.messages.first.sender, 'user');
+        expect(history.latest?.sender, 'bot');
+        expect(history.latest?.imageUrl, 'https://cdn.example.com/book.webp');
+      });
+
       test('creates instance correctly', () {
         final timestamp = DateTime.now();
         final message = ChatMessage(
@@ -202,10 +240,7 @@ void main() {
           timestamp: DateTime.parse('2024-01-15T10:00:00Z'),
         );
 
-        final copied = original.copyWith(
-          content: 'Modified',
-          isPartial: true,
-        );
+        final copied = original.copyWith(content: 'Modified', isPartial: true);
 
         expect(copied.sender, 'user-1');
         expect(copied.content, 'Modified');
@@ -234,9 +269,12 @@ void main() {
         expect(conversation.requesterId, 'user-001');
         expect(conversation.otherUserId, 'user-002');
         expect(conversation.otherUsername, 'alice');
-        expect(conversation.status, 'established');
+        expect(conversation.status, 'active');
         expect(conversation.lastMessage, 'See you tomorrow!');
-        expect(conversation.lastMessageAt, DateTime.parse('2024-01-15T18:00:00Z'));
+        expect(
+          conversation.lastMessageAt,
+          DateTime.parse('2024-01-15T18:00:00Z'),
+        );
         expect(conversation.unreadCount, 3);
         expect(conversation.isReceiver, true);
       });

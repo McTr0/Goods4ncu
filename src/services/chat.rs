@@ -4,6 +4,7 @@ use sqlx::{PgPool, Row};
 
 /// Maximum number of historical message pairs to include in conversation context
 const CONVERSATION_HISTORY_LIMIT: usize = 10;
+pub const AGENT_CONVERSATION_SENTINEL: &str = "__agent__";
 
 /// A single turn in the conversation history
 #[derive(Debug, Clone)]
@@ -22,6 +23,16 @@ pub struct ChatHistoryEntry {
     pub audio_url: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct AssistantMessageEntry {
+    pub id: String,
+    pub role: &'static str,
+    pub content: String,
+    pub image_url: Option<String>,
+    pub audio_url: Option<String>,
+    pub timestamp: String,
+}
+
 #[derive(Clone)]
 pub struct ChatService {
     db: PgPool,
@@ -30,6 +41,10 @@ pub struct ChatService {
 impl ChatService {
     pub fn new(db: PgPool) -> Self {
         Self { db }
+    }
+
+    pub fn assistant_conversation_id(user_id: &str) -> String {
+        format!("agent:{user_id}")
     }
 
     /// Log a chat message to the database.
@@ -74,8 +89,11 @@ impl ChatService {
         conversation_id: &str,
     ) -> Result<Vec<ChatHistoryEntry>> {
         let rows = sqlx::query(
-            "SELECT sender, content, is_agent, image_data, audio_data, image_url, audio_url FROM chat_messages \
-             WHERE conversation_id = $1 ORDER BY id ASC LIMIT $2",
+            "SELECT sender, content, is_agent, image_data, audio_data, image_url, audio_url \
+             FROM ( \
+                 SELECT id, sender, content, is_agent, image_data, audio_data, image_url, audio_url \
+                 FROM chat_messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT $2 \
+             ) recent ORDER BY id ASC",
         )
         .bind(conversation_id)
         .bind(CONVERSATION_HISTORY_LIMIT as i64)
@@ -100,6 +118,61 @@ impl ChatService {
                 }
             })
             .collect())
+    }
+
+    pub async fn get_assistant_messages(
+        &self,
+        user_id: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<(Vec<AssistantMessageEntry>, i64)> {
+        let conversation_id = Self::assistant_conversation_id(user_id);
+        let rows = sqlx::query(
+            r#"
+            SELECT id, content, is_agent, image_url, audio_url, timestamp
+            FROM (
+                SELECT id, content, is_agent, image_url, audio_url, timestamp
+                FROM chat_messages
+                WHERE conversation_id = $1 AND sender = $2
+                ORDER BY timestamp DESC, id DESC
+                LIMIT $3 OFFSET $4
+            ) recent
+            ORDER BY timestamp ASC, id ASC
+            "#,
+        )
+        .bind(&conversation_id)
+        .bind(user_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.db)
+        .await?;
+
+        let total = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM chat_messages WHERE conversation_id = $1 AND sender = $2",
+        )
+        .bind(&conversation_id)
+        .bind(user_id)
+        .fetch_one(&self.db)
+        .await?;
+
+        let messages = rows
+            .into_iter()
+            .map(|row| {
+                let is_agent: bool = row.get("is_agent");
+                AssistantMessageEntry {
+                    id: row.get::<i64, _>("id").to_string(),
+                    role: if is_agent { "assistant" } else { "user" },
+                    content: row.get("content"),
+                    image_url: row.try_get("image_url").ok().flatten(),
+                    audio_url: row.try_get("audio_url").ok().flatten(),
+                    timestamp: row
+                        .get::<chrono::DateTime<chrono::Utc>, _>("timestamp")
+                        .to_rfc3339(),
+                }
+            })
+            .collect();
+
+        Ok((messages, total))
     }
 
     /// List all conversation IDs for a user with metadata.

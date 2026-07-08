@@ -97,6 +97,35 @@ void main() {
       expect(message.audioBase64, 'audio-data-123');
     });
 
+    test('fromJson parses structured quote snapshots', () {
+      final json = {
+        'id': '123',
+        'conversation_id': 'conv-456',
+        'sender': 'user-789',
+        'content': '看这个',
+        'sent_at': '2024-01-15T10:30:00Z',
+        'quote': {
+          'kind': 'listing',
+          'ref_id': 'listing-1',
+          'snapshot': {
+            'title': '二手自行车',
+            'price_cny': 188,
+            'status': 'active',
+            'image_url': 'https://cdn.example/bike.jpg',
+          },
+        },
+      };
+
+      final message = ConversationMessage.fromJson(json);
+
+      expect(message.quote, isNotNull);
+      expect(message.quote!.kind, 'listing');
+      expect(message.quote!.refId, 'listing-1');
+      expect(message.quote!.title, '二手自行车');
+      expect(message.quote!.primaryPrice, 188);
+      expect(message.quote!.status, 'active');
+    });
+
     test('copyWith preserves unchanged fields', () {
       final original = ConversationMessage(
         id: '123',
@@ -247,6 +276,7 @@ void main() {
         'description': 'Almost new',
         'status': 'active',
         'thumbnail_hint': 'iphone.jpg',
+        'image_url': 'http://127.0.0.1:3001/test_product_images/iphone.jpg',
         'defects': ['Scratch on back'],
         'owner_id': 'user-456',
         'owner_username': 'johndoe',
@@ -264,6 +294,10 @@ void main() {
       expect(listing.description, 'Almost new');
       expect(listing.status, 'active');
       expect(listing.thumbnailHint, 'iphone.jpg');
+      expect(
+        listing.imageUrl,
+        'http://127.0.0.1:3001/test_product_images/iphone.jpg',
+      );
       expect(listing.defects, ['Scratch on back']);
       expect(listing.ownerId, 'user-456');
       expect(listing.ownerUsername, 'johndoe');
@@ -286,6 +320,7 @@ void main() {
       expect(listing.id, 'listing-123');
       expect(listing.description, isNull);
       expect(listing.thumbnailHint, isNull);
+      expect(listing.imageUrl, isNull);
       expect(listing.defects, isNull);
       expect(listing.ownerId, isNull);
       expect(listing.ownerUsername, isNull);
@@ -370,6 +405,7 @@ void main() {
         'description': 'Test description',
         'status': 'active',
         'thumbnail_hint': 'test.jpg',
+        'image_url': 'http://127.0.0.1:3001/test_product_images/test.jpg',
         'defects': ['None'],
         'owner_id': 'user-123',
         'owner_username': 'testuser',
@@ -387,6 +423,7 @@ void main() {
       expect(listing.description, original['description']);
       expect(listing.status, original['status']);
       expect(listing.thumbnailHint, original['thumbnail_hint']);
+      expect(listing.imageUrl, original['image_url']);
       expect(listing.defects, original['defects']);
       expect(listing.ownerId, original['owner_id']);
       expect(listing.ownerUsername, original['owner_username']);
@@ -414,7 +451,7 @@ void main() {
       expect(conversation.requesterId, 'user-001');
       expect(conversation.otherUserId, 'user-002');
       expect(conversation.otherUsername, 'alice');
-      expect(conversation.status, 'connected');
+      expect(conversation.status, 'active');
       expect(conversation.lastMessage, 'Hello!');
       expect(
         conversation.lastMessageAt,
@@ -422,6 +459,23 @@ void main() {
       );
       expect(conversation.unreadCount, 5);
       expect(conversation.isReceiver, false);
+    });
+
+    test('fromJson parses read receipt preferences', () {
+      final conversation = Conversation.fromJson({
+        'id': 'conv-read',
+        'mode': 'realtime',
+        'state': 'active',
+        'initiator_id': 'user-001',
+        'recipient_id': 'user-002',
+        'other_user_id': 'user-002',
+        'other_username': 'alice',
+        'read_receipt_mode': 'manual',
+        'effective_read_receipt_mode': 'manual',
+      });
+
+      expect(conversation.readReceiptMode, 'manual');
+      expect(conversation.effectiveReadReceiptMode, 'manual');
     });
 
     test('canRespond is true only for pending incoming requests', () {
@@ -497,6 +551,23 @@ void main() {
         ).connectionStatus,
         ConnectionStatusType.offline,
       );
+    });
+
+    test('fromJson parses restart capability', () {
+      final conversation = Conversation.fromJson({
+        'id': 'conv-restart',
+        'mode': 'realtime',
+        'state': 'closed',
+        'initiator_id': 'user-001',
+        'recipient_id': 'user-002',
+        'other_user_id': 'user-002',
+        'other_username': 'bob',
+        'capabilities': {'can_restart': true},
+      });
+
+      expect(conversation.state, ConversationState.closed);
+      expect(conversation.capabilities.canRestart, isTrue);
+      expect(conversation.capabilities.canSend, isFalse);
     });
   });
 
@@ -585,10 +656,12 @@ void main() {
 
     test('statusLabel returns correct Chinese labels', () {
       final testCases = [
-        ('pending', '待支付'),
-        ('paid', '已支付'),
-        ('shipped', '已发货'),
-        ('completed', '已完成'),
+        ('pending', '待卖家确认'),
+        ('intent_pending', '待卖家确认'),
+        ('paid', '已确认成交'),
+        ('shipped', '已确认成交'),
+        ('completed', '已确认成交'),
+        ('confirmed', '已确认成交'),
         ('cancelled', '已取消'),
         ('unknown', 'unknown'),
       ];

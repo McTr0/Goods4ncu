@@ -37,7 +37,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get books => 'Books';
 
   @override
-  String get buyNow => 'Buy Now';
+  String get buyNow => 'Start deal intent';
 
   @override
   String get buyer => 'Buyer';
@@ -104,6 +104,101 @@ class AppLocalizationsEn extends AppLocalizations {
   String get createListing => 'Create Listing';
 
   @override
+  String get createListingAiNeedsRetry => 'Needs retry';
+
+  @override
+  String get createListingAiReady => 'AI recognition complete';
+
+  @override
+  String get createListingAiRecognizing => 'Assistant is recognizing...';
+
+  @override
+  String get createListingAiSubtitle =>
+      'Take or upload a photo, and the assistant will draft the title, category, brand, and condition for you to confirm.';
+
+  @override
+  String get createListingAiTitle => 'Let the assistant take a look first';
+
+  @override
+  String get createListingBasicInfo => 'Listing basics';
+
+  @override
+  String get createListingBasicInfoSubtitle =>
+      'These details decide whether classmates will open the listing.';
+
+  @override
+  String get createListingBrandHint => 'For example: Apple, Casio, NCU';
+
+  @override
+  String get createListingBrandRequired => 'Please enter the brand or source';
+
+  @override
+  String get createListingChangeImage => 'Change image';
+
+  @override
+  String get createListingConditionSection => 'Condition & defects';
+
+  @override
+  String get createListingConditionSubtitle =>
+      'Being clear about flaws makes the listing easier to trust.';
+
+  @override
+  String get createListingDefectHint => 'For example: minor screen scratch';
+
+  @override
+  String get createListingDescriptionHint =>
+      'Describe purchase time, usage, accessories, pickup location, etc...';
+
+  @override
+  String get createListingDescriptionLabel => 'Description (optional)';
+
+  @override
+  String get createListingDescriptionSection => 'Extra details';
+
+  @override
+  String get createListingDescriptionSubtitle =>
+      'Optional, but concrete details reduce back-and-forth.';
+
+  @override
+  String createListingMissingFields(String fields) {
+    return 'Missing $fields';
+  }
+
+  @override
+  String get createListingPriceInvalid => 'Please enter a valid price number';
+
+  @override
+  String get createListingPriceLabel => 'Price (CNY) *';
+
+  @override
+  String get createListingPriceRequired => 'Please enter a price';
+
+  @override
+  String get createListingProgressBasics => 'Basics complete';
+
+  @override
+  String get createListingProgressCondition => 'Condition confirmed';
+
+  @override
+  String get createListingProgressDescription => 'Extra details';
+
+  @override
+  String get createListingProgressImage => 'Image-assisted recognition';
+
+  @override
+  String get createListingProgressSubtitle =>
+      'Follow this rhythm and the listing will stay tidy.';
+
+  @override
+  String get createListingProgressTitle => 'Publish progress';
+
+  @override
+  String get createListingReadyHint => 'Everything is ready to publish';
+
+  @override
+  String get createListingTitleHint => 'For example: iPhone 13 Pro Max 256G';
+
+  @override
   String get createSuccess => 'Listing created successfully';
 
   @override
@@ -163,6 +258,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get language => 'Language';
+
+  @override
+  String get listSeparator => ', ';
 
   @override
   String get listingDetail => 'Listing Details';
@@ -268,7 +366,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get pay => 'Pay';
 
   @override
-  String get markPaid => 'Paid';
+  String get markPaid => 'Intent confirmed';
 
   @override
   String get reason => 'Reason (optional)';
@@ -303,6 +401,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get other => 'Other';
 
   @override
+  String get optional => 'optional';
+
+  @override
   String get owner => 'Owner';
 
   @override
@@ -333,7 +434,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get purchaseFailed => 'Purchase failed, please try again';
 
   @override
-  String get purchaseSuccess => 'Purchase successful! Order created';
+  String get purchaseSuccess =>
+      'Deal intent sent. Waiting for seller confirmation.';
 
   @override
   String recognitionFailed(String error) {
@@ -438,11 +540,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get tradeProtection => 'Trade protection';
+  String get tradeProtection => 'Offline deal reminder';
 
   @override
   String get tradeProtectionSubtitle =>
-      'Platform escrow + 7-day delivery confirmation';
+      'The platform does not escrow funds. Confirm inspection, handoff, and payment with each other.';
 
   @override
   String get typeMessage => 'Type a message...';
@@ -496,10 +598,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get changeRole => 'Change Role';
 
   @override
-  String get markShipped => 'Mark Shipped';
+  String get markShipped => 'Confirm deal';
 
   @override
-  String get markCompleted => 'Mark Completed';
+  String get markCompleted => 'Deal confirmed';
 
   @override
   String get orderStatusUpdated => 'Order status updated';
@@ -713,4 +815,1201 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get notSet => 'Not set';
+
+  @override
+  String get homeHeroEyebrow => 'GOOD4NCU CAMPUS MARKET';
+
+  @override
+  String get homeHeroTitle => 'What are you looking for today?';
+
+  @override
+  String get homeHeroSubtitle =>
+      'Tell Xiaobang what you need, your budget, or how you plan to use it. You can also keep scrolling through what classmates just listed.';
+
+  @override
+  String get homePromptHint =>
+      'Find textbooks, lightweight laptops, or ask Xiaobang to help sell an item...';
+
+  @override
+  String get homePromptSubmitTooltip => 'Ask Xiaobang';
+
+  @override
+  String get homeSuggestionTitle => 'Try starting with';
+
+  @override
+  String get homeThoughtLaptopLabel => 'Find a laptop';
+
+  @override
+  String get homeThoughtLaptopPrompt =>
+      'My budget is 3000 yuan. Help me find a lightweight laptop for coding and carrying to class.';
+
+  @override
+  String get homeThoughtPriceLabel => 'Price my item';
+
+  @override
+  String get homeThoughtPricePrompt =>
+      'I have an unused item to sell. Ask me a few questions first, then estimate a fair price.';
+
+  @override
+  String get homeThoughtCopyLabel => 'Write listing copy';
+
+  @override
+  String get homeThoughtCopyPrompt =>
+      'Help me organize the item details step by step and write an honest, trustworthy listing.';
+
+  @override
+  String get homeThoughtNegotiateLabel => 'Negotiate politely';
+
+  @override
+  String get homeThoughtNegotiatePrompt =>
+      'Help me find worthwhile digital items and start a polite negotiation when the price makes sense.';
+
+  @override
+  String get homeRecentTitle => 'Recently Listed';
+
+  @override
+  String get homeRecentSubtitle => 'See what classmates are selling right now.';
+
+  @override
+  String get conversationLoadFailedTitle => 'Messages could not load';
+
+  @override
+  String get conversationEmptyTitle => 'No conversations yet';
+
+  @override
+  String get conversationEmptySubtitle =>
+      'Contact someone from a listing, or search for a classmate to start a conversation.';
+
+  @override
+  String get findClassmate => 'Find classmate';
+
+  @override
+  String conversationWaitingCount(int count) {
+    return 'Awaiting your reply · $count';
+  }
+
+  @override
+  String get conversationFilterAll => 'All';
+
+  @override
+  String get conversationFilterRealtime => 'Realtime';
+
+  @override
+  String get conversationFilterMail => 'Mail';
+
+  @override
+  String get lookupDialogTitle => 'Find classmate';
+
+  @override
+  String get lookupDialogSubtitle =>
+      'Enter a username, full email, or student ID. If they turned off that discovery method, they will not appear here.';
+
+  @override
+  String get lookupFieldLabel => 'Search value';
+
+  @override
+  String get lookupFieldHint =>
+      'e.g. Alex / 2024123456 / name@email.ncu.edu.cn';
+
+  @override
+  String get lookupMethodLabel => 'Search by';
+
+  @override
+  String get lookupMethodAuto => 'Auto detect';
+
+  @override
+  String get lookupMethodUsername => 'Username';
+
+  @override
+  String get lookupMethodStudentId => 'Student ID';
+
+  @override
+  String get lookupMethodEmail => 'Email';
+
+  @override
+  String get lookupSearchAction => 'Search';
+
+  @override
+  String get lookupHint =>
+      'Tip: email and student ID must be entered fully. Whether someone can be found is controlled by their settings.';
+
+  @override
+  String get lookupEmpty =>
+      'No contactable user found. The input may be incomplete, or the other user may not have enabled this discovery method.';
+
+  @override
+  String lookupMatchedWithListings(String method, int count) {
+    return 'Matched by $method · $count active listings';
+  }
+
+  @override
+  String lookupMatchedIdentifierWithListings(
+    String method,
+    String identifier,
+    int count,
+  ) {
+    return 'Matched by $method: $identifier · $count active listings';
+  }
+
+  @override
+  String get viewClassmateListings => 'View listings';
+
+  @override
+  String get contactAction => 'Contact';
+
+  @override
+  String classmateActiveListingsTitle(String username) {
+    return '$username\'s listings';
+  }
+
+  @override
+  String get classmateListingsLoadFailedTitle => 'Listings could not load';
+
+  @override
+  String get classmateListingsEmptyTitle => 'No active listings';
+
+  @override
+  String get classmateListingsEmptySubtitle =>
+      'This user does not have public active listings right now.';
+
+  @override
+  String get unnamedListing => 'Untitled listing';
+
+  @override
+  String listingPriceLine(String category, String price) {
+    return '$category · ¥$price';
+  }
+
+  @override
+  String get assistantName => 'Xiaobang';
+
+  @override
+  String get assistantSystemBadge => 'AI Assistant';
+
+  @override
+  String get assistantInboxSubtitle =>
+      'Find items, price, publish, and negotiate from here';
+
+  @override
+  String get assistantHeaderSubtitle =>
+      'Your campus trading assistant · important decisions ask for your confirmation first';
+
+  @override
+  String get assistantHistoryLoadFailed =>
+      'History could not load. You can still keep asking Xiaobang.';
+
+  @override
+  String get assistantTyping => 'AI is typing...';
+
+  @override
+  String recordingStatus(int seconds) {
+    return 'Recording ${seconds}s / 60s';
+  }
+
+  @override
+  String get viewAction => 'View';
+
+  @override
+  String get invitationFallbackTitle => 'Wants to chat with you now';
+
+  @override
+  String get declineNow => 'Not now';
+
+  @override
+  String get connectNow => 'Connect';
+
+  @override
+  String get modeRealtime => 'Realtime';
+
+  @override
+  String get modeMail => 'Mail';
+
+  @override
+  String get conversationStateDelivered => 'Delivered';
+
+  @override
+  String get conversationStateSynSent => 'Waiting for them to connect';
+
+  @override
+  String get conversationStateSynAck =>
+      'They replied, waiting for confirmation';
+
+  @override
+  String get conversationStateActive => 'This conversation is connected';
+
+  @override
+  String get conversationStateDeclined => 'This time did not connect';
+
+  @override
+  String get conversationStateCancelled => 'Invitation cancelled';
+
+  @override
+  String get conversationStateExpired => 'This conversation has ended';
+
+  @override
+  String get conversationStateClosed => 'This conversation is closed';
+
+  @override
+  String get conversationChooseTitle => 'Choose a conversation';
+
+  @override
+  String get conversationChooseSubtitle =>
+      'Realtime conversations and mail threads stay clearly separated here.';
+
+  @override
+  String get contactModePromptTitle => 'How would you like to reach out?';
+
+  @override
+  String contactContextUser(String username) {
+    return 'Contact $username';
+  }
+
+  @override
+  String contactContextListing(String title) {
+    return 'About \"$title\"';
+  }
+
+  @override
+  String get contactFallbackUser => 'this classmate';
+
+  @override
+  String get contactModeRealtimeTitle => 'Chat now';
+
+  @override
+  String get contactModeRealtimeDescription =>
+      'Send a 10-minute realtime invite. The conversation starts once they connect.';
+
+  @override
+  String get contactModeMailTitle => 'Leave a message';
+
+  @override
+  String get contactModeMailDescription =>
+      'Deliver it directly without online, typing, or read indicators.';
+
+  @override
+  String get contactOpeningRequired =>
+      'Please write what you want to say first.';
+
+  @override
+  String get contactMailSubjectRequired => 'Mail needs a subject.';
+
+  @override
+  String get contactRealtimeComposerTitle => 'Start a realtime invite';
+
+  @override
+  String get contactMailComposerTitle => 'Leave a message';
+
+  @override
+  String get contactMailSubjectLabel => 'Subject';
+
+  @override
+  String get contactMailSubjectHint => 'e.g. Asking about condition';
+
+  @override
+  String get contactMailBodyLabel => 'Body';
+
+  @override
+  String get contactRealtimeOpeningLabel =>
+      'They will see this before connecting';
+
+  @override
+  String get contactMailBodyHint =>
+      'Share your question and when it is convenient to reply...';
+
+  @override
+  String get contactRealtimeOpeningHint => 'Hi, is this item still available?';
+
+  @override
+  String get contactMailSubmit => 'Deliver message';
+
+  @override
+  String get contactRealtimeSubmit => 'Wait for them to connect';
+
+  @override
+  String get publicProfile => 'Classmate Profile';
+
+  @override
+  String get myPublicProfile => 'My public profile';
+
+  @override
+  String get myPublicProfileSubtitle => 'Preview how others see your profile.';
+
+  @override
+  String get viewPublicProfile => 'View profile';
+
+  @override
+  String get publicProfileLoadFailed => 'Profile could not load';
+
+  @override
+  String get publicProfileListingsTitle => 'Active listings';
+
+  @override
+  String get publicProfileListingsEmpty => 'No active listings right now.';
+
+  @override
+  String get paymentQrSectionTitle => 'Offline payment QR codes';
+
+  @override
+  String get paymentQrSectionSubtitle =>
+      'Shown only when the user chooses to make them public. The platform does not process, verify, or escrow payments.';
+
+  @override
+  String get paymentQrPublicNotice =>
+      'Use only after you have confirmed the item and seller. Offline payments are arranged between users.';
+
+  @override
+  String get wechatPayQr => 'WeChat Pay';
+
+  @override
+  String get alipayQr => 'Alipay';
+
+  @override
+  String get paymentQrSettingsTitle => 'Payment QR codes';
+
+  @override
+  String get paymentQrSettingsSubtitle =>
+      'Optional. These are displayed on your public profile only after you turn them on.';
+
+  @override
+  String get uploadWechatQr => 'Upload WeChat Pay code';
+
+  @override
+  String get uploadAlipayQr => 'Upload Alipay code';
+
+  @override
+  String get showWechatQr => 'Show WeChat Pay code';
+
+  @override
+  String get showAlipayQr => 'Show Alipay code';
+
+  @override
+  String get paymentQrUpdated => 'Payment QR settings updated';
+
+  @override
+  String get paymentQrCleared => 'Payment QR code removed';
+
+  @override
+  String get paymentQrMissingHint =>
+      'Upload a QR code before turning on public display.';
+
+  @override
+  String get paymentQrSafetyHint =>
+      'The platform only displays your image and will not confirm whether anyone has paid.';
+
+  @override
+  String get createDealIntent => 'Start deal intent';
+
+  @override
+  String get dealIntentSent =>
+      'Deal intent sent. Waiting for seller confirmation.';
+
+  @override
+  String get platformNoEscrowShort =>
+      'The platform only records offline deal intent. It does not escrow funds or verify payment or handoff. Please confirm inspection, exchange, and payment in chat.';
+
+  @override
+  String get awaitingSellerConfirm => 'Waiting for seller confirmation';
+
+  @override
+  String get dealConfirmed => 'Offline deal confirmed';
+
+  @override
+  String get dealCancelled => 'Deal record cancelled';
+
+  @override
+  String get confirmOfflineDeal => 'Confirm deal';
+
+  @override
+  String get autoDelistAfterConfirm => 'Auto-delist item after confirmation';
+
+  @override
+  String get autoDelistAfterConfirmSubtitle =>
+      'Best for one-off used items. Turn it off if you want the listing to keep receiving intents.';
+
+  @override
+  String get dealIntentCreated => 'Buyer started deal intent';
+
+  @override
+  String get sellerConfirmedDeal => 'Seller confirmed deal';
+
+  @override
+  String get itemAutoDelisted => 'Item auto-delisted';
+
+  @override
+  String get listingStatus => 'Listing status';
+
+  @override
+  String get chatReadReceiptSettingsTitle => 'Chat read receipts';
+
+  @override
+  String get chatReadReceiptDefaultTitle => 'Default read behavior';
+
+  @override
+  String get chatReadReceiptAutoTitle => 'Auto read';
+
+  @override
+  String get chatReadReceiptManualTitle => 'Manual read';
+
+  @override
+  String get chatReadReceiptAutoSubtitle =>
+      'Mark received messages as read when you open an active realtime chat.';
+
+  @override
+  String get chatReadReceiptManualSubtitle =>
+      'They only see read after you tap \"Mark read\".';
+
+  @override
+  String get chatReadReceiptAutoCurrent =>
+      'Auto: opening an active realtime chat marks messages as read.';
+
+  @override
+  String get chatReadReceiptManualCurrent =>
+      'Manual: opening chat does not automatically show read receipts.';
+
+  @override
+  String get chatReadReceiptUpdated => 'Chat read receipt setting updated';
+
+  @override
+  String get markConversationRead => 'Mark read';
+
+  @override
+  String get markConversationReadSuccess => 'Marked as read';
+
+  @override
+  String get manualReadUnreadOne =>
+      'Unread messages are waiting; manual read is on';
+
+  @override
+  String manualReadUnreadMany(int count) {
+    return '$count unread messages; manual read is on';
+  }
+
+  @override
+  String get readPreferenceUpdated => 'Read preference updated';
+
+  @override
+  String get readPreferenceInherit => 'Read receipts: inherit default';
+
+  @override
+  String get readPreferenceAuto => 'Read receipts: auto';
+
+  @override
+  String get readPreferenceManual => 'Read receipts: manual';
+
+  @override
+  String get selectedSuffix => ' ✓';
+
+  @override
+  String get quoteListing => 'Listing';
+
+  @override
+  String get quoteOrder => 'Deal record';
+
+  @override
+  String get quoteHitlOffer => 'Negotiation';
+
+  @override
+  String get quoteGeneric => 'Quote';
+
+  @override
+  String get discoverabilitySettingsTitle => 'How others can find me';
+
+  @override
+  String get discoverByUsernameTitle => 'Find me by username';
+
+  @override
+  String get discoverByUsernameSubtitle =>
+      'When off, others cannot find you by username. Required display in listings and existing conversations is not affected.';
+
+  @override
+  String get discoverByEmailTitle => 'Find me by email';
+
+  @override
+  String get discoverByEmailMissingSubtitle =>
+      'Set a campus email first, then choose whether others can find you by entering the full email.';
+
+  @override
+  String discoverByEmailSubtitle(String email) {
+    return 'Current email: $email. When enabled, others must enter the full email to find you.';
+  }
+
+  @override
+  String get discoverByStudentIdTitle => 'Find me by student ID';
+
+  @override
+  String discoverByStudentIdSubtitle(String studentId) {
+    return 'Student ID inferred from email: $studentId. When enabled, others must enter the full student ID to find you.';
+  }
+
+  @override
+  String get discoverByStudentIdMissingSubtitle =>
+      'The current email does not reveal a student ID. Use a campus email that starts with 8-12 digits.';
+
+  @override
+  String get discoverabilityUpdated => 'Discovery settings updated';
+
+  @override
+  String settingsUpdateFailed(String error) {
+    return 'Settings update failed: $error';
+  }
+
+  @override
+  String get conversationSectionDirect => 'Direct messages';
+
+  @override
+  String get conversationSectionSpaces => 'Campus groups and channels';
+
+  @override
+  String get conversationSectionTools => 'Tools and assistant';
+
+  @override
+  String get conversationCreateGroupSuccess =>
+      'Group created and added to Messages';
+
+  @override
+  String get conversationCreateChannelSuccess =>
+      'Channel created and added to Messages';
+
+  @override
+  String conversationCreateFailed(String error) {
+    return 'Create failed: $error';
+  }
+
+  @override
+  String get conversationPeerFallback => 'Classmate';
+
+  @override
+  String get conversationThreadLoading => 'Loading thread';
+
+  @override
+  String conversationThreadStats(int realtime, int mail, int count) {
+    return 'Realtime $realtime · Mail $mail · $count segments';
+  }
+
+  @override
+  String get conversationReconnect => 'Reconnect';
+
+  @override
+  String get conversationThreadLoadFailedTitle =>
+      'Contact thread could not load';
+
+  @override
+  String get conversationThreadEmptyTitle =>
+      'No visible conversation history yet';
+
+  @override
+  String get conversationThreadEmptySubtitle =>
+      'Reconnect to start a new realtime chat or mail thread.';
+
+  @override
+  String get conversationMailThreadTitle => 'Mail thread';
+
+  @override
+  String get conversationRealtimeThreadTitle => 'Realtime session';
+
+  @override
+  String get conversationSegmentHistoryHint =>
+      'This segment is kept as history. Start a new conversation when you need to continue.';
+
+  @override
+  String get conversationSegmentOpenHint =>
+      'Open this segment to view messages, reply, quote context, or handle connection state.';
+
+  @override
+  String get conversationViewHistory => 'View history';
+
+  @override
+  String get conversationOpenSegment => 'Open this segment';
+
+  @override
+  String conversationPendingCount(int count) {
+    return 'Pending $count';
+  }
+
+  @override
+  String get conversationTimelineFallback => 'View conversation timeline';
+
+  @override
+  String conversationRealtimeCount(int count) {
+    return 'Realtime $count';
+  }
+
+  @override
+  String conversationMailCount(int count) {
+    return 'Mail $count';
+  }
+
+  @override
+  String conversationSegmentCount(int count) {
+    return '$count segments';
+  }
+
+  @override
+  String get campusCommunicationTitle => 'Campus communication';
+
+  @override
+  String get campusCommunicationSubtitle =>
+      'Groups are for discussions, channels are for announcements. One-to-one chats can use call and secret chat MVPs.';
+
+  @override
+  String get createGroup => 'Create group';
+
+  @override
+  String get createChannel => 'Create channel';
+
+  @override
+  String get spaceNameLabel => 'Name';
+
+  @override
+  String get spaceDescriptionOptionalLabel => 'Description (optional)';
+
+  @override
+  String get createAction => 'Create';
+
+  @override
+  String get unnamedSpace => 'Unnamed space';
+
+  @override
+  String get spaceFallbackTitle => 'Campus group';
+
+  @override
+  String get refresh => 'Refresh';
+
+  @override
+  String get spaceLoadFailedTitle => 'Space could not load';
+
+  @override
+  String get spaceNotFoundTitle => 'Space not found';
+
+  @override
+  String get spaceNotFoundSubtitle =>
+      'It may have been deleted, or you may not be a member.';
+
+  @override
+  String spaceSendFailed(String error) {
+    return 'Send failed: $error';
+  }
+
+  @override
+  String spaceMembersRoleLine(int count, String role) {
+    return '$count members · My role $role';
+  }
+
+  @override
+  String get spaceMessagesLoadFailedTitle => 'Space messages could not load';
+
+  @override
+  String get spaceChannelCreatedTitle => 'Channel created';
+
+  @override
+  String get spaceGroupCreatedTitle => 'Group created';
+
+  @override
+  String get spaceChannelEmptySubtitle =>
+      'Announcements will appear here. Channel members can read, react, and report.';
+
+  @override
+  String get spaceGroupEmptySubtitle =>
+      'It is now in Messages. Send the first note to bring the group to life.';
+
+  @override
+  String get replyAction => 'Reply';
+
+  @override
+  String replyPreviewMissing(int messageId) {
+    return 'Replied to message #$messageId';
+  }
+
+  @override
+  String get spaceChannelReadOnlyNotice =>
+      'You are a channel member. You can read, react, and report; only channel owners/admins can post announcements.';
+
+  @override
+  String get cancelReply => 'Cancel reply';
+
+  @override
+  String get channelComposerHint => 'Post an announcement...';
+
+  @override
+  String get groupComposerHint => 'Send a group message...';
+
+  @override
+  String spaceFallbackDescription(int count, String kind) {
+    return '$count members · $kind';
+  }
+
+  @override
+  String get spaceKindChannelLong => 'Announcement channel';
+
+  @override
+  String get spaceKindGroupLong => 'Campus group';
+
+  @override
+  String get spaceKindChannel => 'Channel';
+
+  @override
+  String get spaceKindGroup => 'Group';
+
+  @override
+  String get spaceRoleOwner => 'Owner';
+
+  @override
+  String get spaceRoleAdmin => 'Admin';
+
+  @override
+  String get spaceRoleBanned => 'Restricted';
+
+  @override
+  String get spaceRoleMember => 'Member';
+
+  @override
+  String get chatAcceptedLegacy => 'Connection accepted';
+
+  @override
+  String chatAcceptFailed(String error) {
+    return 'Accept failed: $error';
+  }
+
+  @override
+  String get chatRejectedLegacy => 'Connection rejected';
+
+  @override
+  String chatRejectFailed(String error) {
+    return 'Reject failed: $error';
+  }
+
+  @override
+  String get replyingToMessage => 'Replying to this message';
+
+  @override
+  String reactionFailed(String error) {
+    return 'Reaction failed: $error';
+  }
+
+  @override
+  String get hideMessageDialogTitle => 'Delete from my chat history?';
+
+  @override
+  String get hideMessageDialogBody =>
+      'This only hides the message for you. The other person can still see it.';
+
+  @override
+  String get deleteAction => 'Delete';
+
+  @override
+  String get messageHiddenForMe => 'Hidden from your chat history';
+
+  @override
+  String messageHideFailed(String error) {
+    return 'Delete failed: $error';
+  }
+
+  @override
+  String get reportMessageTitle => 'Report this message';
+
+  @override
+  String get reportReasonDefault => 'Inappropriate content';
+
+  @override
+  String get reportReasonLabel => 'Reason';
+
+  @override
+  String get reportDetailsLabel => 'Additional details (optional)';
+
+  @override
+  String get submitAction => 'Submit';
+
+  @override
+  String get acceptAction => 'Accept';
+
+  @override
+  String get rejectAction => 'Reject';
+
+  @override
+  String get reportSubmitted => 'Report submitted';
+
+  @override
+  String reportFailed(String error) {
+    return 'Report failed: $error';
+  }
+
+  @override
+  String markReadFailed(String error) {
+    return 'Mark read failed: $error';
+  }
+
+  @override
+  String readPreferenceUpdateFailed(String error) {
+    return 'Read preference update failed: $error';
+  }
+
+  @override
+  String get quoteUnavailable =>
+      'This conversation has no listing, order, or negotiation context to quote.';
+
+  @override
+  String get quotePickerTitle => 'Quote related info';
+
+  @override
+  String get quotePickerSubtitle =>
+      'The server creates the fact snapshot, so price, title, and status cannot be forged by the client.';
+
+  @override
+  String get quoteListingFallback => 'Listing linked to this conversation';
+
+  @override
+  String get quoteListingSubtitle =>
+      'Quote a snapshot of the listing title, price, condition, and cover image.';
+
+  @override
+  String get conversationCannotSendMessage =>
+      'This conversation cannot send messages right now';
+
+  @override
+  String messageSendFailed(String error) {
+    return 'Send failed: $error';
+  }
+
+  @override
+  String get replyAssistantUnavailable =>
+      'Xiaobang is not ready yet. You can still type directly.';
+
+  @override
+  String closeConversationFailed(String error) {
+    return 'End conversation failed: $error';
+  }
+
+  @override
+  String get blockUserTitle => 'Block this user?';
+
+  @override
+  String get blockUserBody =>
+      'Neither side will be able to keep sending messages. Existing history will be preserved.';
+
+  @override
+  String get blockAction => 'Block';
+
+  @override
+  String blockFailed(String error) {
+    return 'Block failed: $error';
+  }
+
+  @override
+  String get callRequiresActiveConversation =>
+      'You can start a call after the conversation is connected.';
+
+  @override
+  String get videoCallSignalSent => 'Video call signal sent';
+
+  @override
+  String get audioCallSignalSent => 'Audio call signal sent';
+
+  @override
+  String callStartFailed(String error) {
+    return 'Start call failed: $error';
+  }
+
+  @override
+  String get secretChatCreated =>
+      'Secret chat session created. The server only stores ciphertext endpoints.';
+
+  @override
+  String secretChatCreateFailed(String error) {
+    return 'Create secret chat failed: $error';
+  }
+
+  @override
+  String quoteListingLabel(String title) {
+    return 'Quote listing: $title';
+  }
+
+  @override
+  String get conversationFallbackTitle => 'Conversation';
+
+  @override
+  String get conversationLoadingState => 'Loading conversation state';
+
+  @override
+  String get conversationUnavailable =>
+      'This conversation is currently unavailable';
+
+  @override
+  String get conversationWaitingPeer => 'Waiting for them to connect';
+
+  @override
+  String get conversationAcceptToReply => 'Connect to reply';
+
+  @override
+  String get conversationCompletingHandshake =>
+      'Completing connection confirmation';
+
+  @override
+  String get conversationDeclinedTitle => 'This time did not connect';
+
+  @override
+  String get conversationCancelledTitle => 'Invitation cancelled';
+
+  @override
+  String get conversationExpiredTitle => 'This conversation has ended';
+
+  @override
+  String get conversationClosedTitle => 'This conversation is closed';
+
+  @override
+  String conversationReadMenuHeader(String mode) {
+    return 'Read settings · Current $mode';
+  }
+
+  @override
+  String get readModeUnknown => 'Unknown';
+
+  @override
+  String get readModeManual => 'Manual';
+
+  @override
+  String get readModeAuto => 'Auto';
+
+  @override
+  String get readModeInherit => 'Inherit default';
+
+  @override
+  String get audioCallMvp => 'Audio call MVP';
+
+  @override
+  String get videoCallMvp => 'Video call MVP';
+
+  @override
+  String get secretChatMvp => 'Secret chat MVP';
+
+  @override
+  String get closeConversationAction => 'End this conversation';
+
+  @override
+  String get replyAssistantButton => 'Ask Xiaobang';
+
+  @override
+  String get mailFallbackTitle => 'Mail';
+
+  @override
+  String get mailProtocolSubtitle =>
+      'Async delivery · no online, typing, or read status';
+
+  @override
+  String get incomingRealtimeTitle => 'They want to chat now';
+
+  @override
+  String get incomingRealtimeSubtitle => 'You can choose whether to connect';
+
+  @override
+  String incomingRealtimeExpiring(String remaining) {
+    return 'Invitation expires in $remaining';
+  }
+
+  @override
+  String get notConvenientNow => 'Not convenient now';
+
+  @override
+  String get connectAction => 'Connect';
+
+  @override
+  String get waitingPeerTitle => 'Waiting for them to connect';
+
+  @override
+  String get invitationDelivered => 'Invitation delivered';
+
+  @override
+  String timeRemaining(String remaining) {
+    return '$remaining left';
+  }
+
+  @override
+  String get cancelInvitation => 'Cancel invitation';
+
+  @override
+  String get confirmingConnectionTitle => 'Confirming connection';
+
+  @override
+  String get peerRespondedWaitingTitle =>
+      'They responded; waiting for confirmation';
+
+  @override
+  String get confirmingConnectionSubtitle =>
+      'You can chat after confirmation completes.';
+
+  @override
+  String connectionReleaseAfter(String remaining) {
+    return 'This connection releases in $remaining';
+  }
+
+  @override
+  String get realtimeConnectedTitle => 'Conversation connected';
+
+  @override
+  String get realtimeConnectedSubtitle => 'You can chat in realtime now';
+
+  @override
+  String realtimeExpiresAfterIdle(String remaining) {
+    return 'Ends after $remaining with no new messages';
+  }
+
+  @override
+  String get endAction => 'End';
+
+  @override
+  String get conversationTerminalSubtitle =>
+      'History is kept. Reconnecting starts a new conversation.';
+
+  @override
+  String get conversationNaturallyEndedTitle =>
+      'This conversation ended naturally';
+
+  @override
+  String durationHoursMinutes(int hours, int minutes) {
+    return '${hours}h ${minutes}m';
+  }
+
+  @override
+  String get connectionRequestTitle => 'Connection request';
+
+  @override
+  String connectionRequestReadReceiptNotice(String title, String body) {
+    return '$title\n\n$body\n\nRead receipts will be enabled after you confirm.';
+  }
+
+  @override
+  String get offlineStatus => 'Offline';
+
+  @override
+  String get onlineStatus => 'Online';
+
+  @override
+  String get pendingAcceptStatus => 'Pending';
+
+  @override
+  String get connectingStatus => 'Connecting...';
+
+  @override
+  String get replyPreviewGeneric => 'Quoted a message';
+
+  @override
+  String get editedSuffix => '(edited)';
+
+  @override
+  String get editAction => 'Edit';
+
+  @override
+  String get hideMessageAction => 'Delete from my chat history';
+
+  @override
+  String get hideMessageActionSubtitle =>
+      'Only hides it for you; the other person can still see it';
+
+  @override
+  String get reportAction => 'Report';
+
+  @override
+  String get sendFailedShort => 'Send failed';
+
+  @override
+  String get messageSentStatus => 'Sent';
+
+  @override
+  String get messageReadStatus => 'Read';
+
+  @override
+  String get messageDeliveredStatus => 'Delivered';
+
+  @override
+  String typingIndicator(String username) {
+    return '$username is typing...';
+  }
+
+  @override
+  String loadFailedWithError(String error) {
+    return 'Load failed: $error';
+  }
+
+  @override
+  String get noMessagesYet => 'No messages yet. Start the conversation.';
+
+  @override
+  String get stopAction => 'Stop';
+
+  @override
+  String get replyMediaMessage => 'Reply to a media message';
+
+  @override
+  String get cancelQuote => 'Cancel quote';
+
+  @override
+  String get quoteContextTooltip => 'Quote a listing, order, or negotiation';
+
+  @override
+  String get editMessageHint => 'Edit message...';
+
+  @override
+  String get messageInputHint => 'Type a message...';
+
+  @override
+  String offerPriceLine(String price) {
+    return 'Offer: ¥$price';
+  }
+
+  @override
+  String reasonLine(String reason) {
+    return 'Reason: $reason';
+  }
+
+  @override
+  String expiresAtLine(String time) {
+    return 'Valid until: $time';
+  }
+
+  @override
+  String get counterOfferAction => 'Counter';
+
+  @override
+  String get acceptCounterAction => 'Accept counter';
+
+  @override
+  String sellerCounterPriceLine(String price) {
+    return 'Seller countered ¥$price';
+  }
+
+  @override
+  String yourOriginalOfferLine(String price) {
+    return 'Your original offer: ¥$price';
+  }
+
+  @override
+  String get connectionFailedNetwork =>
+      'Connection failed. Please check the network.';
+
+  @override
+  String get emptyReplyPlaceholder => '(no reply)';
+
+  @override
+  String listingLine(String listingId) {
+    return 'Listing: $listingId';
+  }
+
+  @override
+  String buyerOfferLine(String price) {
+    return 'Buyer offer: ¥$price';
+  }
+
+  @override
+  String statusLine(String status) {
+    return 'Status: $status';
+  }
+
+  @override
+  String counterPriceLine(String price) {
+    return 'Counter: ¥$price';
+  }
+
+  @override
+  String negotiationStatusLine(String status) {
+    return 'Negotiation $status';
+  }
 }

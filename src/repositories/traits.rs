@@ -24,6 +24,7 @@ pub struct Listing {
     pub suggested_price_cny: i32,
     pub defects: Option<String>,
     pub description: Option<String>,
+    pub image_url: Option<String>,
     pub owner_id: String,
     pub status: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -39,6 +40,7 @@ pub struct CreateListingInput {
     pub suggested_price_cny: f64,
     pub defects: Vec<String>,
     pub description: String,
+    pub image_url: Option<String>,
     pub owner_id: String,
 }
 
@@ -118,6 +120,7 @@ pub struct User {
     pub id: String,
     pub username: String,
     pub email: Option<String>,
+    pub student_id: Option<String>,
     pub password_hash: String,
     pub role: String,
     pub status: String,
@@ -126,13 +129,54 @@ pub struct User {
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[allow(dead_code)]
+pub struct UserDiscoverability {
+    pub username: bool,
+    pub email: bool,
+    pub student_id: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[allow(dead_code)]
+pub struct UserPaymentQr {
+    pub wechat_url: Option<String>,
+    pub alipay_url: Option<String>,
+    pub show_wechat: bool,
+    pub show_alipay: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[allow(dead_code)]
 pub struct UserProfile {
     pub user_id: String,
     pub username: String,
     pub email: Option<String>,
+    pub student_id: Option<String>,
+    pub discoverability: UserDiscoverability,
+    pub chat_read_receipt_mode: String,
     pub avatar_url: Option<String>,
+    pub payment_qr: UserPaymentQr,
     pub role: String,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum UserLookupMethod {
+    Auto,
+    Username,
+    Email,
+    StudentId,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[allow(dead_code)]
+pub struct UserLookupResult {
+    pub user_id: String,
+    pub username: String,
+    pub matched_by: String,
+    pub masked_identifier: Option<String>,
+    pub listing_count: i64,
+    pub can_start_conversation: bool,
 }
 
 #[allow(dead_code, async_fn_in_trait)]
@@ -178,6 +222,15 @@ pub trait UserRepository: Send + Sync {
         offset: i64,
     ) -> Result<(Vec<(UserProfile, i64)>, i64), ApiError>;
 
+    /// Privacy-aware lookup for starting a direct conversation.
+    async fn lookup_users(
+        &self,
+        requester_id: &str,
+        query: &str,
+        method: UserLookupMethod,
+        limit: i64,
+    ) -> Result<Vec<UserLookupResult>, ApiError>;
+
     /// Ban a user.
     async fn ban_user(&self, user_id: &str) -> Result<(), ApiError>;
 
@@ -195,6 +248,32 @@ pub trait UserRepository: Send + Sync {
 
     /// Update email for a user. Returns error if new_email already taken.
     async fn update_email(&self, user_id: &str, new_email: &str) -> Result<(), ApiError>;
+
+    /// Update user discovery preferences.
+    async fn update_discoverability(
+        &self,
+        user_id: &str,
+        username: Option<bool>,
+        email: Option<bool>,
+        student_id: Option<bool>,
+    ) -> Result<(), ApiError>;
+
+    /// Update global chat read receipt preference.
+    async fn update_chat_read_receipt_mode(
+        &self,
+        user_id: &str,
+        mode: &str,
+    ) -> Result<(), ApiError>;
+
+    /// Update optional offline payment QR-code URLs and public visibility.
+    async fn update_payment_qr(
+        &self,
+        user_id: &str,
+        wechat_url: Option<&str>,
+        alipay_url: Option<&str>,
+        show_wechat: Option<bool>,
+        show_alipay: Option<bool>,
+    ) -> Result<(), ApiError>;
 
     /// Update password hash for a user.
     async fn update_password_hash(
@@ -302,28 +381,6 @@ pub trait ChatRepository: Send + Sync {
 
     /// Mark a message as read.
     async fn mark_message_read(&self, message_id: &str, reader_id: &str) -> Result<(), ApiError>;
-
-    /// Request a new chat connection.
-    async fn request_connection(
-        &self,
-        requester_id: &str,
-        receiver_id: &str,
-        listing_id: &str,
-    ) -> Result<String, ApiError>;
-
-    /// Accept a connection request.
-    async fn accept_connection(
-        &self,
-        connection_id: &str,
-        acceptor_id: &str,
-    ) -> Result<(), ApiError>;
-
-    /// Reject a connection request.
-    async fn reject_connection(
-        &self,
-        connection_id: &str,
-        rejector_id: &str,
-    ) -> Result<(), ApiError>;
 }
 
 // ---------------------------------------------------------------------------

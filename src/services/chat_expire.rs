@@ -1,0 +1,29 @@
+use sqlx::PgPool;
+use std::time::Duration;
+
+use crate::api::ws;
+use crate::services::chat_conversation::ChatConversationService;
+
+pub async fn run_chat_expiry_worker(pool: PgPool) {
+    let service = ChatConversationService::new(pool);
+    let mut interval = tokio::time::interval(Duration::from_secs(30));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        interval.tick().await;
+        match service.expire_stale().await {
+            Ok(expired) => {
+                for (conversation_id, initiator_id, recipient_id) in expired {
+                    let payload = serde_json::json!({
+                        "event": "conversation_state_changed",
+                        "conversation_id": conversation_id,
+                        "state": "expired",
+                    })
+                    .to_string();
+                    ws::broadcast_to_user(&initiator_id, &payload);
+                    ws::broadcast_to_user(&recipient_id, &payload);
+                }
+            }
+            Err(error) => tracing::error!(%error, "chat expiry worker failed"),
+        }
+    }
+}

@@ -13,7 +13,6 @@ import '../services/notification_service.dart';
 import '../services/order_service.dart';
 import '../services/recommendation_service.dart';
 import '../services/upload_service.dart';
-import '../services/sse_service.dart';
 
 /// All service providers for dependency injection.
 /// Pages can use these directly for better testability,
@@ -31,7 +30,6 @@ List<SingleChildWidget> get serviceProviders => [
   Provider<WatchlistService>(create: (_) => WatchlistService()),
   Provider<NotificationService>(create: (_) => NotificationService()),
   Provider<OrderService>(create: (_) => OrderService()),
-  Provider<SseService>(create: (_) => SseService()),
   Provider<AdminImpersonationService>(
     create: (context) =>
         AdminImpersonationService(apiService: context.read<ApiService>()),

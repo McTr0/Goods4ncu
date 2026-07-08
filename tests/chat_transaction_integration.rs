@@ -1,6 +1,11 @@
-//! Integration tests for chat transaction boundaries.
+//! Integration tests for the direct chat conversation state machine.
 
-use good4ncu::repositories::PostgresChatRepository;
+use good4ncu::api::error::ApiError;
+use good4ncu::services::chat_conversation::{
+    ChatConversationService, ConversationDecision, ConversationMode, ConversationState,
+    CreateConversationInput, SendConversationMessageInput, StructuredQuoteInput,
+    StructuredQuoteKind,
+};
 use good4ncu::test_infra::with_test_pool;
 use sqlx::Row;
 use uuid::Uuid;
@@ -14,492 +19,612 @@ async fn insert_user(pool: &sqlx::PgPool, id: &str, username: &str) {
         .unwrap();
 }
 
-async fn insert_connected_conversation(
-    pool: &sqlx::PgPool,
-    connection_id: Uuid,
-    requester_id: &str,
-    receiver_id: &str,
-    unread_count: i32,
-) {
+fn realtime_input(
+    initiator_id: &str,
+    recipient_id: &str,
+    content: &str,
+) -> CreateConversationInput {
+    CreateConversationInput {
+        client_request_id: Uuid::new_v4(),
+        initiator_id: initiator_id.to_string(),
+        recipient_id: recipient_id.to_string(),
+        listing_id: None,
+        mode: ConversationMode::Realtime,
+        subject: None,
+        content: content.to_string(),
+    }
+}
+
+fn mail_input(
+    initiator_id: &str,
+    recipient_id: &str,
+    subject: &str,
+    content: &str,
+) -> CreateConversationInput {
+    CreateConversationInput {
+        client_request_id: Uuid::new_v4(),
+        initiator_id: initiator_id.to_string(),
+        recipient_id: recipient_id.to_string(),
+        listing_id: None,
+        mode: ConversationMode::Mail,
+        subject: Some(subject.to_string()),
+        content: content.to_string(),
+    }
+}
+
+fn send_input(
+    conversation_id: Uuid,
+    sender_id: &str,
+    content: &str,
+) -> SendConversationMessageInput {
+    SendConversationMessageInput {
+        client_message_id: Uuid::new_v4(),
+        conversation_id,
+        sender_id: sender_id.to_string(),
+        content: content.to_string(),
+        reply_to_message_id: None,
+        quote: None,
+        image_data: None,
+        audio_data: None,
+        image_url: None,
+        audio_url: None,
+    }
+}
+
+async fn insert_listing(pool: &sqlx::PgPool, id: &str, owner_id: &str, title: &str) {
     sqlx::query(
-        "INSERT INTO chat_connections (id, requester_id, receiver_id, status, unread_count, established_at) \
-         VALUES ($1, $2, $3, 'connected', $4, NOW())",
+        "INSERT INTO inventory
+         (id, title, category, brand, condition_score, suggested_price_cny, defects, owner_id, status)
+         VALUES ($1, $2, 'electronics', 'brand', 8, 12345, 'none', $3, 'active')",
     )
-    .bind(connection_id)
-    .bind(requester_id)
-    .bind(receiver_id)
-    .bind(unread_count)
+    .bind(id)
+    .bind(title)
+    .bind(owner_id)
     .execute(pool)
     .await
     .unwrap();
 }
 
-async fn insert_connection(
-    pool: &sqlx::PgPool,
-    connection_id: Uuid,
-    requester_id: &str,
-    receiver_id: &str,
-    status: &str,
-    established_at: Option<chrono::DateTime<chrono::Utc>>,
-) {
-    sqlx::query(
-        "INSERT INTO chat_connections (id, requester_id, receiver_id, status, established_at) \
-         VALUES ($1, $2, $3, $4, $5)",
-    )
-    .bind(connection_id)
-    .bind(requester_id)
-    .bind(receiver_id)
-    .bind(status)
-    .bind(established_at)
-    .execute(pool)
-    .await
-    .unwrap();
+async fn create_active_realtime(
+    service: &ChatConversationService,
+    initiator_id: &str,
+    recipient_id: &str,
+) -> Uuid {
+    let created = service
+        .create_conversation(realtime_input(
+            initiator_id,
+            recipient_id,
+            "你好，想聊聊这个商品",
+        ))
+        .await
+        .unwrap();
+    let conversation_id = Uuid::parse_str(&created.conversation.id).unwrap();
+    service
+        .respond(conversation_id, recipient_id, ConversationDecision::Accept)
+        .await
+        .unwrap();
+    service
+        .acknowledge(conversation_id, initiator_id)
+        .await
+        .unwrap();
+    conversation_id
 }
 
 #[tokio::test]
-async fn create_direct_message_starts_unread_and_increments_unread_count() {
+async fn threads_group_multiple_conversations_by_peer_without_merging_history() {
     with_test_pool(|pool| async move {
-        insert_user(&pool, "user-sender", "sender").await;
-        insert_user(&pool, "user-receiver", "receiver").await;
+        insert_user(&pool, "user-a", "alice").await;
+        insert_user(&pool, "user-b", "bob").await;
+        let service = ChatConversationService::new(pool.clone());
 
-        let connection_id = Uuid::new_v4();
-        insert_connected_conversation(&pool, connection_id, "user-sender", "user-receiver", 0)
-            .await;
-
-        let repo = PostgresChatRepository::new(pool.clone());
-        let (message_id, _timestamp, read_at) = repo
-            .create_direct_message(
-                &connection_id.to_string(),
-                Some(connection_id),
-                "user-sender",
-                Some("user-receiver"),
-                "hello",
-                None,
-                None,
-                Some("https://cdn.example.com/a.jpg"),
-                None,
-                None,
-            )
+        let realtime_id = create_active_realtime(&service, "user-a", "user-b").await;
+        service.close(realtime_id, "user-a").await.unwrap();
+        service
+            .create_conversation(mail_input("user-a", "user-b", "取货时间", "今晚七点可以吗"))
             .await
             .unwrap();
 
-        assert!(message_id > 0);
-        assert!(read_at.is_none());
+        let threads = service.list_threads("user-b", None, 20).await.unwrap();
+        assert_eq!(threads.len(), 1);
+        let thread = &threads[0];
+        assert_eq!(thread.peer_user_id, "user-a");
+        assert_eq!(thread.peer_username, "alice");
+        assert_eq!(thread.conversation_count, 2);
+        assert_eq!(thread.realtime_count, 1);
+        assert_eq!(thread.mail_count, 1);
+        assert_eq!(thread.unread_count, 2);
+        assert_eq!(thread.latest_preview.as_deref(), Some("今晚七点可以吗"));
 
-        let message = sqlx::query(
-            "SELECT content, sender, receiver, image_url, read_at, read_by, status FROM chat_messages WHERE id = $1",
-        )
-        .bind(message_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert_eq!(message.get::<String, _>("content"), "hello");
-        assert_eq!(message.get::<String, _>("sender"), "user-sender");
-        assert_eq!(
-            message.get::<Option<String>, _>("receiver").as_deref(),
-            Some("user-receiver")
-        );
-        assert_eq!(
-            message.get::<Option<String>, _>("image_url").as_deref(),
-            Some("https://cdn.example.com/a.jpg")
-        );
-        assert!(message
-            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("read_at")
-            .is_none());
-        assert!(message.get::<Option<String>, _>("read_by").is_none());
-        assert_eq!(message.get::<String, _>("status"), "sent");
+        let detail = service.get_thread("user-b", "user-a", None).await.unwrap();
+        assert_eq!(detail.thread.peer_user_id, "user-a");
+        assert_eq!(detail.conversations.len(), 2);
+        assert!(detail
+            .conversations
+            .iter()
+            .any(|conversation| conversation.mode == ConversationMode::Realtime));
+        assert!(detail
+            .conversations
+            .iter()
+            .any(|conversation| conversation.mode == ConversationMode::Mail));
 
-        let unread_count: i32 =
-            sqlx::query_scalar("SELECT unread_count FROM chat_connections WHERE id = $1")
-                .bind(connection_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(unread_count, 1);
+        let mail_threads = service
+            .list_threads("user-b", Some(ConversationMode::Mail), 20)
+            .await
+            .unwrap();
+        assert_eq!(mail_threads.len(), 1);
+        assert_eq!(mail_threads[0].conversation_count, 1);
     })
     .await;
 }
 
 #[tokio::test]
-async fn upsert_connection_request_resets_existing_pair_to_pending() {
+async fn message_reply_reaction_hide_and_report_are_member_scoped() {
     with_test_pool(|pool| async move {
         insert_user(&pool, "user-a", "alice").await;
         insert_user(&pool, "user-b", "bob").await;
+        let service = ChatConversationService::new(pool.clone());
+        let conversation_id = create_active_realtime(&service, "user-a", "user-b").await;
 
-        let connection_id = Uuid::new_v4();
-        insert_connection(
-            &pool,
-            connection_id,
-            "user-b",
-            "user-a",
-            "rejected",
-            Some(chrono::Utc::now()),
-        )
-        .await;
-
-        let repo = PostgresChatRepository::new(pool.clone());
-        let result = repo
-            .upsert_connection_request("user-a", "user-b")
+        let first = service
+            .send_message(send_input(conversation_id, "user-a", "这个耳机还能小刀吗"))
             .await
             .unwrap();
+        let mut reply_input = send_input(conversation_id, "user-b", "可以小刀一点，但希望今天自提");
+        reply_input.reply_to_message_id = Some(first.id);
+        let reply = service.send_message(reply_input).await.unwrap();
+        assert_eq!(reply.reply_to_message_id, Some(first.id));
+        assert_eq!(
+            reply.reply_preview.as_ref().map(|preview| preview.id),
+            Some(first.id)
+        );
 
-        assert_eq!(result.connection_id, connection_id.to_string());
+        let reacted = service
+            .set_reaction(reply.id, "user-a", "👍")
+            .await
+            .unwrap();
+        assert_eq!(reacted.reactions.len(), 1);
+        assert_eq!(reacted.reactions[0].emoji, "👍");
+        assert!(reacted.reactions[0].reacted_by_me);
+
+        service.hide_message(reply.id, "user-a").await.unwrap();
+        let (alice_messages, _) = service
+            .get_messages(conversation_id, "user-a", 20, 0)
+            .await
+            .unwrap();
+        assert!(!alice_messages.iter().any(|message| message.id == reply.id));
+        let (bob_messages, _) = service
+            .get_messages(conversation_id, "user-b", 20, 0)
+            .await
+            .unwrap();
+        assert!(bob_messages.iter().any(|message| message.id == reply.id));
+
+        let report_id = service
+            .report_message(first.id, "user-b", "不当内容", Some("测试举报"))
+            .await
+            .unwrap();
+        let duplicate_report_id = service
+            .report_message(first.id, "user-b", "不当内容", Some("更新说明"))
+            .await
+            .unwrap();
+        assert_eq!(report_id, duplicate_report_id);
+
+        let report_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM chat_message_reports
+             WHERE message_id = $1 AND reporter_id = 'user-b'",
+        )
+        .bind(first.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(report_count, 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn realtime_accept_then_sender_message_auto_acknowledges_and_tracks_unread() {
+    with_test_pool(|pool| async move {
+        insert_user(&pool, "user-a", "alice").await;
+        insert_user(&pool, "user-b", "bob").await;
+        let service = ChatConversationService::new(pool.clone());
+
+        let created = service
+            .create_conversation(realtime_input("user-a", "user-b", "你好，我想问下还在吗"))
+            .await
+            .unwrap();
+        assert!(created.created);
+        assert_eq!(created.conversation.state, ConversationState::SynSent);
+        assert!(created.conversation.capabilities.can_close);
+
+        let conversation_id = Uuid::parse_str(&created.conversation.id).unwrap();
+        let receiver_view = service
+            .get_conversation(conversation_id, "user-b")
+            .await
+            .unwrap();
+        assert_eq!(receiver_view.unread_count, 1);
+        assert!(receiver_view.capabilities.can_respond);
+
+        let accepted = service
+            .respond(conversation_id, "user-b", ConversationDecision::Accept)
+            .await
+            .unwrap();
+        assert_eq!(accepted.state, ConversationState::SynAck);
+
+        let initiator_view = service
+            .get_conversation(conversation_id, "user-a")
+            .await
+            .unwrap();
+        assert!(initiator_view.capabilities.can_ack);
+        assert!(initiator_view.capabilities.can_send);
+
+        let sent = service
+            .send_message(send_input(
+                conversation_id,
+                "user-a",
+                "我现在在线，可以继续聊",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(sent.kind, "message");
+
+        let receiver_after = service
+            .get_conversation(conversation_id, "user-b")
+            .await
+            .unwrap();
+        assert_eq!(receiver_after.state, ConversationState::Active);
+        assert_eq!(receiver_after.unread_count, 2);
+
+        let ack_events: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM chat_conversation_events
+             WHERE conversation_id = $1 AND event_type = 'conversation_acknowledged_by_message'",
+        )
+        .bind(conversation_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(ack_events, 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn mutual_realtime_intent_reuses_single_active_conversation() {
+    with_test_pool(|pool| async move {
+        insert_user(&pool, "user-a", "alice").await;
+        insert_user(&pool, "user-b", "bob").await;
+        let service = ChatConversationService::new(pool.clone());
+
+        let first = service
+            .create_conversation(realtime_input("user-a", "user-b", "我想聊一下"))
+            .await
+            .unwrap();
+        let first_id = Uuid::parse_str(&first.conversation.id).unwrap();
+
+        let second = service
+            .create_conversation(realtime_input("user-b", "user-a", "我也正想联系你"))
+            .await
+            .unwrap();
+        assert!(!second.created);
+        assert!(second.mutual_open);
+        assert_eq!(second.conversation.id, first_id.to_string());
+        assert_eq!(second.conversation.state, ConversationState::Active);
+
+        let message_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM chat_messages WHERE direct_conversation_id = $1",
+        )
+        .bind(first_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(message_count, 2);
+
+        let user_a_view = service.get_conversation(first_id, "user-a").await.unwrap();
+        let user_b_view = service.get_conversation(first_id, "user-b").await.unwrap();
+        assert_eq!(user_a_view.unread_count, 1);
+        assert_eq!(user_b_view.unread_count, 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn mail_thread_opens_immediately_allows_reply_and_member_archiving() {
+    with_test_pool(|pool| async move {
+        insert_user(&pool, "user-a", "alice").await;
+        insert_user(&pool, "user-b", "bob").await;
+        let service = ChatConversationService::new(pool.clone());
+
+        let created = service
+            .create_conversation(mail_input(
+                "user-a",
+                "user-b",
+                "想确认取货时间",
+                "你好，我不急，你方便时回复就好。",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(created.conversation.mode, ConversationMode::Mail);
+        assert_eq!(created.conversation.state, ConversationState::Open);
+        assert!(created.conversation.capabilities.can_send);
+
+        let conversation_id = Uuid::parse_str(&created.conversation.id).unwrap();
+        let receiver_view = service
+            .get_conversation(conversation_id, "user-b")
+            .await
+            .unwrap();
+        assert_eq!(receiver_view.unread_count, 1);
+        assert!(receiver_view.capabilities.can_send);
+
+        service
+            .send_message(send_input(conversation_id, "user-b", "今晚 7 点后可以"))
+            .await
+            .unwrap();
+        let initiator_view = service
+            .get_conversation(conversation_id, "user-a")
+            .await
+            .unwrap();
+        assert_eq!(initiator_view.unread_count, 1);
+
+        let archived = service
+            .set_archived(conversation_id, "user-a", true)
+            .await
+            .unwrap();
+        assert!(archived.archived);
+
+        let (user_a_items, _) = service
+            .list_conversations("user-a", None, None, 10)
+            .await
+            .unwrap();
+        assert!(user_a_items.is_empty());
+
+        let (user_b_items, _) = service
+            .list_conversations("user-b", None, None, 10)
+            .await
+            .unwrap();
+        assert_eq!(user_b_items.len(), 1);
+        assert!(!user_b_items[0].archived);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn mark_read_resets_member_unread_and_marks_received_messages() {
+    with_test_pool(|pool| async move {
+        insert_user(&pool, "user-a", "alice").await;
+        insert_user(&pool, "user-b", "bob").await;
+        let service = ChatConversationService::new(pool.clone());
+
+        let created = service
+            .create_conversation(mail_input("user-a", "user-b", "问题", "第一条消息"))
+            .await
+            .unwrap();
+        let conversation_id = Uuid::parse_str(&created.conversation.id).unwrap();
+
+        let marked = service.mark_read(conversation_id, "user-b").await.unwrap();
+        assert_eq!(marked, 1);
+
+        let receiver_view = service
+            .get_conversation(conversation_id, "user-b")
+            .await
+            .unwrap();
+        assert_eq!(receiver_view.unread_count, 0);
 
         let row = sqlx::query(
-            "SELECT requester_id, receiver_id, status, established_at \
-             FROM chat_connections WHERE id = $1",
+            "SELECT read_by, read_at, status
+             FROM chat_messages
+             WHERE direct_conversation_id = $1 AND receiver = 'user-b'",
         )
-        .bind(connection_id)
+        .bind(conversation_id)
         .fetch_one(&pool)
         .await
         .unwrap();
-
-        assert_eq!(row.get::<String, _>("requester_id"), "user-a");
-        assert_eq!(row.get::<String, _>("receiver_id"), "user-b");
-        assert_eq!(row.get::<String, _>("status"), "pending");
+        assert_eq!(
+            row.get::<Option<String>, _>("read_by").as_deref(),
+            Some("user-b")
+        );
         assert!(row
-            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("established_at")
-            .is_none());
+            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("read_at")
+            .is_some());
+        assert_eq!(row.get::<String, _>("status"), "read");
     })
     .await;
 }
 
 #[tokio::test]
-async fn accept_pending_connection_updates_status_and_timestamp() {
+async fn read_preference_inherits_global_and_allows_member_override() {
     with_test_pool(|pool| async move {
         insert_user(&pool, "user-a", "alice").await;
         insert_user(&pool, "user-b", "bob").await;
-
-        let connection_id = Uuid::new_v4();
-        insert_connection(&pool, connection_id, "user-a", "user-b", "pending", None).await;
-
-        let repo = PostgresChatRepository::new(pool.clone());
-        let result = repo
-            .accept_pending_connection(&connection_id.to_string(), "user-b")
+        sqlx::query("UPDATE users SET chat_read_receipt_mode = 'manual' WHERE id = 'user-b'")
+            .execute(&pool)
             .await
             .unwrap();
 
-        assert_eq!(result.requester_id, "user-a");
-        assert_eq!(result.receiver_id, "user-b");
-        assert!(result.established_at.is_some());
+        let service = ChatConversationService::new(pool.clone());
+        let conversation_id = create_active_realtime(&service, "user-a", "user-b").await;
 
-        let row = sqlx::query("SELECT status, established_at FROM chat_connections WHERE id = $1")
-            .bind(connection_id)
-            .fetch_one(&pool)
+        let inherited = service
+            .get_conversation(conversation_id, "user-b")
             .await
             .unwrap();
-        assert_eq!(row.get::<String, _>("status"), "connected");
-        assert!(row
-            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("established_at")
-            .is_some());
+        assert_eq!(inherited.read_receipt_mode, "inherit");
+        assert_eq!(inherited.effective_read_receipt_mode, "manual");
+
+        let overridden = service
+            .set_read_preference(conversation_id, "user-b", "auto")
+            .await
+            .unwrap();
+        assert_eq!(overridden.read_receipt_mode, "auto");
+        assert_eq!(overridden.effective_read_receipt_mode, "auto");
+
+        let invalid = service
+            .set_read_preference(conversation_id, "user-b", "sometimes")
+            .await
+            .unwrap_err();
+        assert!(matches!(invalid, ApiError::BadRequest(_)));
     })
     .await;
 }
 
 #[tokio::test]
-async fn accept_pending_connection_forbidden_leaves_row_unchanged() {
+async fn structured_quotes_are_server_snapshots_and_permission_scoped() {
     with_test_pool(|pool| async move {
         insert_user(&pool, "user-a", "alice").await;
         insert_user(&pool, "user-b", "bob").await;
         insert_user(&pool, "user-c", "carol").await;
+        insert_listing(&pool, "listing-quote", "user-b", "引用测试商品").await;
 
-        let connection_id = Uuid::new_v4();
-        insert_connection(&pool, connection_id, "user-a", "user-b", "pending", None).await;
+        sqlx::query(
+            "INSERT INTO orders (id, listing_id, buyer_id, seller_id, final_price, status)
+             VALUES ('order-quote', 'listing-quote', 'user-a', 'user-b', 12000, 'intent_pending')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO hitl_requests
+             (id, listing_id, buyer_id, seller_id, proposed_price, reason, status, counter_price)
+             VALUES ('hitl-quote', 'listing-quote', 'user-a', 'user-b', 11000, '测试', 'countered', 11800)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
 
-        let repo = PostgresChatRepository::new(pool.clone());
-        let error = repo
-            .accept_pending_connection(&connection_id.to_string(), "user-c")
+        let service = ChatConversationService::new(pool.clone());
+        let conversation_id = create_active_realtime(&service, "user-a", "user-b").await;
+
+        let mut listing_message = send_input(conversation_id, "user-a", "我说的是这件");
+        listing_message.quote = Some(StructuredQuoteInput {
+            kind: StructuredQuoteKind::Listing,
+            ref_id: "listing-quote".to_string(),
+        });
+        let listing_quote = service.send_message(listing_message).await.unwrap();
+        let quote = listing_quote.quote.as_ref().expect("listing quote");
+        assert_eq!(quote.kind, "listing");
+        assert_eq!(quote.ref_id, "listing-quote");
+        assert_eq!(quote.snapshot["title"], "引用测试商品");
+        assert_eq!(quote.snapshot["price_cny"], 123.45);
+
+        let mut order_message = send_input(conversation_id, "user-b", "这个成交意向");
+        order_message.quote = Some(StructuredQuoteInput {
+            kind: StructuredQuoteKind::Order,
+            ref_id: "order-quote".to_string(),
+        });
+        let order_quote = service.send_message(order_message).await.unwrap();
+        assert_eq!(
+            order_quote
+                .quote
+                .as_ref()
+                .expect("order quote")
+                .snapshot["final_price_cny"],
+            120.0
+        );
+
+        let mut hitl_message = send_input(conversation_id, "user-a", "这次还价");
+        hitl_message.quote = Some(StructuredQuoteInput {
+            kind: StructuredQuoteKind::HitlOffer,
+            ref_id: "hitl-quote".to_string(),
+        });
+        let hitl_quote = service.send_message(hitl_message).await.unwrap();
+        assert_eq!(
+            hitl_quote
+                .quote
+                .as_ref()
+                .expect("hitl quote")
+                .snapshot["counter_price_cny"],
+            118.0
+        );
+
+        let other_conversation = create_active_realtime(&service, "user-c", "user-b").await;
+        let mut forbidden = send_input(other_conversation, "user-c", "偷看订单");
+        forbidden.quote = Some(StructuredQuoteInput {
+            kind: StructuredQuoteKind::Order,
+            ref_id: "order-quote".to_string(),
+        });
+        let error = service.send_message(forbidden).await.unwrap_err();
+        assert!(matches!(error, ApiError::Forbidden));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn block_user_closes_live_realtime_and_prevents_new_or_continued_contact() {
+    with_test_pool(|pool| async move {
+        insert_user(&pool, "user-a", "alice").await;
+        insert_user(&pool, "user-b", "bob").await;
+        let service = ChatConversationService::new(pool.clone());
+        let conversation_id = create_active_realtime(&service, "user-a", "user-b").await;
+
+        service.block_user("user-b", "user-a").await.unwrap();
+
+        let blocked_view = service
+            .get_conversation(conversation_id, "user-a")
+            .await
+            .unwrap();
+        assert_eq!(blocked_view.state, ConversationState::Closed);
+        assert_eq!(blocked_view.close_reason.as_deref(), Some("blocked"));
+        assert!(blocked_view.is_blocked);
+
+        let send_error = service
+            .send_message(send_input(conversation_id, "user-a", "还能聊吗"))
             .await
             .unwrap_err();
-        assert!(matches!(error, good4ncu::api::error::ApiError::Forbidden));
+        assert!(matches!(send_error, ApiError::Conflict(_)));
 
-        let row = sqlx::query("SELECT status, established_at FROM chat_connections WHERE id = $1")
-            .bind(connection_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(row.get::<String, _>("status"), "pending");
-        assert!(row
-            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("established_at")
-            .is_none());
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn reject_pending_connection_updates_status() {
-    with_test_pool(|pool| async move {
-        insert_user(&pool, "user-a", "alice").await;
-        insert_user(&pool, "user-b", "bob").await;
-
-        let connection_id = Uuid::new_v4();
-        insert_connection(&pool, connection_id, "user-a", "user-b", "pending", None).await;
-
-        let repo = PostgresChatRepository::new(pool.clone());
-        let result = repo
-            .reject_pending_connection(&connection_id.to_string(), "user-b")
-            .await
-            .unwrap();
-
-        assert_eq!(result.requester_id, "user-a");
-        assert_eq!(result.receiver_id, "user-b");
-        assert!(result.established_at.is_none());
-
-        let status: String =
-            sqlx::query_scalar("SELECT status FROM chat_connections WHERE id = $1")
-                .bind(connection_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(status, "rejected");
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn reject_pending_connection_bad_status_leaves_row_unchanged() {
-    with_test_pool(|pool| async move {
-        insert_user(&pool, "user-a", "alice").await;
-        insert_user(&pool, "user-b", "bob").await;
-
-        let connection_id = Uuid::new_v4();
-        insert_connection(
-            &pool,
-            connection_id,
-            "user-a",
-            "user-b",
-            "connected",
-            Some(chrono::Utc::now()),
-        )
-        .await;
-
-        let repo = PostgresChatRepository::new(pool.clone());
-        let error = repo
-            .reject_pending_connection(&connection_id.to_string(), "user-b")
+        let create_error = service
+            .create_conversation(realtime_input("user-a", "user-b", "重新联系一下"))
             .await
             .unwrap_err();
-        assert!(matches!(
-            error,
-            good4ncu::api::error::ApiError::BadRequest(_)
-        ));
-
-        let row = sqlx::query("SELECT status, established_at FROM chat_connections WHERE id = $1")
-            .bind(connection_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(row.get::<String, _>("status"), "connected");
-        assert!(row
-            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("established_at")
-            .is_some());
+        assert!(matches!(create_error, ApiError::Conflict(_)));
     })
     .await;
 }
 
 #[tokio::test]
-async fn update_direct_message_content_persists_new_content_and_timestamp() {
+async fn expire_stale_invites_is_idempotent() {
     with_test_pool(|pool| async move {
         insert_user(&pool, "user-a", "alice").await;
         insert_user(&pool, "user-b", "bob").await;
+        let service = ChatConversationService::new(pool.clone());
 
-        let connection_id = Uuid::new_v4();
-        insert_connected_conversation(&pool, connection_id, "user-a", "user-b", 0).await;
+        let created = service
+            .create_conversation(realtime_input("user-a", "user-b", "有空时接通一下"))
+            .await
+            .unwrap();
+        let conversation_id = Uuid::parse_str(&created.conversation.id).unwrap();
 
-        let message_id: i64 = sqlx::query_scalar(
-            "INSERT INTO chat_messages (conversation_id, listing_id, sender, receiver, is_agent, content, status) \
-             VALUES ($1::text, 'direct', 'user-a', 'user-b', false, 'before', 'sent') RETURNING id",
+        sqlx::query(
+            "UPDATE chat_conversations
+             SET invite_expires_at = NOW() - INTERVAL '1 minute'
+             WHERE id = $1",
         )
-        .bind(connection_id.to_string())
+        .bind(conversation_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let expired = service.expire_stale().await.unwrap();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].0, conversation_id);
+
+        let expired_again = service.expire_stale().await.unwrap();
+        assert!(expired_again.is_empty());
+
+        let view = service
+            .get_conversation(conversation_id, "user-a")
+            .await
+            .unwrap();
+        assert_eq!(view.state, ConversationState::Expired);
+        assert_eq!(view.close_reason.as_deref(), Some("invite_timeout"));
+
+        let expire_events: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM chat_conversation_events
+             WHERE conversation_id = $1 AND event_type = 'conversation_expired'",
+        )
+        .bind(conversation_id)
         .fetch_one(&pool)
         .await
         .unwrap();
-
-        let edited_at = chrono::Utc::now();
-        let repo = PostgresChatRepository::new(pool.clone());
-        repo.update_direct_message_content(message_id, "after", edited_at)
-            .await
-            .unwrap();
-
-        let row = sqlx::query("SELECT content, edited_at FROM chat_messages WHERE id = $1")
-            .bind(message_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(row.get::<String, _>("content"), "after");
-        assert_eq!(
-            row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("edited_at"),
-            Some(edited_at)
-        );
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn list_user_chat_messages_returns_message_metadata_and_total() {
-    with_test_pool(|pool| async move {
-        insert_user(&pool, "user-a", "alice").await;
-        insert_user(&pool, "user-b", "bob").await;
-
-        let connection_id = Uuid::new_v4();
-        insert_connected_conversation(&pool, connection_id, "user-a", "user-b", 0).await;
-
-        sqlx::query(
-            "INSERT INTO chat_messages (conversation_id, listing_id, sender, receiver, is_agent, content, image_url, read_at, read_by, edited_at, status) \
-             VALUES ($1::text, 'direct', 'user-a', 'user-b', false, 'first', 'https://cdn.example.com/one.jpg', NOW(), 'user-b', NOW(), 'read'), \
-                    ($1::text, 'direct', 'user-b', 'user-a', true, 'second', NULL, NULL, NULL, NULL, 'sent')",
-        )
-        .bind(connection_id.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let repo = PostgresChatRepository::new(pool.clone());
-        let (messages, total) = repo
-            .list_user_chat_messages(&connection_id.to_string(), 10, 0)
-            .await
-            .unwrap();
-
-        assert_eq!(total, 2);
-        assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].content, "second");
-        assert_eq!(messages[0].status, "sent");
-        assert!(messages[0].read_at.is_none());
-        assert_eq!(messages[1].content, "first");
-        assert_eq!(messages[1].status, "read");
-        assert_eq!(messages[1].read_by.as_deref(), Some("user-b"));
-        assert_eq!(
-            messages[1].image_url.as_deref(),
-            Some("https://cdn.example.com/one.jpg")
-        );
-        assert!(messages[1].edited_at.is_some());
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn mark_connection_read_with_count_marks_messages_and_resets_unread_count() {
-    with_test_pool(|pool| async move {
-        insert_user(&pool, "user-a", "sender").await;
-        insert_user(&pool, "user-b", "receiver").await;
-
-        let connection_id = Uuid::new_v4();
-        insert_connected_conversation(&pool, connection_id, "user-a", "user-b", 2).await;
-
-        sqlx::query(
-            "INSERT INTO chat_messages (conversation_id, listing_id, sender, receiver, is_agent, content, status) \
-             VALUES ($1::text, 'direct', 'user-a', 'user-b', false, 'm1', 'sent'), \
-                    ($1::text, 'direct', 'user-a', 'user-b', false, 'm2', 'delivered')",
-        )
-        .bind(connection_id.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let repo = PostgresChatRepository::new(pool.clone());
-        let now = chrono::Utc::now();
-        let marked = repo
-            .mark_connection_read_with_count(
-                &connection_id.to_string(),
-                Some(connection_id),
-                "user-b",
-                now,
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(marked, 2);
-
-        let unread_count: i32 =
-            sqlx::query_scalar("SELECT unread_count FROM chat_connections WHERE id = $1")
-                .bind(connection_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(unread_count, 0);
-
-        let rows = sqlx::query(
-            "SELECT status, read_by, read_at FROM chat_messages WHERE conversation_id = $1::text ORDER BY id",
-        )
-        .bind(connection_id.to_string())
-        .fetch_all(&pool)
-        .await
-        .unwrap();
-        assert_eq!(rows.len(), 2);
-        for row in rows {
-            assert_eq!(row.get::<String, _>("status"), "read");
-            assert_eq!(row.get::<Option<String>, _>("read_by").as_deref(), Some("user-b"));
-            assert!(row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("read_at").is_some());
-        }
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn mark_direct_message_read_preserves_remaining_unread_count() {
-    with_test_pool(|pool| async move {
-        insert_user(&pool, "user-a", "sender").await;
-        insert_user(&pool, "user-b", "receiver").await;
-
-        let connection_id = Uuid::new_v4();
-        insert_connected_conversation(&pool, connection_id, "user-a", "user-b", 2).await;
-
-        sqlx::query(
-            "INSERT INTO chat_messages (conversation_id, listing_id, sender, receiver, is_agent, content, status) \
-             VALUES ($1::text, 'direct', 'user-a', 'user-b', false, 'm1', 'sent'), \
-                    ($1::text, 'direct', 'user-a', 'user-b', false, 'm2', 'sent')",
-        )
-        .bind(connection_id.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let first_message_id: i64 = sqlx::query_scalar(
-            "SELECT id FROM chat_messages WHERE conversation_id = $1::text ORDER BY id ASC LIMIT 1",
-        )
-        .bind(connection_id.to_string())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-
-        let repo = PostgresChatRepository::new(pool.clone());
-        repo.mark_direct_message_read(
-            first_message_id,
-            &connection_id.to_string(),
-            Some(connection_id),
-            "user-b",
-            chrono::Utc::now(),
-        )
-        .await
-        .unwrap();
-
-        let unread_count: i32 =
-            sqlx::query_scalar("SELECT unread_count FROM chat_connections WHERE id = $1")
-                .bind(connection_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(unread_count, 1);
-
-        let statuses = sqlx::query(
-            "SELECT id, read_by, read_at FROM chat_messages WHERE conversation_id = $1::text ORDER BY id ASC",
-        )
-        .bind(connection_id.to_string())
-        .fetch_all(&pool)
-        .await
-        .unwrap();
-        assert_eq!(statuses.len(), 2);
-        assert_eq!(
-            statuses[0]
-                .get::<Option<String>, _>("read_by")
-                .as_deref(),
-            Some("user-b")
-        );
-        assert!(statuses[0]
-            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("read_at")
-            .is_some());
-        assert!(statuses[1]
-            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("read_at")
-            .is_none());
+        assert_eq!(expire_events, 1);
     })
     .await;
 }

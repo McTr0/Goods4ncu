@@ -12,8 +12,8 @@ use crate::api::auth;
 use crate::api::error::ApiError;
 use crate::api::{AppState, PeerAddr};
 use crate::llm::MarketplaceAgent;
-use crate::services::chat::ChatService;
-use axum::extract::State;
+use crate::services::chat::{ChatService, AGENT_CONVERSATION_SENTINEL};
+use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::Json;
@@ -53,6 +53,19 @@ pub(crate) struct ChatStreamRequest {
     pub audio_url: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub(crate) struct AssistantHistoryQuery {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+#[derive(Serialize)]
+pub(crate) struct AssistantHistoryResponse {
+    pub conversation_id: &'static str,
+    pub messages: Vec<crate::services::chat::AssistantMessageEntry>,
+    pub total: i64,
+}
+
 pub(crate) fn normalize_optional_media_url(
     value: Option<String>,
     field_name: &str,
@@ -75,6 +88,50 @@ fn extract_bearer_token(headers: &HeaderMap) -> Result<&str, ApiError> {
         .and_then(|v| v.strip_prefix("Bearer "))
         .filter(|v| !v.is_empty())
         .ok_or(ApiError::Unauthorized)
+}
+
+fn resolve_chat_conversation_id(
+    requested_id: Option<String>,
+    user_id: &str,
+) -> (String, String, bool) {
+    match requested_id.filter(|id| !id.is_empty()) {
+        Some(id) if id == AGENT_CONVERSATION_SENTINEL => (
+            ChatService::assistant_conversation_id(user_id),
+            AGENT_CONVERSATION_SENTINEL.to_string(),
+            true,
+        ),
+        Some(id) => (id.clone(), id, false),
+        None => {
+            let id = Uuid::new_v4().to_string();
+            (id.clone(), id, false)
+        }
+    }
+}
+
+pub(crate) async fn get_assistant_history(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<AssistantHistoryQuery>,
+) -> Result<Json<AssistantHistoryResponse>, ApiError> {
+    let user_id = auth::extract_user_id_from_token_with_fallback(
+        &headers,
+        &state.secrets.jwt_secret,
+        state.secrets.jwt_secret_old.as_deref(),
+    )
+    .map_err(|_| ApiError::Unauthorized)?;
+    let limit = query.limit.unwrap_or(50).clamp(1, 100);
+    let offset = query.offset.unwrap_or(0).max(0);
+    let service = ChatService::new(state.infra.db.clone());
+    let (messages, total) = service
+        .get_assistant_messages(&user_id, limit, offset)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
+
+    Ok(Json(AssistantHistoryResponse {
+        conversation_id: AGENT_CONVERSATION_SENTINEL,
+        messages,
+        total,
+    }))
 }
 
 /// Resolve listing context for a chat request.
@@ -157,6 +214,12 @@ pub(crate) async fn handle_chat(
             "Text message exceeds maximum length of 2000 characters.".to_string(),
         ));
     }
+    let moderation = state.infra.moderation.check_text(&message);
+    if !moderation.passed {
+        return Err(ApiError::ContentViolation(
+            moderation.reason.unwrap_or_default(),
+        ));
+    }
 
     let normalized_image_url = normalize_optional_media_url(image_url, "image_url")?;
     let normalized_audio_url = normalize_optional_media_url(audio_url, "audio_url")?;
@@ -178,29 +241,61 @@ pub(crate) async fn handle_chat(
         state.secrets.jwt_secret_old.as_deref(),
     )
     .map_err(|_| ApiError::Unauthorized)?;
+    let (conversation_id, response_conversation_id, is_assistant_conversation) =
+        resolve_chat_conversation_id(conversation_id, &current_user_id);
+    let chat_svc = ChatService::new(state.infra.db.clone());
 
     // Lightweight intent classification — blocked content and greetings short-circuit here.
     let intent_result = state.agents.router.classify(&message);
     tracing::debug!(intent = ?intent_result.intent.as_str(), confidence = %intent_result.confidence, "Router classification");
 
     if let Some(reply) = intent_result.direct_response(&message) {
-        let conversation_id = conversation_id
-            .filter(|id| !id.is_empty())
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        if is_assistant_conversation {
+            chat_svc
+                .log_message(
+                    &conversation_id,
+                    "global",
+                    &current_user_id,
+                    None,
+                    false,
+                    &message,
+                    image.as_deref(),
+                    audio.as_deref(),
+                    normalized_image_url.as_deref(),
+                    normalized_audio_url.as_deref(),
+                )
+                .await
+                .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
+            chat_svc
+                .log_message(
+                    &conversation_id,
+                    "global",
+                    &current_user_id,
+                    None,
+                    true,
+                    &reply,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
+        }
         return Ok(Json(ChatResponse {
             reply,
-            conversation_id,
+            conversation_id: response_conversation_id,
         }));
     }
 
     let (resolved_listing_id, receiver) =
         resolve_listing_context(&state.infra.db, listing_id.as_deref(), &current_user_id).await?;
 
-    let conversation_id = conversation_id
-        .filter(|id| !id.is_empty())
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
-
-    let chat_svc = ChatService::new(state.infra.db.clone());
+    let history = chat_svc
+        .get_conversation_history(&conversation_id)
+        .await
+        .unwrap_or_default();
+    let chat_history = history_to_rig_messages(&history);
 
     // Persist before LLM execution to avoid message loss on timeout or abort.
     chat_svc
@@ -223,12 +318,6 @@ pub(crate) async fn handle_chat(
         })?;
 
     state.infra.metrics.record_chat_message();
-
-    let history = chat_svc
-        .get_conversation_history(&conversation_id)
-        .await
-        .unwrap_or_default();
-    let chat_history = history_to_rig_messages(&history);
 
     let agent: Box<dyn MarketplaceAgent> = state
         .agents
@@ -257,7 +346,7 @@ pub(crate) async fn handle_chat(
         .log_message(
             &conversation_id,
             &resolved_listing_id,
-            "assistant",
+            &current_user_id,
             None,
             true,
             &reply,
@@ -273,7 +362,7 @@ pub(crate) async fn handle_chat(
 
     Ok(Json(ChatResponse {
         reply,
-        conversation_id,
+        conversation_id: response_conversation_id,
     }))
 }
 
@@ -319,6 +408,12 @@ async fn handle_chat_stream_request(
             "Text message exceeds maximum length of 2000 characters.".to_string(),
         ));
     }
+    let moderation = state.infra.moderation.check_text(&message);
+    if !moderation.passed {
+        return Err(ApiError::ContentViolation(
+            moderation.reason.unwrap_or_default(),
+        ));
+    }
 
     let normalized_image_url = normalize_optional_media_url(image_url, "image_url")?;
     let normalized_audio_url = normalize_optional_media_url(audio_url, "audio_url")?;
@@ -336,27 +431,63 @@ async fn handle_chat_stream_request(
     )
     .map_err(|_| ApiError::Unauthorized)?;
     auth::ensure_user_not_banned(&state, &current_user_id).await?;
+    let (conversation_id, response_conversation_id, is_assistant_conversation) =
+        resolve_chat_conversation_id(conversation_id, &current_user_id);
+    let chat_svc = ChatService::new(state.infra.db.clone());
 
     let intent_result = state.agents.router.classify(&message);
     tracing::debug!(intent = ?intent_result.intent.as_str(), confidence = %intent_result.confidence, "SSE Router classification");
 
     if let Some(reply) = intent_result.direct_response(&message) {
-        let conversation_id = conversation_id
-            .filter(|id| !id.is_empty())
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
-        let sse_payload = serde_json::json!({ "token": reply, "conversation_id": conversation_id });
+        if is_assistant_conversation {
+            chat_svc
+                .log_message(
+                    &conversation_id,
+                    "global",
+                    &current_user_id,
+                    None,
+                    false,
+                    &message,
+                    None,
+                    None,
+                    normalized_image_url.as_deref(),
+                    normalized_audio_url.as_deref(),
+                )
+                .await
+                .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
+            chat_svc
+                .log_message(
+                    &conversation_id,
+                    "global",
+                    &current_user_id,
+                    None,
+                    true,
+                    &reply,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
+        }
+        let sse_payload = serde_json::json!({
+            "token": reply,
+            "conversation_id": response_conversation_id,
+            "is_complete": true
+        });
         let body = axum::body::Body::from(encode_sse_data(&sse_payload));
-        return build_sse_response(&conversation_id, body);
+        return build_sse_response(&response_conversation_id, body);
     }
 
     let (resolved_listing_id, receiver) =
         resolve_listing_context(&state.infra.db, listing_id.as_deref(), &current_user_id).await?;
 
-    let conversation_id = conversation_id
-        .filter(|id| !id.is_empty())
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
-
-    let chat_svc = ChatService::new(state.infra.db.clone());
+    let history = chat_svc
+        .get_conversation_history(&conversation_id)
+        .await
+        .unwrap_or_default();
+    let chat_history = history_to_rig_messages(&history);
 
     // Persist user turn before streaming — aborted streams must not lose the message.
     chat_svc
@@ -378,12 +509,6 @@ async fn handle_chat_stream_request(
             ApiError::Internal(anyhow::anyhow!("Failed to persist user message"))
         })?;
 
-    let history = chat_svc
-        .get_conversation_history(&conversation_id)
-        .await
-        .unwrap_or_default();
-    let chat_history = history_to_rig_messages(&history);
-
     let agent: Box<dyn MarketplaceAgent> = state
         .agents
         .llm_provider
@@ -395,25 +520,60 @@ async fn handle_chat_stream_request(
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!(e)))?;
 
-    let stream = agent.stream_chat(message.clone(), chat_history);
+    let mut stream = agent.stream_chat(message.clone(), chat_history);
+    let persisted_conversation_id = conversation_id.clone();
+    let public_conversation_id = response_conversation_id.clone();
+    let persisted_listing_id = resolved_listing_id.clone();
+    let persisted_user_id = current_user_id.clone();
+    let persist_service = chat_svc.clone();
+    let sse_stream = async_stream::stream! {
+        let mut full_reply = String::new();
+        let mut completed = true;
+        while let Some(result) = stream.next().await {
+            let bytes = match result {
+                Ok(token) => {
+                    full_reply.push_str(&token);
+                    let payload = serde_json::json!({
+                        "token": token,
+                        "conversation_id": public_conversation_id
+                    });
+                    encode_sse_data(&payload)
+                }
+                Err(error) => {
+                    completed = false;
+                    let payload = serde_json::json!({ "error": error.to_string() });
+                    encode_sse_data(&payload)
+                }
+            };
+            yield Ok::<_, std::convert::Infallible>(bytes);
+            if !completed {
+                break;
+            }
+        }
 
-    let conv_id = conversation_id.clone();
-    let sse_stream = stream.map(move |result| {
-        let bytes = match result {
-            Ok(token) => {
-                let payload = serde_json::json!({ "token": token, "conversation_id": conv_id });
-                encode_sse_data(&payload)
+        if completed && !full_reply.trim().is_empty() {
+            if let Err(error) = persist_service
+                .log_message(
+                    &persisted_conversation_id,
+                    &persisted_listing_id,
+                    &persisted_user_id,
+                    None,
+                    true,
+                    &full_reply,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+            {
+                tracing::warn!(%error, "failed to persist streamed assistant reply");
             }
-            Err(e) => {
-                let payload = serde_json::json!({ "error": e.to_string() });
-                encode_sse_data(&payload)
-            }
-        };
-        Ok::<_, std::convert::Infallible>(bytes)
-    });
+        }
+    };
 
     let body = axum::body::Body::from_stream(sse_stream);
-    build_sse_response(&conversation_id, body)
+    build_sse_response(&response_conversation_id, body)
 }
 
 /// GET /api/chat/stream — text-only SSE compat path (query string params).
@@ -521,5 +681,32 @@ mod tests {
             normalize_optional_media_url(Some("file:///tmp/image.jpg".to_string()), "image_url")
                 .expect_err("invalid");
         assert!(matches!(err, ApiError::BadRequest(_)));
+    }
+
+    #[test]
+    fn assistant_sentinel_maps_to_user_scoped_conversation() {
+        let (internal, public, is_assistant) =
+            resolve_chat_conversation_id(Some(AGENT_CONVERSATION_SENTINEL.to_string()), "user-1");
+        assert_eq!(internal, "agent:user-1");
+        assert_eq!(public, AGENT_CONVERSATION_SENTINEL);
+        assert!(is_assistant);
+    }
+
+    #[test]
+    fn assistant_conversations_are_isolated_between_users() {
+        let (first, _, _) =
+            resolve_chat_conversation_id(Some(AGENT_CONVERSATION_SENTINEL.to_string()), "user-1");
+        let (second, _, _) =
+            resolve_chat_conversation_id(Some(AGENT_CONVERSATION_SENTINEL.to_string()), "user-2");
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn regular_conversation_id_is_preserved() {
+        let (internal, public, is_assistant) =
+            resolve_chat_conversation_id(Some("conv-123".to_string()), "user-1");
+        assert_eq!(internal, "conv-123");
+        assert_eq!(public, "conv-123");
+        assert!(!is_assistant);
     }
 }

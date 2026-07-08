@@ -25,6 +25,7 @@ class UserChatComposerController {
   }
 
   String? get editingMessageId => _chatData?.editingMessageId;
+  ConversationMessage? get replyingToMessage => _chatData?.replyingToMessage;
 
   bool get isSending => _chatData?.isSending ?? false;
 
@@ -36,6 +37,14 @@ class UserChatComposerController {
   void cancelEdit() {
     _chatNotifier.cancelEdit();
     textController.clear();
+  }
+
+  void startReplyMessage(ConversationMessage message) {
+    _chatNotifier.startReplyMessage(message);
+  }
+
+  void cancelReply() {
+    _chatNotifier.cancelReply();
   }
 
   Future<String?> confirmEdit() async {
@@ -54,7 +63,7 @@ class UserChatComposerController {
     }
   }
 
-  Future<void> sendMessage() async {
+  Future<void> sendMessage({Map<String, String>? quote}) async {
     if (isSending) {
       return;
     }
@@ -65,13 +74,17 @@ class UserChatComposerController {
     }
 
     final chatData = _chatData;
-    if (chatData?.connectionStatus != 'connected') {
+    final canSend =
+        chatData?.conversation?.capabilities.canSend ??
+        (chatData?.connectionStatus == 'connected' ||
+            chatData?.connectionStatus == 'active');
+    if (!canSend) {
       throw UserChatComposerException('等待连接建立后再发送消息');
     }
 
     textController.clear();
     try {
-      await _chatNotifier.sendMessage(content: content);
+      await _chatNotifier.sendMessage(content: content, quote: quote);
     } catch (e) {
       throw UserChatComposerException('发送失败: $e');
     }

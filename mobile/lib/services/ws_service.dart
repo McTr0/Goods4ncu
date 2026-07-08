@@ -15,6 +15,7 @@ class WsNotification {
   final String? relatedOrderId;
   final String? relatedListingId;
   final String? negotiationId;
+  final String? relatedConversationId;
 
   /// 用于 connection_request 等事件
   final String? connectionId;
@@ -26,6 +27,9 @@ class WsNotification {
   final String? conversationId;
   final String? typingUserId;
   final String? typingUsername;
+  final String? conversationMode;
+  final String? conversationState;
+  final DateTime? expiresAt;
 
   WsNotification({
     this.id,
@@ -35,11 +39,15 @@ class WsNotification {
     this.relatedOrderId,
     this.relatedListingId,
     this.negotiationId,
+    this.relatedConversationId,
     this.connectionId,
     this.messageId,
     this.conversationId,
     this.typingUserId,
     this.typingUsername,
+    this.conversationMode,
+    this.conversationState,
+    this.expiresAt,
   });
 
   factory WsNotification.fromJson(Map<String, dynamic> json) {
@@ -51,11 +59,19 @@ class WsNotification {
       relatedOrderId: json['related_order_id']?.toString(),
       relatedListingId: json['related_listing_id']?.toString(),
       negotiationId: json['negotiation_id']?.toString(),
+      relatedConversationId:
+          json['related_conversation_id']?.toString() ??
+          json['conversation_id']?.toString(),
       connectionId: json['connection_id']?.toString(),
       messageId: json['message_id']?.toString(),
       conversationId: json['conversation_id']?.toString(),
       typingUserId: json['user_id']?.toString(),
       typingUsername: json['username']?.toString(),
+      conversationMode: json['mode']?.toString(),
+      conversationState: json['state']?.toString(),
+      expiresAt: json['expires_at'] == null
+          ? null
+          : DateTime.tryParse(json['expires_at'].toString()),
     );
   }
 }

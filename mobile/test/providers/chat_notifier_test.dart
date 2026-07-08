@@ -13,11 +13,13 @@ class FakeChatService extends ChatService {
   FakeChatService({
     this.messages = const [],
     this.connections = const [],
+    this.conversation,
     this.reply,
   });
 
   List<ConversationMessage> messages;
   List<Conversation> connections;
+  Conversation? conversation;
   ConversationMessage? reply;
   String? sentContent;
   String? sentImageBase64;
@@ -25,6 +27,7 @@ class FakeChatService extends ChatService {
   String? sentImageUrl;
   String? sentAudioUrl;
   int loadMessagesCalls = 0;
+  int markConversationReadCalls = 0;
 
   @override
   Future<List<ConversationMessage>> getChatConversationMessages(
@@ -40,16 +43,51 @@ class FakeChatService extends ChatService {
   Future<void> markConnectionAsRead(String conversationId) async {}
 
   @override
+  Future<void> markConversationRead(String conversationId) async {
+    markConversationReadCalls += 1;
+  }
+
+  @override
+  Future<Conversation> setConversationReadPreference(
+    String conversationId,
+    String mode,
+  ) async {
+    final updated = Conversation(
+      id: conversation?.id ?? conversationId,
+      requesterId: conversation?.requesterId ?? 'user-me',
+      otherUserId: conversation?.otherUserId ?? 'user-other',
+      otherUsername: conversation?.otherUsername ?? 'Other',
+      state: conversation?.state ?? ConversationState.active,
+      unreadCount: conversation?.unreadCount ?? 0,
+      readReceiptMode: mode,
+      effectiveReadReceiptMode: mode == 'inherit' ? 'auto' : mode,
+      capabilities:
+          conversation?.capabilities ??
+          const ConversationCapabilities(canSend: true),
+    );
+    conversation = updated;
+    return updated;
+  }
+
+  @override
   Future<List<Conversation>> getConnections() async => connections;
+
+  @override
+  Future<Conversation> getConversation(String conversationId) async {
+    return conversation ??
+        connections.firstWhere((item) => item.id == conversationId);
+  }
 
   @override
   Future<ConversationMessage> sendMessage(
     String conversationId, {
     required String content,
+    String? replyToMessageId,
     String? imageBase64,
     String? audioBase64,
     String? imageUrl,
     String? audioUrl,
+    Map<String, String>? quote,
   }) async {
     sentContent = content;
     sentImageBase64 = imageBase64;
@@ -97,6 +135,13 @@ class FakeUserService extends UserService {
 
 void main() {
   test('hydrates current user and normalizes established status', () async {
+    final conversation = Conversation(
+      id: 'conv-1',
+      requesterId: 'user-other',
+      otherUserId: 'user-other',
+      otherUsername: 'Other',
+      status: 'established',
+    );
     final chatService = FakeChatService(
       messages: [
         ConversationMessage(
@@ -107,15 +152,8 @@ void main() {
           sentAt: DateTime.now(),
         ),
       ],
-      connections: [
-        Conversation(
-          id: 'conv-1',
-          requesterId: 'user-other',
-          otherUserId: 'user-other',
-          otherUsername: 'Other',
-          status: 'established',
-        ),
-      ],
+      connections: [conversation],
+      conversation: conversation,
     );
     final notifier = ChatNotifier(
       conversationId: 'conv-1',
@@ -129,7 +167,7 @@ void main() {
 
     final state = notifier.currentState as ChatViewData;
     expect(state.currentUserId, 'user-me');
-    expect(state.connectionStatus, 'connected');
+    expect(state.connectionStatus, 'active');
     expect(state.messages, hasLength(1));
     notifier.dispose();
   });
@@ -173,7 +211,16 @@ void main() {
   test(
     'connection_established reloads messages and marks conversation connected',
     () async {
-      final chatService = FakeChatService(messages: const []);
+      final chatService = FakeChatService(
+        messages: const [],
+        conversation: Conversation(
+          id: 'conv-1',
+          requesterId: 'user-other',
+          otherUserId: 'user-other',
+          otherUsername: 'Other',
+          state: ConversationState.active,
+        ),
+      );
       final notifier = ChatNotifier(
         conversationId: 'conv-1',
         chatService: chatService,
@@ -195,10 +242,85 @@ void main() {
       await flushAsync();
 
       final state = notifier.currentState as ChatViewData;
-      expect(state.connectionStatus, 'connected');
+      expect(state.connectionStatus, 'active');
       expect(state.messages.single.content, 'after connect');
       expect(chatService.loadMessagesCalls, greaterThanOrEqualTo(2));
       notifier.dispose();
     },
   );
+
+  test('auto read preference marks active realtime messages as read', () async {
+    final chatService = FakeChatService(
+      messages: [
+        ConversationMessage(
+          id: 'm1',
+          conversationId: 'conv-1',
+          senderId: 'user-other',
+          content: 'hello',
+          sentAt: DateTime.now(),
+        ),
+      ],
+      conversation: Conversation(
+        id: 'conv-1',
+        requesterId: 'user-other',
+        otherUserId: 'user-other',
+        otherUsername: 'Other',
+        state: ConversationState.active,
+        unreadCount: 1,
+        effectiveReadReceiptMode: 'auto',
+      ),
+    );
+    final notifier = ChatNotifier(
+      conversationId: 'conv-1',
+      chatService: chatService,
+      userService: FakeUserService({'user_id': 'user-me'}),
+    );
+
+    await flushAsync();
+    await notifier.hydrateConnectionStatus();
+    await flushAsync();
+
+    expect(chatService.markConversationReadCalls, greaterThanOrEqualTo(1));
+    notifier.dispose();
+  });
+
+  test('manual read preference waits for explicit mark read', () async {
+    final chatService = FakeChatService(
+      messages: [
+        ConversationMessage(
+          id: 'm1',
+          conversationId: 'conv-1',
+          senderId: 'user-other',
+          content: 'hello',
+          sentAt: DateTime.now(),
+        ),
+      ],
+      conversation: Conversation(
+        id: 'conv-1',
+        requesterId: 'user-other',
+        otherUserId: 'user-other',
+        otherUsername: 'Other',
+        state: ConversationState.active,
+        unreadCount: 1,
+        effectiveReadReceiptMode: 'manual',
+      ),
+    );
+    final notifier = ChatNotifier(
+      conversationId: 'conv-1',
+      chatService: chatService,
+      userService: FakeUserService({'user_id': 'user-me'}),
+    );
+
+    await flushAsync();
+    await notifier.hydrateConnectionStatus();
+    await flushAsync();
+
+    expect(chatService.markConversationReadCalls, 0);
+    expect(notifier.shouldShowManualReadAction, isTrue);
+
+    await notifier.markConversationRead();
+    expect(chatService.markConversationReadCalls, 1);
+    expect(notifier.shouldShowManualReadAction, isFalse);
+    notifier.dispose();
+  });
 }
