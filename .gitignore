@@ -48,7 +48,7 @@ config/good4ncu.toml
 
 # === Misc ===
 *.log
+uploads/
 
 # === Claude Code ===
 .claude/
-
