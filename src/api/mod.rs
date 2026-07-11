@@ -24,6 +24,7 @@ pub mod negotiate;
 pub mod notifications;
 pub mod orders;
 pub mod recommendations;
+pub mod request_context;
 pub mod stats;
 pub mod upload;
 pub mod user;
@@ -231,18 +232,29 @@ pub async fn http_metrics_middleware(
     let response = next.run(request).await;
     let duration = start.elapsed();
     let status = response.status().as_u16();
+    let normalized_path = normalize_path(&path);
+    let request_id = request_context::current_or_new_request_id();
 
     state
         .infra
         .metrics
-        .record_http(&method, &normalize_path(&path), status, duration);
+        .record_http(&method, &normalized_path, status, duration);
+
+    tracing::info!(
+        request_id = %request_id,
+        method = %method,
+        path = %normalized_path,
+        status,
+        duration_ms = duration.as_secs_f64() * 1000.0,
+        "HTTP request completed"
+    );
 
     response
 }
 
 /// Extractor that provides the direct TCP peer address of the connected client.
-/// Unlike ConnectInfo, this works with the plain axum::serve without special server configuration.
-/// The peer address cannot be spoofed by clients since it comes from the TCP stack.
+/// The server is started with `into_make_service_with_connect_info`, so this value comes from the
+/// TCP connection rather than a spoofable request header.
 #[derive(Clone, Debug)]
 pub struct PeerAddr(pub SocketAddr);
 
@@ -256,7 +268,7 @@ where
         parts: &mut axum::http::request::Parts,
         _state: &S,
     ) -> Result<Self, Self::Rejection> {
-        // axum::serve automatically adds extensions::PeerAddr when using the MakeService
+        // Prefer Axum's ConnectInfo; the raw SocketAddr branch keeps tests and custom services safe.
         let addr = peer_addr_from_extensions(&parts.extensions).unwrap_or_else(fallback_peer_addr);
         Ok(PeerAddr(addr))
     }
@@ -331,12 +343,14 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             .allow_origin(Any)
             .allow_methods(Any)
             .allow_headers(Any)
+            .expose_headers([request_context::REQUEST_ID_HEADER])
     } else if cors_origins.iter().any(|s| s == "*") {
         // Wildcard: allow all origins
         CorsLayer::new()
             .allow_origin(Any)
             .allow_methods(Any)
             .allow_headers(Any)
+            .expose_headers([request_context::REQUEST_ID_HEADER])
     } else {
         let origins: Vec<axum::http::HeaderValue> = cors_origins
             .iter()
@@ -346,6 +360,7 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             .allow_origin(origins)
             .allow_methods(Any)
             .allow_headers(Any)
+            .expose_headers([request_context::REQUEST_ID_HEADER])
     };
 
     Router::new()
@@ -404,6 +419,14 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             get(listings::get_listing)
                 .put(listings::update_listing)
                 .delete(listings::delete_listing),
+        )
+        .route(
+            "/api/listings/{id}/matches",
+            get(listings::get_wanted_matches),
+        )
+        .route(
+            "/api/listings/{id}/responses",
+            post(listings::respond_to_wanted),
         )
         .route("/api/listings/{id}/relist", post(listings::relist_listing))
         .route(
@@ -578,6 +601,7 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         // requests still expose their status and headers to the web client.
         .layer(middleware::from_fn(security_headers_middleware))
         .layer(cors)
+        .layer(middleware::from_fn(request_context::request_id_middleware))
         .with_state(state)
 }
 

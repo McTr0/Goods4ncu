@@ -3,6 +3,18 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
 
+use super::request_context;
+
+pub(crate) fn error_payload(code: &str, message: &str, trace_id: &str) -> serde_json::Value {
+    json!({
+        // Keep the legacy string while unversioned clients migrate.
+        "error": message,
+        "code": code,
+        "message": message,
+        "trace_id": trace_id,
+    })
+}
+
 #[derive(Debug, thiserror::Error)]
 #[allow(dead_code)]
 pub enum ApiError {
@@ -42,31 +54,51 @@ impl From<jsonwebtoken::errors::Error> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let (status, msg) = match &self {
-            ApiError::NotFound => (StatusCode::NOT_FOUND, "资源不存在".to_string()),
-            ApiError::BadRequest(m) => (StatusCode::BAD_REQUEST, format!("请求错误: {}", m)),
-            ApiError::Unauthorized => (StatusCode::UNAUTHORIZED, "请先登录后再操作".to_string()),
-            ApiError::AuthFailed(m) => (StatusCode::UNAUTHORIZED, format!("认证失败: {}", m)),
-            ApiError::Forbidden => (StatusCode::FORBIDDEN, "您没有权限执行此操作".to_string()),
-            ApiError::Conflict(m) => (StatusCode::CONFLICT, format!("冲突: {}", m)),
+        let trace_id = request_context::current_or_new_request_id();
+        let (status, code, msg) = match &self {
+            ApiError::NotFound => (StatusCode::NOT_FOUND, "not_found", "资源不存在".to_string()),
+            ApiError::BadRequest(m) => (
+                StatusCode::BAD_REQUEST,
+                "bad_request",
+                format!("请求错误: {}", m),
+            ),
+            ApiError::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                "unauthorized",
+                "请先登录后再操作".to_string(),
+            ),
+            ApiError::AuthFailed(m) => (
+                StatusCode::UNAUTHORIZED,
+                "authentication_failed",
+                format!("认证失败: {}", m),
+            ),
+            ApiError::Forbidden => (
+                StatusCode::FORBIDDEN,
+                "forbidden",
+                "您没有权限执行此操作".to_string(),
+            ),
+            ApiError::Conflict(m) => (StatusCode::CONFLICT, "conflict", format!("冲突: {}", m)),
             ApiError::RateLimitExceeded => (
                 StatusCode::TOO_MANY_REQUESTS,
+                "rate_limited",
                 "请求过于频繁，请稍后再试".to_string(),
             ),
             ApiError::ContentViolation(msg) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
+                "content_violation",
                 format!("内容包含违规信息: {}", msg),
             ),
             ApiError::Internal(ref e) => {
                 // Log the full error for server-side traceability before hiding it from the client.
-                tracing::error!(err = %e, "Internal server error");
+                tracing::error!(trace_id = %trace_id, err = %e, "Internal server error");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal_error",
                     "服务器内部错误，请稍后再试".to_string(),
                 )
             }
         };
-        (status, Json(json!({ "error": msg }))).into_response()
+        (status, Json(error_payload(code, &msg, &trace_id))).into_response()
     }
 }
 

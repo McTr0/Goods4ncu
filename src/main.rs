@@ -234,7 +234,8 @@ async fn main() -> Result<(), anyhow::Error> {
     tracing::info!(addr = %bind_addr, "Web Server started");
 
     let server_handle = tokio::spawn(async move {
-        if let Err(e) = axum::serve(listener, app).await {
+        let service = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
+        if let Err(e) = axum::serve(listener, service).await {
             tracing::error!(%e, "Server error");
         }
     });
