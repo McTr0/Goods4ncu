@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../brand/app_brand.dart';
 import '../l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 import '../pages/home_page.dart';
@@ -366,14 +367,13 @@ class _DesktopNavigation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
-      width: extended ? 232 : 88,
+      width: extended ? 216 : 88,
       decoration: BoxDecoration(
-        color: Theme.of(context).cardTheme.color,
+        color: theme.cardTheme.color,
         border: Border(
-          right: BorderSide(
-            color: Theme.of(context).dividerColor.withValues(alpha: 0.75),
-          ),
+          right: BorderSide(color: theme.dividerColor.withValues(alpha: 0.75)),
         ),
         boxShadow: const [
           BoxShadow(
@@ -387,10 +387,10 @@ class _DesktopNavigation extends StatelessWidget {
         child: NavigationRail(
           extended: extended,
           minWidth: 88,
-          minExtendedWidth: 232,
+          minExtendedWidth: 216,
           backgroundColor: Colors.transparent,
           selectedIndex: selectedIndex,
-          groupAlignment: -0.56,
+          groupAlignment: extended ? -0.5 : -0.42,
           useIndicator: true,
           indicatorColor: AppTheme.accentSoft,
           selectedIconTheme: const IconThemeData(color: AppTheme.primaryDark),
@@ -445,22 +445,20 @@ class _DesktopBrand extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final mark = Container(
-      width: 48,
-      height: 48,
+      width: extended ? 52 : 56,
+      height: extended ? 52 : 56,
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [AppTheme.primaryDark, AppTheme.primary],
-        ),
-        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(AppTheme.radiusXl),
+        border: Border.all(color: theme.dividerColor.withValues(alpha: 0.72)),
         boxShadow: AppTheme.softShadow,
       ),
-      child: const Icon(
-        Icons.swap_horiz_rounded,
-        color: Colors.white,
-        size: 28,
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: Image.asset(AppBrand.logoAsset, fit: BoxFit.contain),
       ),
     );
 
@@ -475,7 +473,7 @@ class _DesktopBrand extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'Good4NCU',
+                AppBrand.englishName,
                 style: TextStyle(
                   color: AppTheme.textPrimary,
                   fontSize: 17,
@@ -483,7 +481,7 @@ class _DesktopBrand extends StatelessWidget {
                 ),
               ),
               Text(
-                '校园循环市集',
+                AppBrand.subtitle,
                 style: TextStyle(
                   color: AppTheme.textSecondary,
                   fontSize: 11,

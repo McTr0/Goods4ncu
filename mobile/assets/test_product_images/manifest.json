@@ -2,7 +2,7 @@
   "source": "DummyJSON public product API",
   "source_catalog": "https://dummyjson.com/products",
   "fetched_at": "2026-06-28",
-  "purpose": "Local Good4NCU development fixtures; not production catalog data.",
+  "purpose": "Local Goods4ncu development fixtures; not production catalog data.",
   "items": [
     {
       "demo_id": "d0000000-0000-4000-8000-000000000001",

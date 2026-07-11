@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../brand/app_brand.dart';
 import '../l10n/app_localizations.dart';
 import '../theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
@@ -303,15 +304,15 @@ class _LoginBrandPanel extends StatelessWidget {
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(AppTheme.radiusXl),
                 ),
-                child: const Icon(
-                  Icons.school_rounded,
-                  color: AppTheme.primary,
-                  size: 34,
+                clipBehavior: Clip.antiAlias,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Image.asset(AppBrand.logoAsset, fit: BoxFit.cover),
                 ),
               ),
               SizedBox(height: compact ? AppTheme.sp20 : AppTheme.sp32),
               Text(
-                'Good4NCU',
+                AppBrand.englishName,
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: compact ? 34 : 48,

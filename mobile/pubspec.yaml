@@ -1,5 +1,5 @@
 name: good4ncu_mobile
-description: "A new Flutter project."
+description: "Goods4ncu mobile app for the 续樟 campus marketplace."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -79,6 +79,7 @@ flutter:
   uses-material-design: true
 
   assets:
+    - assets/brand/
     - assets/test_product_images/
 
   # To add more assets to your application, extend the assets section:

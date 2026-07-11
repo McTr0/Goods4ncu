@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'l10n/app_localizations.dart';
+import 'brand/app_brand.dart';
 import 'router/app_router.dart';
 import 'theme/app_theme.dart';
 import 'services/locale_service.dart';
@@ -11,7 +12,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LocaleService.init();
   ErrorWidget.builder = (details) => _FallbackErrorWidget(details: details);
-  runApp(const Good4NCUApp());
+  runApp(const Goods4ncuApp());
 }
 
 class _FallbackErrorWidget extends StatelessWidget {
@@ -29,9 +30,15 @@ class _FallbackErrorWidget extends StatelessWidget {
             children: [
               const Icon(Icons.error_outline, size: 64, color: Colors.red),
               const SizedBox(height: 16),
-              const Text('出现了一些问题', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const Text(
+                '出现了一些问题',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 8),
-              Text(details.exceptionAsString(), style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              Text(
+                details.exceptionAsString(),
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
             ],
           ),
         ),
@@ -40,14 +47,14 @@ class _FallbackErrorWidget extends StatelessWidget {
   }
 }
 
-class Good4NCUApp extends StatefulWidget {
-  const Good4NCUApp({super.key});
+class Goods4ncuApp extends StatefulWidget {
+  const Goods4ncuApp({super.key});
 
   @override
-  State<Good4NCUApp> createState() => _Good4NCUAppState();
+  State<Goods4ncuApp> createState() => _Goods4ncuAppState();
 }
 
-class _Good4NCUAppState extends State<Good4NCUApp> {
+class _Goods4ncuAppState extends State<Goods4ncuApp> {
   final LocaleNotifier _localeNotifier = LocaleNotifier();
 
   @override
@@ -66,7 +73,7 @@ class _Good4NCUAppState extends State<Good4NCUApp> {
           listenable: _localeNotifier,
           builder: (context, _) {
             return MaterialApp.router(
-              title: 'Good4NCU',
+              title: AppBrand.englishName,
               theme: AppTheme.light,
               darkTheme: AppTheme.dark,
               themeMode: ThemeMode.system,
@@ -77,10 +84,7 @@ class _Good4NCUAppState extends State<Good4NCUApp> {
                 GlobalWidgetsLocalizations.delegate,
                 GlobalCupertinoLocalizations.delegate,
               ],
-              supportedLocales: const [
-                Locale('en'),
-                Locale('zh'),
-              ],
+              supportedLocales: const [Locale('en'), Locale('zh')],
               routerConfig: appRouter,
               debugShowCheckedModeBanner: false,
             );
