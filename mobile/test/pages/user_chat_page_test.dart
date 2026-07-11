@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:good4ncu_mobile/components/audio_message_player.dart';
+import 'package:good4ncu_mobile/l10n/app_localizations.dart';
 import 'package:good4ncu_mobile/models/models.dart';
 import 'package:good4ncu_mobile/pages/user_chat_composer_controller.dart';
 import 'package:good4ncu_mobile/pages/user_chat_components.dart';
@@ -28,7 +29,12 @@ class _FakePageUserService extends UserService {
 
 void main() {
   Widget buildTestableWidget(Widget child) {
-    return MaterialApp(home: Scaffold(body: child));
+    return MaterialApp(
+      locale: const Locale('zh'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(body: child),
+    );
   }
 
   group('UserChatPage', () {
@@ -546,13 +552,8 @@ void main() {
   group('ConnectionIndicator', () {
     testWidgets('shows offline state when ws not connected', (tester) async {
       await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: ConnectionIndicator(
-              status: 'connected',
-              isWsConnected: false,
-            ),
-          ),
+        buildTestableWidget(
+          const ConnectionIndicator(status: 'connected', isWsConnected: false),
         ),
       );
 
@@ -561,10 +562,8 @@ void main() {
 
     testWidgets('shows connected status when ws connected', (tester) async {
       await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: ConnectionIndicator(status: 'connected', isWsConnected: true),
-          ),
+        buildTestableWidget(
+          const ConnectionIndicator(status: 'connected', isWsConnected: true),
         ),
       );
 
@@ -573,10 +572,8 @@ void main() {
 
     testWidgets('shows pending status', (tester) async {
       await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: ConnectionIndicator(status: 'pending', isWsConnected: true),
-          ),
+        buildTestableWidget(
+          const ConnectionIndicator(status: 'pending', isWsConnected: true),
         ),
       );
 
@@ -585,13 +582,8 @@ void main() {
 
     testWidgets('shows connecting status with animation', (tester) async {
       await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: ConnectionIndicator(
-              status: 'connecting',
-              isWsConnected: true,
-            ),
-          ),
+        buildTestableWidget(
+          const ConnectionIndicator(status: 'connecting', isWsConnected: true),
         ),
       );
 
@@ -608,12 +600,10 @@ void main() {
 
     testWidgets('shows default offline for unknown status', (tester) async {
       await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: ConnectionIndicator(
-              status: 'unknown_status',
-              isWsConnected: true,
-            ),
+        buildTestableWidget(
+          const ConnectionIndicator(
+            status: 'unknown_status',
+            isWsConnected: true,
           ),
         ),
       );
@@ -642,8 +632,9 @@ void main() {
         ),
       );
 
-      expect(find.text('加载失败: network'), findsOneWidget);
-      expect(find.text('重试'), findsOneWidget);
+      final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
+      expect(find.text(l.loadFailedWithError('network')), findsOneWidget);
+      expect(find.text(l.retry), findsOneWidget);
     });
 
     testWidgets('shows empty state when there are no messages', (tester) async {

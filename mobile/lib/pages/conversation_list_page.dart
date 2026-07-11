@@ -121,10 +121,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
     }
   }
 
-  Future<void> _refresh() async {
-    await Future.wait([_load(), _loadAssistantPreview()]);
-  }
-
   void _openConversation(Conversation conversation) {
     final thread = ChatThread(
       peerUserId: conversation.otherUserId,
@@ -257,21 +253,55 @@ class _ConversationListPageState extends State<ConversationListPage> {
       appBar: AppBar(
         title: Text(l.messagesTab),
         actions: [
-          IconButton(
-            tooltip: l.findClassmate,
-            onPressed: _openUserLookup,
-            icon: const Icon(Icons.person_search_rounded),
-          ),
-          IconButton(
-            onPressed: _refresh,
-            icon: const Icon(Icons.refresh_rounded),
+          PopupMenuButton<String>(
+            tooltip: l.createAction,
+            icon: const Icon(Icons.add_rounded),
+            onSelected: (value) {
+              switch (value) {
+                case 'classmate':
+                  _openUserLookup();
+                  break;
+                case 'group':
+                  _createSpace('group');
+                  break;
+                case 'channel':
+                  _createSpace('channel');
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'classmate',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.person_search_rounded),
+                  title: Text(l.findClassmate),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'group',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.group_add_outlined),
+                  title: Text(l.createGroup),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'channel',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.campaign_outlined),
+                  title: Text(l.createChannel),
+                ),
+              ),
+            ],
           ),
         ],
       ),
       body: isDesktop
           ? Row(
               children: [
-                SizedBox(width: 410, child: inbox),
+                SizedBox(width: 360, child: inbox),
                 VerticalDivider(width: 1, color: scheme.outlineVariant),
                 Expanded(
                   child: _assistantSelected
@@ -280,6 +310,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
                           chatService: _chatService,
                           embedded: true,
                           onConversationUpdated: _loadAssistantPreview,
+                          onExit: _closeAssistant,
                         )
                       : _selectedSpace != null
                       ? _SpaceDetailPane(
@@ -352,6 +383,11 @@ class _ConversationListPageState extends State<ConversationListPage> {
     _load();
   }
 
+  void _closeAssistant() {
+    if (!_assistantSelected) return;
+    setState(() => _assistantSelected = false);
+  }
+
   Widget _buildConversationList() {
     final l = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
@@ -389,11 +425,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
                 icon: Icons.forum_outlined,
                 title: l.conversationEmptyTitle,
                 subtitle: l.conversationEmptySubtitle,
-                action: FilledButton.icon(
-                  onPressed: _openUserLookup,
-                  icon: const Icon(Icons.person_search_rounded),
-                  label: Text(l.findClassmate),
-                ),
               ),
             ),
           if (_threads.isNotEmpty) ...[
@@ -473,11 +504,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
             MediaQuery.sizeOf(context).width >= 1000 && _assistantSelected,
         latestMessage: _assistantHistory?.latest,
         onTap: _openAssistant,
-      ),
-      const SizedBox(height: 8),
-      _TelegramCapabilityCard(
-        onCreateGroup: () => _createSpace('group'),
-        onCreateChannel: () => _createSpace('channel'),
       ),
     ];
   }
@@ -2187,68 +2213,6 @@ class _AssistantConversationCard extends StatelessWidget {
       return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
     }
     return '${local.month}/${local.day}';
-  }
-}
-
-class _TelegramCapabilityCard extends StatelessWidget {
-  const _TelegramCapabilityCard({
-    required this.onCreateGroup,
-    required this.onCreateChannel,
-  });
-
-  final VoidCallback onCreateGroup;
-  final VoidCallback onCreateChannel;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
-      margin: EdgeInsets.zero,
-      color: scheme.secondaryContainer.withValues(alpha: 0.34),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.hub_outlined, color: scheme.secondary),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    l.campusCommunicationTitle,
-                    style: const TextStyle(fontWeight: FontWeight.w900),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              l.campusCommunicationSubtitle,
-              style: TextStyle(color: scheme.onSurfaceVariant, height: 1.35),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton.tonalIcon(
-                  onPressed: onCreateGroup,
-                  icon: const Icon(Icons.group_add_outlined),
-                  label: Text(l.createGroup),
-                ),
-                OutlinedButton.icon(
-                  onPressed: onCreateChannel,
-                  icon: const Icon(Icons.campaign_outlined),
-                  label: Text(l.createChannel),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
 

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
 import 'package:image_picker/image_picker.dart';
@@ -442,6 +443,7 @@ class ChatPage extends StatefulWidget {
   final String? initialPrompt;
   final bool embedded;
   final VoidCallback? onConversationUpdated;
+  final VoidCallback? onExit;
 
   const ChatPage({
     super.key,
@@ -453,6 +455,7 @@ class ChatPage extends StatefulWidget {
     this.initialPrompt,
     this.embedded = false,
     this.onConversationUpdated,
+    this.onExit,
   });
 
   @override
@@ -810,7 +813,7 @@ class _ChatPageState extends State<ChatPage> {
     final l = AppLocalizations.of(context)!;
     return Column(
       children: [
-        _AssistantHeader(embedded: widget.embedded),
+        _AssistantHeader(embedded: widget.embedded, onExit: _exitAssistant),
         if (_historyError != null)
           Container(
             width: double.infinity,
@@ -975,6 +978,18 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  void _exitAssistant() {
+    if (widget.onExit != null) {
+      widget.onExit!();
+      return;
+    }
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/conversations');
+    }
+  }
+
   void _showNegotiationCard(HitlRequest req) {
     showModalBottomSheet(
       context: context,
@@ -1081,9 +1096,10 @@ class _HitlChip extends StatelessWidget {
 }
 
 class _AssistantHeader extends StatelessWidget {
-  const _AssistantHeader({required this.embedded});
+  const _AssistantHeader({required this.embedded, required this.onExit});
 
   final bool embedded;
+  final VoidCallback onExit;
 
   @override
   Widget build(BuildContext context) {
@@ -1126,6 +1142,12 @@ class _AssistantHeader extends StatelessWidget {
             ),
           ),
           const _AgentStatusPill(),
+          const SizedBox(width: 8),
+          IconButton.filledTonal(
+            tooltip: l.closeConversationAction,
+            onPressed: onExit,
+            icon: const Icon(Icons.close_rounded),
+          ),
         ],
       ),
     );

@@ -40,12 +40,13 @@ class ConversationListViewError extends ConversationListViewState {
 }
 
 /// Manages conversation list state including pending incoming requests.
-class ConversationListNotifier extends StateNotifier<ConversationListViewState> {
+class ConversationListNotifier
+    extends StateNotifier<ConversationListViewState> {
   final ChatService _chatService;
 
   ConversationListNotifier({ChatService? chatService})
-      : _chatService = chatService ?? ChatService(),
-        super(const ConversationListViewInitial());
+    : _chatService = chatService ?? ChatService(),
+      super(const ConversationListViewInitial());
 
   Future<void> loadConversations() async {
     state = const ConversationListViewLoading();

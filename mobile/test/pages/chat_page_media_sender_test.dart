@@ -57,63 +57,72 @@ Future<XFile> _createTempXFile(String filename, List<int> bytes) async {
 }
 
 void main() {
-  test('uploadSelectedMedia uploads image and audio and returns URL payloads', () async {
-    final uploadService = _FakeUploadService(
-      imageUrl: 'https://cdn.example.com/chat-image.png',
-      audioUrl: 'https://cdn.example.com/chat-audio.ogg',
-    );
-    final sender = ChatPageMediaSender(uploadService: uploadService);
-    final picked = await _createTempXFile('draft.png', <int>[1, 2, 3]);
+  test(
+    'uploadSelectedMedia uploads image and audio and returns URL payloads',
+    () async {
+      final uploadService = _FakeUploadService(
+        imageUrl: 'https://cdn.example.com/chat-image.png',
+        audioUrl: 'https://cdn.example.com/chat-audio.ogg',
+      );
+      final sender = ChatPageMediaSender(uploadService: uploadService);
+      final picked = await _createTempXFile('draft.png', <int>[1, 2, 3]);
 
-    final result = await sender.uploadSelectedMedia(
-      pickedImage: picked,
-      imageBytes: Uint8List.fromList(<int>[1, 2, 3]),
-      audioBytes: <int>[7, 8, 9],
-    );
+      final result = await sender.uploadSelectedMedia(
+        pickedImage: picked,
+        imageBytes: Uint8List.fromList(<int>[1, 2, 3]),
+        audioBytes: <int>[7, 8, 9],
+      );
 
-    expect(result.imageUrl, 'https://cdn.example.com/chat-image.png');
-    expect(result.audioUrl, 'https://cdn.example.com/chat-audio.ogg');
-    expect(uploadService.uploadedImageBytes, <int>[1, 2, 3]);
-    expect(uploadService.uploadedImageExtension, 'png');
-    expect(uploadService.uploadedImageContentType, 'image/png');
-    expect(uploadService.uploadedAudioBytes, <int>[7, 8, 9]);
-  });
+      expect(result.imageUrl, 'https://cdn.example.com/chat-image.png');
+      expect(result.audioUrl, 'https://cdn.example.com/chat-audio.ogg');
+      expect(uploadService.uploadedImageBytes, <int>[1, 2, 3]);
+      expect(uploadService.uploadedImageExtension, 'png');
+      expect(uploadService.uploadedImageContentType, 'image/png');
+      expect(uploadService.uploadedAudioBytes, <int>[7, 8, 9]);
+    },
+  );
 
-  test('uploadPickedImage surfaces upload failures with retryable message', () async {
-    final sender = ChatPageMediaSender(
-      uploadService: _FakeUploadService(failImageUpload: true),
-    );
-    final picked = await _createTempXFile('draft.jpg', <int>[4, 5, 6]);
+  test(
+    'uploadPickedImage surfaces upload failures with retryable message',
+    () async {
+      final sender = ChatPageMediaSender(
+        uploadService: _FakeUploadService(failImageUpload: true),
+      );
+      final picked = await _createTempXFile('draft.jpg', <int>[4, 5, 6]);
 
-    expect(
-      () => sender.uploadPickedImage(
-        picked,
-        imageBytes: Uint8List.fromList(<int>[4, 5, 6]),
-      ),
-      throwsA(
-        isA<ChatPageMediaUploadException>().having(
-          (e) => e.message,
-          'message',
-          '图片上传失败，请重试',
+      expect(
+        () => sender.uploadPickedImage(
+          picked,
+          imageBytes: Uint8List.fromList(<int>[4, 5, 6]),
         ),
-      ),
-    );
-  });
-
-  test('uploadAudioBytes surfaces upload failures with retryable message', () async {
-    final sender = ChatPageMediaSender(
-      uploadService: _FakeUploadService(failAudioUpload: true),
-    );
-
-    expect(
-      () => sender.uploadAudioBytes(<int>[9, 9, 9]),
-      throwsA(
-        isA<ChatPageMediaUploadException>().having(
-          (e) => e.message,
-          'message',
-          '语音上传失败，请重试',
+        throwsA(
+          isA<ChatPageMediaUploadException>().having(
+            (e) => e.message,
+            'message',
+            '图片上传失败，请重试',
+          ),
         ),
-      ),
-    );
-  });
+      );
+    },
+  );
+
+  test(
+    'uploadAudioBytes surfaces upload failures with retryable message',
+    () async {
+      final sender = ChatPageMediaSender(
+        uploadService: _FakeUploadService(failAudioUpload: true),
+      );
+
+      expect(
+        () => sender.uploadAudioBytes(<int>[9, 9, 9]),
+        throwsA(
+          isA<ChatPageMediaUploadException>().having(
+            (e) => e.message,
+            'message',
+            '语音上传失败，请重试',
+          ),
+        ),
+      );
+    },
+  );
 }

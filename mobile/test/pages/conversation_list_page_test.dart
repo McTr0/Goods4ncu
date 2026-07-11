@@ -205,11 +205,14 @@ void main() {
   testWidgets('created group remains visible in the inbox', (tester) async {
     await tester.pumpWidget(_buildPage(_FakeChatService()));
     await tester.pumpAndSettle();
+    final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
 
-    await tester.tap(find.text('创建群组'));
+    await tester.tap(find.byTooltip(l.createAction));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(l.createGroup));
     await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextField, '名称'), '浏览器亲测群组');
-    await tester.tap(find.widgetWithText(FilledButton, '创建'));
+    await tester.tap(find.widgetWithText(FilledButton, l.createAction));
     await tester.pumpAndSettle();
 
     expect(find.text('浏览器亲测群组'), findsWidgets);
