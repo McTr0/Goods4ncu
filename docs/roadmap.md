@@ -1,203 +1,247 @@
-# 路线图与架构风险
+# 生产路线图：从当前单实例到可信多校园平台
 
-这篇文档记录当前工程方向和技术债。它不是需求池，也不是承诺清单；它的作用是让后来接手的人知道：哪些工作已经完成，哪些工作现在最重要，哪些风险需要改代码时顺手收敛。
-
-## 当前已完成的硬化工作
-
-认证链路已经从“能登录”推进到更接近真实系统的会话模型：access token 带 JTI，logout 可撤销当前 token，refresh token 采用旋转策略，并在 replay 时撤销用户所有 refresh token。封禁用户不能登录或 refresh，WebSocket 建连也会检查 token 和用户状态。
-
-订单和议价路径已经把关键写入收敛到事务里。创建订单时商品售出和订单插入一起提交；HITL 接受或买家接受 counter 时，锁定请求、创建订单、写系统消息和状态更新也在事务中完成。这样降低了半成功交易的概率。
-
-用户直聊已经从永久好友连接改为会话式沟通：`realtime` 使用 `syn_sent -> syn_ack -> active` 的短期握手，`mail` 使用无需接通的异步留言线程。消息模型同时支持 URL-first 媒体和 Base64 fallback，方便新客户端走对象存储，旧路径继续兼容。
-
-配置系统已经统一为环境变量优先、TOML 补充、默认值兜底。生产 CORS 有 fail-fast 防护，pgvector 维度启动检查可以提前暴露配置错误。
-
-## 本轮本地已闭环的缺陷修复
-
-最近一轮排查围绕“本地能否顺利启动并完成核心浏览路径”展开，已经在本地代码中完成以下修复：
-
-| 问题 | 修复方向 | 验收方式 |
-| --- | --- | --- |
-| Web 前端默认连错后端地址 | Flutter 平台工具支持 `API_BASE_URL` 和 `WS_BASE_URL` 编译参数，并从 HTTP 地址推导 WebSocket 地址。 | 用 `--dart-define=API_BASE_URL=http://127.0.0.1:3000` 启动前端后，浏览器可以正常请求本地后端。 |
-| 联系买家触发 Navigator key assertion | 商品详情页不再直接创建好友式连接，而是打开“现在聊 / 写封留言”模式面板；创建会话后进入 `user-chat`。 | 在商品详情页点击联系卖家/买家，不再出现 `!keyReservation.contains(key)` 断言。 |
-| 普通用户能看到管理后台入口 | `ProfilePage` 只在用户 `role == 'admin'` 时渲染管理入口，并补充 Widget 测试。 | 普通用户“我的”页面不可见管理后台；管理员账号仍可见。 |
-| 好友式聊天连接不符合交易沟通心理 | 新增 `chat_conversations`、members、events、blocks，统一收件箱和消息 API，废弃旧 `/connect/*` 语义。 | Rust 会话状态机测试覆盖握手、mutual intent、邮件、归档、已读、屏蔽和过期；Flutter 测试覆盖新状态模型。 |
-
-这些修复属于进入可部署 MVP 前的稳定性基线。合并前仍要跑完整验证命令，避免“本地点通了，但 CI 或其他平台退化”的情况。
-
-## 可部署 MVP 修缮计划
-
-当前计划不是继续堆功能，而是把 Good4NCU 收敛到一个可以可靠演示、可以部署、可以继续迭代的 MVP。默认目标是：后端用 Docker 镜像部署，数据库使用支持 pgvector 的 PostgreSQL，Flutter Web 作为静态站点发布，移动端继续通过同一套 HTTP API 访问后端。
-
-### Phase 0：稳定当前修复并建立基线
-
-先把本轮已经改好的缺陷修复整理成一个清晰 PR。这个阶段不引入新业务能力，只确认当前本地开发链路稳定。
-
-验收清单：
-
-1. `cargo fmt -- --check`
-2. `cargo check --locked`
-3. `cargo test --lib`
-4. `cargo test --test chat_transaction_integration -- --nocapture --test-threads=1`
-5. `cd mobile && flutter analyze`
-6. `cd mobile && NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost flutter test`
-7. `git diff --check`
-8. 浏览器手工验证：普通用户资料页隐藏管理入口，商品详情页联系用户不会触发路由断言。
-
-如果这一阶段失败，不继续做 UUID 或部署。先修基线，因为后面的工作都依赖这些路径。
-
-### Phase 1：核心 ID 的 UUID adoption
-
-外部 API 暂时保持字符串 ID，不强迫 Flutter 或第三方调用方立刻感知 UUID 类型。内部实现逐步采用 UUID 语义，避免继续把“旧 TEXT id”“新 UUID id”“path 参数”“token claim”混成同一种普通字符串。
-
-建议顺序：
-
-1. 先从 repository 层开始，给用户、商品、订单、聊天、收藏、通知这些核心表建立统一的 ID 读取/写入辅助函数。
-2. 新写入路径优先写 UUID shadow column，同时保留旧字段兼容。
-3. 查询路径优先用 UUID join；如果遇到旧数据，再走兼容条件。
-4. service 层继续接收字符串参数，但进入 repository 前做一次明确解析和兼容处理。
-5. handler 和 Flutter model 暂时不改公开字段名，降低前后端同时断裂的概率。
-6. 增加混合数据测试：旧 TEXT 数据、新 UUID 数据、旧新交叉 join 都要覆盖。
-
-阶段验收标准：
-
-1. 新创建用户、商品、订单、聊天会话时 UUID 字段完整写入。
-2. 旧测试 fixture 仍能被读取。
-3. `orders`、`chat_conversations`、`watchlist`、`notifications`、管理员列表没有 UUID/TEXT decode panic。
-4. API JSON 中的 `id`、`user_id`、`listing_id` 等字段仍是字符串。
-5. UUID divergence 视图或等价检查结果为零。
-
-### Phase 2：URL-first 媒体路径稳定化
-
-媒体路径的目标不是马上删除 Base64，而是先让 URL-first 成为默认、可测、可排错的主路径。Base64 只作为兼容 fallback 存在，并且要有明确边界。
-
-建议顺序：
-
-1. 统一消息发送、商品图片、语音消息使用 `image_url`、`audio_url` 一类 URL 字段。
-2. 上传失败时给用户明确反馈，不把大 Base64 静默塞进普通 JSON 请求。
-3. 内容审核优先读取 URL 媒体；Base64 fallback 只在旧数据或旧客户端场景启用。
-4. 给 fallback 加日志或指标，确认真实使用量。
-5. 当 fallback 使用量接近零后，再讨论数据库字段清理和迁移。
-
-阶段验收标准：
-
-1. 新客户端默认发送 URL 媒体。
-2. URL 媒体和 Base64 fallback 都有测试。
-3. 文档把 URL-first 写成推荐路径，Base64 写成兼容路径。
-4. 大图、大音频不会造成明显请求体膨胀或 Flutter 内存压力。
-
-### Phase 3：前端体验和模块拆分
-
-这个阶段解决“功能能用但维护压力开始变大”的问题。优先拆最容易牵连其他功能的大文件，而不是为了整洁做无收益重构。
-
-建议顺序：
-
-1. 先给 `user_chat_page.dart` 建立行为测试或最小回归用例，再拆 composer、message list、media sender、reply assistant 和会话状态 banner。
-2. 再拆 `src/api/user_chat/message.rs`，优先分出媒体、已读、编辑、typing 相关处理；状态转换继续集中在 `ChatConversationService`。
-3. 明确 Web token storage 策略，区分 Web 和移动端的安全边界。
-4. 继续补齐普通用户路径受管理员动作影响的回归测试，例如封禁后登录、refresh、WebSocket、聊天发送。
-
-阶段验收标准：
-
-1. 拆分后用户聊天、AI 聊天、媒体发送和已读状态行为不变。
-2. `flutter analyze` 和 Flutter Widget 测试保持通过。
-3. 后端 user chat 相关集成测试保持通过。
-4. 新文件按职责命名，不把复杂度从一个大文件搬到另一个大文件。
-
-### Phase 4：部署 MVP
-
-部署阶段先追求可重复、可观察、可回滚，不追求一次性做完支付、结算、对象存储、CDN 全量生产化。
-
-建议默认部署形态：
-
-1. 后端：使用现有 `Dockerfile` 构建 Rust 服务镜像。
-2. 数据库：使用 PostgreSQL 16/18 加 pgvector，生产库和测试库分离。
-3. 前端：`flutter build web --dart-define=API_BASE_URL=https://你的后端域名`，构建产物放到静态托管或 Nginx。
-4. CORS：生产环境显式设置允许的前端域名，不使用通配。
-5. 配置：从 `.env` 或平台密钥注入 `DATABASE_URL`、`JWT_SECRET`、LLM key、CORS origin、pgvector 维度。
-6. 观测：上线后至少检查 `/api/health`、Prometheus metrics、结构化日志。
-
-阶段验收标准：
-
-1. 新环境可以从空库自动应用迁移并启动。
-2. 健康检查返回成功。
-3. 浏览器能完成注册/登录/刷新资料/浏览商品/联系用户。
-4. 普通用户看不到管理入口，管理员能进入后台。
-5. 不在生产环境运行 seed 测试账号。
-6. 回滚方案明确：可以回滚镜像，不破坏已应用迁移的数据兼容性。
-
-## Now：核心表 UUID 应用读写 adoption
-
-当前最重要的方向是让应用层逐步采用核心表 UUID 读写，而不是继续扩散旧 TEXT id 假设。迁移已经引入 shadow columns 的方向，下一步要把 Rust repository、service、handler、Flutter model 和测试里的 ID 假设逐步收敛到稳定的 UUID 语义。
-
-这项工作不能只改数据库。验收时要证明：新数据写入 UUID 字段，旧数据仍能被读取，跨表 join 不丢数据，API 返回字段对客户端兼容，订单、聊天、收藏、通知和管理员路径都能正常工作。
-
-建议顺序是：
-
-1. 先确认所有核心表的 UUID shadow column 和索引存在，并有 backfill 路径。
-2. 再让 repository 优先读写 UUID，同时兼容旧 TEXT id。
-3. 然后收敛 service 和 handler 中对 id 类型的假设。
-4. 最后同步 Flutter model、测试 fixture 和文档。
-
-不要在一个 PR 里试图切完所有层。UUID 迁移适合小步、强测试、可观测推进。
-
-## Next：Base64 media fallback cleanup
-
-聊天媒体当前处于 URL-first 加 Base64 fallback 阶段。下一步不是立刻删除 Base64，而是先让新路径足够稳：上传 token、OSS 直传、消息发送、消息展示、图片审核、失败重试和测试都优先覆盖 URL 字段。
-
-等 URL 路径稳定后，再统计 Base64 fallback 是否仍有使用。如果没有真实客户端依赖，可以逐步减少 Base64 存储和传输，降低数据库体积、请求大小和移动端内存压力。
-
-验收标准包括：新客户端默认走 URL；Base64 fallback 有明确开关或兼容边界；媒体消息测试覆盖 URL 和 fallback；文档不再把 Base64 当推荐路径。
-
-## Later：后续方向
-
-| 方向 | 为什么重要 |
+| 项目 | 内容 |
 | --- | --- |
-| 头像审核 UX | 用户头像也属于可见内容，需要审核状态、失败反馈和默认占位体验。 |
-| 缩略图 | 列表页不应加载大图，移动端流量和滚动性能都依赖缩略图。 |
-| Web token storage | Web 平台 token 存储策略不同于移动端 secure storage，需要明确安全边界。 |
-| 线下成交记录 | 平台只记录成交意向和卖家确认，不做资金托管、付款确认或物流追踪；后续重点是把风险提示、自动下架和纠纷证据链做清楚。 |
-| `user_chat_page.dart` 拆分 | 用户聊天页面承担输入、媒体、消息列表、会话状态 banner 和 Reply Assistant，继续变大后维护成本会快速上升。 |
-| `user_chat/message.rs` 拆分 | 后端消息文件密度较高，媒体、已读、编辑、typing 可以逐步拆到更清晰模块。 |
+| 适用读者 | 产品负责人、技术负责人、工程师、测试、运营和部署维护者 |
+| 当前状态 | 路线图描述目标顺序，不代表阶段已经交付；完成必须满足对应退出门槛 |
+| 事实来源 | 当前代码、迁移、设计文档、测试现状和生产架构差距 |
+| 最后核对范围 | 生产安全、offer/wanted、推荐、Agent、多租户、事件、实时通信和灾备 |
 
-## UUID 迁移专项
+这份路线图以“可以安全交付给真实校园用户”为目标，不按功能数量排序。每个阶段都要先满足前置条件和退出门槛，再扩大下一个风险面。
 
-### 已完成方向
+## 当前基线
 
-迁移层已经出现 shadow column 思路，说明团队已经意识到不能直接把主键类型一刀切。测试中也有 UUID shadow migration integration，说明迁移安全性开始被纳入验证。
+[已实现] 当前系统已经具备：
 
-### 未完成风险
+- Rust Axum + Flutter + PostgreSQL/pgvector 模块化单体。
+- JWT/JTI、refresh rotation、logout 撤销、封禁和管理员审计。
+- offer/wanted 发布、列表、匹配和响应基础能力。
+- 分类亲和度、新鲜度和向量相似推荐。
+- 联系人 Thread、realtime/mail、消息回复/反应/举报/已读/quote。
+- 群组、频道、通话信令和 Secret Chat 原型。
+- 多 LLM provider、RAG、市场工具和回复助手。
+- 线下成交意向、卖家确认和可选自动下架。
+- 同步文本审核、异步媒体审核任务和收款码公开控制。
+- Dockerfile、演示 Compose、Prometheus metrics 和结构化日志。
 
-最大风险是应用层仍把 id 当普通字符串自由传递。字符串本身不是问题，问题是它隐藏了语义：有些字符串是旧 TEXT id，有些是 UUID，有些来自 path 参数，有些来自 token claim，有些来自数据库 join。迁移期如果不明确每条路径读写哪个字段，就容易出现“新数据能写但旧数据查不到”或“某个 join 仍用旧字段”的问题。
+当前能力还不是生产就绪。主要差距：
 
-第二个风险是测试 fixture。很多测试会手写 id，如果测试数据只覆盖旧格式，就无法发现 UUID 路径坏掉；如果只覆盖 UUID，又可能漏掉兼容旧数据的问题。
+- 没有完整 CampusMembership 和租户隔离。
+- Agent 写工具没有统一 ActionPlan 确认协议。
+- 进程内事件和 WebSocket 状态不支持可靠多副本。
+- 媒体隔离、审核公开门槛、缩略图和 Base64 退出不完整。
+- API 缺少统一版本和 cursor；[已实现] 未版本化接口已有兼容旧客户端的稳定错误字段、服务端 request ID，以及 listing 发布幂等，其他写接口仍需收敛。
+- 推荐解释、反馈、评估和公平性指标不足。
+- Secret Chat 与服务器可治理通信目标冲突。
+- 备份恢复、密钥管理、SLO、告警和事故演练未闭环。
 
-### 安全护栏
+## Phase 0：事实基线与交付纪律
 
-新迁移必须可重复运行，并能在已有数据上安全 backfill。repository 应优先封装兼容逻辑，不要让 handler 到处判断新旧 id。涉及订单、聊天、收藏和通知的查询要特别检查 join 条件。
+### 目标
 
-测试上至少覆盖：新用户/商品/订单写入，旧数据读取，混合数据 join，管理员列表，移动端解析。日志中如果打印 id，要避免泄漏敏感信息，但保留足够上下文排查迁移问题。
+让代码、文档、测试和产品语言描述同一个系统，建立后续生产化的可信起点。
 
-### 验收标准
+### 工作
 
-UUID adoption 不能只以“编译通过”为标准。更合理的验收是：
+- 文档使用 `[已实现]`、`[实验中]`、`[目标态]`、`[待弃用]`。
+- API 参考与 `src/api/mod.rs` 实际路由逐项核对。
+- 数据模型与 migration/service 对齐，修正订单、下架、Secret Chat、UUID 和 offer/wanted 矛盾。
+- 用户侧统一“成交记录”语义，不出现支付、发货或平台担保暗示。
+- 建立关键旅程测试矩阵：认证、发布、匹配、联系、消息、成交、审核、管理员影响。
+- 清理 CI 已知失败，保证格式、check、clippy、Rust tests、Flutter analyze/tests 和 Docker build 有可重复结果。
+- 建立设计变更规则：领域、权限、API、配置和 SLO 变化必须同步专题文档。
 
-1. 新写入路径使用目标 UUID 字段。
-2. 旧数据通过兼容查询仍可读取。
-3. 核心 API 返回对客户端稳定。
-4. 订单、聊天、收藏、通知、管理员路径都有测试覆盖。
-5. 迁移和回填过程有可观测日志。
-6. 文档更新，说明当前 ID 语义和剩余兼容期。
+### 退出门槛
 
-## 架构风险清单
+- 文档链接和 Markdown 检查通过。
+- 当前接口没有未标记的文档缺口，目标接口不会混入当前 curl 示例。
+- 本地主干验证和 CI 结果一致，失败有 owner 和可解释原因。
+- Codex Browser 完成桌面/手机核心路径，发现的问题进入回归测试。
+- 当前生产风险清单有优先级、owner 和阶段归属。
 
-| 风险 | 表现 | 应对 |
+## Phase 1：生产安全基线
+
+### 目标
+
+在不扩大用户和校园范围前，建立身份、API、媒体、数据和运维的安全边界。
+
+### 身份与授权
+
+- 新增 Campus 与 CampusMembership，南昌大学作为首个 tenant seed/config。
+- 游客可浏览，注册用户可收藏，verified membership 才能发布、联系、加入空间和参与成交。
+- 校园运营与平台管理员分离，管理员启用 MFA/近期认证目标。
+- 所有普通查询和写入引入 TenantContext，跨校园默认拒绝。
+
+### API 与数据
+
+- [已实现] 当前 `/api/*` 响应提供 `X-Request-ID`，业务错误和框架拒绝提供稳定 `code/message/trace_id`，同时保留旧 `error` 字符串。
+- [已实现] `POST /api/listings` 支持 `Idempotency-Key`，同用户同 key 同内容只创建一次，不同内容返回冲突。
+- [目标态] 定义 `/api/v1` 嵌套错误对象和 cursor pagination，并把幂等扩展到联系、成交和 Agent confirm 等其余关键写接口。
+- 兼容未版本化接口，记录使用量并制定弃用窗口。
+- 继续收敛 TEXT/UUID shadow columns：repository 优先 UUID、旧数据兼容、divergence 为零。
+- 关键写入添加资源版本或等价冲突检查。
+
+### 媒体与审核
+
+- 新上传默认进入私有对象存储隔离区。
+- 校验文件头、MIME、尺寸和解码，审核通过后生成公开 URL 和缩略图。
+- Base64 fallback 加指标和 feature flag，不再作为新客户端主路径。
+- 建立 ModerationCase 最小模型，先统一机器决定、人工处理和举报关联。
+
+### 运维
+
+- staging/production 配置和密钥完全隔离。
+- 建立备份、PITR、恢复演练、密钥轮换和依赖/镜像扫描。
+- 定义核心 SLO dashboard、告警 owner 和事故 runbook。
+- 数据库 migration 在空库和升级库都验证。
+
+### 退出门槛
+
+- 未认证用户从后端无法发布和联系，不能只靠隐藏 UI。
+- 租户隔离集成测试证明 A 校园无法读取/关联 B 校园数据。
+- 重复写请求不会创建重复 listing、conversation、message 或 DealRecord。
+- 未审核媒体不会公开原始对象，审核失败和 provider 故障有安全降级。
+- 恢复演练达到 RPO 15 分钟、RTO 2 小时目标或记录批准的差距。
+- 普通 API、Feed、消息和 Agent 指标可观察并有告警。
+
+## Phase 2：可信智能信息流
+
+### 目标
+
+让“出/收”真正形成双向流通闭环，推荐可解释、可反馈、可评估，而不是只按点击和新鲜度堆内容。
+
+### 信息生命周期
+
+- 明确 `IntentItem kind=goods`，完成 wanted fulfilled/reopen 状态和相应 API/UI。
+- Response 支持 accepted/dismissed/withdrawn 用户动作和通知。
+- wanted 完成后停止新匹配，已有 Thread、Response 和 DealRecord 保留。
+- 品牌“不限”改为结构化空值/偏好，不把展示词当数据事实。
+
+### 召回与排序
+
+- 两阶段推荐：硬约束/召回，再排序/多样性。
+- 所有检索先过滤 campus、status、direction 和 visibility。
+- 返回稳定 `rank_reason`、`match_summary`、排序版本和来源类型。
+- 增加隐藏、减少此类、清除个性化信号和非个性化排序入口。
+- 防止重复条目、单一类别垄断和自己内容反复出现。
+
+### 评估
+
+- 建立带硬约束真值的离线匹配集。
+- 评价 NDCG/Recall 之外的预算满足率、成色满足率、有效响应率、无结果质量和多样性。
+- 线上同时观察推荐点击、有效响应、会话质量、wanted 关闭和举报率。
+- 排序实验使用版本和小流量开关，可回滚，不把未确认 Agent 推断当兴趣事实。
+
+### 退出门槛
+
+- wanted/offer 的创建、匹配、响应、沟通、完成和重新开启端到端通过。
+- 硬约束违反率为零；没有 embedding 时关键词和条件 fallback 可用。
+- 每条个性化推荐有用户可理解原因和反馈入口。
+- 新排序在质量、信任和公平 guardrail 上不劣于基线。
+- Feed/Search p95 在目标容量下小于 500ms。
+
+## Phase 3：Agent 行动系统
+
+### 目标
+
+让 Agent 从“可以调用工具”升级为“有权限等级、确认、幂等、审计和评估的受控行动系统”。
+
+### ActionPlan
+
+- 为 L2/L3 动作新增 AgentActionPlan 和短期 confirmation token。
+- 发布、更新、联系和推荐使用一次确认；报价、议价接受、成交确认和隐私公开使用二次确认。
+- 计划保存输入快照、资源版本、风险文案版本、过期时间和幂等键。
+- 执行时重新校验 membership、tenant、owner、状态和价格。
+
+### 工具收敛
+
+- Agent 工具调用与 HTTP 相同的 service，不直接写 SQL 或复制状态机。
+- 工具声明 auth、tenant、risk、side effects、idempotency 和 audit category。
+- 回复助手继续保持无工具、只读最近文本、只填草稿不发送。
+- Provider 能力建立支持矩阵，写动作不因 LLM 超时自动重试。
+
+### 安全与质量
+
+- 建立 prompt injection、间接注入、跨用户/跨校园、虚假承诺和参数污染测试集。
+- AgentRun 记录路由、检索、工具、provider、版本、延迟和结果类别，敏感正文脱敏。
+- 无 LLM 时搜索、表单、聊天和成交记录仍可用。
+- Agent 变更采用 feature flag 和 canary，越权执行有立即 kill switch。
+
+### 退出门槛
+
+- 所有 L2/L3 工具都经过确认或在生产禁用。
+- 重复 confirm 只产生一次业务结果，过期/版本冲突安全失败。
+- 越权、跨校园和未确认执行测试为零容忍。
+- 离线评估覆盖中文口语、错别字、歧义、无结果、provider 和工具故障。
+- Agent 首 token p95 小于 3 秒，失败时用户输入和手工路径保留。
+
+## Phase 4：多校园与水平扩展
+
+### 目标
+
+在可信单校园生产基线之上接入第二所校园，并支持 API 多副本和可靠异步处理。
+
+### 持久事件
+
+- 业务事务同时写 transactional outbox。
+- 通知、embedding、审核、搜索投影和 WebSocket fan-out 迁入幂等 worker。
+- Worker 支持 lease、指数退避、dead-letter、lag metrics 和受审计重放。
+- 进程内 mpsc 只保留为优化，不作为唯一事件通道。
+
+### 多副本实时通信
+
+- Redis 用于分布式限流、WebSocket pub/sub、typing 和短期 call signaling。
+- 消息和通知先持久化，socket 只做实时投递。
+- 断线和跨实例丢事件通过 HTTP cursor 补偿。
+- TURN、权限、弱网和 signaling 多副本完成后，通话才从实验进入稳定。
+
+### 校园运营
+
+- 校园级邮箱域名、分类、审核策略、运营角色和开关可配置。
+- 校园运营只能访问本 tenant，跨校园由平台管理员处理并审计。
+- 建立新校园 onboarding、数据检查、策略批准、灰度和退出手册。
+
+### 容量与灾备
+
+- 以 10 万注册、1 万日活、数千 socket、数百峰值 RPS 压测。
+- 验证数据库连接、锁、向量查询、outbox lag、Redis 和对象存储容量。
+- 多副本滚动发布、数据库升级、Redis 故障、provider 故障和区域恢复演练。
+
+### 退出门槛
+
+- 第二校园完成接入，租户隔离测试和运营权限审计通过。
+- 任一 API replica 下线不丢持久消息、通知或 outbox event。
+- 在线消息持久化后投递 p95 小于 1 秒，断线补偿无重复用户可见消息。
+- 月度 99.9% SLO 有 dashboard、错误预算和处理流程。
+- 备份、恢复、密钥轮换、canary 和 rollback 完成演练。
+
+## 暂不进入当前阶段
+
+以下方向不在首个生产交付中，只有在核心闭环和治理指标稳定后重新评审：
+
+- 平台托管支付、结算、退款、物流和赔付。
+- 服务、技能、活动、互助和知识等新 IntentItem kind。
+- 大型公开群、机器人平台、群组通话和 SFU。
+- 无人监督的 Agent 主动联系、议价或成交。
+- 服务器不可解密的生产私聊。
+- 因“未来可能很大”而提前拆分微服务或独立搜索集群。
+
+## 跨阶段技术债
+
+| 技术债 | 所属阶段 | 完成定义 |
 | --- | --- | --- |
-| 核心 ID 迁移 | TEXT 与 UUID 假设混用，join 或 path 解析容易漏。 | 小步迁移，repository 封装兼容，测试覆盖混合数据。 |
-| AI 聊天页面过大 | 一个页面处理太多状态，修一个功能影响另一个功能。 | 拆 controller、composer、media sender、message list 和 agent panel。 |
-| Base64 fallback 长期存在 | 请求体变大、数据库膨胀、移动端内存压力高。 | URL-first 稳定后逐步收敛 fallback。 |
-| `user_chat/message.rs` 密度高 | 消息发送、媒体、已读、编辑、typing 混在一起。 | 按职责拆文件，保持 handler 薄、service 清晰。 |
-| AI 工具跨层复杂 | prompt、工具、权限、SQL、LLM provider 混合排错。 | 工具保持可测试，权限不交给 LLM，RAG 写入和查询可观测。 |
-| 管理员动作影响普通路径 | 封禁、下架、撤销 token 只测管理员成功，漏普通用户行为。 | 管理员测试必须带一个受影响普通路径。 |
+| TEXT/UUID 并存 | Phase 1 | 新写 UUID、旧数据兼容、核心 join 和 divergence 检查通过 |
+| Base64 fallback | Phase 1 | 新客户端零使用、指标验证后再迁移/删除 |
+| user_chat 大模块 | Phase 0–3 | 行为测试后按消息、媒体、状态和空间拆分 |
+| Secret Chat | Phase 1 | 停止宣传/新建，历史兼容和迁移说明完成 |
+| 进程内事件 | Phase 4 | 关键消费者全部由 outbox 驱动 |
+| 单实例 WebSocket | Phase 4 | Redis fan-out 和断线补偿通过压测 |
+| Agent 直接写工具 | Phase 3 | 所有 L2/L3 使用 ActionPlan 或生产禁用 |
 
-路线图会变化，但风险清单应该保持诚实。每次大改动后，如果你发现新的系统性风险，不要只在 PR 描述里提一句，应该更新这里。
+## 路线图维护规则
+
+- “完成”必须引用测试、指标或演练证据，不以代码合并代替交付。
+- 阶段内工作可以并行，但不能绕过退出门槛扩大下一个风险面。
+- 新风险必须归属阶段、owner 和可验证完成定义。
+- 产品、架构和信任边界变化时，同步更新相关设计文档。
+- 真实容量或用户行为推翻假设时，更新路线图而不是隐藏差距。

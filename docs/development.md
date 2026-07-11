@@ -1,6 +1,13 @@
 # 开发指南
 
-这篇文档回答“怎么开发”。它不重复解释每个业务流程的状态机，也不列完整 API 字段；需要业务语义时看 [业务流程](domain-flows.md)，需要接口形状时看 [API 参考](api-reference.md)，需要配置和排错时看 [运行、配置与排错](operations.md)。
+| 项目 | 内容 |
+| --- | --- |
+| 适用读者 | 后端、Flutter、AI、测试工程师和准备提交代码的新人 |
+| 当前状态 | 命令和当前分层可直接使用；多租户、ActionPlan、outbox 等目标任务按设计文档实施 |
+| 事实来源 | Cargo/Flutter 配置、AGENTS.md、CI workflow、目录结构和现有测试 |
+| 最后核对范围 | 本地启动、验证命令、常见开发任务、协议兼容、SQL、async 和设计同步 |
+
+这篇文档回答“怎么开发”。它不重复解释每个状态机，也不列完整 API 字段；业务语义见 [业务流程](domain-flows.md)，接口形状见 [API 参考](api-reference.md)，配置排错见 [运行、配置与排错](operations.md)，目标架构见[生产架构](production-architecture.md)。
 
 ## 本地环境
 
@@ -12,10 +19,10 @@
 
 ```bash
 cp docs/.env.example .env
-cp docs/config.toml.example good4ncu.toml
+cp docs/config.toml.example goods4ncu.toml
 ```
 
-`.env` 放密钥和连接串，`good4ncu.toml` 放非敏感配置。两者的完整解释见 [运行、配置与排错](operations.md)。
+`.env` 放密钥和连接串，`goods4ncu.toml` 放非敏感配置。两者的完整解释见 [运行、配置与排错](operations.md)。
 
 ## 常用命令和含义
 
@@ -59,6 +66,10 @@ flutter test
 | 改聊天、WebSocket、媒体 | 聊天 integration/e2e 测试，移动端相关 service/page 测试。 |
 | 改 Flutter 页面 | `flutter analyze`，相关 widget/controller/service 测试。 |
 | 改前后端协议 | 后端测试、Dart model/service 测试、手动确认字段名兼容。 |
+| 改 tenant/membership | A/B 校园隔离、未认证写入拒绝、管理员范围和审计测试。 |
+| 改推荐/匹配 | 硬约束、fallback、解释字段、离线评估和 Feed GUI 验收。 |
+| 改 Agent 工具 | tool/service 单测、ActionPlan/确认/幂等、越权评估和故障降级。 |
+| 改 outbox/worker | 事务一致性、重复消费、重试、dead-letter 和 lag 指标。 |
 
 不要用“我只改了一行”来判断测试范围。应该问：这行影响哪条业务路径，是否改变权限、状态、事务、协议或 UI 生命周期。
 
@@ -71,6 +82,8 @@ flutter test
 如果接口涉及跨表写入、状态转换、订单、议价、封禁、通知或后台任务，先写 service 方法，再让 handler 调 service。最后补测试：纯参数校验可以单元测试，真实数据库行为应放到 `tests/` 的 integration 或 regression 测试。
 
 新增接口后更新 [API 参考](api-reference.md)。如果它改变业务流程，也更新 [业务流程](domain-flows.md)。
+
+生产目标的新接口优先进入 `/api/v1`，但不要直接删除当前 `/api/*`。写接口先定义幂等行为和稳定错误 code；列表先定义 cursor 的排序稳定性。普通业务接口必须从认证上下文得到用户和 tenant，不能信任 body 中的 `user_id`/`campus_id`。
 
 ### 修改数据库
 
@@ -99,6 +112,29 @@ flutter test
 协议改动要同时考虑四个位置：Rust request/response struct，Dart model，Dart service，测试 fixture。字段改名比新增字段危险，因为旧客户端可能还在发旧字段。能兼容时优先新增字段并保留旧字段一段时间。
 
 如果协议涉及媒体，优先使用 URL 字段，例如 `image_url` 和 `audio_url`。Base64 字段只作为 fallback，不应成为新功能的主路径。
+
+协议文档必须标明 `[已实现]` 或 `[目标态]`。目标字段可以先进入设计文档，但只有 router、struct、客户端解析和测试完成后才能改为已实现。
+
+### 新增或修改 Agent 工具
+
+先在 [Agent 系统设计](agent-system.md) 判断风险等级。L0/L1 可以直接回答或草拟；L2/L3 必须使用 ActionPlan 或在生产配置中禁用。
+
+工具只做协议适配：身份、tenant、owner、状态、金额和事务仍由 service 校验。为工具声明输入 schema、side effects、幂等、审计类别和失败类型，并覆盖 prompt injection、跨用户/校园、资源状态变化和 provider timeout。
+
+不要通过修改 prompt 修复本应由权限或数据库约束处理的问题。
+
+### 新增后台任务
+
+当前 worker 可以使用现有运行方式，但生产关键副作用必须规划迁入 transactional outbox。新增任务时定义：
+
+- 事件 schema 和版本。
+- 事务内何时写 outbox。
+- 消费幂等键。
+- 可重试/不可重试错误。
+- 最大尝试、退避、dead-letter 和重放权限。
+- lag、成功、重试和失败 metrics。
+
+Worker 重复执行不能创建重复通知、消息、embedding 或状态转换。
 
 ## 测试应该放在哪里
 
@@ -144,6 +180,33 @@ Flutter 中最常见的异步 bug 是：请求发出时页面还在，请求回�
 
 ## 文档同步
 
-代码改动影响接口字段时更新 [API 参考](api-reference.md)。影响业务状态机时更新 [业务流程](domain-flows.md)。影响启动、配置、部署、metrics 或排错时更新 [运行、配置与排错](operations.md)。影响工程方向、技术债或迁移策略时更新 [路线图与架构风险](roadmap.md)。
+代码改动影响接口字段时更新 [API 参考](api-reference.md)。影响业务状态机时更新 [业务流程](domain-flows.md)或[信息模型](information-model.md)。影响 Agent 权限和工具时更新[Agent 系统设计](agent-system.md)。影响身份、审核、隐私和管理员边界时更新[信任与安全](trust-safety.md)。影响启动、配置、部署、metrics 或排错时更新 [运行、配置与排错](operations.md)。影响生产阶段和技术债时更新 [生产路线图](roadmap.md)。
+
+能力状态改动遵循：
+
+```text
+[目标态]
+  -> migration / backend / client / tests 完成
+  -> [实验中]
+  -> 真实用户与生产门槛验证
+  -> [已实现]
+```
+
+不要因为某张表或某个 endpoint 已存在就直接标记稳定；如果权限、UI、故障降级和测试尚未完成，仍应是实验中。
+
+## 架构决策记录
+
+重大决策先记录在对应专题文档，内容至少包括：
+
+| 项目 | 要回答的问题 |
+| --- | --- |
+| Context | 当前问题、约束、容量和风险是什么？ |
+| Decision | 选择什么，明确不选择什么？ |
+| Consequences | 得到什么，付出什么维护成本？ |
+| Compatibility | 对 schema、API、客户端和历史数据有什么影响？ |
+| Verification | 用什么测试、指标或演练证明有效？ |
+| Exit criteria | 哪些真实信号出现时需要重新评审？ |
+
+当同一决策影响三个以上模块、需要长期兼容或存在多个合理替代方案时，再在后续 PR 拆为独立 ADR。ADR 只记录决定和后果，不复制完整 API 或运维手册。
 
 文档不是 PR 的装饰品。它是下一位同学接手时的地图。

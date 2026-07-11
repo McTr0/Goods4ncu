@@ -1,118 +1,180 @@
-# 架构与分层
+# 当前架构与代码分层
 
-Good4NCU 的架构目标不是把代码分成很多目录，而是让每一层承担稳定的责任。对新人来说，最重要的能力不是背目录名，而是看到一个需求时能判断它属于“展示、协议、业务规则、数据访问、后台任务、AI 工具、运维配置”中的哪一类。
+| 项目 | 内容 |
+| --- | --- |
+| 适用读者 | 后端、Flutter、AI 工程师以及需要修改当前代码的贡献者 |
+| 当前状态 | 只描述当前仓库已经存在的结构；目标生产架构单独维护 |
+| 事实来源 | `src/`、`mobile/lib/`、`migrations/`、Cargo/Flutter 配置和当前路由 |
+| 最后核对范围 | Axum AppState、service/repository、HTTP/SSE/WebSocket、workers、LLM provider 和 Flutter 分层 |
 
-## 总体链路
+这篇文档回答“当前代码怎样工作、改动应该落在哪一层”。多校园、transactional outbox、多副本实时通信和生产 SLO 见[生产架构](production-architecture.md)。
+
+## 当前总体链路
 
 ```text
-Flutter App
-  pages / components
-  providers / controllers
-  services
-        |
-        | HTTP JSON, SSE, WebSocket
-        v
-Rust Axum Backend
-  api handlers
-  middleware
-  services
-  repositories
-  agents / llm
-        |
-        | SQL + transactions + vector queries
-        v
-PostgreSQL + pgvector
+Flutter Web / Mobile
+  -> HTTP JSON：认证、出收、用户、成交、管理、普通聊天操作
+  -> SSE：小帮流式回复
+  -> WebSocket：消息、通知、typing、会话和通话信令事件
+  -> Rust Axum Router
+  -> middleware：CORS、body limit、rate limit、token denylist、metrics、安全响应头
+  -> handler：解析协议和认证上下文
+  -> service：权限、状态机、事务和后台任务规则
+  -> repository / sqlx：PostgreSQL + pgvector
+  -> LLM / moderation / OSS 等外部 provider
 ```
 
-Flutter 负责交互和本地状态，Rust 后端负责可信业务规则，PostgreSQL 保存事实。pgvector 没有引入一个单独的向量数据库，而是和关系型数据放在同一个 PostgreSQL 实例里。这让部署简单，但也要求启动时检查 `documents.embedding` 的维度与配置一致，否则语义搜索会在运行时才失败。
+当前后端通常作为一个进程运行。PostgreSQL 同时保存账号、信息意图、聊天、成交、审核、通知和 embedding。Redis 只在配置后用于限流；业务事件主要使用进程内 channel，WebSocket 连接也由单实例内存管理。
 
-## HTTP、SSE 和 WebSocket
+## 协议边界
 
-HTTP JSON 是主协议。注册、登录、商品、订单、收藏、通知、管理员操作和大多数聊天动作都走普通 HTTP。它适合明确的请求/响应：客户端发一个动作，服务端完成校验、写库并返回结果。
+### HTTP JSON
 
-SSE 用于 AI 流式回复。AI 生成文本可能耗时较长，如果只用普通 HTTP，用户只能等到最终答案；SSE 可以让服务端一段段推送，移动端逐步显示“正在生成”。本项目的 AI 单轮和流式入口在 `src/api/chat.rs`。
+HTTP 是持久业务操作的主要入口。创建 offer/wanted、发起 Conversation、写 Message、确认 DealRecord 和管理动作最终都必须先写数据库，再返回成功。
 
-WebSocket 用于实时通知推送。客户端连接 `GET /api/ws`，用 `Authorization: Bearer <jwt>` 认证。连接建立后，通知服务可以把 JSON payload 推送给该用户的所有在线设备。WebSocket 不是数据库，它只是投递通道；真正的通知仍然落在 `notifications` 表里。
+客户端不能因为按钮点击或 socket 收到事件就自行假设业务成功。HTTP 409 等状态冲突是正常业务结果，应展示可恢复提示。
 
-## 后端分层
+### SSE
+
+SSE 用于 Agent token 流式输出。服务端保存用户消息，调用 LLM/工具并逐段输出；只有正常完成才把完整助手回复作为一条历史消息保存。
+
+中途断开不能把半截内容伪装成完整回复。SSE 失败也不能影响普通搜索、发布表单和用户聊天。
+
+### WebSocket
+
+WebSocket 用于低延迟提示，不是业务事实来源。事件包括 conversation/message、read、typing、space、call 和 notification 等。
+
+客户端断线后要通过 HTTP 列表和消息接口补偿。当前连接表是单进程内存结构，因此多副本 fan-out 仍是生产缺口。
+
+## 后端目录和职责
+
+| 目录 | 当前职责 | 修改原则 |
+| --- | --- | --- |
+| `src/api/` | Axum 路由、请求/响应模型、认证提取和协议适配 | handler 保持薄，不嵌入跨表业务事务 |
+| `src/services/` | 成交、通知、审核、token、后台 worker 和状态转换 | service 是权限和事务的最终边界 |
+| `src/repositories/` | 用户、listing、chat、auth 等 SQL 封装 | 统一 ID/tenant/status 过滤，不让 handler 拼 SQL |
+| `src/agents/` | IntentRouter、市场工具、议价和 Agent 模型 | 工具调用 service，不信任模型提供的身份 |
+| `src/llm/` | Gemini、MiniMax、OpenAI-compatible provider | 隔离 provider 差异、超时和流式实现 |
+| `src/middleware/` | rate limit 等横切入口控制 | 只做通用控制，不决定领域状态 |
+| `src/config/`、`src/config.rs` | env/TOML/default 配置合并和验证 | 密钥不写日志，生产配置 fail fast |
+| `migrations/` | 向前数据库 schema 和数据迁移 | 已合并迁移不修改，新迁移兼容已有数据 |
+
+`AppState` 当前按 secrets、infrastructure 和 agents 分组，并保留具体 repository。它仍是共享应用状态，不等于领域模块已经完全解耦。
+
+## 请求如何穿过各层
+
+以发布 wanted 为例：
+
+```text
+POST /api/listings
+  -> handler 解析 JWT、body 和 direction
+  -> 文本审核和字段校验
+  -> repository/service 写 inventory
+  -> 写或更新 documents embedding
+  -> 可选提交媒体审核 job
+  -> 返回 listing JSON
+```
+
+目标多校园设计要求 `TenantContext`，但当前路径还没有完整 campus/membership 边界。修改当前代码时，不要因为目标文档有 campus_id 就伪造当前字段。
+
+## 事务边界
+
+事务属于 service 或明确的业务工具适配层，因为只有这些层知道哪些事实必须一起成功。
+
+当前线下成交语义：
+
+- 创建 `intent_pending` 时只创建成交意向，不立即把 listing 标为 sold。
+- 卖家确认时，在同一事务更新成交记录；如果选择自动下架，再一起更新 listing。
+- HITL 接受或接受 counter 时，锁定请求、检查状态、创建确认的成交记录、写系统消息和更新请求应共同完成。
+- 通知可以在事务提交后 best-effort 发送，但生产目标是通过持久 outbox 保证可重试。
+
+旧文档中“创建订单时先把商品标 sold”已经不符合当前线下成交模型，不应继续引用。
+
+## 当前信息和推荐架构
+
+`inventory` 当前同时承载 offer 与 wanted：
+
+```text
+direction=offer  -> price 是出售价，condition 是当前成色
+direction=wanted -> price 是预算上限，condition 是最低可接受成色
+```
+
+`documents` 保存商品/需求的检索文本和 embedding。相似推荐使用 pgvector 距离；首页 Feed 对登录用户结合收藏和买家成交意向的分类亲和度，再按新鲜度排序。
+
+wanted matches 使用分类、预算、成色和 active 状态等条件，并排除自己的 offer。完整的 campus 过滤、解释字段、用户反馈和多样性控制仍属于目标态。
+
+更完整的对象定义见[信息模型](information-model.md)，目标推荐原则见[产品设计](product-design.md)。
+
+## 当前聊天架构
+
+用户直聊的底层事实：
+
+- `chat_conversations`：realtime/mail、参与者、状态、主题和过期时间。
+- `chat_conversation_members`：成员级未读、归档和阅读偏好。
+- `chat_conversation_events`：握手、关闭和过期时间线。
+- `chat_messages`：正文、媒体 URL/Base64 fallback、reply、quote、编辑和审核状态。
+- `chat_blocks`：屏蔽关系。
+
+收件箱的 Thread 是按对方用户聚合的查询视图，不会合并底层 Conversation。群组、频道、message reaction/hide/report、call signaling 和 Secret Chat 原型位于 user_chat 模块。
+
+[实验中][待弃用] Secret Chat 使用服务器不可读密文，不属于生产方向。治理和迁移见[信任与安全](trust-safety.md)。
+
+当前 `src/api/user_chat/message.rs` 和部分 Flutter 聊天页面职责密度较高。拆分时保持 Conversation 状态转换集中在 service，不要把复杂度从一个大文件搬到另一个大文件。
+
+## 当前 Agent 与 RAG
+
+自然语言入口先经过内容审核和 IntentRouter，再根据意图直接回答、检索或调用 Agent。Provider 支持 Gemini、MiniMax 和 OpenAI-compatible chat；embedding 当前仍主要依赖 Gemini 客户端和配置维度。
+
+市场 Agent 已挂载发布、搜索、详情、更新、删除、成交意向、议价和“我的发布”等工具。工具会做权限和状态检查，但统一 ActionPlan/确认 token 仍未完成，因此新增写工具前必须阅读[Agent 系统设计](agent-system.md)。
+
+回复助手是受限 agent，只生成三个不超过限制的草稿，不读取媒体，不自动发送，也不挂载成交工具。
+
+## Flutter 分层
 
 | 层 | 目录 | 职责 |
 | --- | --- | --- |
-| API handler | `src/api/` | 定义路由、解析请求、提取认证、做轻量参数校验、把工作交给 service 或 repository、映射 HTTP 错误。 |
-| Middleware | `src/middleware/` | 处理跨接口逻辑，例如管理员权限、限流、请求指标、CORS 相关行为。 |
-| Service | `src/services/` | 承载业务规则、状态机、事务边界、后台 worker 和跨 repository 的协调。 |
-| Repository | `src/repositories/` | 封装 SQL 查询和写入，让上层不直接拼接数据库细节。 |
-| Agents | `src/agents/` | 处理 AI 意图路由和工具调用，例如搜索商品、创建 listing、购买或议价。 |
-| LLM providers | `src/llm/` | 封装 Gemini、MiniMax 等 provider 差异，负责 prompt、stream、embedding 和熔断。 |
-| Config / DB | `src/config.rs`、`src/db.rs` | 加载配置、初始化数据库、启用 pgvector、运行迁移、检查 embedding 维度。 |
+| Pages | `mobile/lib/pages/` | 页面布局、路由响应和用户交互 |
+| Components | `mobile/lib/components/` | 可复用视觉和交互组件 |
+| Providers / Controllers | `mobile/lib/providers/` 和部分 controller | 异步状态、刷新、缓存和跨组件数据流 |
+| Services | `mobile/lib/services/` | HTTP、SSE、WebSocket、token 和协议封装 |
+| Models | `mobile/lib/models/` | API JSON 与本地展示需要的数据模型 |
+| Theme / Responsive | `mobile/lib/theme/` | 色彩、间距、深色模式和布局断点 |
+| l10n | `mobile/lib/l10n/` | 所有用户可见中英文文案 |
 
-handler 可以拒绝明显非法输入，比如空标题、过长字段、缺少 token。但当一个行为需要同时改多个表，或者需要遵守状态机，它就应该进入 service。比如创建订单不仅插入 `orders`，还要把商品从 `active` 改成 sold；议价接受不仅更新 `hitl_requests`，还可能创建订单、写系统消息、发通知。这些动作必须放在同一个事务里思考。
+判断原则：service 负责“怎样调用后端”，provider/controller 负责“页面当前是什么状态”，page 负责“如何展示和响应”。页面可以根据 capabilities 隐藏按钮，但不能自己认定状态转换合法。
 
-## 为什么事务边界属于 service
+所有异步 `setState`、SnackBar 和导航前检查 `mounted`。桌面与移动布局共享领域状态，不能实现两套不同业务逻辑。
 
-事务的本质是业务语义：哪些事情必须一起成功。Repository 知道“怎样执行一条 SQL”，但不应该决定“创建订单时是否也必须锁定商品”；handler 知道“这是一个 POST 请求”，但不应该决定“哪些表一起提交”。这些决策属于 service。
+## 当前数据主地图
 
-以订单为例，`OrderService` 会在事务里调用 listing repository 和 order repository：先把 active 商品标为 sold，再插入 pending 订单。如果中间任何一步失败，事务回滚。这样不会出现“商品已经卖掉但订单没创建”或“订单创建了但商品仍然可买”的半成功状态。
-
-同理，HITL 议价接受 counter 时，也必须在同一事务中锁定议价请求、确认状态仍然是 `countered`、创建订单、写系统消息、更新状态。通知推送可以在事务提交后 best-effort 执行，因为通知失败不应回滚已经达成的交易事实。
-
-## 移动端分层
-
-| 层 | 目录 | 职责 |
-| --- | --- | --- |
-| Pages | `mobile/lib/pages/` | 页面结构和用户交互，例如首页、详情页、聊天页、订单页、管理页。 |
-| Components | `mobile/lib/components/` | 可复用 UI 组件，例如价格标签、推荐轮播、聊天面板。 |
-| Services | `mobile/lib/services/` | HTTP、SSE、WebSocket、token storage 和后端协议封装。 |
-| Providers / Controllers | `mobile/lib/providers/`、部分 `pages/*_controller.dart` | 管理页面状态、异步加载、刷新、错误态和跨组件数据流。 |
-| Models | `mobile/lib/models/` | Dart 数据模型，与 API JSON 字段保持同步。 |
-| l10n | `mobile/lib/l10n/` | 用户可见文案和多语言资源。 |
-
-移动端的判断原则是：service 负责“怎么和后端说话”，provider/controller 负责“当前页面处于什么状态”，page 负责“怎么展示和响应点击”。不要把 HTTP 拼接散落在 page 里，也不要在 page 里实现订单状态机。
-
-如果新增用户可见文案，应走 `mobile/lib/l10n/`。如果新增 API 字段，需要同步更新 Dart model、service 解析和相关测试。
-
-## AI 与 RAG 数据流
-
-AI 相关流程有两条线：自然语言交互和语义检索。
-
-自然语言交互从 `src/api/chat.rs` 进入。后端先持久化用户消息，再进行意图路由。明显违规或可直接回答的请求可以不调用 LLM；需要工具执行时进入 `src/agents/`；需要模型生成时进入 `src/llm/`。LLM provider 负责把不同供应商的 API 差异包起来，外层尽量只依赖统一接口。
-
-移动端收件箱中的“小帮”是虚拟系统会话，不应伪装成普通用户，也不写入 `chat_conversations`。客户端只认识 `__agent__`，后端把它映射为 `agent:<当前用户 ID>` 后再读写 `chat_messages`。这个映射必须发生在认证之后，保证两个用户即使都使用相同公共标识，也不会进入同一段模型上下文。SSE 正常完成时才持久化完整助手回复。
-
-语义检索依赖 `documents` 表。商品发布或更新后，应把可搜索文本写成 document，并生成 embedding。推荐和相似搜索用 pgvector 的距离计算找到相近商品。这个路径常见失败点包括：文档没有写入、embedding 维度不匹配、provider key 不可用、向量索引异常、商品状态过滤不正确。
-
-AI 不是可信权限边界。AI 工具要像普通 API 一样校验用户、商品 owner、价格范围、商品状态和订单约束。模型说“帮我买这个”并不代表可以绕过 service 层。
-
-## 数据模型的主地图
-
-| 表 | 作用 |
+| 表 | 当前作用 |
 | --- | --- |
-| `users` | 用户账号、密码 hash、角色、状态、邮箱和头像等身份数据。 |
-| `refresh_tokens`、`revoked_access_tokens` | refresh token 轮换、logout、token replay 保护和 access token 撤销。 |
-| `inventory` | 商品 listing，是搜索、详情、订单和收藏的核心表。 |
-| `documents` | 商品语义检索文档和 pgvector embedding。 |
-| `orders` | 订单事实，包含 buyer、seller、listing、价格和状态时间戳。 |
-| `hitl_requests` | HITL 议价请求，记录 pending、approved、rejected、countered、expired 等状态。 |
-| `chat_conversations` | 用户直聊会话事实，保存 `realtime`/`mail` 模式、状态、参与者、主题、过期时间和版本。 |
-| `chat_conversation_members` | 每个会话成员自己的未读数、归档状态和最后阅读位置。 |
-| `chat_conversation_events` | 会话创建、接通、ACK、关闭、过期等状态事件时间线。 |
-| `chat_blocks` | 用户屏蔽关系；屏蔽后不能新建会话或继续发送。 |
-| `chat_messages` | 用户消息、AI/system 消息、直聊 `direct_conversation_id`、媒体 URL/Base64 兼容字段和已读状态。 |
-| `watchlist` | 用户收藏商品。 |
-| `notifications` | 可持久化通知，WebSocket 只是实时推送通道。 |
-| `admin_audit_logs` | 管理员关键操作审计。 |
-| `moderation_jobs` | 图片等异步审核任务。 |
+| `users` | 账号、角色、状态、邮箱、发现设置、头像和收款码 |
+| `refresh_tokens` / `revoked_access_tokens` | token 轮换、replay、logout 和撤销 |
+| `inventory` | offer/wanted 信息意图 |
+| `documents` | RAG 文档和 pgvector embedding |
+| `wanted_responses` | offer 对 wanted 的用户响应 |
+| `orders` | 线下成交意向与确认记录 |
+| `hitl_requests` | 议价 Human-In-The-Loop 状态 |
+| `chat_*` | 直聊、线程基础、群组/频道、通话、反应、举报和 Secret Chat 原型 |
+| `watchlist` | 收藏关系 |
+| `notifications` | 持久通知事实 |
+| `moderation_jobs` | 异步媒体审核任务 |
+| `admin_audit_logs` | 管理员关键操作审计 |
 
-更详细的运维视角见 [运行、配置与排错](operations.md)。
+完整关系和目标对象见[信息模型](information-model.md)。
 
-## 当前维护注意事项
+## 当前生产风险
 
-第一，核心 ID 正处在 UUID 迁移方向上。新代码要优先兼容 UUID 读写，不要把 TEXT 旧 ID 假设继续扩散。专项计划见 [路线图与架构风险](roadmap.md)。
+| 风险 | 当前表现 | 目标方向 |
+| --- | --- | --- |
+| 单校园假设 | 用户和内容没有完整 tenant context | CampusMembership、campus_id、约束和 RLS |
+| 进程内事件 | 崩溃可能丢失异步动作 | transactional outbox |
+| 单实例 WebSocket | 多副本无法直接 fan-out | Redis pub/sub + HTTP 补偿 |
+| 媒体兼容路径 | URL-first 与 Base64、静态 uploads 并存 | 私有隔离对象存储和 CDN |
+| Agent 写工具 | 未统一 ActionPlan 确认 | 分级授权、幂等执行和审计 |
+| Secret Chat | 服务器不可读，治理边界冲突 | 停止生产承诺并迁移 |
+| TEXT/UUID 并存 | join 和 fixture 可能只覆盖一类 ID | repository 兼容封装和分阶段收敛 |
+| 大模块 | user_chat 和页面承担多种职责 | 先补行为测试，再按领域拆分 |
 
-第二，移动端 `user_chat_page.dart` 和后端 `src/api/user_chat/message.rs` 承担了较多职责。改聊天功能时要格外注意不要把媒体、已读、编辑、typing、WebSocket 刷新全揉成一个更大的函数。状态转换必须留在 `ChatConversationService`，handler 不应直接写会话状态 SQL。
-
-第三，聊天媒体正在从 Base64 fallback 走向 URL-first。新路径应优先使用 `image_url`、`audio_url`，Base64 字段只是兼容旧客户端或失败兜底。
-
-第四，AI 工具调用会跨越很多层。修 AI bug 时不要只改 prompt；先确认工具、权限、数据库状态和 provider 行为。
-
-如果你准备动手开发，下一章是 [开发指南](development.md)。如果你想按业务理解系统，读 [业务流程](domain-flows.md)。
+这些风险的顺序和验收见[生产路线图](roadmap.md)。

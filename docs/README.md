@@ -1,55 +1,104 @@
-# Good4NCU 文档入口
+# Goods4ncu（续樟）文档入口
 
-Good4NCU 是一个面向南昌大学校园二手交易场景的全栈工程：Flutter 移动端负责用户界面，Rust Axum 后端负责 API、实时消息和业务事务，PostgreSQL 与 pgvector 同时承载关系型数据和语义检索，AI Agent 帮助用户搜索、发布、议价和理解商品。
-
-这份 README 不是一本完整手册，而是整套文档的入口。新人应该从这里开始，根据自己的任务进入对应章节；同一主题只在一个专题文件中维护，其他地方只链接，避免同一件事在多个文档里慢慢分叉。
-
-## 推荐阅读路径
-
-| 你现在想做什么 | 建议路线 |
+| 项目 | 内容 |
 | --- | --- |
-| 第一次接触项目 | 先读 [新人导览](onboarding.md)，再读 [架构与分层](architecture.md)，最后按需要进入 [开发指南](development.md)。 |
-| 写后端功能 | 先确认 [架构与分层](architecture.md) 的边界，再按 [开发指南](development.md) 选择测试，接口细节查 [API 参考](api-reference.md)。 |
-| 改 Flutter 页面 | 先看 [新人导览](onboarding.md) 的产品角色，再看 [架构与分层](architecture.md) 的移动端分层，协议字段查 [API 参考](api-reference.md)。 |
-| 排查线上或本地问题 | 从 [运行、配置与排错](operations.md) 开始，再跳到对应的 [业务流程](domain-flows.md)。 |
-| 准备 PR | 读 [贡献指南](contributing.md)，然后回到 [开发指南](development.md) 选择最小但可信的验证命令。 |
-| 判断当前工程方向 | 读 [路线图与架构风险](roadmap.md)，尤其是 UUID 迁移、媒体上传和大文件拆分部分。 |
+| 适用读者 | 第一次了解续樟的读者，以及需要定位产品、工程或运维文档的协作者 |
+| 当前状态 | 文档同时描述当前实现和生产目标，所有目标能力必须使用状态标记 |
+| 事实来源 | `docs/` 专题文档、Axum 路由、数据库迁移、Flutter 页面和测试 |
+| 最后核对范围 | 产品设计、领域模型、Agent、信任安全、当前架构、生产架构和工程手册 |
+
+续樟是以校园可信身份为基础、由智能匹配和 Agent 辅助的信息流通平台。首个生产版本聚焦物品的“出 `offer` / 收 `wanted`”：用户表达自己愿意提供什么或正在寻找什么，系统帮助信息被合适的人发现，并在用户明确授权下推进沟通和线下成交。
+
+平台不托管资金、不确认付款、不追踪物流。Agent 不是新的权限主体，高风险动作必须由用户确认。
+
+## 能力状态标记
+
+文档使用以下标记区分事实与方向：
+
+| 标记 | 含义 |
+| --- | --- |
+| `[已实现]` | 当前代码、迁移和用户路径已经具备，仍可能存在生产硬化任务 |
+| `[实验中]` | 有 API 或界面原型，但不属于稳定生产承诺 |
+| `[目标态]` | 已做出设计决策，尚未完整实现 |
+| `[待弃用]` | 当前仍需兼容，但不应继续扩大使用 |
+
+没有标记的教程性说明只解释概念，不代表对应生产能力已经上线。
+
+## 三条阅读路线
+
+### 理解产品为什么这样设计
+
+1. [产品设计](product-design.md)：理解“出/收”、用户控制权、产品边界与成功指标。
+2. [信息模型](information-model.md)：理解意图、匹配、沟通、成交和审核事实。
+3. [Agent 系统设计](agent-system.md)：理解 Agent 能做什么、何时必须确认。
+4. [信任与安全](trust-safety.md)：理解身份、审核、隐私、收款码和治理边界。
+
+### 开始开发或修改代码
+
+1. [新人导览](onboarding.md)：通过一次完整用户旅程建立系统地图。
+2. [当前架构与分层](architecture.md)：确认 Flutter、Axum、service、repository、worker 和 LLM 的边界。
+3. [业务流程](domain-flows.md)：找到对应状态机和失败路径。
+4. [API 参考](api-reference.md)：核对当前路由、字段和目标接口。
+5. [开发指南](development.md)与[贡献指南](contributing.md)：实现、测试和提交。
+
+### 部署、排错或规划生产化
+
+1. [生产架构](production-architecture.md)：理解容量、租户、持久事件、SLO 和灾备目标。
+2. [运行、配置与排错](operations.md)：处理本地与当前部署问题。
+3. [生产路线图](roadmap.md)：查看阶段、前置条件、验收门槛和退出标准。
+4. [集成测试手册](integration-testing.md)：按真实用户操作验证系统。
 
 ## 文档地图
 
-| 文档 | 职责 |
+| 文档 | 唯一职责 |
 | --- | --- |
-| [新人导览](onboarding.md) | 像教材第一章一样解释 Good4NCU 是什么、有哪些角色、一次交易怎样发生，以及新人常见术语。 |
-| [架构与分层](architecture.md) | 解释 Flutter、Rust Axum、PostgreSQL、pgvector、WebSocket、SSE、AI/RAG 的结构关系和代码边界。 |
-| [开发指南](development.md) | 说明本地启动、常用命令、测试选择、常见开发任务、SQL 安全和 Flutter async 生命周期。 |
-| [业务流程](domain-flows.md) | 串联认证、商品、直聊、AI Agent、订单、HITL 议价、内容审核和媒体上传的业务状态流。 |
-| [API 参考](api-reference.md) | 记录常用接口的请求形状、响应边界、权限要求和行为约束。 |
-| [运行、配置与排错](operations.md) | 说明环境变量、TOML 搜索顺序、数据库要求、迁移、CORS、metrics、日志、表地图和排错路径。 |
-| [Codex Browser 集成测试](integration-testing.md) | 说明如何用 Codex Browser 和 API driver 模拟真实用户日常使用、聊天、交易、故障和响应式验收。 |
-| [路线图与架构风险](roadmap.md) | 记录当前工程重点、UUID 迁移专项、下一步清理方向和需要持续关注的架构风险。 |
-| [贡献指南](contributing.md) | 说明分支命名、Conventional Commits、PR 内容、合并前检查和新人第一个 PR 的选择。 |
+| [产品设计](product-design.md) | 产品使命、出/收哲学、用户旅程、边界和成功指标 |
+| [信息模型](information-model.md) | 领域对象、状态机、事实边界、事件和多租户不变量 |
+| [Agent 系统设计](agent-system.md) | Agent 权限、ActionPlan、工具、RAG、安全和评估 |
+| [信任与安全](trust-safety.md) | 身份、审核、通信治理、收款码、隐私、申诉和审计 |
+| [生产架构](production-architecture.md) | 模块化单体、多校园、outbox、Redis、存储、SLO 和恢复 |
+| [新人导览](onboarding.md) | 面向新人的教材式项目入口和术语解释 |
+| [当前架构与分层](architecture.md) | 只描述当前代码结构、运行链路和已知风险 |
+| [业务流程](domain-flows.md) | 当前与目标业务状态流及失败路径 |
+| [API 参考](api-reference.md) | 当前公共接口和明确标记的目标契约 |
+| [开发指南](development.md) | 本地开发、命令、测试选择和常见任务 |
+| [运行、配置与排错](operations.md) | 配置、数据库、迁移、日志、指标、runbook 和事故处理 |
+| [集成测试手册](integration-testing.md) | API 与 Codex Browser 的真实用户验收路径 |
+| [生产路线图](roadmap.md) | 从当前代码到生产平台的阶段计划和验收门槛 |
+| [贡献指南](contributing.md) | 分支、commit、PR、review、ADR 和文档同步规则 |
 
-## 配置模板和仓库规则
+## 当前实现与目标形态
 
-[环境变量模板](.env.example) 和 [TOML 配置模板](config.toml.example) 继续独立存在。它们是可复制的样例，不并入叙述性文档：`.env` 负责密钥和连接串，`good4ncu.toml` 负责非敏感运行参数。
+当前系统是 Rust Axum + Flutter + PostgreSQL/pgvector 的模块化单体，已经具备认证、offer/wanted、推荐、直聊、群组/频道原型、Agent 工具、线下成交记录、审核和管理能力。
 
-根目录 [AGENTS.md](../AGENTS.md) 也继续独立存在。它面向编码代理和仓库协作规则，不是新人学习项目的主线文档；人类读者需要理解工程时，以 `docs/README.md` 为入口。
+生产目标不是立即拆成微服务，而是先补齐：校园 membership、多租户范围、Agent 确认协议、可解释推荐、统一审核案件、对象存储隔离、transactional outbox、多副本实时 fan-out、SLO 和灾难恢复。
+
+完整差距和顺序见[生产路线图](roadmap.md)。
+
+## 配置与仓库规则
+
+[环境变量模板](.env.example)保存密钥和连接串示例，[TOML 配置模板](config.toml.example)保存非敏感运行参数。真实密钥不得提交。
+
+根目录 [AGENTS.md](../AGENTS.md) 面向编码代理和仓库协作，不取代人类设计文档。编码代理重启后，进行 GUI 验收前必须重新确认前后端真实可访问。
 
 ## 文档维护规则
 
-同一主题只在一个文件维护。API 字段只写在 [API 参考](api-reference.md)，状态机只写在 [业务流程](domain-flows.md)，配置和排错只写在 [运行、配置与排错](operations.md)，路线图只写在 [路线图与架构风险](roadmap.md)。其他文件需要提到时，只描述上下文并链接过去。
+1. 同一主题只在一份专题文档详细维护，其他地方只给上下文和链接。
+2. 当前事实优先从 migration、service、repository、handler 和客户端模型核对。
+3. 目标接口必须标记 `[目标态]`，不得混入当前 curl 示例。
+4. 新功能改变领域事实、权限、API、配置、SLO 或用户路径时，同一个 PR 更新对应文档。
+5. 重大架构决策在相关设计文档记录背景、选择、后果和退出条件；稳定后再拆独立 ADR。
+6. 文档以中文为主，保留必要英文术语并在首次出现时解释。
 
-新增文档前先问一个问题：它是否真的有新的职责？如果只是补充某个已有主题，应该更新对应专题文件，而不是再开一个入口。文档可以长，但职责要窄；可以详细，但不要复制粘贴同一段解释。
+## 最短启动索引
 
-## 快速启动索引
-
-完整说明见 [开发指南](development.md) 和 [运行、配置与排错](operations.md)。第一次本地启动通常只需要记住这个顺序：
+完整步骤见[开发指南](development.md)和[运行排错](operations.md)：
 
 ```bash
 cp docs/.env.example .env
-cp docs/config.toml.example good4ncu.toml
+cp docs/config.toml.example goods4ncu.toml
 cargo check --locked
 cargo run
 ```
 
-移动端依赖和运行见 [开发指南](development.md)。如果你还不知道每条命令背后的含义，不要急着背命令，先读 [新人导览](onboarding.md)：理解系统地图以后，命令会变得非常自然。
+Flutter Web/App 的依赖、API base URL 和测试命令见[开发指南](development.md)。

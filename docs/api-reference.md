@@ -1,6 +1,20 @@
 # API 参考
 
-这篇文档记录常用接口的请求形状、权限要求和行为边界。它不是完整 OpenAPI 描述，字段以当前 Rust request/response struct 为准。业务状态机请看 [业务流程](domain-flows.md)。
+| 项目 | 内容 |
+| --- | --- |
+| 适用读者 | 后端、Flutter、集成测试和需要核对当前/目标接口的工程师 |
+| 当前状态 | 未版本化 `/api/*` 为当前实现；单独标记的 `/api/v1/*` 为目标契约 |
+| 事实来源 | `src/api/mod.rs` 路由、Rust request/response struct、Flutter service/model 和接口测试 |
+| 最后核对范围 | Auth、Users、Listings、Chat/Threads/Spaces、AI、Deals、Admin、Upload、Recommendations、Health/Metrics |
+
+这篇文档记录接口形状、权限要求和行为边界。它不是自动生成的完整 OpenAPI；当前字段以 Rust struct 和 handler 为准。业务状态机见 [业务流程](domain-flows.md)，目标对象见[信息模型](information-model.md)。
+
+接口使用以下状态：
+
+- `[已实现]`：当前 Axum router 已注册。
+- `[实验中]`：当前可调用，但没有稳定生产承诺。
+- `[目标态]`：设计契约，当前 router 不存在。
+- `[待弃用]`：当前为兼容保留，不应有新客户端依赖。
 
 除特别说明外，需要登录的接口都使用：
 
@@ -9,7 +23,22 @@ Authorization: Bearer <access_token>
 Content-Type: application/json
 ```
 
-分页接口通常使用 `limit` 和 `offset`，后端会限制最大 `limit`。金额对外多使用 `*_cny`，内部交易逻辑使用 cents 整数。
+当前分页接口混合使用 `limit/offset` 和 cursor，具体以各节为准。金额对外多使用 `*_cny`，内部关键逻辑使用 cents 整数。
+
+[已实现] 每个 HTTP 响应包含服务端生成的 `X-Request-ID`；浏览器 CORS 可以读取该 header。当前未版本化错误为兼容旧客户端保留 `error` 字符串，同时增加稳定字段：
+
+```json
+{
+  "error": "请求错误: 输入无效",
+  "code": "bad_request",
+  "message": "请求错误: 输入无效",
+  "trace_id": "uuid"
+}
+```
+
+`trace_id` 与响应 `X-Request-ID` 相同，可用于关联日志。客户端应逐步使用 `code` 判断类别、使用 `message` 展示，并继续兼容旧 `error`。目标 `/api/v1` 会在版本边界内切换为嵌套 error envelope。
+
+当前稳定代码包括业务层的 `bad_request`、`unauthorized`、`authentication_failed`、`forbidden`、`not_found`、`conflict`、`rate_limited`、`content_violation` 和 `internal_error`，以及 Axum 在进入 handler 前返回的 `validation_failed`、`method_not_allowed`、`payload_too_large`、`unsupported_media_type`。`/api/*` 的框架拒绝也使用上述 JSON 结构；静态 `/uploads/*` 不会被错误中间件改写。
 
 ## Auth
 
@@ -85,13 +114,13 @@ Content-Type: application/json
 
 ### GET `/api/user/profile`
 
-需要登录。返回当前用户资料，包括 `user_id`、`username`、`email`、`student_id`、`avatar_url`、`role`、`created_at`、`chat_read_receipt_mode` 和 `discoverability`。
+需要登录。返回当前用户资料，包括 `user_id`、`username`、`email`、`student_id`、`avatar_url`、`role`、`created_at`、`chat_read_receipt_mode`、`discoverability` 和 `payment_qr`。
 
 `student_id` 是只读派生字段：当学校邮箱形如 `{8-12位数字}@email.ncu.edu.cn` 时，后端从邮箱本地部分推断；否则为 `null`。`discoverability.username` 默认 `true`，`discoverability.email` 和 `discoverability.student_id` 默认 `false`。
 
 ### PATCH `/api/user/profile`
 
-需要登录。可更新昵称、学校邮箱、头像 URL、查找设置和全局聊天已读策略。邮箱更新后会同步重新推断 `student_id`。`chat_read_receipt_mode` 可选 `auto` 或 `manual`，默认 `auto`。
+需要登录。可更新昵称、学校邮箱、头像 URL、查找设置、全局聊天已读策略和收款码设置。邮箱更新后会同步重新推断 `student_id`。`chat_read_receipt_mode` 可选 `auto` 或 `manual`，默认 `auto`。
 
 ```json
 {
@@ -102,9 +131,29 @@ Content-Type: application/json
     "username": true,
     "email": false,
     "student_id": true
+  },
+  "payment_qr": {
+    "wechat_url": "https://cdn.example.com/payment/wechat.jpg",
+    "alipay_url": null,
+    "show_wechat": true,
+    "show_alipay": false
   }
 }
 ```
+
+`show_wechat/show_alipay` 默认 `false`。URL 为空时不得开启公开展示。收款码只表示用户自愿公开的线下收款信息，不代表平台验证收款人或担保付款。
+
+### GET `/api/users/{id}`
+
+公开用户主页。返回允许公开的用户名、头像、加入时间、active listing 总数和用户主动公开的 `payment_qr` URL。当前计数不拆分出/收。不会返回完整邮箱、学号、发现设置、公开开关或私有收款码。
+
+### GET `/api/user/listings`
+
+需要登录。返回当前用户自己的 listing，供“我的发布”和推荐 wanted response 选择器使用。支持分页；当前客户端可按 `direction` 在本地或接口能力范围内展示出/收分组。
+
+### GET `/api/users/search`
+
+需要登录的兼容用户搜索接口。新“找同学”体验优先使用权限和脱敏语义更明确的 `/api/users/lookup`。
 
 ### GET `/api/users/lookup`
 
@@ -153,6 +202,7 @@ Content-Type: application/json
 | `search` | 文本搜索，最长 200 字符。 |
 | `sort` | `newest`、`price_asc`、`price_desc`、`condition_desc`。 |
 | `min_price_cny`、`max_price_cny` | CNY 价格区间。 |
+| `direction` | `offer`、`wanted`、`all`；默认 `offer` 保持旧客户端兼容。 |
 
 返回：
 
@@ -164,6 +214,7 @@ Content-Type: application/json
       "title": "二手教材",
       "category": "books",
       "brand": "高等教育出版社",
+      "direction": "offer",
       "condition_score": 8,
       "suggested_price_cny": 29.9,
       "status": "active",
@@ -182,10 +233,13 @@ Content-Type: application/json
 
 ### POST `/api/listings`
 
-需要登录。创建商品，走字段校验和文本审核。可选 `image_url` 必须以 `http://` 或 `https://` 开头，并会进入图片审核任务。
+需要登录。创建 offer 或 wanted，走字段校验和文本审核。`direction` 默认 `offer`。可选 `image_url` 必须以 `http://` 或 `https://` 开头，并会进入图片审核任务。
+
+[已实现] 客户端可以发送 `Idempotency-Key` header，值为 1–128 个不含空格的 ASCII 字符。相同用户用同一 key 重试完全相同的规范化发布内容时，接口返回第一次创建的 listing id，不会再建条目或重复提交图片审核；同一 key 搭配不同内容返回 `409 conflict`。没有该 header 的旧客户端保持原行为。
 
 ```json
 {
+  "direction": "offer",
   "title": "iPhone 13",
   "category": "electronics",
   "brand": "Apple",
@@ -197,14 +251,19 @@ Content-Type: application/json
 }
 ```
 
+wanted 使用同一请求形状，但价格解释为预算上限、成色解释为最低可接受成色。当前 V1 信息类型固定为物品，不接受任意 `kind`。
+
 返回：
 
 ```json
 {
   "id": "listing-id",
-  "message": "商品发布成功"
+  "message": "商品发布成功",
+  "replayed": false
 }
 ```
+
+`replayed=true` 表示本次响应复用了先前成功结果。Flutter 发布页会为一次表单内容生成 UUID；网络失败后原样重试复用该 UUID，用户修改发布内容后生成新 UUID。
 
 ### PUT `/api/listings/{id}`
 
@@ -217,6 +276,25 @@ Content-Type: application/json
 ### POST `/api/listings/{id}/relist`
 
 需要登录且必须是 owner。把已售或已删除商品重新上架，返回 `status: active`。
+
+### GET `/api/listings/{id}/matches`
+
+需要登录。`id` 必须指向 active wanted。返回满足分类、预算、最低成色和 active 约束的 offer，排除需求方自己的内容。存在 embedding 时结合向量相似度，无 embedding 时回退到条件、关键词和新鲜度。
+
+对 offer 调用返回 bad request。当前响应还没有生产目标中的 `rank_reason` 和 `match_summary` 稳定契约。
+
+### POST `/api/listings/{id}/responses`
+
+需要登录。提供方选择自己的 active offer 响应一条 wanted：
+
+```json
+{
+  "offer_listing_id": "my-active-offer-id",
+  "message": "这台平板符合你的预算，可以看看"
+}
+```
+
+不能推荐别人的商品、wanted、sold 或 deleted 内容。同一 responder/offer/wanted 不会产生重复 pending response；成功后写入通知。Response 不自动创建聊天或成交记录。
 
 ### POST `/api/listings/recognize`
 
@@ -234,6 +312,18 @@ Content-Type: application/json
 
 返回合法分类，例如 `electronics`、`books`、`digitalAccessories`、`dailyGoods`、`clothingShoes`、`other`。
 
+## Legacy Conversation History
+
+### GET `/api/conversations` [待弃用]
+
+需要登录。按旧 `chat_messages.conversation_id` 语义列出用户参与的历史，使用 `limit/offset`。它不等同于新的联系人 Thread，也不承载 realtime/mail 状态机。
+
+### GET `/api/conversations/{id}/messages` [待弃用]
+
+需要登录。只有当当前用户是该旧会话至少一条消息的 sender/receiver 时才可读取，避免 IDOR。返回 sender、sender_username、content、is_agent 和 timestamp 等旧字段。
+
+新直聊使用 `/api/chat/threads` 与 `/api/chat/conversations/*`，小帮使用 `/api/chat/assistant`。新增客户端不应依赖这两个旧接口。
+
 ## User Chat
 
 用户直聊已经从“永久好友连接”改为“每次联系创建独立会话”。会话有两种模式：
@@ -244,6 +334,14 @@ Content-Type: application/json
 公共会话字段包括 `id`、`mode`、`state`、`initiator_id`、`recipient_id`、`other_user_id`、`other_username`、`listing_id`、`subject`、`last_message`、`unread_count`、`read_receipt_mode`、`effective_read_receipt_mode`、`expires_at`、`is_blocked` 和 `capabilities`。`read_receipt_mode` 是本会话覆盖项，可为 `inherit`、`auto` 或 `manual`；`effective_read_receipt_mode` 是后端合并全局默认后的实际行为。`capabilities` 告诉移动端当前用户是否可以 `respond`、`ack`、`send`、`close`、`archive` 或 `restart`。
 
 非法状态转换返回 `409 invalid_conversation_state`。重复创建和重复发送依赖客户端 UUID 幂等。
+
+### GET `/api/chat/threads`
+
+需要登录。按 `other_user_id` 聚合收件箱，让同一聊天对象只返回一个 Thread。支持 `mode=all|realtime|mail`。返回对方标识、最近活动/预览、总未读、conversation/mail/realtime/pending 数量和 active realtime 状态。
+
+### GET `/api/chat/threads/{peer_user_id}`
+
+需要登录。返回当前用户与指定对方之间的 Conversation 卡组，按最近活动排序。只包含当前用户参与的会话，不泄露第三方历史。Thread 是查询聚合，不改变底层 Conversation ID 和状态机。
 
 ### POST `/api/chat/conversations`
 
@@ -360,6 +458,37 @@ Content-Type: application/json
 }
 ```
 
+### POST `/api/chat/messages/{id}/reaction`
+
+需要登录且消息对当前用户可见。设置或替换当前用户的单个 emoji reaction。
+
+```json
+{
+  "emoji": "👍"
+}
+```
+
+### DELETE `/api/chat/messages/{id}/reaction`
+
+移除当前用户对该消息的 reaction，不影响其他用户。
+
+### POST `/api/chat/messages/{id}/hide`
+
+“仅对自己删除”。消息从当前用户列表隐藏，对方仍可见，数据库原文和必要审核记录保留。当前接口不提供用户 hard delete。
+
+### POST `/api/chat/messages/{id}/report`
+
+举报当前用户可见的消息：
+
+```json
+{
+  "reason": "harassment",
+  "details": "可选补充说明"
+}
+```
+
+同一用户不能重复举报同一消息。普通用户不会通过该接口获得审核处理细节。
+
 ### POST `/api/chat/conversations/{id}/typing`
 
 需要登录且必须是会话成员。只适用于 `realtime/active`。邮件不发送 typing 事件。
@@ -385,6 +514,46 @@ Content-Type: application/json
 ### DELETE `/api/chat/blocks/{id}`
 
 需要登录。取消屏蔽指定用户。
+
+### GET/POST `/api/chat/spaces` [实验中]
+
+GET 返回当前用户可见的 group/channel；POST 创建空间，body 包含 `kind=group|channel`、名称和可选描述。创建者成为 owner。
+
+### GET `/api/chat/spaces/{id}` [实验中]
+
+返回空间详情、当前用户角色和能力。非成员或被 banned 用户按可见性规则拒绝。
+
+### POST `/api/chat/spaces/{id}/members` [实验中]
+
+owner/admin 添加成员。成员角色和跨校园限制仍需生产硬化。
+
+### DELETE `/api/chat/spaces/{id}/members/{user_id}` [实验中]
+
+owner/admin 移除成员，或按 handler 规则处理退出。不能让普通成员提升角色或移除 owner。
+
+### GET/POST `/api/chat/spaces/{id}/messages` [实验中]
+
+Group 成员按角色发言；Channel 只有 owner/admin 发言，成员可读、reaction 和举报。支持 `reply_to_message_id`。
+
+### POST `/api/chat/calls` [实验中]
+
+在 active realtime 一对一会话中创建 WebRTC call signaling。后端只转发信令，不处理媒体流。
+
+### POST `/api/chat/calls/{id}/answer` [实验中]
+
+会话成员接听并提交 answer。非成员或非 active realtime 拒绝。
+
+### POST `/api/chat/calls/{id}/end` [实验中]
+
+任一通话成员结束 signaling，会产生 `call_ended` 事件。
+
+### POST `/api/chat/secret-sessions` [实验中][待弃用]
+
+创建服务器不可读的客户端密文会话。该能力不进入生产承诺，不应有新功能依赖。
+
+### GET/POST `/api/chat/secret-sessions/{id}/messages` [实验中][待弃用]
+
+读写密文、nonce、公钥指纹和过期时间。服务器不接收明文。生产迁移方向见[信任与安全](trust-safety.md)。
 
 ## AI Chat
 
@@ -412,11 +581,11 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 
 使用 `Authorization: Bearer <jwt>` 建连。服务端会验证 token 未撤销、用户未封禁。连接用于通知推送、聊天消息提示、typing 等实时事件。客户端收到 WebSocket 事件后仍应回查 HTTP 列表，因为数据库才是最终事实。
 
-## Orders
+## Deal Records（当前路径仍为 Orders）
 
 ### GET `/api/orders`
 
-需要登录。列出当前用户订单。query：
+需要登录。列出当前用户参与的线下成交记录。query：
 
 | 参数 | 说明 |
 | --- | --- |
@@ -425,7 +594,7 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 
 ### GET `/api/orders/{id}`
 
-需要登录且必须是 buyer 或 seller。返回订单详情、商品标题、双方用户名、状态和各状态时间戳。
+需要登录且必须是 buyer 或 seller。返回成交详情、商品标题、双方用户名、状态和各状态时间戳。
 
 ### POST `/api/orders`
 
@@ -448,11 +617,11 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 }
 ```
 
-### POST `/api/orders/{id}/pay`
+### POST `/api/orders/{id}/pay` [待弃用]
 
 兼容旧客户端入口。平台不负责资金中转，调用会返回明确错误提示，不改变订单状态。
 
-### POST `/api/orders/{id}/ship`
+### POST `/api/orders/{id}/ship` [待弃用]
 
 兼容旧客户端入口。平台不追踪物流或交接，调用会返回明确错误提示，不改变订单状态。
 
@@ -565,7 +734,7 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 | `GET /api/admin/stats` | 平台管理统计。 |
 | `GET /api/admin/users` | 用户列表。 |
 | `GET /api/admin/listings` | 商品列表。 |
-| `GET /api/admin/orders` | 订单列表。 |
+| `GET /api/admin/orders` | 线下成交记录列表。 |
 | `GET /api/admin/audit-logs` | 管理员审计日志。 |
 | `POST /api/admin/users/{id}/ban` | 封禁用户。 |
 | `POST /api/admin/users/{id}/unban` | 解封用户。 |
@@ -573,12 +742,121 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 | `POST /api/admin/users/{id}/impersonate` | 生成目标用户 JWT，用于排查。 |
 | `POST /api/admin/tokens/{jti}/revoke` | 撤销 access token。 |
 | `POST /api/admin/users/{id}/role` | 修改用户角色。 |
-| `POST /api/admin/orders/{id}/status` | 管理员强制设置订单状态。 |
+| `POST /api/admin/orders/{id}/status` | 管理员按允许状态处理成交记录。 |
 
 改管理员接口时要同时检查审计日志和普通用户路径的影响。
 
 ## Upload、Recommendations、Health 和 Metrics
 
-`GET /api/upload/token` 返回 OSS 直传临时凭证，要求 OSS 相关配置存在。推荐路径包括 `GET /api/recommendations/feed` 和 `GET /api/recommendations/similar`，依赖 pgvector 和 active 商品过滤。
+`GET /api/upload/token` 返回 OSS 直传临时凭证，要求 OSS 相关配置存在。
+
+推荐路径：
+
+- `GET /api/recommendations/similar?listing_id=...` 用 pgvector 余弦距离返回相似 active 商品；无 embedding 时回退到最新 active 列表。
+- `GET /api/recommendations/feed?direction=offer|wanted|all` 对匿名用户按 `created_at` 返回最新 active 内容。若请求带有效 Bearer token，则按收藏与买家成交意向的分类亲和度排序，排除自己的内容和已收藏内容。
 
 `GET /api/health` 返回健康状态，常用于启动检查。`GET /api/stats` 返回公开平台统计。`GET /api/metrics` 暴露 Prometheus 文本格式指标，包括请求、限流、聊天、LLM、WebSocket 和订单相关指标。
+
+## 目标生产契约 [目标态]
+
+本节是已经确定的接口方向，不代表当前 router 已注册。实现时先增加 `/api/v1`，保留未版本化 `/api/*` 兼容窗口，不直接替换旧接口。
+
+### 版本、错误和幂等
+
+所有 v1 错误使用统一 envelope：
+
+```json
+{
+  "error": {
+    "code": "invalid_state",
+    "message": "当前状态不能执行此操作",
+    "trace_id": "uuid",
+    "details": {}
+  }
+}
+```
+
+`code` 是客户端稳定判断依据，`message` 可本地化，`details` 只包含安全的字段级信息。不得返回 SQL、provider 原始错误、屏蔽关系或审核规则。
+
+发布、联系、消息、wanted response、Agent confirm 和成交写接口接受 `Idempotency-Key`。同一用户、路径和 key 的重复请求返回首次结果；相同 key 配不同 body 返回冲突。
+
+列表统一使用：
+
+```json
+{
+  "items": [],
+  "next_cursor": "opaque-or-null"
+}
+```
+
+cursor 对客户端不透明，绑定 tenant、过滤条件和稳定排序；不能用可篡改 offset 冒充 cursor。
+
+### Campus 与 Membership
+
+```text
+GET  /api/v1/campuses
+GET  /api/v1/memberships
+POST /api/v1/memberships/verification
+GET  /api/v1/memberships/{id}
+POST /api/v1/memberships/{id}/refresh
+```
+
+普通业务请求从 token/session 获取 active campus；不能仅依赖 body 中的 `campus_id`。verification 响应不泄露其他账号或 membership 是否存在。
+
+### Intent Feed 与解释
+
+```text
+GET  /api/v1/feed?direction=all|offer|wanted&cursor=...
+POST /api/v1/feed/feedback
+POST /api/v1/intents/{id}/complete
+POST /api/v1/intents/{id}/reopen
+```
+
+Feed item 在当前 listing 字段之外增加：
+
+```json
+{
+  "rank_reason": "within_budget",
+  "match_summary": ["同分类", "预算内", "成色满足"],
+  "source": "wanted_match",
+  "ranking_version": "feed-v1"
+}
+```
+
+`rank_reason` 使用稳定枚举，不暴露内部权重、敏感画像或另一个用户的私有行为。
+
+Feedback 支持 hide、less_like_this、not_relevant 和 clear_personalization 等用户控制，写入行为信号前明确目的和保留策略。
+
+### Agent ActionPlan
+
+```text
+POST /api/v1/agent/plans
+GET  /api/v1/agent/plans/{id}
+POST /api/v1/agent/plans/{id}/confirm
+POST /api/v1/agent/plans/{id}/cancel
+```
+
+创建计划返回 `plan_id`、`action_type`、`risk_level`、`summary`、`preview`、`expires_at`、`idempotency_key` 和 `confirmation_mode`。L2 使用一次确认，L3 使用二次确认并写审计。
+
+Confirm 时服务端重新验证 tenant、membership、owner、资源版本、状态和金额。过期、上下文变化和重复执行返回稳定冲突，不静默更新计划输入。
+
+### Moderation 与申诉
+
+```text
+GET  /api/v1/moderation/cases/{id}
+POST /api/v1/moderation/cases/{id}/appeals
+GET  /api/v1/moderation/appeals/{id}
+```
+
+普通用户只能读取自己的案件摘要和提交申诉，不获得举报人、审核者身份、命中词和内部阈值。校园运营使用独立 tenant-scoped 管理接口；平台管理员跨校园处理需要理由和审计。
+
+### Secret Chat 弃用
+
+当前 `/api/chat/secret-sessions*` 进入弃用后：
+
+1. 首先禁止生产新建并从默认 UI 移除。
+2. 在兼容窗口保留授权用户的只读历史能力。
+3. 发布弃用 metrics、客户端版本门槛和截止时间。
+4. 最终移除发送和创建路由，不把服务器不可读 E2EE 迁入 `/api/v1`。
+
+新的加密消息仍使用普通 Conversation API，只改变服务端存储和授权解密实现，不向客户端承诺服务器不可读。

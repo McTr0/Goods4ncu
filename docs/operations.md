@@ -1,6 +1,13 @@
 # 运行、配置与排错
 
-这篇文档面向“系统跑不起来、跑着不对、上线前要确认什么”。它集中维护配置、数据库、迁移、metrics、日志和排错路径。开发步骤见 [开发指南](development.md)，业务状态见 [业务流程](domain-flows.md)。
+| 项目 | 内容 |
+| --- | --- |
+| 适用读者 | 本地开发者、部署维护者、SRE、数据库管理员和事故响应人员 |
+| 当前状态 | 当前配置和单实例排错已可用；完整 SLO、PITR、KMS、outbox 和多副本 runbook 属于目标态 |
+| 事实来源 | 配置加载代码、环境模板、Docker/Compose、migration、metrics、worker 和实际启动行为 |
+| 最后核对范围 | 环境变量、PostgreSQL/pgvector、CORS、Redis、媒体审核、日志、健康检查和常见故障 |
+
+这篇文档面向“系统跑不起来、跑着不对、上线前要确认什么”。它集中维护配置、数据库、迁移、metrics、日志和排错路径。目标拓扑和 SLO 见[生产架构](production-architecture.md)，开发步骤见 [开发指南](development.md)，业务状态见 [业务流程](domain-flows.md)。
 
 ## 环境变量
 
@@ -36,15 +43,30 @@
 
 如果启动时报缺失变量，优先检查 `.env` 是否被加载、变量名是否拼写正确、shell 当前目录是否是项目根目录。
 
+## Docker Compose 本地栈
+
+根目录 `docker-compose.yml` 提供演示级两服务栈：`db`（`pgvector/pgvector:pg16`）和 `api`（本仓库 `Dockerfile`）。Compose 会把 `DATABASE_URL` 指到服务名 `db`，因此即使 `.env` 写了 localhost 也能在容器网络内连通。
+
+```bash
+cp docs/.env.example .env
+# 至少填入 JWT_SECRET（≥32 字符）和可用的 LLM/embedding key
+docker compose up --build
+curl -s http://127.0.0.1:3000/api/health
+```
+
+这不替代生产编排（密钥管理、HTTPS 终止、静态站点与备份仍需单独配置），但能缩短“空环境到可演示 API”的路径。
+
 ## TOML 配置搜索顺序
 
-非敏感配置可以放在 `good4ncu.toml`，模板见 [config.toml.example](config.toml.example)。加载优先级是：
+非敏感配置可以放在 `goods4ncu.toml`，模板见 [config.toml.example](config.toml.example)。加载优先级是：
 
 ```text
 环境变量
   > CONFIG_FILE 指定路径
-  > ./good4ncu.toml
-  > ./config/good4ncu.toml
+  > ./goods4ncu.toml
+  > ./config/goods4ncu.toml
+  > ./good4ncu.toml        # legacy fallback
+  > ./config/good4ncu.toml # legacy fallback
   > 代码默认值
 ```
 
@@ -52,7 +74,7 @@ TOML 适合放 server、LLM provider、限流、event bus、worker 扫描间隔�
 
 ## PostgreSQL 和 pgvector
 
-Good4NCU 使用一个 PostgreSQL 实例同时保存业务数据和向量数据。启动时会执行：
+Goods4ncu 使用一个 PostgreSQL 实例同时保存业务数据和向量数据。启动时会执行：
 
 ```text
 CREATE EXTENSION IF NOT EXISTS vector
@@ -90,6 +112,10 @@ CORS_ORIGINS=https://your-app.example.com
 
 日志使用结构化字段。排错时优先看带字段的日志，例如 `user_id`、`listing_id`、`order_id`、`err`、`provider`、`vector_dim`。不要只看最后一行错误文本；上下文字段往往能直接说明是哪个用户、哪条订单或哪次 provider 调用失败。
 
+每个 HTTP 响应包含 `X-Request-ID`。错误 JSON 的 `trace_id` 与该 header 相同；用户报告问题时优先收集这个 ID，再在结构化日志中关联。每条请求完成日志还包含相同的 `request_id`、HTTP method、归一化 path、status 和 `duration_ms`。服务端总是生成 ID，不信任客户端自报的 request id，也不会把请求体或 token 写入访问日志。
+
+匿名限流默认使用 TCP peer IP；服务必须通过 `into_make_service_with_connect_info` 启动才能向中间件提供可信地址。代理部署时仍以网关层限流和可信代理配置为主，不要直接信任客户端提交的 `X-Forwarded-For`。
+
 ## 数据库表地图
 
 | 表 | 排错时常看什么 |
@@ -97,8 +123,9 @@ CORS_ORIGINS=https://your-app.example.com
 | `users` | 用户 status、role、email、password_hash 是否正常。 |
 | `refresh_tokens` | refresh token 是否过期、revoked_at 是否被设置。 |
 | `revoked_access_tokens` | logout 或管理员撤销后的 JTI 是否存在。 |
-| `inventory` | 商品 status、owner_id、价格、分类、更新时间。 |
+| `inventory` | 商品 status、owner_id、价格、分类、更新时间；重复发布时检查 `idempotency_key/idempotency_hash`。 |
 | `documents` | RAG 文档是否存在，embedding 是否非空，维度是否匹配。 |
+| `wanted_responses` | wanted/offer/responder/requester 是否一致，pending 是否重复。 |
 | `orders` | 状态、buyer/seller、listing、金额和时间戳。 |
 | `hitl_requests` | pending/countered/expired 状态、counter_price、expires_at。 |
 | `chat_conversations` | mode、state、initiator/recipient、listing、subject、过期时间、close_reason。 |
@@ -106,10 +133,14 @@ CORS_ORIGINS=https://your-app.example.com
 | `chat_conversation_events` | 握手、ACK、关闭、过期等状态事件时间线。 |
 | `chat_blocks` | blocker/blocked 屏蔽关系。 |
 | `chat_messages` | conversation_id、direct_conversation_id、sender、receiver、read_at、media URL/Base64、edited_at。 |
+| `chat_spaces` 及成员/消息表 | group/channel、owner、成员角色、发言权限和更新时间。 |
+| `chat_secret_sessions` 及消息表 | [实验中][待弃用] 密文、参与者、过期时间和兼容读取。 |
 | `watchlist` | 用户和商品关系，是否收藏自己的商品。 |
 | `notifications` | unread、event_type、related_order/listing、是否已推送但未读。 |
 | `admin_audit_logs` | 管理员操作是否有审计记录。 |
 | `moderation_jobs` | 图片审核任务是否 pending、failed 或 completed。 |
+
+[目标态] 新增 `campuses`、`campus_memberships`、`moderation_cases`、`agent_runs`、`agent_action_plans` 和 `outbox_events` 后，应同步更新本表与对应 runbook。
 
 ## 内容审核策略
 
@@ -162,6 +193,102 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 ### Flutter async 问题
 
 页面销毁后请求返回会导致常见 mounted 问题。连续刷新或搜索会导致旧请求覆盖新请求。token refresh 失败要集中由 service/token storage 处理，不要在多个页面各自补一套临时逻辑。
+
+## 生产上线检查 [目标态]
+
+### 环境和密钥
+
+- development、staging、production 使用不同数据库、Redis、对象存储、provider key 和 JWT/KMS 密钥。
+- 密钥由部署平台 secret manager 注入，不写入镜像、TOML、日志或备份说明。
+- 生产 `CORS_ORIGINS`、public base URL、WebSocket URL 和 callback URL 使用 HTTPS/WSS 正式域名。
+- 管理员和校园运营启用 MFA/近期认证策略。
+- Seed 测试账号和本地测试图片不进入生产数据库。
+
+### 数据库和 migration
+
+- 在空库运行全部 migration，证明新环境可启动。
+- 在生产快照脱敏副本运行升级，记录锁时间、表扫描和磁盘增长。
+- 先部署兼容 schema，再部署应用读写，最后单独清理旧字段。
+- 应用 rollback 不依赖回滚已执行 migration。
+- 核心 TEXT/UUID shadow column divergence 检查为零或有批准的兼容清单。
+
+### 核心用户旅程
+
+- 游客浏览；注册用户收藏；校园认证成员发布和联系。
+- offer/wanted 发布、匹配、响应、联系人线程和线下成交确认。
+- 普通用户看不到管理入口，校园运营不能跨 tenant。
+- Agent provider 故障时仍可使用搜索、表单和手工聊天。
+- 媒体审核 pending/failed 不公开原始对象。
+
+## SLO、告警和错误预算 [目标态]
+
+生产默认目标见[生产架构](production-architecture.md)：月可用性 99.9%，普通 API p95 小于 300ms，Feed/Search p95 小于 500ms，在线消息投递 p95 小于 1s，Agent 首 token p95 小于 3s。
+
+告警必须面向用户影响，而不是单个瞬时 CPU 峰值：
+
+| 告警 | 触发信号 | 第一检查点 |
+| --- | --- | --- |
+| API 错误预算快速消耗 | 5xx/timeout 持续上升 | 最近发布、DB、依赖、rate limit |
+| 数据库饱和 | pool wait、连接、锁和慢查询 | 每实例 pool、长事务、缺索引 |
+| 消息投递退化 | DB 已写但 fan-out 延迟/失败 | Redis、实例连接表、HTTP 补偿 |
+| 审核积压 | pending age 和队列长度 | provider、worker lease、dead-letter |
+| Outbox 积压 | oldest unprocessed age | worker、不可重试事件、数据库锁 |
+| Agent 退化 | 首 token、错误、熔断 | provider、模型、工具循环、配额 |
+| 媒体错误 | 上传/解码/公开失败率 | STS、bucket policy、MIME、CDN |
+
+错误预算耗尽时暂停扩大风险的新功能，优先处理可靠性、安全和容量。维护窗口和 provider 故障不能无限排除在 SLO 外。
+
+## 备份与恢复 Runbook [目标态]
+
+### 备份
+
+1. PostgreSQL 开启满足 RPO 15 分钟的连续归档/PITR 或等价能力。
+2. 定期全量备份并验证校验值，备份账号不能写生产业务表。
+3. 对象存储开启版本/生命周期，CDN 缓存不算备份。
+4. KMS 密钥和数据备份分开保护，文档记录恢复依赖但不记录密钥材料。
+5. 备份 metrics 包括成功、持续时间、大小、最近可恢复时间和失败告警。
+
+### 恢复演练
+
+1. 在隔离环境创建空数据库和对象存储目标。
+2. 恢复到指定时间点，记录开始、可连接、应用可用和完整验收时间。
+3. 启动兼容版本应用，禁止连接生产 Redis/provider 写路径。
+4. 验证账号、membership、offer/wanted、聊天、成交、审核、审计和 outbox。
+5. 重建可重建的 embedding/cache，并验证没有把 deleted/sold 内容重新公开。
+6. 对比目标 RPO/RTO，形成差距、owner 和截止日期。
+
+恢复演练至少按季度执行，并在重大 schema、对象存储或 KMS 变更后额外执行。
+
+## 密钥轮换 Runbook [目标态]
+
+- JWT 使用新旧 secret 兼容窗口：先验证新旧、只签新，再等待旧 token 过期并移除旧 secret。
+- Provider/OSS key 先创建新 key、灰度验证、切换引用，再撤销旧 key。
+- KMS 数据密钥轮换不要求一次重写全库；新写使用新版本，后台受控重包旧数据密钥。
+- 轮换过程监控认证失败、上传失败、解密失败和 provider 错误。
+- 紧急泄漏时优先撤销和限制影响，再进行正常兼容迁移。
+
+## 审核积压 Runbook [目标态]
+
+1. 检查 `moderation_jobs`/ModerationCase 的 oldest pending、重试和 last_error。
+2. 判断是 provider、网络、格式、配额还是 worker lease 问题。
+3. 保持媒体 pending 和私有隔离，不因积压自动公开。
+4. 可安全重试的任务使用指数退避；不可解码内容直接进入拒绝/人工队列。
+5. 超过阈值进入 dead-letter，并提供受审计的批量重放。
+6. 用户界面显示“审核中/稍后重试”，不暴露 provider 或内部规则。
+
+## 事故响应 Runbook [目标态]
+
+| 阶段 | 要做什么 |
+| --- | --- |
+| 发现 | 记录时间、用户影响、告警和初始 trace，不急于猜根因 |
+| 限制 | 撤销 token、关闭上传/Agent 写工具、暂停校园发布或回滚应用 |
+| 保全 | 保存必要日志、审计和事件，避免无边界复制用户数据 |
+| 修复 | 处理根因并增加自动检测/回归测试 |
+| 恢复 | 分阶段开放，观察错误预算、队列和关键旅程 |
+| 沟通 | 按批准流程通知负责人和受影响用户，不夸大或隐瞒 |
+| 复盘 | 记录时间线、系统原因、检测缺口、修复 owner 和截止时间 |
+
+高风险 kill switch 至少覆盖 Agent L2/L3、媒体公开、Secret Chat 新建、跨校园能力和管理员 impersonation。
 
 ## 文档级验证
 

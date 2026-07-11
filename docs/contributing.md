@@ -1,6 +1,13 @@
 # 贡献指南
 
-这篇文档说明如何把改动安全地送进项目。它不代替代码审查，也不重复开发命令细节；命令含义见 [开发指南](development.md)，架构边界见 [架构与分层](architecture.md)。
+| 项目 | 内容 |
+| --- | --- |
+| 适用读者 | 所有提交代码、迁移、设计或运维变更的贡献者与 reviewer |
+| 当前状态 | 当前 Git/PR 规则可直接使用；ADR、生产门槛和能力状态规则用于后续生产化变更 |
+| 事实来源 | 仓库 Git 历史、AGENTS.md、CI、开发指南和设计文档 |
+| 最后核对范围 | 分支、Conventional Commits、PR、review、迁移、兼容、ADR 和文档同步 |
+
+这篇文档说明如何把改动安全地送进项目。命令含义见 [开发指南](development.md)，当前边界见 [当前架构](architecture.md)，目标边界见[生产架构](production-architecture.md)。
 
 ## 分支命名
 
@@ -47,6 +54,16 @@ PR 描述至少包含：
 ## Risk
 
 - Migrations, config changes, compatibility risks, follow-up work.
+
+## Design & Compatibility
+
+- Capability status before/after: target, experimental, implemented, deprecated.
+- API/schema/client compatibility and deprecation window.
+
+## Observability & Rollback
+
+- Metrics/logs/alerts affected.
+- Feature flag, rollback or kill switch.
 ```
 
 如果有数据库迁移、配置变更、移动端可见 UI、管理员权限、认证、支付/订单、AI 工具或媒体上传，一定在 PR 里单独说明。移动端 UI 改动应提供截图或录屏。
@@ -96,6 +113,11 @@ Reviewer 应优先看风险，而不是先挑风格。重点包括：
 | 事务 | 跨表写入是否同生共死，失败时是否会留下半成功状态。 |
 | SQL | 用户输入是否 bind，动态 SQL 是否来自白名单。 |
 | 状态机 | 订单、聊天会话、HITL 议价是否只允许合法跳转。 |
+| 多租户 | tenant context 是否来自可信认证，查询/关联是否可能跨校园。 |
+| Agent | 风险等级、确认、幂等、工具权限和失败降级是否完整。 |
+| 推荐 | 硬约束、解释、反馈、公平 guardrail 和排序版本是否可验证。 |
+| 审核隐私 | 媒体是否先隔离，敏感数据是否最小访问并可审计。 |
+| 异步事件 | 事务、outbox、重复消费、重试和 dead-letter 是否一致。 |
 | 移动端 async | 页面销毁、重复请求、token refresh、错误态是否处理。 |
 | 协议兼容 | Rust struct、Dart model、service 和测试 fixture 是否同步。 |
 | 运维 | 新配置是否有默认值、模板、生产安全边界和排错说明。 |
@@ -114,6 +136,18 @@ Reviewer 应优先看风险，而不是先挑风格。重点包括：
 
 ## 文档协作规则
 
-文档结构由 [README](README.md) 串联。新增主题前先确认是否已有专题文件。API 细节进 [API 参考](api-reference.md)，流程进 [业务流程](domain-flows.md)，配置排错进 [运行、配置与排错](operations.md)，路线图进 [路线图与架构风险](roadmap.md)。
+文档结构由 [README](README.md) 串联。新增主题前先确认是否已有专题文件：
+
+- 产品目标和边界进[产品设计](product-design.md)。
+- 对象和不变量进[信息模型](information-model.md)。
+- Agent 权限和评估进[Agent 系统设计](agent-system.md)。
+- 身份、审核和隐私进[信任与安全](trust-safety.md)。
+- 当前代码结构进[当前架构](architecture.md)，目标部署进[生产架构](production-architecture.md)。
+- API 细节进 [API 参考](api-reference.md)，流程进 [业务流程](domain-flows.md)。
+- 配置排错进 [运行、配置与排错](operations.md)，阶段计划进 [生产路线图](roadmap.md)。
+
+所有目标能力必须写 `[目标态]`。只有 migration、后端、客户端、测试和必要运维门槛共同完成后，才改为 `[已实现]`；原型或未稳定能力使用 `[实验中]`。
+
+重大架构决定需要记录 Context、Decision、Consequences、Compatibility、Verification 和 Exit criteria。影响多个模块或需要长期兼容时拆为 ADR，并在相关专题文档链接。
 
 写文档时不要为了“显得简单”而省略真实边界。好的新人文档不是把系统讲成玩具，而是把复杂性分层，让读者知道先理解哪一块、后理解哪一块。
