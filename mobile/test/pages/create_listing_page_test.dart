@@ -12,11 +12,13 @@ const _tinyPngBase64 =
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
 class _FakeApiService extends ApiService {
-  _FakeApiService({this.recognizedItem, this.recognizeError});
+  _FakeApiService({this.recognizedItem, this.recognizeError, this.createError});
 
   final RecognizedItem? recognizedItem;
   final Object? recognizeError;
+  final Object? createError;
   int recognitionCalls = 0;
+  final List<String?> submittedIdempotencyKeys = [];
 
   @override
   Future<RecognizedItem> recognizeItem(String imageBase64) async {
@@ -44,7 +46,12 @@ class _FakeApiService extends ApiService {
     required double suggestedPriceCny,
     required List<String> defects,
     String? description,
+    String direction = 'offer',
+    String? idempotencyKey,
   }) async {
+    submittedIdempotencyKeys.add(idempotencyKey);
+    final error = createError;
+    if (error != null) throw error;
     return 'listing-created';
   }
 }
@@ -85,6 +92,53 @@ Widget _buildApp({
 }
 
 void main() {
+  testWidgets('publish retries reuse a key until form content changes', (
+    tester,
+  ) async {
+    final apiService = _FakeApiService(
+      createError: Exception('simulated timeout'),
+    );
+    await tester.pumpWidget(_buildApp(apiService: apiService));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('create-title-field')),
+      '二手高数教材',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('create-brand-field')),
+      'NCU',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('create-price-field')),
+      '35',
+    );
+
+    final submit = find.byKey(const ValueKey('create-submit-button'));
+    await tester.tap(submit);
+    await tester.pumpAndSettle();
+    final firstKey = apiService.submittedIdempotencyKeys.single;
+    expect(firstKey, isNotNull);
+
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    await tester.tap(submit);
+    await tester.pumpAndSettle();
+    expect(apiService.submittedIdempotencyKeys, hasLength(2));
+    expect(apiService.submittedIdempotencyKeys[1], firstKey);
+
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('create-price-field')),
+      '36',
+    );
+    await tester.tap(submit);
+    await tester.pumpAndSettle();
+    expect(apiService.submittedIdempotencyKeys, hasLength(3));
+    expect(apiService.submittedIdempotencyKeys[2], isNot(firstKey));
+  });
+
   testWidgets('mobile page shows a live missing-field summary', (tester) async {
     await tester.pumpWidget(_buildApp());
     await tester.pumpAndSettle();
@@ -110,6 +164,26 @@ void main() {
     await tester.pump();
 
     expect(find.text('信息齐了，可以发布'), findsOneWidget);
+  });
+
+  testWidgets('wanted mode rewrites the create form semantics', (tester) async {
+    await tester.pumpWidget(_buildApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('我要收'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('描述你想收什么'), findsOneWidget);
+    expect(find.text('预算上限（元） *'), findsOneWidget);
+
+    await tester.drag(
+      find.byKey(const ValueKey('create-mobile-workspace')),
+      const Offset(0, -420),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('最低成色'), findsOneWidget);
+    expect(find.text('要求/备注'), findsOneWidget);
   });
 
   testWidgets('desktop page uses two-column workspace and English copy', (

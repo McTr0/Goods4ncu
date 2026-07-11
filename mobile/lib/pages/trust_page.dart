@@ -26,12 +26,20 @@ class TrustPage extends StatelessWidget {
               ),
               child: Column(
                 children: [
-                  const Icon(Icons.info_outline, color: Colors.orange, size: 48),
+                  const Icon(
+                    Icons.info_outline,
+                    color: Colors.orange,
+                    size: 48,
+                  ),
                   const SizedBox(height: 12),
                   Text(
                     l.infoDisclaimer,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.orange),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.orange,
+                    ),
                   ),
                 ],
               ),
@@ -83,7 +91,10 @@ class TrustPage extends StatelessWidget {
               ),
               child: Text(
                 l.platformDisclaimer,
-                style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.textSecondary,
+                ),
               ),
             ),
           ],
@@ -128,7 +139,10 @@ class _TrustSection extends StatelessWidget {
             children: [
               Text(
                 title,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
               ),
               if (subtitle.isNotEmpty) ...[
                 const SizedBox(height: 2),

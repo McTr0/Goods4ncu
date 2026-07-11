@@ -5,6 +5,15 @@ import '../models/models.dart';
 import '../services/order_service.dart';
 import '../theme/app_theme.dart';
 
+String _localizedOrderStatus(AppLocalizations l, String status) {
+  return switch (status) {
+    'pending' || 'intent_pending' => l.awaitingSellerConfirm,
+    'paid' || 'shipped' || 'completed' || 'confirmed' => l.dealConfirmed,
+    'cancelled' => l.dealCancelled,
+    _ => l.unknown,
+  };
+}
+
 /// Order detail page with action buttons based on status and role.
 class OrderDetailPage extends StatefulWidget {
   final String orderId;
@@ -135,7 +144,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
 
                 // Parties info
                 _SectionCard(
-                  title: l.orderDetail,
+                  title: l.dealParties,
                   children: [
                     _InfoRow(
                       label: l.buyer,
@@ -154,7 +163,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
 
                 // Timeline
                 _SectionCard(
-                  title: l.orderDetail,
+                  title: l.dealTimeline,
                   children: [
                     _TimelineRow(
                       label: l.dealIntentCreated,
@@ -330,6 +339,7 @@ class _StatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
     return Card(
       color: order.statusColor.withValues(alpha: 0.1),
       child: Padding(
@@ -342,7 +352,7 @@ class _StatusCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  order.statusLabel,
+                  _localizedOrderStatus(l, order.status),
                   style: TextStyle(
                     color: order.statusColor,
                     fontWeight: FontWeight.bold,

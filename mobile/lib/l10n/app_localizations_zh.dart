@@ -15,7 +15,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get aiError => '抱歉，出现了一些问题，请重试。';
 
   @override
-  String get aiGreeting => '你好！我是校园二手交易平台的智能助手。有什么我可以帮你的吗？';
+  String get aiGreeting => '你好！我是续樟校园二手交易平台的智能助手。有什么我可以帮你的吗？';
 
   @override
   String get aiWillAutoRecognize => 'AI将自动识别商品信息';
@@ -116,13 +116,37 @@ class AppLocalizationsZh extends AppLocalizations {
   String get createListingAiTitle => '先让小帮看一眼';
 
   @override
+  String get createListingModeOffer => '我要出';
+
+  @override
+  String get createListingModeWanted => '我要收';
+
+  @override
+  String get createWantedPanelTitle => '描述你想收什么';
+
+  @override
+  String get createWantedPanelSubtitle => '写清预算、最低成色和你在意的细节；系统会帮你匹配同学正在出的物品。';
+
+  @override
   String get createListingBasicInfo => '商品基础信息';
 
   @override
   String get createListingBasicInfoSubtitle => '这些信息会直接影响同学是否愿意点进来看。';
 
   @override
+  String get createWantedBasicInfo => '收物基础信息';
+
+  @override
+  String get createWantedBasicInfoSubtitle => '把需求说清楚，愿意出的同学才知道是否匹配。';
+
+  @override
   String get createListingBrandHint => '例如：Apple、Casio、NCU';
+
+  @override
+  String get createWantedBrandLabel => '偏好品牌';
+
+  @override
+  String get createWantedBrandHint => '不限，或例如：Apple、Casio';
 
   @override
   String get createListingBrandRequired => '请输入品牌或来源';
@@ -137,7 +161,22 @@ class AppLocalizationsZh extends AppLocalizations {
   String get createListingConditionSubtitle => '把不完美说清楚，反而更容易成交。';
 
   @override
+  String get createWantedConditionSection => '最低要求';
+
+  @override
+  String get createWantedConditionSubtitle => '这是你愿意接受的最低成色和补充要求。';
+
+  @override
   String get createListingDefectHint => '例如：屏幕有轻微划痕';
+
+  @override
+  String get createWantedRequirementHint => '例如：要带充电器、可接受轻微划痕';
+
+  @override
+  String get createWantedRequirementsLabel => '要求/备注';
+
+  @override
+  String get createWantedBudgetLabel => '预算上限（元） *';
 
   @override
   String get createListingDescriptionHint => '描述一下购买时间、使用频率、配件、取货地点等...';
@@ -150,6 +189,18 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get createListingDescriptionSubtitle => '可选，但越具体越省沟通成本。';
+
+  @override
+  String get createWantedDescriptionHint => '描述你想用它做什么、希望在哪里交接、哪些点不能接受...';
+
+  @override
+  String get createWantedDescriptionLabel => '需求描述（选填）';
+
+  @override
+  String get createWantedDescriptionSection => '补充需求';
+
+  @override
+  String get createWantedDescriptionSubtitle => '可选，但越具体越容易收到靠谱推荐。';
 
   @override
   String createListingMissingFields(String fields) {
@@ -188,6 +239,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get createListingTitleHint => '例如：iPhone 13 Pro Max 256G';
+
+  @override
+  String get createWantedTitleHint => '例如：想收一台 iPad Air 或同档平板';
 
   @override
   String get createSuccess => '商品发布成功';
@@ -251,6 +305,15 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get listSeparator => '、';
+
+  @override
+  String get listingDirectionAll => '全部';
+
+  @override
+  String get listingDirectionOffer => '出';
+
+  @override
+  String get listingDirectionWanted => '收';
 
   @override
   String get listingDetail => '商品详情';
@@ -326,10 +389,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get myListingsTab => '我的发布';
 
   @override
-  String get myOrders => '我的订单';
+  String get myOrders => '成交记录';
 
   @override
-  String get myOrdersSubtitle => '查看购买记录';
+  String get myOrdersSubtitle => '查看线下成交意向与确认记录';
 
   @override
   String get allOrders => '全部';
@@ -341,16 +404,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get unreadOnly => '未读';
 
   @override
-  String get buyerOrders => '作为买家';
+  String get buyerOrders => '我想收';
 
   @override
-  String get sellerOrders => '作为卖家';
+  String get sellerOrders => '我在出';
 
   @override
-  String get orderAsBuyer => '作为买家';
+  String get orderAsBuyer => '收';
 
   @override
-  String get orderAsSeller => '作为卖家';
+  String get orderAsSeller => '出';
 
   @override
   String get pay => '支付';
@@ -407,6 +470,33 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get priceLabel => '价格';
+
+  @override
+  String get wantedBudgetShort => '预算';
+
+  @override
+  String get wantedMinimumCondition => '最低成色';
+
+  @override
+  String get wantedRequester => '需求方';
+
+  @override
+  String get wantedMatchesTitle => '匹配的可出商品';
+
+  @override
+  String get contactRequester => '联系需求方';
+
+  @override
+  String get recommendMyOffer => '推荐我的商品';
+
+  @override
+  String get wantedOwnerHint => '这是你自己的需求';
+
+  @override
+  String get wantedNoOfferToRecommend => '你还没有可推荐的在出商品';
+
+  @override
+  String get wantedRecommendSuccess => '已推荐给需求方';
 
   @override
   String get profile => '个人信息';
@@ -559,7 +649,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get adminListingsTab => '商品';
 
   @override
-  String get adminOrdersTab => '订单';
+  String get adminOrdersTab => '成交记录';
 
   @override
   String get adminUsersTab => '用户';
@@ -574,7 +664,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get adminUsers => '用户总数';
 
   @override
-  String get adminOrders => '订单总数';
+  String get adminOrders => '成交记录总数';
 
   @override
   String get adminTrend7Days => '趋势 (7日)';
@@ -589,7 +679,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get markCompleted => '已确认成交';
 
   @override
-  String get orderStatusUpdated => '订单状态已更新';
+  String get orderStatusUpdated => '成交记录状态已更新';
 
   @override
   String get userRoleUpdated => '用户角色已更新';
@@ -659,13 +749,19 @@ class AppLocalizationsZh extends AppLocalizations {
   String get adminViewListings => '查看商品';
 
   @override
-  String get orderId => '订单号';
+  String get orderId => '记录编号';
 
   @override
-  String get orderDetail => '订单详情';
+  String get orderDetail => '成交详情';
 
   @override
-  String get noOrders => '暂无订单';
+  String get dealParties => '沟通双方';
+
+  @override
+  String get dealTimeline => '成交时间线';
+
+  @override
+  String get noOrders => '暂无成交记录';
 
   @override
   String get conditionLikeNew => '几乎全新';
@@ -699,7 +795,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String orderNumber(String id) {
-    return '订单 #$id';
+    return '成交记录 #$id';
   }
 
   @override
@@ -792,7 +888,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get notSet => '未设置';
 
   @override
-  String get homeHeroEyebrow => 'GOOD4NCU CAMPUS MARKET';
+  String get homeHeroEyebrow => 'Goods4ncu Campus Market';
 
   @override
   String get homeHeroTitle => '今天想淘点什么？';
@@ -953,7 +1049,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get assistantInboxSubtitle => '找货、估价、发布、议价，都可以从这里开始';
 
   @override
-  String get assistantHeaderSubtitle => '你的校园交易助手 · 重要决定会先征求你的确认';
+  String get assistantHeaderSubtitle => '你的续樟校园交易助手 · 重要决定会先征求你的确认';
 
   @override
   String get assistantHistoryLoadFailed => '历史消息暂时没有加载出来，你仍然可以继续询问小帮。';
@@ -1300,7 +1396,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationSectionSpaces => '校园群组与频道';
 
   @override
-  String get conversationSectionTools => '工具与助手';
+  String get conversationSectionTools => '小帮';
 
   @override
   String get conversationCreateGroupSuccess => '群组已创建，已放入消息列表';
@@ -1376,13 +1472,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String conversationSegmentCount(int count) {
     return '共 $count 段';
   }
-
-  @override
-  String get campusCommunicationTitle => '校园通信';
-
-  @override
-  String get campusCommunicationSubtitle =>
-      '群组适合讨论，频道适合公告；一对一会话内可使用通话和加密聊天 MVP。';
 
   @override
   String get createGroup => '创建群组';

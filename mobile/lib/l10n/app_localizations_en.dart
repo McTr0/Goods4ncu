@@ -120,6 +120,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get createListingAiTitle => 'Let the assistant take a look first';
 
   @override
+  String get createListingModeOffer => 'I am offering';
+
+  @override
+  String get createListingModeWanted => 'I am looking for';
+
+  @override
+  String get createWantedPanelTitle => 'Describe what you want';
+
+  @override
+  String get createWantedPanelSubtitle =>
+      'Add budget, minimum condition, and the details you care about. The system will match classmates\' active offers.';
+
+  @override
   String get createListingBasicInfo => 'Listing basics';
 
   @override
@@ -127,7 +140,20 @@ class AppLocalizationsEn extends AppLocalizations {
       'These details decide whether classmates will open the listing.';
 
   @override
+  String get createWantedBasicInfo => 'Wanted basics';
+
+  @override
+  String get createWantedBasicInfoSubtitle =>
+      'A clear request helps classmates know whether their item matches.';
+
+  @override
   String get createListingBrandHint => 'For example: Apple, Casio, NCU';
+
+  @override
+  String get createWantedBrandLabel => 'Preferred brand';
+
+  @override
+  String get createWantedBrandHint => 'Any, or for example: Apple, Casio';
 
   @override
   String get createListingBrandRequired => 'Please enter the brand or source';
@@ -143,7 +169,24 @@ class AppLocalizationsEn extends AppLocalizations {
       'Being clear about flaws makes the listing easier to trust.';
 
   @override
+  String get createWantedConditionSection => 'Minimum requirements';
+
+  @override
+  String get createWantedConditionSubtitle =>
+      'Set the lowest condition and notes you can accept.';
+
+  @override
   String get createListingDefectHint => 'For example: minor screen scratch';
+
+  @override
+  String get createWantedRequirementHint =>
+      'For example: charger included, minor scratches acceptable';
+
+  @override
+  String get createWantedRequirementsLabel => 'Requirements / notes';
+
+  @override
+  String get createWantedBudgetLabel => 'Budget ceiling (CNY) *';
 
   @override
   String get createListingDescriptionHint =>
@@ -158,6 +201,20 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get createListingDescriptionSubtitle =>
       'Optional, but concrete details reduce back-and-forth.';
+
+  @override
+  String get createWantedDescriptionHint =>
+      'Describe how you will use it, pickup preference, and deal breakers...';
+
+  @override
+  String get createWantedDescriptionLabel => 'Wanted description (optional)';
+
+  @override
+  String get createWantedDescriptionSection => 'Extra request details';
+
+  @override
+  String get createWantedDescriptionSubtitle =>
+      'Optional, but details help you get better recommendations.';
 
   @override
   String createListingMissingFields(String fields) {
@@ -197,6 +254,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get createListingTitleHint => 'For example: iPhone 13 Pro Max 256G';
+
+  @override
+  String get createWantedTitleHint =>
+      'For example: Looking for an iPad Air or similar tablet';
 
   @override
   String get createSuccess => 'Listing created successfully';
@@ -261,6 +322,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get listSeparator => ', ';
+
+  @override
+  String get listingDirectionAll => 'All';
+
+  @override
+  String get listingDirectionOffer => 'Offer';
+
+  @override
+  String get listingDirectionWanted => 'Wanted';
 
   @override
   String get listingDetail => 'Listing Details';
@@ -336,10 +406,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get myListingsTab => 'My Listings';
 
   @override
-  String get myOrders => 'My Orders';
+  String get myOrders => 'Deal Records';
 
   @override
-  String get myOrdersSubtitle => 'View purchase history';
+  String get myOrdersSubtitle => 'View offline deal intents and confirmations';
 
   @override
   String get allOrders => 'All';
@@ -351,16 +421,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get unreadOnly => 'Unread';
 
   @override
-  String get buyerOrders => 'As Buyer';
+  String get buyerOrders => 'Wanted by Me';
 
   @override
-  String get sellerOrders => 'As Seller';
+  String get sellerOrders => 'Offered by Me';
 
   @override
-  String get orderAsBuyer => 'As Buyer';
+  String get orderAsBuyer => 'Wanted';
 
   @override
-  String get orderAsSeller => 'As Seller';
+  String get orderAsSeller => 'Offered';
 
   @override
   String get pay => 'Pay';
@@ -417,6 +487,34 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get priceLabel => 'Price';
+
+  @override
+  String get wantedBudgetShort => 'Budget';
+
+  @override
+  String get wantedMinimumCondition => 'Minimum condition';
+
+  @override
+  String get wantedRequester => 'Requester';
+
+  @override
+  String get wantedMatchesTitle => 'Matching offers';
+
+  @override
+  String get contactRequester => 'Contact requester';
+
+  @override
+  String get recommendMyOffer => 'Recommend my offer';
+
+  @override
+  String get wantedOwnerHint => 'This is your own request';
+
+  @override
+  String get wantedNoOfferToRecommend =>
+      'You do not have an active offer to recommend';
+
+  @override
+  String get wantedRecommendSuccess => 'Recommended to the requester';
 
   @override
   String get profile => 'Profile';
@@ -574,7 +672,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminListingsTab => 'Listings';
 
   @override
-  String get adminOrdersTab => 'Orders';
+  String get adminOrdersTab => 'Deal Records';
 
   @override
   String get adminUsersTab => 'Users';
@@ -589,7 +687,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminUsers => 'Users';
 
   @override
-  String get adminOrders => 'Orders';
+  String get adminOrders => 'Deal Records';
 
   @override
   String get adminTrend7Days => 'Trend (7 days)';
@@ -604,7 +702,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get markCompleted => 'Deal confirmed';
 
   @override
-  String get orderStatusUpdated => 'Order status updated';
+  String get orderStatusUpdated => 'Deal record updated';
 
   @override
   String get userRoleUpdated => 'User role updated';
@@ -676,13 +774,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminViewListings => 'View Listings';
 
   @override
-  String get orderId => 'Order ID';
+  String get orderId => 'Record ID';
 
   @override
-  String get orderDetail => 'Order Detail';
+  String get orderDetail => 'Deal Details';
 
   @override
-  String get noOrders => 'No orders';
+  String get dealParties => 'Participants';
+
+  @override
+  String get dealTimeline => 'Deal Timeline';
+
+  @override
+  String get noOrders => 'No deal records';
 
   @override
   String get conditionLikeNew => 'Like New';
@@ -718,7 +822,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String orderNumber(String id) {
-    return 'Order #$id';
+    return 'Deal record #$id';
   }
 
   @override
@@ -817,7 +921,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get notSet => 'Not set';
 
   @override
-  String get homeHeroEyebrow => 'GOOD4NCU CAMPUS MARKET';
+  String get homeHeroEyebrow => 'Goods4ncu Campus Market';
 
   @override
   String get homeHeroTitle => 'What are you looking for today?';
@@ -1360,7 +1464,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get conversationSectionSpaces => 'Campus groups and channels';
 
   @override
-  String get conversationSectionTools => 'Tools and assistant';
+  String get conversationSectionTools => 'Xiaobang';
 
   @override
   String get conversationCreateGroupSuccess =>
@@ -1443,13 +1547,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String conversationSegmentCount(int count) {
     return '$count segments';
   }
-
-  @override
-  String get campusCommunicationTitle => 'Campus communication';
-
-  @override
-  String get campusCommunicationSubtitle =>
-      'Groups are for discussions, channels are for announcements. One-to-one chats can use call and secret chat MVPs.';
 
   @override
   String get createGroup => 'Create group';

@@ -13,6 +13,7 @@ class _FakeRecommendationService extends RecommendationService {
   Future<List<Listing>> getRecommendationFeed({
     int limit = 20,
     int offset = 0,
+    String direction = 'all',
   }) async {
     return [
       Listing(
@@ -93,6 +94,9 @@ void main() {
 
     expect(find.text('最近上新'), findsOneWidget);
     expect(find.text('看看同学们正在出什么闲置。'), findsOneWidget);
+    expect(find.text('全部'), findsOneWidget);
+    expect(find.text('出'), findsWidgets);
+    expect(find.text('收'), findsOneWidget);
     expect(find.text('可解释排序'), findsNothing);
     expect(find.text('程序设计教材'), findsOneWidget);
   });

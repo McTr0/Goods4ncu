@@ -6,6 +6,7 @@ class Listing {
   final String title;
   final String category;
   final String brand;
+  final String direction;
   final int conditionScore;
   final double suggestedPriceCny;
   final String? description;
@@ -22,6 +23,7 @@ class Listing {
     required this.title,
     required this.category,
     required this.brand,
+    this.direction = 'offer',
     required this.conditionScore,
     required this.suggestedPriceCny,
     this.description,
@@ -40,6 +42,7 @@ class Listing {
       title: json['title'] ?? '',
       category: json['category'] ?? '',
       brand: json['brand'] ?? '',
+      direction: json['direction'] ?? 'offer',
       conditionScore: json['condition_score'] ?? 0,
       suggestedPriceCny: (json['suggested_price_cny'] ?? 0).toDouble(),
       description: json['description'],
@@ -60,6 +63,16 @@ class Listing {
   String get conditionLabel => AppTheme.conditionLabel(conditionScore);
 
   Color get conditionColor => AppTheme.conditionColor(conditionScore);
+
+  bool get isWanted => direction == 'wanted';
+
+  bool get isOffer => !isWanted;
+
+  String get directionLabelZh => isWanted ? '收' : '出';
+
+  String get priceSemanticLabelZh => isWanted ? '预算上限' : '价格';
+
+  String get conditionSemanticLabelZh => isWanted ? '最低成色' : '成色';
 }
 
 class ListingsResponse {

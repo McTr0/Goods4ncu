@@ -73,10 +73,7 @@ class _RecommendationCard extends StatelessWidget {
   final Listing listing;
   final VoidCallback onTap;
 
-  const _RecommendationCard({
-    required this.listing,
-    required this.onTap,
-  });
+  const _RecommendationCard({required this.listing, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -87,10 +84,7 @@ class _RecommendationCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: Theme.of(context).cardTheme.color,
           borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-          border: Border.all(
-            color: Theme.of(context).dividerColor,
-            width: 1,
-          ),
+          border: Border.all(color: Theme.of(context).dividerColor, width: 1),
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(

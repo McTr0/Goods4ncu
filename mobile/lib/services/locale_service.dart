@@ -41,7 +41,11 @@ class LocaleNotifier extends ChangeNotifier {
 class LocaleProvider extends InheritedWidget {
   final LocaleNotifier notifier;
 
-  const LocaleProvider({super.key, required this.notifier, required super.child});
+  const LocaleProvider({
+    super.key,
+    required this.notifier,
+    required super.child,
+  });
 
   @override
   bool updateShouldNotify(LocaleProvider oldWidget) {

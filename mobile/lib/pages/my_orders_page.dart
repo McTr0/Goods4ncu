@@ -6,6 +6,15 @@ import '../models/models.dart';
 import '../services/order_service.dart';
 import '../theme/app_theme.dart';
 
+String _localizedOrderStatus(AppLocalizations l, String status) {
+  return switch (status) {
+    'pending' || 'intent_pending' => l.awaitingSellerConfirm,
+    'paid' || 'shipped' || 'completed' || 'confirmed' => l.dealConfirmed,
+    'cancelled' => l.dealCancelled,
+    _ => l.unknown,
+  };
+}
+
 /// Order list page with tabs: All / As Buyer / As Seller.
 class MyOrdersPage extends StatefulWidget {
   final OrderService? orderService;
@@ -227,6 +236,10 @@ class _OrderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     final roleLabel = order.role == 'buyer' ? l.orderAsBuyer : l.orderAsSeller;
+    final peerLabel = order.role == 'buyer' ? l.owner : l.buyer;
+    final peerUsername = order.role == 'buyer'
+        ? order.sellerUsername
+        : order.buyerUsername;
 
     return Card(
       margin: EdgeInsets.zero,
@@ -261,7 +274,7 @@ class _OrderCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
-                      order.statusLabel,
+                      _localizedOrderStatus(l, order.status),
                       style: TextStyle(
                         color: order.statusColor,
                         fontSize: 12,
@@ -294,9 +307,7 @@ class _OrderCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    order.role == 'buyer'
-                        ? '${l.owner}: ${order.sellerUsername}'
-                        : '${l.owner}: ${order.buyerUsername}',
+                    '$peerLabel: $peerUsername',
                     style: const TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: 12,

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:uuid/uuid.dart';
 
 import '../l10n/app_localizations.dart';
 import '../services/api_service.dart';
@@ -35,12 +36,15 @@ class _CreateListingPageState extends State<CreateListingPage> {
   final _defectController = TextEditingController();
 
   String _category = 'electronics';
+  String _direction = 'offer';
   int _conditionScore = 7;
   final List<String> _defects = [];
   bool _isLoading = false;
   bool _isRecognizing = false;
   String? _imageBase64;
   String? _recognitionError;
+  String? _submissionFingerprint;
+  String? _submissionIdempotencyKey;
 
   static const _categoryKeys = [
     'electronics',
@@ -77,6 +81,8 @@ class _CreateListingPageState extends State<CreateListingPage> {
     if (mounted) setState(() {});
   }
 
+  bool get _isWantedMode => _direction == 'wanted';
+
   Future<void> _takePhotoAndRecognize() =>
       _selectImageAndRecognize(ImageSource.camera);
 
@@ -84,6 +90,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
       _selectImageAndRecognize(ImageSource.gallery);
 
   Future<void> _selectImageAndRecognize(ImageSource source) async {
+    if (_isWantedMode) return;
     final base64 =
         await (widget.imageBase64Picker?.call(source) ??
             _pickImageAsBase64(source));
@@ -173,16 +180,38 @@ class _CreateListingPageState extends State<CreateListingPage> {
 
     try {
       final price = double.tryParse(_priceController.text) ?? 0;
+      final title = _titleController.text.trim();
+      final brand = _isWantedMode && _brandController.text.trim().isEmpty
+          ? '不限'
+          : _brandController.text.trim();
+      final description = _descriptionController.text.trim().isEmpty
+          ? null
+          : _descriptionController.text.trim();
+      final submissionFingerprint = jsonEncode({
+        'title': title,
+        'category': _category,
+        'brand': brand,
+        'direction': _direction,
+        'condition_score': _conditionScore,
+        'suggested_price_cny': price,
+        'defects': _defects,
+        'description': description,
+      });
+      if (_submissionFingerprint != submissionFingerprint) {
+        _submissionFingerprint = submissionFingerprint;
+        _submissionIdempotencyKey = const Uuid().v4();
+      }
+
       final id = await _apiService.createListing(
-        title: _titleController.text.trim(),
+        title: title,
         category: _category,
-        brand: _brandController.text.trim(),
+        brand: brand,
         conditionScore: _conditionScore,
         suggestedPriceCny: price,
         defects: _defects,
-        description: _descriptionController.text.trim().isEmpty
-            ? null
-            : _descriptionController.text.trim(),
+        description: description,
+        direction: _direction,
+        idempotencyKey: _submissionIdempotencyKey,
       );
 
       if (!mounted) return;
@@ -207,6 +236,37 @@ class _CreateListingPageState extends State<CreateListingPage> {
 
     setState(() => _defects.add(text));
     _defectController.clear();
+  }
+
+  Widget _buildModeSwitch() {
+    final l = AppLocalizations.of(context)!;
+    return _buildCard(
+      child: SegmentedButton<String>(
+        segments: [
+          ButtonSegment(
+            value: 'offer',
+            icon: const Icon(Icons.north_east_rounded),
+            label: Text(l.createListingModeOffer),
+          ),
+          ButtonSegment(
+            value: 'wanted',
+            icon: const Icon(Icons.south_west_rounded),
+            label: Text(l.createListingModeWanted),
+          ),
+        ],
+        selected: {_direction},
+        onSelectionChanged: (values) {
+          final next = values.first;
+          if (next == _direction) return;
+          setState(() {
+            _direction = next;
+            if (_isWantedMode && _brandController.text.trim().isEmpty) {
+              _brandController.text = '不限';
+            }
+          });
+        },
+      ),
+    );
   }
 
   String _getCategoryDisplayName(BuildContext context, String key) {
@@ -246,8 +306,12 @@ class _CreateListingPageState extends State<CreateListingPage> {
   List<String> _missingRequiredFields(AppLocalizations l) {
     final fields = <String>[];
     if (_titleController.text.trim().isEmpty) fields.add(l.title);
-    if (_brandController.text.trim().isEmpty) fields.add(l.brand);
-    if (!_hasValidPrice) fields.add(l.price);
+    if (!_isWantedMode && _brandController.text.trim().isEmpty) {
+      fields.add(l.brand);
+    }
+    if (!_hasValidPrice) {
+      fields.add(_isWantedMode ? l.wantedBudgetShort : l.price);
+    }
     return fields;
   }
 
@@ -315,6 +379,52 @@ class _CreateListingPageState extends State<CreateListingPage> {
   Widget _buildAiCapturePanel({bool compact = false}) {
     final l = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
+    if (_isWantedMode) {
+      return Container(
+        key: const ValueKey('create-wanted-prompt-panel'),
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppTheme.sp24),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppTheme.radius2xl),
+          gradient: LinearGradient(
+            colors: theme.brightness == Brightness.dark
+                ? const [Color(0xFF16312D), Color(0xFF10211F)]
+                : const [Color(0xFFEAF7EF), Color(0xFFFFF7E8)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          border: Border.all(color: AppTheme.primary.withValues(alpha: 0.18)),
+          boxShadow: AppTheme.softShadow,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.search_rounded,
+              size: compact ? 36 : 46,
+              color: AppTheme.primary,
+            ),
+            const SizedBox(height: AppTheme.sp16),
+            Text(
+              l.createWantedPanelTitle,
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.5,
+              ),
+            ),
+            const SizedBox(height: AppTheme.sp8),
+            Text(
+              l.createWantedPanelSubtitle,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                height: 1.45,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final isDark = theme.brightness == Brightness.dark;
     final onGradientText = isDark ? Colors.white : AppTheme.primaryDark;
     final secondaryText = isDark
@@ -706,9 +816,11 @@ class _CreateListingPageState extends State<CreateListingPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionHeader(
-          l.createListingBasicInfo,
+          _isWantedMode ? l.createWantedBasicInfo : l.createListingBasicInfo,
           Icons.info_outline,
-          subtitle: l.createListingBasicInfoSubtitle,
+          subtitle: _isWantedMode
+              ? l.createWantedBasicInfoSubtitle
+              : l.createListingBasicInfoSubtitle,
         ),
         _buildCard(
           child: Column(
@@ -718,7 +830,9 @@ class _CreateListingPageState extends State<CreateListingPage> {
                 controller: _titleController,
                 decoration: InputDecoration(
                   labelText: '${l.title} *',
-                  hintText: l.createListingTitleHint,
+                  hintText: _isWantedMode
+                      ? l.createWantedTitleHint
+                      : l.createListingTitleHint,
                   prefixIcon: const Icon(Icons.title),
                 ),
                 validator: (v) =>
@@ -750,20 +864,29 @@ class _CreateListingPageState extends State<CreateListingPage> {
                 key: const ValueKey('create-brand-field'),
                 controller: _brandController,
                 decoration: InputDecoration(
-                  labelText: '${l.brand} *',
-                  hintText: l.createListingBrandHint,
+                  labelText: _isWantedMode
+                      ? l.createWantedBrandLabel
+                      : '${l.brand} *',
+                  hintText: _isWantedMode
+                      ? l.createWantedBrandHint
+                      : l.createListingBrandHint,
                   prefixIcon: const Icon(Icons.branding_watermark_outlined),
                 ),
-                validator: (v) => v == null || v.trim().isEmpty
-                    ? l.createListingBrandRequired
-                    : null,
+                validator: (v) {
+                  if (_isWantedMode) return null;
+                  return v == null || v.trim().isEmpty
+                      ? l.createListingBrandRequired
+                      : null;
+                },
               ),
               const SizedBox(height: AppTheme.sp16),
               TextFormField(
                 key: const ValueKey('create-price-field'),
                 controller: _priceController,
                 decoration: InputDecoration(
-                  labelText: l.createListingPriceLabel,
+                  labelText: _isWantedMode
+                      ? l.createWantedBudgetLabel
+                      : l.createListingPriceLabel,
                   hintText: '0.00',
                   prefixIcon: const Icon(Icons.currency_yuan),
                 ),
@@ -793,9 +916,13 @@ class _CreateListingPageState extends State<CreateListingPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionHeader(
-          l.createListingConditionSection,
+          _isWantedMode
+              ? l.createWantedConditionSection
+              : l.createListingConditionSection,
           Icons.health_and_safety_outlined,
-          subtitle: l.createListingConditionSubtitle,
+          subtitle: _isWantedMode
+              ? l.createWantedConditionSubtitle
+              : l.createListingConditionSubtitle,
         ),
         _buildCard(
           child: Column(
@@ -805,7 +932,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    l.condition,
+                    _isWantedMode ? l.wantedMinimumCondition : l.condition,
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w800,
                     ),
@@ -874,7 +1001,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
               ),
               const SizedBox(height: AppTheme.sp24),
               Text(
-                l.defects,
+                _isWantedMode ? l.createWantedRequirementsLabel : l.defects,
                 style: Theme.of(
                   context,
                 ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
@@ -886,7 +1013,9 @@ class _CreateListingPageState extends State<CreateListingPage> {
                     child: TextField(
                       controller: _defectController,
                       decoration: InputDecoration(
-                        hintText: l.createListingDefectHint,
+                        hintText: _isWantedMode
+                            ? l.createWantedRequirementHint
+                            : l.createListingDefectHint,
                         prefixIcon: const Icon(Icons.report_problem_outlined),
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: AppTheme.sp16,
@@ -949,16 +1078,24 @@ class _CreateListingPageState extends State<CreateListingPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionHeader(
-          l.createListingDescriptionSection,
+          _isWantedMode
+              ? l.createWantedDescriptionSection
+              : l.createListingDescriptionSection,
           Icons.description_outlined,
-          subtitle: l.createListingDescriptionSubtitle,
+          subtitle: _isWantedMode
+              ? l.createWantedDescriptionSubtitle
+              : l.createListingDescriptionSubtitle,
         ),
         _buildCard(
           child: TextFormField(
             controller: _descriptionController,
             decoration: InputDecoration(
-              labelText: l.createListingDescriptionLabel,
-              hintText: l.createListingDescriptionHint,
+              labelText: _isWantedMode
+                  ? l.createWantedDescriptionLabel
+                  : l.createListingDescriptionLabel,
+              hintText: _isWantedMode
+                  ? l.createWantedDescriptionHint
+                  : l.createListingDescriptionHint,
               alignLabelWithHint: true,
               border: InputBorder.none,
               enabledBorder: InputBorder.none,
@@ -982,6 +1119,8 @@ class _CreateListingPageState extends State<CreateListingPage> {
         AppTheme.sp32,
       ),
       children: [
+        _buildModeSwitch(),
+        const SizedBox(height: AppTheme.sp20),
         _buildAiCapturePanel(compact: true),
         const SizedBox(height: AppTheme.sp24),
         _buildBasicsSection(),
@@ -1009,6 +1148,8 @@ class _CreateListingPageState extends State<CreateListingPage> {
             width: 380,
             child: Column(
               children: [
+                _buildModeSwitch(),
+                const SizedBox(height: AppTheme.sp20),
                 _buildAiCapturePanel(),
                 const SizedBox(height: AppTheme.sp20),
                 _buildProgressCard(),
@@ -1150,8 +1291,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
                 key: _formKey,
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    final isDesktop =
-                        constraints.maxWidth >= AppBreakpoints.desktop;
+                    final isDesktop = constraints.maxWidth >= 1240;
                     return ResponsiveContent(
                       maxWidth: isDesktop ? 1180 : 860,
                       child: isDesktop

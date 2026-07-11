@@ -308,6 +308,30 @@ abstract class AppLocalizations {
   /// **'Let the assistant take a look first'**
   String get createListingAiTitle;
 
+  /// No description provided for @createListingModeOffer.
+  ///
+  /// In en, this message translates to:
+  /// **'I am offering'**
+  String get createListingModeOffer;
+
+  /// No description provided for @createListingModeWanted.
+  ///
+  /// In en, this message translates to:
+  /// **'I am looking for'**
+  String get createListingModeWanted;
+
+  /// No description provided for @createWantedPanelTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Describe what you want'**
+  String get createWantedPanelTitle;
+
+  /// No description provided for @createWantedPanelSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Add budget, minimum condition, and the details you care about. The system will match classmates\' active offers.'**
+  String get createWantedPanelSubtitle;
+
   /// No description provided for @createListingBasicInfo.
   ///
   /// In en, this message translates to:
@@ -320,11 +344,35 @@ abstract class AppLocalizations {
   /// **'These details decide whether classmates will open the listing.'**
   String get createListingBasicInfoSubtitle;
 
+  /// No description provided for @createWantedBasicInfo.
+  ///
+  /// In en, this message translates to:
+  /// **'Wanted basics'**
+  String get createWantedBasicInfo;
+
+  /// No description provided for @createWantedBasicInfoSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'A clear request helps classmates know whether their item matches.'**
+  String get createWantedBasicInfoSubtitle;
+
   /// No description provided for @createListingBrandHint.
   ///
   /// In en, this message translates to:
   /// **'For example: Apple, Casio, NCU'**
   String get createListingBrandHint;
+
+  /// No description provided for @createWantedBrandLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Preferred brand'**
+  String get createWantedBrandLabel;
+
+  /// No description provided for @createWantedBrandHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Any, or for example: Apple, Casio'**
+  String get createWantedBrandHint;
 
   /// No description provided for @createListingBrandRequired.
   ///
@@ -350,11 +398,41 @@ abstract class AppLocalizations {
   /// **'Being clear about flaws makes the listing easier to trust.'**
   String get createListingConditionSubtitle;
 
+  /// No description provided for @createWantedConditionSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Minimum requirements'**
+  String get createWantedConditionSection;
+
+  /// No description provided for @createWantedConditionSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Set the lowest condition and notes you can accept.'**
+  String get createWantedConditionSubtitle;
+
   /// No description provided for @createListingDefectHint.
   ///
   /// In en, this message translates to:
   /// **'For example: minor screen scratch'**
   String get createListingDefectHint;
+
+  /// No description provided for @createWantedRequirementHint.
+  ///
+  /// In en, this message translates to:
+  /// **'For example: charger included, minor scratches acceptable'**
+  String get createWantedRequirementHint;
+
+  /// No description provided for @createWantedRequirementsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Requirements / notes'**
+  String get createWantedRequirementsLabel;
+
+  /// No description provided for @createWantedBudgetLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Budget ceiling (CNY) *'**
+  String get createWantedBudgetLabel;
 
   /// No description provided for @createListingDescriptionHint.
   ///
@@ -379,6 +457,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Optional, but concrete details reduce back-and-forth.'**
   String get createListingDescriptionSubtitle;
+
+  /// No description provided for @createWantedDescriptionHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Describe how you will use it, pickup preference, and deal breakers...'**
+  String get createWantedDescriptionHint;
+
+  /// No description provided for @createWantedDescriptionLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Wanted description (optional)'**
+  String get createWantedDescriptionLabel;
+
+  /// No description provided for @createWantedDescriptionSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Extra request details'**
+  String get createWantedDescriptionSection;
+
+  /// No description provided for @createWantedDescriptionSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional, but details help you get better recommendations.'**
+  String get createWantedDescriptionSubtitle;
 
   /// No description provided for @createListingMissingFields.
   ///
@@ -451,6 +553,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'For example: iPhone 13 Pro Max 256G'**
   String get createListingTitleHint;
+
+  /// No description provided for @createWantedTitleHint.
+  ///
+  /// In en, this message translates to:
+  /// **'For example: Looking for an iPad Air or similar tablet'**
+  String get createWantedTitleHint;
 
   /// No description provided for @createSuccess.
   ///
@@ -577,6 +685,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **', '**
   String get listSeparator;
+
+  /// No description provided for @listingDirectionAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get listingDirectionAll;
+
+  /// No description provided for @listingDirectionOffer.
+  ///
+  /// In en, this message translates to:
+  /// **'Offer'**
+  String get listingDirectionOffer;
+
+  /// No description provided for @listingDirectionWanted.
+  ///
+  /// In en, this message translates to:
+  /// **'Wanted'**
+  String get listingDirectionWanted;
 
   /// No description provided for @listingDetail.
   ///
@@ -719,13 +845,13 @@ abstract class AppLocalizations {
   /// No description provided for @myOrders.
   ///
   /// In en, this message translates to:
-  /// **'My Orders'**
+  /// **'Deal Records'**
   String get myOrders;
 
   /// No description provided for @myOrdersSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'View purchase history'**
+  /// **'View offline deal intents and confirmations'**
   String get myOrdersSubtitle;
 
   /// No description provided for @allOrders.
@@ -749,25 +875,25 @@ abstract class AppLocalizations {
   /// No description provided for @buyerOrders.
   ///
   /// In en, this message translates to:
-  /// **'As Buyer'**
+  /// **'Wanted by Me'**
   String get buyerOrders;
 
   /// No description provided for @sellerOrders.
   ///
   /// In en, this message translates to:
-  /// **'As Seller'**
+  /// **'Offered by Me'**
   String get sellerOrders;
 
   /// No description provided for @orderAsBuyer.
   ///
   /// In en, this message translates to:
-  /// **'As Buyer'**
+  /// **'Wanted'**
   String get orderAsBuyer;
 
   /// No description provided for @orderAsSeller.
   ///
   /// In en, this message translates to:
-  /// **'As Seller'**
+  /// **'Offered'**
   String get orderAsSeller;
 
   /// No description provided for @pay.
@@ -877,6 +1003,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Price'**
   String get priceLabel;
+
+  /// No description provided for @wantedBudgetShort.
+  ///
+  /// In en, this message translates to:
+  /// **'Budget'**
+  String get wantedBudgetShort;
+
+  /// No description provided for @wantedMinimumCondition.
+  ///
+  /// In en, this message translates to:
+  /// **'Minimum condition'**
+  String get wantedMinimumCondition;
+
+  /// No description provided for @wantedRequester.
+  ///
+  /// In en, this message translates to:
+  /// **'Requester'**
+  String get wantedRequester;
+
+  /// No description provided for @wantedMatchesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Matching offers'**
+  String get wantedMatchesTitle;
+
+  /// No description provided for @contactRequester.
+  ///
+  /// In en, this message translates to:
+  /// **'Contact requester'**
+  String get contactRequester;
+
+  /// No description provided for @recommendMyOffer.
+  ///
+  /// In en, this message translates to:
+  /// **'Recommend my offer'**
+  String get recommendMyOffer;
+
+  /// No description provided for @wantedOwnerHint.
+  ///
+  /// In en, this message translates to:
+  /// **'This is your own request'**
+  String get wantedOwnerHint;
+
+  /// No description provided for @wantedNoOfferToRecommend.
+  ///
+  /// In en, this message translates to:
+  /// **'You do not have an active offer to recommend'**
+  String get wantedNoOfferToRecommend;
+
+  /// No description provided for @wantedRecommendSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Recommended to the requester'**
+  String get wantedRecommendSuccess;
 
   /// No description provided for @profile.
   ///
@@ -1169,7 +1349,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminOrdersTab.
   ///
   /// In en, this message translates to:
-  /// **'Orders'**
+  /// **'Deal Records'**
   String get adminOrdersTab;
 
   /// No description provided for @adminUsersTab.
@@ -1199,7 +1379,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminOrders.
   ///
   /// In en, this message translates to:
-  /// **'Orders'**
+  /// **'Deal Records'**
   String get adminOrders;
 
   /// No description provided for @adminTrend7Days.
@@ -1229,7 +1409,7 @@ abstract class AppLocalizations {
   /// No description provided for @orderStatusUpdated.
   ///
   /// In en, this message translates to:
-  /// **'Order status updated'**
+  /// **'Deal record updated'**
   String get orderStatusUpdated;
 
   /// No description provided for @userRoleUpdated.
@@ -1361,19 +1541,31 @@ abstract class AppLocalizations {
   /// No description provided for @orderId.
   ///
   /// In en, this message translates to:
-  /// **'Order ID'**
+  /// **'Record ID'**
   String get orderId;
 
   /// No description provided for @orderDetail.
   ///
   /// In en, this message translates to:
-  /// **'Order Detail'**
+  /// **'Deal Details'**
   String get orderDetail;
+
+  /// No description provided for @dealParties.
+  ///
+  /// In en, this message translates to:
+  /// **'Participants'**
+  String get dealParties;
+
+  /// No description provided for @dealTimeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Deal Timeline'**
+  String get dealTimeline;
 
   /// No description provided for @noOrders.
   ///
   /// In en, this message translates to:
-  /// **'No orders'**
+  /// **'No deal records'**
   String get noOrders;
 
   /// No description provided for @conditionLikeNew.
@@ -1439,7 +1631,7 @@ abstract class AppLocalizations {
   /// No description provided for @orderNumber.
   ///
   /// In en, this message translates to:
-  /// **'Order #{id}'**
+  /// **'Deal record #{id}'**
   String orderNumber(String id);
 
   /// No description provided for @joinedLabel.
@@ -1613,7 +1805,7 @@ abstract class AppLocalizations {
   /// No description provided for @homeHeroEyebrow.
   ///
   /// In en, this message translates to:
-  /// **'GOOD4NCU CAMPUS MARKET'**
+  /// **'Goods4ncu Campus Market'**
   String get homeHeroEyebrow;
 
   /// No description provided for @homeHeroTitle.
@@ -2571,7 +2763,7 @@ abstract class AppLocalizations {
   /// No description provided for @conversationSectionTools.
   ///
   /// In en, this message translates to:
-  /// **'Tools and assistant'**
+  /// **'Xiaobang'**
   String get conversationSectionTools;
 
   /// No description provided for @conversationCreateGroupSuccess.
@@ -2699,18 +2891,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count} segments'**
   String conversationSegmentCount(int count);
-
-  /// No description provided for @campusCommunicationTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Campus communication'**
-  String get campusCommunicationTitle;
-
-  /// No description provided for @campusCommunicationSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Groups are for discussions, channels are for announcements. One-to-one chats can use call and secret chat MVPs.'**
-  String get campusCommunicationSubtitle;
 
   /// No description provided for @createGroup.
   ///

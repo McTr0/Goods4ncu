@@ -43,11 +43,15 @@ class AnalyticsService {
           .timeout(const Duration(seconds: 5));
 
       if (response.statusCode != 200 && response.statusCode != 201) {
-        debugPrint('[Analytics] Event $eventType failed: ${response.statusCode}');
+        debugPrint(
+          '[Analytics] Event $eventType failed: ${response.statusCode}',
+        );
       }
     } catch (e) {
       // Graceful degradation: analytics failure should not affect user experience.
-      debugPrint('[Analytics] Event $eventType for listing $listingId failed: $e');
+      debugPrint(
+        '[Analytics] Event $eventType for listing $listingId failed: $e',
+      );
     }
   }
 }

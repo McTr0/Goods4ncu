@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'package:uuid/uuid.dart';
+
 import '../models/models.dart';
 import 'base_service.dart';
 
@@ -18,6 +20,7 @@ class ListingService extends BaseService {
     double? minPriceCny,
     double? maxPriceCny,
     String sort = 'newest',
+    String direction = 'offer',
   }) async {
     final headers = await authHeaders();
     final queryParams = <String, String>{
@@ -36,6 +39,7 @@ class ListingService extends BaseService {
       queryParams['max_price_cny'] = maxPriceCny.toString();
     }
     if (sort != 'newest') queryParams['sort'] = sort;
+    queryParams['direction'] = direction;
 
     final uri = Uri.parse(
       '$baseUrl/api/listings',
@@ -72,15 +76,19 @@ class ListingService extends BaseService {
     required double suggestedPriceCny,
     required List<String> defects,
     String? description,
+    String direction = 'offer',
+    String? idempotencyKey,
   }) async {
     final headers = await authHeaders();
+    headers['Idempotency-Key'] = idempotencyKey ?? const Uuid().v4();
     final response = await post(
       Uri.parse('$baseUrl/api/listings'),
       headers,
       jsonEncode({
         'title': title,
         'category': category,
-        'brand': brand,
+        'brand': direction == 'wanted' && brand.trim().isEmpty ? '不限' : brand,
+        'direction': direction,
         'condition_score': conditionScore,
         'suggested_price_cny': suggestedPriceCny,
         'defects': defects,
@@ -88,6 +96,35 @@ class ListingService extends BaseService {
       }),
     );
     return handleResponse(response, (data) => data['id'] ?? '');
+  }
+
+  /// Get active offers matching a wanted listing.
+  Future<ListingsResponse> getWantedMatches(String wantedId) async {
+    final headers = await authHeaders();
+    final response = await get(
+      Uri.parse('$baseUrl/api/listings/$wantedId/matches'),
+      headers,
+    );
+    return handleResponse(response, (data) => ListingsResponse.fromJson(data));
+  }
+
+  /// Recommend one of the current user's active offers to a wanted listing.
+  Future<String> recommendOfferForWanted({
+    required String wantedId,
+    required String offerListingId,
+    String? message,
+  }) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/listings/$wantedId/responses'),
+      headers,
+      jsonEncode({
+        'offer_listing_id': offerListingId,
+        if (message != null && message.trim().isNotEmpty)
+          'message': message.trim(),
+      }),
+    );
+    return handleResponse(response, (data) => data['message'] ?? '');
   }
 
   /// Update existing listing.

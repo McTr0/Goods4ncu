@@ -168,6 +168,7 @@ class ApiService extends BaseService {
     double? minPriceCny,
     double? maxPriceCny,
     String sort = 'newest',
+    String direction = 'offer',
   }) => _listingService.getListings(
     limit: limit,
     offset: offset,
@@ -177,6 +178,7 @@ class ApiService extends BaseService {
     minPriceCny: minPriceCny,
     maxPriceCny: maxPriceCny,
     sort: sort,
+    direction: direction,
   );
 
   Future<Listing> getListingDetail(String id) =>
@@ -190,6 +192,8 @@ class ApiService extends BaseService {
     required double suggestedPriceCny,
     required List<String> defects,
     String? description,
+    String direction = 'offer',
+    String? idempotencyKey,
   }) => _listingService.createListing(
     title: title,
     category: category,
@@ -198,10 +202,25 @@ class ApiService extends BaseService {
     suggestedPriceCny: suggestedPriceCny,
     defects: defects,
     description: description,
+    direction: direction,
+    idempotencyKey: idempotencyKey,
   );
 
   Future<void> updateListing(String id, Map<String, dynamic> updates) =>
       _listingService.updateListing(id, updates);
+
+  Future<ListingsResponse> getWantedMatches(String wantedId) =>
+      _listingService.getWantedMatches(wantedId);
+
+  Future<String> recommendOfferForWanted({
+    required String wantedId,
+    required String offerListingId,
+    String? message,
+  }) => _listingService.recommendOfferForWanted(
+    wantedId: wantedId,
+    offerListingId: offerListingId,
+    message: message,
+  );
 
   Future<RecognizedItem> recognizeItem(String imageBase64) =>
       _listingService.recognizeItem(imageBase64);

@@ -23,6 +23,7 @@ class _MyListingsPageState extends State<MyListingsPage> {
   List<Listing> _listings = [];
   bool _loading = true;
   String? _error;
+  String _directionFilter = 'all';
 
   @override
   void initState() {
@@ -32,7 +33,10 @@ class _MyListingsPageState extends State<MyListingsPage> {
   }
 
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final data = await _apiService.getUserListings();
       final items = data['items'] as List<dynamic>?;
@@ -43,7 +47,12 @@ class _MyListingsPageState extends State<MyListingsPage> {
         });
       }
     } catch (e) {
-      if (mounted) setState(() { _loading = false; _error = e.toString(); });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = e.toString();
+        });
+      }
     }
   }
 
@@ -51,9 +60,7 @@ class _MyListingsPageState extends State<MyListingsPage> {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(l.myListings),
-      ),
+      appBar: AppBar(title: Text(l.myListings)),
       body: _buildBody(),
     );
   }
@@ -90,7 +97,10 @@ class _MyListingsPageState extends State<MyListingsPage> {
             const SizedBox(height: 16),
             Text(
               l.noProducts,
-              style: const TextStyle(fontSize: 16, color: AppTheme.textSecondary),
+              style: const TextStyle(
+                fontSize: 16,
+                color: AppTheme.textSecondary,
+              ),
             ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
@@ -103,24 +113,64 @@ class _MyListingsPageState extends State<MyListingsPage> {
       );
     }
 
+    final visibleListings = _listings.where((listing) {
+      if (_directionFilter == 'all') return true;
+      return listing.direction == _directionFilter;
+    }).toList();
+
     return RefreshIndicator(
       onRefresh: _load,
-      child: GridView.builder(
-        padding: const EdgeInsets.all(AppTheme.sp16),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          childAspectRatio: 0.72,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-        ),
-        itemCount: _listings.length,
-        itemBuilder: (context, i) {
-          final listing = _listings[i];
-          return ListingCard(
-            listing: listing,
-            onTap: () => context.push('/listing/${listing.id}'),
-          );
-        },
+      child: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppTheme.sp16,
+                AppTheme.sp16,
+                AppTheme.sp16,
+                0,
+              ),
+              child: SegmentedButton<String>(
+                segments: [
+                  ButtonSegment(
+                    value: 'all',
+                    label: Text(l.listingDirectionAll),
+                  ),
+                  ButtonSegment(
+                    value: 'offer',
+                    label: Text(l.listingDirectionOffer),
+                  ),
+                  ButtonSegment(
+                    value: 'wanted',
+                    label: Text(l.listingDirectionWanted),
+                  ),
+                ],
+                selected: {_directionFilter},
+                onSelectionChanged: (values) =>
+                    setState(() => _directionFilter = values.first),
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.all(AppTheme.sp16),
+            sliver: SliverGrid.builder(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                childAspectRatio: 0.72,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+              ),
+              itemCount: visibleListings.length,
+              itemBuilder: (context, i) {
+                final listing = visibleListings[i];
+                return ListingCard(
+                  listing: listing,
+                  onTap: () => context.push('/listing/${listing.id}'),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

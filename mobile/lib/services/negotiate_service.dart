@@ -9,10 +9,7 @@ class NegotiateService extends BaseService {
   /// GET /api/negotiations
   Future<List<HitlRequest>> getNegotiations() async {
     final headers = await authHeaders();
-    final response = await get(
-      Uri.parse('$baseUrl/api/negotiations'),
-      headers,
-    );
+    final response = await get(Uri.parse('$baseUrl/api/negotiations'), headers);
     final data = handleResponse(response, (d) => d as Map<String, dynamic>);
     final items = data['items'] as List<dynamic>? ?? [];
     return items

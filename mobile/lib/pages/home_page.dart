@@ -27,6 +27,7 @@ class _HomePageState extends State<HomePage> {
   bool _recommendationLoading = true;
   bool _feedHasMore = true;
   bool _feedLoading = false;
+  String _directionFilter = 'all';
 
   @override
   void initState() {
@@ -45,6 +46,7 @@ class _HomePageState extends State<HomePage> {
           .getRecommendationFeed(
             limit: 20,
             offset: reset ? 0 : _recommendedListings.length,
+            direction: _directionFilter,
           );
       if (mounted) {
         setState(() {
@@ -200,7 +202,18 @@ class _HomePageState extends State<HomePage> {
                       : AppTheme.sp16,
                   AppTheme.sp8,
                 ),
-                child: const _SectionTitle(),
+                child: _SectionTitle(
+                  selectedDirection: _directionFilter,
+                  onDirectionChanged: (direction) {
+                    if (_directionFilter == direction) return;
+                    setState(() {
+                      _directionFilter = direction;
+                      _recommendedListings = [];
+                      _feedHasMore = true;
+                    });
+                    _loadRecommendations(reset: true);
+                  },
+                ),
               ),
             ),
             SliverPadding(
@@ -274,7 +287,7 @@ class _HomeHero extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.fromLTRB(
         desktop ? AppTheme.sp24 : AppTheme.sp16,
-        desktop ? AppTheme.sp16 : AppTheme.sp8,
+        desktop ? AppTheme.sp12 : AppTheme.sp8,
         desktop ? AppTheme.sp24 : AppTheme.sp16,
         AppTheme.sp4,
       ),
@@ -296,7 +309,7 @@ class _HomeHero extends StatelessWidget {
           ],
         ),
         child: Padding(
-          padding: EdgeInsets.all(desktop ? 28 : AppTheme.sp20),
+          padding: EdgeInsets.all(desktop ? AppTheme.sp24 : AppTheme.sp20),
           child: _AgentIntro(
             promptController: promptController,
             promptFocus: promptFocus,
@@ -352,15 +365,15 @@ class _AgentIntro extends StatelessWidget {
           l.homeHeroTitle,
           style: TextStyle(
             color: scheme.onSurface,
-            fontSize: desktop ? 42 : 32,
+            fontSize: desktop ? 36 : 32,
             height: 1.05,
             fontWeight: FontWeight.w900,
-            letterSpacing: desktop ? -1.4 : -0.9,
+            letterSpacing: desktop ? -1.1 : -0.9,
           ),
         ),
         const SizedBox(height: 10),
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680),
+          constraints: const BoxConstraints(maxWidth: 620),
           child: Text(
             l.homeHeroSubtitle,
             style: TextStyle(
@@ -405,7 +418,7 @@ class _AgentPromptBox extends StatelessWidget {
     final scheme = theme.colorScheme;
     final dark = theme.brightness == Brightness.dark;
     return Container(
-      constraints: const BoxConstraints(maxWidth: 680),
+      constraints: const BoxConstraints(maxWidth: 620),
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHighest.withValues(
@@ -592,7 +605,7 @@ class _ThoughtBubble extends StatelessWidget {
             ),
           ),
           child: Row(
-            mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 thought.icon,
@@ -622,7 +635,13 @@ class _ThoughtBubble extends StatelessWidget {
 }
 
 class _SectionTitle extends StatelessWidget {
-  const _SectionTitle();
+  const _SectionTitle({
+    required this.selectedDirection,
+    required this.onDirectionChanged,
+  });
+
+  final String selectedDirection;
+  final ValueChanged<String> onDirectionChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -662,6 +681,25 @@ class _SectionTitle extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ),
+        SegmentedButton<String>(
+          segments: [
+            ButtonSegment(value: 'all', label: Text(l.listingDirectionAll)),
+            ButtonSegment(value: 'offer', label: Text(l.listingDirectionOffer)),
+            ButtonSegment(
+              value: 'wanted',
+              label: Text(l.listingDirectionWanted),
+            ),
+          ],
+          selected: {selectedDirection},
+          onSelectionChanged: (values) => onDirectionChanged(values.first),
+          style: ButtonStyle(
+            visualDensity: VisualDensity.compact,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            textStyle: WidgetStateProperty.all(
+              const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+            ),
           ),
         ),
       ],

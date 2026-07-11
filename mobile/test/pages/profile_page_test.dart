@@ -41,6 +41,7 @@ void main() {
 
       expect(find.text(l.adminConsole), findsNothing);
       expect(find.text(l.myListings), findsOneWidget);
+      expect(find.text(l.myOrders), findsNothing);
     });
 
     testWidgets('shows admin console for admin users', (tester) async {

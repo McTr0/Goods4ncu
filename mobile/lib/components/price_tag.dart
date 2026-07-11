@@ -94,6 +94,7 @@ class ListingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
     final category = listing.category.trim();
     final categoryLabel = localizedCategoryLabel(context, category);
     final brand = listing.brand.trim();
@@ -124,6 +125,9 @@ class ListingCard extends StatelessWidget {
                   child: _ListingImageHeader(
                     imageUrl: listing.imageUrl,
                     category: categoryLabel,
+                    directionLabel: listing.isWanted
+                        ? l.listingDirectionWanted
+                        : l.listingDirectionOffer,
                     icon: _iconForCategory(category),
                   ),
                 ),
@@ -161,11 +165,27 @@ class ListingCard extends StatelessWidget {
                         const Spacer(),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             Flexible(
-                              child: PriceTag(
-                                priceCny: listing.suggestedPriceCny,
-                                fontSize: 15,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    listing.isWanted
+                                        ? l.wantedBudgetShort
+                                        : l.priceLabel,
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.textSecondary,
+                                    ),
+                                  ),
+                                  PriceTag(
+                                    priceCny: listing.suggestedPriceCny,
+                                    fontSize: 15,
+                                  ),
+                                ],
                               ),
                             ),
                             const SizedBox(width: 4),
@@ -210,11 +230,13 @@ class ListingCard extends StatelessWidget {
 class _ListingImageHeader extends StatelessWidget {
   final String? imageUrl;
   final String category;
+  final String directionLabel;
   final IconData icon;
 
   const _ListingImageHeader({
     required this.imageUrl,
     required this.category,
+    required this.directionLabel,
     required this.icon,
   });
 
@@ -257,6 +279,11 @@ class _ListingImageHeader extends StatelessWidget {
           left: AppTheme.sp12,
           top: AppTheme.sp12,
           child: _ListingPill(label: category.isEmpty ? '闲置好物' : category),
+        ),
+        Positioned(
+          right: AppTheme.sp12,
+          top: AppTheme.sp12,
+          child: _ListingPill(label: directionLabel, strong: true),
         ),
       ],
     );
@@ -317,8 +344,9 @@ class _ListingImageFallback extends StatelessWidget {
 
 class _ListingPill extends StatelessWidget {
   final String label;
+  final bool strong;
 
-  const _ListingPill({required this.label});
+  const _ListingPill({required this.label, this.strong = false});
 
   @override
   Widget build(BuildContext context) {
@@ -326,9 +354,15 @@ class _ListingPill extends StatelessWidget {
       constraints: const BoxConstraints(maxWidth: 92),
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.82),
+        color: strong
+            ? AppTheme.primaryDark.withValues(alpha: 0.9)
+            : Colors.white.withValues(alpha: 0.82),
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.86)),
+        border: Border.all(
+          color: strong
+              ? AppTheme.primaryDark.withValues(alpha: 0.92)
+              : Colors.white.withValues(alpha: 0.86),
+        ),
       ),
       child: Text(
         label,
@@ -338,7 +372,7 @@ class _ListingPill extends StatelessWidget {
           color: AppTheme.primaryDark,
           fontSize: 11,
           fontWeight: FontWeight.w800,
-        ),
+        ).copyWith(color: strong ? Colors.white : AppTheme.primaryDark),
       ),
     );
   }

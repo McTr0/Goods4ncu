@@ -5,11 +5,7 @@ class ShimmerGrid extends StatelessWidget {
   final int itemCount;
   final int crossAxisCount;
 
-  const ShimmerGrid({
-    super.key,
-    this.itemCount = 6,
-    this.crossAxisCount = 2,
-  });
+  const ShimmerGrid({super.key, this.itemCount = 6, this.crossAxisCount = 2});
 
   @override
   Widget build(BuildContext context) {

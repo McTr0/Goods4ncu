@@ -48,6 +48,10 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
   // Similar listings state
   List<Listing> _similarListings = [];
   bool _similarLoading = true;
+  List<Listing> _wantedMatches = [];
+  bool _wantedMatchesLoading = false;
+  String? _currentUserId;
+  bool _currentUserLoaded = false;
 
   @override
   void initState() {
@@ -58,6 +62,24 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     _orderService = widget.orderService ?? context.read<OrderService>();
     _chatService = widget.chatService ?? context.read<ChatService>();
     _loadDetail();
+    _loadCurrentUserId();
+  }
+
+  Future<void> _loadCurrentUserId() async {
+    try {
+      final profile = await _apiService.getUserProfile();
+      if (!mounted) return;
+      setState(() {
+        _currentUserId = profile['user_id']?.toString();
+        _currentUserLoaded = true;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _currentUserId = null;
+        _currentUserLoaded = true;
+      });
+    }
   }
 
   Future<void> _loadDetail() async {
@@ -69,7 +91,11 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
           _listing = listing;
           _loading = false;
         });
-        _loadSimilarListings();
+        if (listing.isWanted) {
+          _loadWantedMatches();
+        } else {
+          _loadSimilarListings();
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -98,6 +124,26 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         setState(() {
           _similarListings = [];
           _similarLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadWantedMatches() async {
+    setState(() => _wantedMatchesLoading = true);
+    try {
+      final response = await _apiService.getWantedMatches(widget.listingId);
+      if (mounted) {
+        setState(() {
+          _wantedMatches = response.items;
+          _wantedMatchesLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _wantedMatches = [];
+          _wantedMatchesLoading = false;
         });
       }
     }
@@ -255,6 +301,91 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     }
   }
 
+  Future<void> _handleRecommendMyOffer() async {
+    final l = AppLocalizations.of(context)!;
+    final messenger = ScaffoldMessenger.of(context);
+    final listing = _listing;
+    if (_isOperating || listing == null) return;
+
+    setState(() => _isOperating = true);
+    try {
+      final profile = await _apiService.getUserProfile();
+      if (!mounted) return;
+      if (profile['user_id']?.toString() == listing.ownerId) {
+        messenger.showSnackBar(SnackBar(content: Text(l.wantedOwnerHint)));
+        return;
+      }
+
+      final myListings = await _apiService.getUserListings(limit: 50);
+      final rawItems = myListings['items'] as List<dynamic>? ?? [];
+      final myOffers = rawItems
+          .map((item) => Listing.fromJson(item as Map<String, dynamic>))
+          .where((item) => item.isOffer && item.status == 'active')
+          .toList();
+      if (!mounted) return;
+      if (myOffers.isEmpty) {
+        messenger.showSnackBar(
+          SnackBar(content: Text(l.wantedNoOfferToRecommend)),
+        );
+        return;
+      }
+
+      final selected = await showModalBottomSheet<Listing>(
+        context: context,
+        showDragHandle: true,
+        builder: (ctx) => SafeArea(
+          child: ListView.separated(
+            shrinkWrap: true,
+            padding: const EdgeInsets.all(AppTheme.sp16),
+            itemCount: myOffers.length,
+            separatorBuilder: (_, _) => const Divider(height: 1),
+            itemBuilder: (context, index) {
+              final offer = myOffers[index];
+              return ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: AppTheme.primary.withValues(alpha: 0.12),
+                  child: const Icon(Icons.inventory_2_outlined),
+                ),
+                title: Text(offer.title),
+                subtitle: Text(
+                  '¥${offer.suggestedPriceCny.toStringAsFixed(2)}',
+                ),
+                onTap: () => Navigator.pop(ctx, offer),
+              );
+            },
+          ),
+        ),
+      );
+      if (selected == null || !mounted) return;
+
+      final message = await _apiService.recommendOfferForWanted(
+        wantedId: listing.id,
+        offerListingId: selected.id,
+      );
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(message.isEmpty ? l.wantedRecommendSuccess : message),
+          backgroundColor: AppTheme.success,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(l.operationFailed(e.toString())),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isOperating = false);
+    }
+  }
+
+  void _handleBack() {
+    context.go('/');
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
@@ -264,7 +395,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         title: Text(_listing?.title ?? l.listingDetail),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.pop(),
+          onPressed: _handleBack,
         ),
       ),
       body: _buildBody(desktop: desktop),
@@ -392,6 +523,22 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Chip(
+          label: Text(
+            listing.isWanted
+                ? l.listingDirectionWanted
+                : l.listingDirectionOffer,
+          ),
+          backgroundColor: listing.isWanted
+              ? AppTheme.accent.withValues(alpha: 0.12)
+              : AppTheme.primary.withValues(alpha: 0.12),
+          side: BorderSide.none,
+          labelStyle: TextStyle(
+            color: listing.isWanted ? AppTheme.accent : AppTheme.primary,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: AppTheme.sp8),
         Text(
           listing.title,
           style: const TextStyle(
@@ -405,9 +552,18 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Flexible(
-              child: PriceTag(
-                priceCny: listing.suggestedPriceCny,
-                fontSize: 30,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    listing.isWanted ? l.wantedBudgetShort : l.priceLabel,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  PriceTag(priceCny: listing.suggestedPriceCny, fontSize: 30),
+                ],
               ),
             ),
             const SizedBox(width: 12),
@@ -421,15 +577,18 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
           label: l.categoryLabel,
           value: _getCategoryDisplayName(context, listing.category),
         ),
-        _DetailRow(label: l.brandLabel, value: listing.brand),
         _DetailRow(
-          label: l.conditionLabel,
+          label: listing.isWanted ? l.createWantedBrandLabel : l.brandLabel,
+          value: listing.brand,
+        ),
+        _DetailRow(
+          label: listing.isWanted ? l.wantedMinimumCondition : l.conditionLabel,
           value: '${listing.conditionScore}/10',
         ),
         if (listing.defects != null && listing.defects!.isNotEmpty) ...[
           const SizedBox(height: AppTheme.sp16),
           Text(
-            l.defectsLabel,
+            listing.isWanted ? l.createWantedRequirementsLabel : l.defectsLabel,
             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
           ),
           const SizedBox(height: 8),
@@ -487,7 +646,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          l.owner,
+                          listing.isWanted ? l.wantedRequester : l.owner,
                           style: const TextStyle(
                             fontSize: 12,
                             color: AppTheme.textSecondary,
@@ -544,6 +703,16 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
   }
 
   Widget _buildSimilarSection(AppLocalizations l) {
+    if (_listing?.isWanted == true) {
+      if (_wantedMatchesLoading) {
+        return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+      }
+      if (_wantedMatches.isEmpty) return const SizedBox.shrink();
+      return RecommendationCarousel(
+        listings: _wantedMatches,
+        title: l.wantedMatchesTitle,
+      );
+    }
     if (_similarLoading) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
@@ -587,6 +756,84 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
 
   Widget _buildActionButtons() {
     final l = AppLocalizations.of(context)!;
+    final listing = _listing;
+    if (!_currentUserLoaded) {
+      return const SizedBox.shrink();
+    }
+    final isOwner =
+        listing?.ownerId != null && listing?.ownerId == _currentUserId;
+    if (listing?.isWanted == true) {
+      if (isOwner) {
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(AppTheme.sp14),
+          decoration: BoxDecoration(
+            color: AppTheme.primary.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+            border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.check_circle_outline, color: AppTheme.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  l.wantedOwnerHint,
+                  style: const TextStyle(
+                    color: AppTheme.primary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+      return Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _isOperating
+                  ? null
+                  : () => _handleContactSeller(context),
+              icon: const Icon(Icons.chat_bubble_outline),
+              label: Text(l.contactRequester),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: ElevatedButton.icon(
+              onPressed: _isOperating ? null : _handleRecommendMyOffer,
+              icon: const Icon(Icons.inventory_2_outlined),
+              label: Text(l.recommendMyOffer),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    if (isOwner) {
+      return SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: () => context.push('/my-listings'),
+          icon: const Icon(Icons.edit_note_outlined),
+          label: Text(l.myListings),
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            backgroundColor: AppTheme.primary,
+            foregroundColor: Colors.white,
+          ),
+        ),
+      );
+    }
     final isSold = _listing?.status == 'sold';
     return Row(
       children: [

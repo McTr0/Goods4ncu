@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 abstract final class AppBreakpoints {
   static const double desktop = 1024;
-  static const double wideDesktop = 1280;
+  static const double wideDesktop = 1440;
 }
 
 class ResponsiveContent extends StatelessWidget {

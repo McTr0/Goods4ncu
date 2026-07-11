@@ -138,22 +138,13 @@ class _ProfilePageState extends State<ProfilePage> {
         child: Column(
           children: [
             const SizedBox(height: AppTheme.sp16),
-            CircleAvatar(
-              radius: 52,
-              backgroundColor: AppTheme.primary.withValues(alpha: 0.15),
-              backgroundImage: avatarUrl != null && avatarUrl.isNotEmpty
-                  ? NetworkImage(avatarUrl)
-                  : null,
-              child: avatarUrl == null || avatarUrl.isEmpty
-                  ? Text(
-                      username.isNotEmpty ? username[0].toUpperCase() : '?',
-                      style: const TextStyle(
-                        fontSize: 40,
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.primary,
-                      ),
-                    )
-                  : null,
+            _ProfileAvatar(
+              username: username,
+              avatarUrl: avatarUrl,
+              tooltip: l.viewPublicProfile,
+              onTap: userId == null || userId.isEmpty
+                  ? null
+                  : () => context.push('/users/$userId'),
             ),
             const SizedBox(height: AppTheme.sp16),
             Text(
@@ -172,24 +163,11 @@ class _ProfilePageState extends State<ProfilePage> {
             ],
             const SizedBox(height: AppTheme.sp32),
 
-            if (userId != null && userId.isNotEmpty)
-              _MenuCard(
-                icon: Icons.account_circle_outlined,
-                title: l.myPublicProfile,
-                subtitle: l.myPublicProfileSubtitle,
-                onTap: () => context.push('/users/$userId'),
-              ),
             _MenuCard(
               icon: Icons.inventory_2_outlined,
               title: l.myListings,
               subtitle: l.myListingsMenu,
               onTap: () => context.push('/my-listings'),
-            ),
-            _MenuCard(
-              icon: Icons.shopping_bag_outlined,
-              title: l.myOrders,
-              subtitle: l.myOrdersSubtitle,
-              onTap: () => context.push('/orders'),
             ),
             _MenuCard(
               icon: Icons.favorite_border,
@@ -232,6 +210,100 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
             const SizedBox(height: AppTheme.sp32),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileAvatar extends StatelessWidget {
+  final String username;
+  final String? avatarUrl;
+  final String tooltip;
+  final VoidCallback? onTap;
+
+  const _ProfileAvatar({
+    required this.username,
+    required this.avatarUrl,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasAvatar = avatarUrl != null && avatarUrl!.isNotEmpty;
+    final avatar = CircleAvatar(
+      radius: 52,
+      backgroundColor: AppTheme.primary.withValues(alpha: 0.15),
+      backgroundImage: hasAvatar ? NetworkImage(avatarUrl!) : null,
+      child: hasAvatar
+          ? null
+          : Text(
+              username.isNotEmpty ? username[0].toUpperCase() : '?',
+              style: const TextStyle(
+                fontSize: 40,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.primary,
+              ),
+            ),
+    );
+
+    if (onTap == null) {
+      return avatar;
+    }
+
+    return Semantics(
+      label: tooltip,
+      button: true,
+      child: Tooltip(
+        message: tooltip,
+        child: Material(
+          color: Colors.transparent,
+          shape: const CircleBorder(),
+          child: InkResponse(
+            onTap: onTap,
+            customBorder: const CircleBorder(),
+            radius: 64,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: AppTheme.primary.withValues(alpha: 0.28),
+                      width: 2,
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(3),
+                    child: avatar,
+                  ),
+                ),
+                Positioned(
+                  right: 2,
+                  bottom: 2,
+                  child: Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Theme.of(context).scaffoldBackgroundColor,
+                        width: 3,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.arrow_outward_rounded,
+                      size: 16,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
