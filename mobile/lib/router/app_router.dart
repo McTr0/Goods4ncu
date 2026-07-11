@@ -450,14 +450,22 @@ class _DesktopBrand extends StatelessWidget {
       width: extended ? 52 : 56,
       height: extended ? 52 : 56,
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(AppTheme.radiusXl),
-        border: Border.all(color: theme.dividerColor.withValues(alpha: 0.72)),
-        boxShadow: AppTheme.softShadow,
+        border: Border.all(
+          color: theme.colorScheme.primary.withValues(alpha: 0.22),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.primary.withValues(alpha: 0.12),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       clipBehavior: Clip.antiAlias,
       child: Padding(
-        padding: const EdgeInsets.all(6),
+        padding: const EdgeInsets.all(2),
         child: Image.asset(AppBrand.logoAsset, fit: BoxFit.contain),
       ),
     );
