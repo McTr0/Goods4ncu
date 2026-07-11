@@ -1,16 +1,17 @@
 # =============================================================================
-# Good4NCU Configuration File
+# Goods4ncu Configuration File
 # =============================================================================
 #
-# COPY THIS FILE TO good4ncu.toml (or config/good4ncu.toml) AND FILL IN VALUES.
+# COPY THIS FILE TO goods4ncu.toml (or config/goods4ncu.toml) AND FILL IN VALUES.
 # This file is safe to commit — it contains no secrets.
 #
 # Env vars ALWAYS override file values. Secrets must come from env vars only.
 #
 # Config file search order:
 #   1. $CONFIG_FILE env var (if set)
-#   2. ./good4ncu.toml (if exists)
-#   3. ./config/good4ncu.toml (if exists)
+#   2. ./goods4ncu.toml (if exists)
+#   3. ./config/goods4ncu.toml (if exists)
+#   4. ./good4ncu.toml or ./config/good4ncu.toml (legacy fallback)
 # =============================================================================
 
 # -----------------------------------------------------------------------
@@ -107,5 +108,5 @@ origins = [
 # -----------------------------------------------------------------------
 [oss]
 endpoint = "https://oss-cn-beijing.aliyuncs.com"
-bucket = "good4ncu"
+bucket = "goods4ncu"
 # Credentials come from env vars: OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET, OSS_ROLE_ARN

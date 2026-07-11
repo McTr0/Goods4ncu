@@ -1,0 +1,4 @@
+# Flutter gen-l10n currently emits these committed generated files with CRLF.
+# Treat CR as part of the line ending so `git diff --check` still catches real
+# trailing whitespace without flagging every regenerated localization line.
+mobile/lib/l10n/app_localizations*.dart text eol=crlf whitespace=cr-at-eol

@@ -47,7 +47,7 @@ const SUPPORTED_COMMANDS = [
 ];
 
 function usage() {
-  return `Good4NCU Codex Browser API driver
+  return `Goods4ncu Codex Browser API driver
 
 Usage:
   node scripts/codex_browser_api_driver.mjs <command> [--base=http://127.0.0.1:3000] [--json]

@@ -1,0 +1,50 @@
+# Local / demo stack for Goods4ncu MVP.
+# Backend image + PostgreSQL with pgvector. Flutter Web is built separately.
+#
+# Usage:
+#   cp docs/.env.example .env   # fill DATABASE_URL is overridden below
+#   docker compose up --build
+#
+# API: http://127.0.0.1:3000/api/health
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: goods4ncu
+      POSTGRES_PASSWORD: goods4ncu
+      POSTGRES_DB: goods4ncu
+    ports:
+      - "5432:5432"
+    volumes:
+      - goods4ncu_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U goods4ncu -d goods4ncu"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    # Optional: create .env from docs/.env.example for JWT_SECRET and LLM keys.
+    # Compose still overrides DATABASE_URL to the in-network db service.
+    env_file:
+      - .env
+    environment:
+      # Compose network hostname; overrides a localhost DATABASE_URL from .env.
+      DATABASE_URL: postgres://goods4ncu:goods4ncu@db:5432/goods4ncu
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: "3000"
+      # Provide real secrets via .env for JWT_SECRET and LLM keys.
+      # JWT_SECRET must be at least 32 characters.
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  goods4ncu_pgdata:
