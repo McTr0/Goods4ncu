@@ -116,9 +116,9 @@ impl IntentResult {
             Intent::Chat => {
                 let msg = message.trim();
                 if msg == "你好" || msg == "您好" {
-                    Some("你好！我是校园二手交易平台的智能助手。我可以帮你搜索商品、发起购买或议价。有什么想买的吗？".to_string())
+                    Some("你好！我是续樟校园二手交易平台的智能助手。我可以帮你搜索商品、发起购买或议价。有什么想买的吗？".to_string())
                 } else if msg == "你是谁" || msg == "你是谁？" {
-                    Some("我是校园二手交易平台的 AI 助手，可以帮你搜索商品、了解详情、发起购买和议价。有什么需要帮忙的吗？".to_string())
+                    Some("我是续樟校园二手交易平台的 AI 助手，可以帮你搜索商品、了解详情、发起购买和议价。有什么需要帮忙的吗？".to_string())
                 } else if msg == "谢谢" || msg == "谢谢！" {
                     Some("不客气！有需要随时找我~".to_string())
                 } else if msg == "再见" || msg == "拜拜" {

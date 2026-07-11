@@ -4,6 +4,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::api::auth::extract_user_id_from_token_with_fallback;
 use crate::api::error::ApiError;
@@ -26,6 +27,8 @@ pub struct ListingQuery {
     pub categories: Option<String>,
     pub search: Option<String>,
     pub sort: Option<String>, // "newest" (default), "price_asc", "price_desc", "condition_desc"
+    /// Listing direction: "offer" (default), "wanted", or "all".
+    pub direction: Option<String>,
     /// Minimum price in CNY (inclusive).
     pub min_price_cny: Option<f64>,
     /// Maximum price in CNY (inclusive).
@@ -43,6 +46,7 @@ pub struct ListingSummary {
     pub title: String,
     pub category: String,
     pub brand: String,
+    pub direction: String,
     pub condition_score: i32,
     pub suggested_price_cny: f64,
     pub status: String,
@@ -66,6 +70,7 @@ pub struct ListingDetail {
     pub title: String,
     pub category: String,
     pub brand: String,
+    pub direction: String,
     pub condition_score: i32,
     pub suggested_price_cny: f64,
     pub defects: Vec<String>,
@@ -84,6 +89,7 @@ pub struct CreateListingRequest {
     pub title: String,
     pub category: String,
     pub brand: String,
+    pub direction: Option<String>,
     pub condition_score: i32,
     pub suggested_price_cny: f64,
     pub defects: Vec<String>,
@@ -93,6 +99,19 @@ pub struct CreateListingRequest {
 
 #[derive(Serialize)]
 pub struct CreateListingResponse {
+    pub id: String,
+    pub message: String,
+    pub replayed: bool,
+}
+
+#[derive(Deserialize)]
+pub struct WantedResponseRequest {
+    pub offer_listing_id: String,
+    pub message: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct WantedResponseResult {
     pub id: String,
     pub message: String,
 }
@@ -112,6 +131,62 @@ pub struct UpdateListingRequest {
 // Handlers
 // ---------------------------------------------------------------------------
 
+fn normalize_direction(value: Option<&str>, default: &str) -> Result<String, ApiError> {
+    let direction = value.unwrap_or(default).trim();
+    match direction {
+        "offer" | "wanted" | "all" => Ok(direction.to_string()),
+        _ => Err(ApiError::BadRequest(
+            "无效的 direction 参数，可选值：offer, wanted, all".to_string(),
+        )),
+    }
+}
+
+fn idempotency_key_from_headers(headers: &HeaderMap) -> Result<Option<String>, ApiError> {
+    let Some(value) = headers.get("idempotency-key") else {
+        return Ok(None);
+    };
+    let key = value
+        .to_str()
+        .map_err(|_| ApiError::BadRequest("Idempotency-Key 必须是 ASCII 文本".to_string()))?;
+    if key.is_empty() || key.len() > 128 || !key.bytes().all(|byte| (0x21..=0x7e).contains(&byte)) {
+        return Err(ApiError::BadRequest(
+            "Idempotency-Key 必须为 1–128 个不含空格的 ASCII 字符".to_string(),
+        ));
+    }
+    Ok(Some(key.to_string()))
+}
+
+fn create_listing_request_hash(input: &CreateListingInput) -> Result<String, ApiError> {
+    let canonical = serde_json::to_vec(input).map_err(|e| {
+        ApiError::Internal(anyhow::anyhow!(
+            "Failed to serialize normalized listing input: {}",
+            e
+        ))
+    })?;
+    Ok(hex::encode(Sha256::digest(canonical)))
+}
+
+fn listing_summary_from_listing(listing: crate::repositories::Listing) -> ListingSummary {
+    let defects = listing
+        .defects
+        .as_ref()
+        .and_then(|t| serde_json::from_str::<Vec<String>>(t).ok())
+        .unwrap_or_default();
+    let defect_hint = defects.first().cloned();
+    ListingSummary {
+        id: listing.id,
+        title: listing.title,
+        category: listing.category,
+        brand: listing.brand.unwrap_or_default(),
+        direction: listing.direction,
+        condition_score: listing.condition_score,
+        suggested_price_cny: cents_to_yuan(listing.suggested_price_cny as i64),
+        status: listing.status,
+        image_url: listing.image_url,
+        defect_hint,
+    }
+}
+
 /// GET /api/listings — public browse with optional category/categories filter,
 /// full-text search, price range, and sort.
 pub async fn get_listings(
@@ -121,6 +196,7 @@ pub async fn get_listings(
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
     let offset = params.offset.unwrap_or(0).max(0);
     let sort = params.sort.as_deref().unwrap_or("newest");
+    let direction = normalize_direction(params.direction.as_deref(), "offer")?;
 
     // Validate search query length
     if let Some(ref srch) = params.search {
@@ -137,6 +213,7 @@ pub async fn get_listings(
             params.category.as_deref(),
             params.categories.as_deref(),
             params.search.as_deref(),
+            Some(direction.as_str()),
             params.min_price_cny,
             params.max_price_cny,
             sort,
@@ -147,25 +224,7 @@ pub async fn get_listings(
 
     let items: Vec<ListingSummary> = listings
         .into_iter()
-        .map(|listing| {
-            let defects = listing
-                .defects
-                .as_ref()
-                .and_then(|t| serde_json::from_str::<Vec<String>>(t).ok())
-                .unwrap_or_default();
-            let defect_hint = defects.first().cloned();
-            ListingSummary {
-                id: listing.id,
-                title: listing.title,
-                category: listing.category,
-                brand: listing.brand.unwrap_or_default(),
-                condition_score: listing.condition_score,
-                suggested_price_cny: cents_to_yuan(listing.suggested_price_cny as i64),
-                status: listing.status,
-                image_url: listing.image_url,
-                defect_hint,
-            }
-        })
+        .map(listing_summary_from_listing)
         .collect();
 
     Ok(Json(ListingsResponse {
@@ -211,6 +270,7 @@ pub async fn get_listing(
         title: listing.title,
         category: listing.category,
         brand: listing.brand.unwrap_or_default(),
+        direction: listing.direction,
         condition_score: listing.condition_score,
         suggested_price_cny: cents_to_yuan(listing.suggested_price_cny as i64),
         defects,
@@ -236,8 +296,15 @@ pub async fn create_listing(
         state.secrets.jwt_secret_old.as_deref(),
     )
     .map_err(|_| ApiError::Unauthorized)?;
+    let idempotency_key = idempotency_key_from_headers(&headers)?;
 
     // Validate input
+    let direction = normalize_direction(payload.direction.as_deref(), "offer")?;
+    if direction == "all" {
+        return Err(ApiError::BadRequest(
+            "direction 创建时只能为 offer 或 wanted".to_string(),
+        ));
+    }
     if payload.title.is_empty() {
         return Err(ApiError::BadRequest("title is required".to_string()));
     }
@@ -246,10 +313,15 @@ pub async fn create_listing(
             "title must be 200 characters or fewer".to_string(),
         ));
     }
-    if payload.brand.is_empty() {
+    let brand = if direction == "wanted" && payload.brand.trim().is_empty() {
+        "不限".to_string()
+    } else {
+        payload.brand.trim().to_string()
+    };
+    if brand.is_empty() {
         return Err(ApiError::BadRequest("brand is required".to_string()));
     }
-    if payload.brand.len() > 100 {
+    if brand.len() > 100 {
         return Err(ApiError::BadRequest(
             "brand must be 100 characters or fewer".to_string(),
         ));
@@ -283,7 +355,7 @@ pub async fn create_listing(
     let text_to_check = format!(
         "{}\n{}\n{}",
         payload.title,
-        payload.brand,
+        brand,
         payload.description.as_deref().unwrap_or_default(),
     );
     let defects_text = payload.defects.join(" ");
@@ -299,36 +371,222 @@ pub async fn create_listing(
         ));
     }
 
-    let listing_id = state
+    let image_url = payload.image_url.clone();
+    let input = CreateListingInput {
+        title: payload.title,
+        category,
+        brand: Some(brand),
+        direction: direction.clone(),
+        condition_score: payload.condition_score,
+        suggested_price_cny: payload.suggested_price_cny,
+        defects: payload.defects,
+        description: payload.description.unwrap_or_default(),
+        image_url: image_url.clone(),
+        owner_id: user_id,
+    };
+    let request_hash = idempotency_key
+        .as_ref()
+        .map(|_| create_listing_request_hash(&input))
+        .transpose()?;
+    let create_result = state
         .listing_repo
-        .create(CreateListingInput {
-            title: payload.title,
-            category,
-            brand: Some(payload.brand),
-            condition_score: payload.condition_score,
-            suggested_price_cny: payload.suggested_price_cny,
-            defects: payload.defects,
-            description: payload.description.unwrap_or_default(),
-            image_url: payload.image_url.clone(),
-            owner_id: user_id,
-        })
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        .create_idempotent(input, idempotency_key.as_deref(), request_hash.as_deref())
+        .await?;
 
-    if let Some(image_url) = payload.image_url.as_deref() {
-        if let Err(e) = state
-            .infra
-            .moderation
-            .submit_image_job(&state.infra.db, &listing_id, image_url, "listing_image")
-            .await
-        {
-            tracing::warn!(%e, listing_id = %listing_id, "Failed to enqueue listing image moderation job");
+    if !create_result.replayed {
+        if let Some(image_url) = image_url.as_deref() {
+            if let Err(e) = state
+                .infra
+                .moderation
+                .submit_image_job(
+                    &state.infra.db,
+                    &create_result.id,
+                    image_url,
+                    "listing_image",
+                )
+                .await
+            {
+                tracing::warn!(%e, listing_id = %create_result.id, "Failed to enqueue listing image moderation job");
+            }
         }
     }
 
     Ok(Json(CreateListingResponse {
-        id: listing_id,
-        message: "商品发布成功".to_string(),
+        id: create_result.id,
+        message: if direction == "wanted" {
+            "需求发布成功".to_string()
+        } else {
+            "商品发布成功".to_string()
+        },
+        replayed: create_result.replayed,
+    }))
+}
+
+/// GET /api/listings/:id/matches — matching active offers for a wanted listing.
+pub async fn get_wanted_matches(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<ListingsResponse>, ApiError> {
+    let wanted = state
+        .listing_repo
+        .find_by_id(&id)
+        .await?
+        .ok_or(ApiError::NotFound)?;
+
+    if wanted.direction != "wanted" {
+        return Err(ApiError::BadRequest(
+            "只有收物需求可以查看匹配商品".to_string(),
+        ));
+    }
+    if wanted.status != "active" {
+        return Ok(Json(ListingsResponse {
+            items: Vec::new(),
+            total: 0,
+            limit: 20,
+            offset: 0,
+        }));
+    }
+
+    let search_text = format!("%{}%", wanted.title.replace('%', "\\%").replace('_', "\\_"));
+    let rows = sqlx::query_as::<_, crate::repositories::Listing>(
+        r#"
+        SELECT i.id, i.title, i.category, i.brand, i.direction, i.condition_score,
+               i.suggested_price_cny, i.defects, i.description, i.image_url,
+               i.owner_id, i.status, i.created_at
+        FROM inventory i
+        LEFT JOIN documents wanted_doc ON wanted_doc.id = $1
+        LEFT JOIN documents offer_doc ON offer_doc.id = i.id
+        WHERE i.status = 'active'
+          AND i.direction = 'offer'
+          AND i.owner_id <> $2
+          AND i.category = $3
+          AND i.suggested_price_cny <= $4
+          AND i.condition_score >= $5
+        ORDER BY
+          CASE WHEN wanted_doc.embedding IS NULL OR offer_doc.embedding IS NULL THEN 1 ELSE 0 END ASC,
+          CASE WHEN wanted_doc.embedding IS NULL OR offer_doc.embedding IS NULL
+               THEN NULL ELSE offer_doc.embedding <=> wanted_doc.embedding END ASC,
+          CASE WHEN i.title ILIKE $6 OR COALESCE(i.description, '') ILIKE $6 THEN 0 ELSE 1 END ASC,
+          i.created_at DESC
+        LIMIT 20
+        "#,
+    )
+    .bind(&wanted.id)
+    .bind(&wanted.owner_id)
+    .bind(&wanted.category)
+    .bind(wanted.suggested_price_cny)
+    .bind(wanted.condition_score)
+    .bind(&search_text)
+    .fetch_all(&state.infra.db)
+    .await
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+    let items: Vec<ListingSummary> = rows.into_iter().map(listing_summary_from_listing).collect();
+    let total = items.len() as i64;
+    Ok(Json(ListingsResponse {
+        items,
+        total,
+        limit: 20,
+        offset: 0,
+    }))
+}
+
+/// POST /api/listings/:id/responses — recommend one of my active offers to a wanted listing.
+pub async fn respond_to_wanted(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(payload): Json<WantedResponseRequest>,
+) -> Result<Json<WantedResponseResult>, ApiError> {
+    let responder_id = extract_user_id_from_token_with_fallback(
+        &headers,
+        &state.secrets.jwt_secret,
+        state.secrets.jwt_secret_old.as_deref(),
+    )
+    .map_err(|_| ApiError::Unauthorized)?;
+
+    let wanted = state
+        .listing_repo
+        .find_by_id(&id)
+        .await?
+        .ok_or(ApiError::NotFound)?;
+    let offer = state
+        .listing_repo
+        .find_by_id(&payload.offer_listing_id)
+        .await?
+        .ok_or(ApiError::NotFound)?;
+
+    if wanted.direction != "wanted" || wanted.status != "active" {
+        return Err(ApiError::BadRequest("这不是可响应的收物需求".to_string()));
+    }
+    if offer.direction != "offer" || offer.status != "active" {
+        return Err(ApiError::BadRequest("只能推荐正在出的商品".to_string()));
+    }
+    if offer.owner_id != responder_id {
+        return Err(ApiError::Forbidden);
+    }
+    if wanted.owner_id == responder_id {
+        return Err(ApiError::BadRequest("不能给自己的需求推荐商品".to_string()));
+    }
+
+    let message = payload
+        .message
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if message.as_ref().is_some_and(|value| value.len() > 500) {
+        return Err(ApiError::BadRequest(
+            "推荐留言不能超过500个字符".to_string(),
+        ));
+    }
+
+    let inserted = sqlx::query_scalar::<_, uuid::Uuid>(
+        r#"
+        INSERT INTO wanted_responses (
+            wanted_listing_id, offer_listing_id, responder_id, requester_id, message
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+        "#,
+    )
+    .bind(&wanted.id)
+    .bind(&offer.id)
+    .bind(&responder_id)
+    .bind(&wanted.owner_id)
+    .bind(&message)
+    .fetch_one(&state.infra.db)
+    .await
+    .map_err(|e| {
+        if e.as_database_error()
+            .and_then(|db| db.code())
+            .is_some_and(|code| code == "23505")
+        {
+            ApiError::BadRequest("已经推荐过这件商品".to_string())
+        } else {
+            ApiError::Internal(anyhow::anyhow!("DB error: {}", e))
+        }
+    })?;
+
+    if let Err(e) = state
+        .infra
+        .notification
+        .create(
+            &wanted.owner_id,
+            "wanted_response",
+            "有人给你的收物需求推荐了商品",
+            &format!("“{}”收到一个匹配推荐：{}", wanted.title, offer.title),
+            None,
+            Some(&wanted.id),
+        )
+        .await
+    {
+        tracing::warn!(%e, wanted_id = %wanted.id, offer_id = %offer.id, "Failed to create wanted response notification");
+    }
+
+    Ok(Json(WantedResponseResult {
+        id: inserted.to_string(),
+        message: "已推荐给需求方".to_string(),
     }))
 }
 
@@ -752,10 +1010,55 @@ mod tests {
         let resp = CreateListingResponse {
             id: "listing-123".to_string(),
             message: "商品发布成功".to_string(),
+            replayed: false,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("listing-123"));
         assert!(json.contains("商品发布成功"));
+        assert!(json.contains("\"replayed\":false"));
+    }
+
+    #[test]
+    fn idempotency_key_validation_accepts_uuid_and_rejects_spaces() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Idempotency-Key",
+            "d9bf5f9b-4d9d-4f11-9976-cf2c0c71f120".parse().unwrap(),
+        );
+        assert_eq!(
+            idempotency_key_from_headers(&headers).unwrap().as_deref(),
+            Some("d9bf5f9b-4d9d-4f11-9976-cf2c0c71f120")
+        );
+
+        headers.insert("Idempotency-Key", "not allowed".parse().unwrap());
+        assert!(matches!(
+            idempotency_key_from_headers(&headers),
+            Err(ApiError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn normalized_listing_hash_is_stable_and_content_sensitive() {
+        let input = CreateListingInput {
+            title: "Desk".to_string(),
+            category: "other".to_string(),
+            brand: Some("Campus".to_string()),
+            direction: "offer".to_string(),
+            condition_score: 8,
+            suggested_price_cny: 123.45,
+            defects: vec!["scratch".to_string()],
+            description: "usable".to_string(),
+            image_url: None,
+            owner_id: "owner".to_string(),
+        };
+        let first = create_listing_request_hash(&input).unwrap();
+        let second = create_listing_request_hash(&input).unwrap();
+        let mut changed = input.clone();
+        changed.title = "Different desk".to_string();
+
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 64);
+        assert_ne!(first, create_listing_request_hash(&changed).unwrap());
     }
 
     #[test]
@@ -765,6 +1068,7 @@ mod tests {
             title: "MacBook Pro".to_string(),
             category: "electronics".to_string(),
             brand: "Apple".to_string(),
+            direction: "offer".to_string(),
             condition_score: 9,
             suggested_price_cny: 12999.0,
             status: "active".to_string(),
@@ -788,6 +1092,7 @@ mod tests {
             title: "Book".to_string(),
             category: "books".to_string(),
             brand: "Publisher".to_string(),
+            direction: "offer".to_string(),
             condition_score: 5,
             suggested_price_cny: 99.0,
             status: "active".to_string(),
@@ -819,6 +1124,7 @@ mod tests {
             title: "iPhone 15".to_string(),
             category: "electronics".to_string(),
             brand: "Apple".to_string(),
+            direction: "offer".to_string(),
             condition_score: 10,
             suggested_price_cny: 7999.0,
             defects: vec!["None".to_string()],

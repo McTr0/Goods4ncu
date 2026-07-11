@@ -210,7 +210,7 @@ impl UserRepository for PostgresUserRepository {
         };
 
         let query = format!(
-            "SELECT id, title, category, brand, condition_score, suggested_price_cny, \
+            "SELECT id, title, category, brand, direction, condition_score, suggested_price_cny, \
              defects, description, image_url, owner_id, status, created_at \
              FROM inventory WHERE owner_id = $1 {} \
              ORDER BY created_at DESC LIMIT {} OFFSET {}",

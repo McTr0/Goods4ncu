@@ -29,6 +29,12 @@ pub struct PostgresListingRepository {
     pool: PgPool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdempotentCreateResult {
+    pub id: String,
+    pub replayed: bool,
+}
+
 impl PostgresListingRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -39,6 +45,25 @@ impl PostgresListingRepository {
         tx: &mut Transaction<'_, Postgres>,
         input: CreateListingInput,
     ) -> Result<String, ApiError> {
+        Ok(self
+            .create_in_tx_with_idempotency(tx, input, None, None)
+            .await?
+            .id)
+    }
+
+    async fn create_in_tx_with_idempotency(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        input: CreateListingInput,
+        idempotency_key: Option<&str>,
+        idempotency_hash: Option<&str>,
+    ) -> Result<IdempotentCreateResult, ApiError> {
+        if idempotency_key.is_some() != idempotency_hash.is_some() {
+            return Err(ApiError::Internal(anyhow::anyhow!(
+                "Listing idempotency key and hash must be provided together"
+            )));
+        }
+
         let listing_id = uuid::Uuid::new_v4().to_string();
         let listing_uuid = Uuid::parse_str(&listing_id).map_err(|e| {
             ApiError::Internal(anyhow::anyhow!(
@@ -50,16 +75,21 @@ impl PostgresListingRepository {
         let defects_json = serde_json::to_string(&input.defects)
             .map_err(|e| ApiError::BadRequest(format!("invalid defects: {}", e)))?;
 
-        sqlx::query(
+        let inserted_id = sqlx::query_scalar::<_, String>(
             r#"
             INSERT INTO inventory (
                 id, new_id,
-                title, category, brand, condition_score,
+                title, category, brand, direction, condition_score,
                 suggested_price_cny, defects, description, image_url,
-                owner_id, new_owner_id, status
+                owner_id, new_owner_id, status,
+                idempotency_key, idempotency_hash
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-                    (SELECT new_id FROM users WHERE id = $11), 'active')
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                    (SELECT new_id FROM users WHERE id = $12), 'active', $13, $14)
+            ON CONFLICT (owner_id, idempotency_key)
+                WHERE idempotency_key IS NOT NULL
+                DO NOTHING
+            RETURNING id
             "#,
         )
         .bind(&listing_id)
@@ -67,17 +97,77 @@ impl PostgresListingRepository {
         .bind(&input.title)
         .bind(&input.category)
         .bind(&input.brand)
+        .bind(&input.direction)
         .bind(input.condition_score)
         .bind(price_cents)
         .bind(&defects_json)
         .bind(&input.description)
         .bind(&input.image_url)
         .bind(&input.owner_id)
-        .execute(&mut **tx)
+        .bind(idempotency_key)
+        .bind(idempotency_hash)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
-        Ok(listing_id)
+        if let Some(id) = inserted_id {
+            return Ok(IdempotentCreateResult {
+                id,
+                replayed: false,
+            });
+        }
+
+        let key = idempotency_key.ok_or_else(|| {
+            ApiError::Internal(anyhow::anyhow!(
+                "Unkeyed listing insert unexpectedly returned no row"
+            ))
+        })?;
+        let (existing_id, existing_hash) =
+            sqlx::query_as::<_, (String, Option<String>)>(
+                "SELECT id, idempotency_hash FROM inventory WHERE owner_id = $1 AND idempotency_key = $2",
+            )
+            .bind(&input.owner_id)
+            .bind(key)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
+            .ok_or_else(|| {
+                ApiError::Internal(anyhow::anyhow!(
+                    "Idempotent listing conflict row disappeared"
+                ))
+            })?;
+
+        if existing_hash.as_deref() != idempotency_hash {
+            return Err(ApiError::Conflict(
+                "Idempotency-Key 已用于不同的发布内容".to_string(),
+            ));
+        }
+
+        Ok(IdempotentCreateResult {
+            id: existing_id,
+            replayed: true,
+        })
+    }
+
+    pub async fn create_idempotent(
+        &self,
+        input: CreateListingInput,
+        idempotency_key: Option<&str>,
+        idempotency_hash: Option<&str>,
+    ) -> Result<IdempotentCreateResult, ApiError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        let result = self
+            .create_in_tx_with_idempotency(&mut tx, input, idempotency_key, idempotency_hash)
+            .await?;
+        tx.commit()
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+        Ok(result)
     }
 
     fn update_query_for_owner(
@@ -289,6 +379,7 @@ impl ListingRepository for PostgresListingRepository {
         category: Option<&str>,
         categories: Option<&str>,
         search: Option<&str>,
+        direction: Option<&str>,
         min_price_cny: Option<f64>,
         max_price_cny: Option<f64>,
         sort: &str,
@@ -296,12 +387,27 @@ impl ListingRepository for PostgresListingRepository {
         offset: i64,
     ) -> Result<(Vec<Listing>, i64), ApiError> {
         let mut query = String::from(
-            "SELECT id, title, category, brand, condition_score, suggested_price_cny, \
+            "SELECT id, title, category, brand, direction, condition_score, suggested_price_cny, \
              defects, description, image_url, owner_id, status, created_at \
              FROM inventory WHERE status = 'active'",
         );
         let mut count_query =
             String::from("SELECT COUNT(*) FROM inventory WHERE status = 'active'");
+
+        if let Some(direction) = direction {
+            if direction != "all" {
+                query = format!(
+                    "{} AND direction = '{}'",
+                    query,
+                    direction.replace('\'', "''")
+                );
+                count_query = format!(
+                    "{} AND direction = '{}'",
+                    count_query,
+                    direction.replace('\'', "''")
+                );
+            }
+        }
 
         // Single category filter (preferred when both are provided)
         if let Some(cat) = category {
@@ -392,7 +498,7 @@ impl ListingRepository for PostgresListingRepository {
 
     async fn find_by_id(&self, id: &str) -> Result<Option<Listing>, ApiError> {
         let row = sqlx::query_as::<_, Listing>(
-            "SELECT id, title, category, brand, condition_score, suggested_price_cny, \
+            "SELECT id, title, category, brand, direction, condition_score, suggested_price_cny, \
              defects, description, image_url, owner_id, status, created_at \
              FROM inventory WHERE id = $1",
         )
@@ -408,7 +514,7 @@ impl ListingRepository for PostgresListingRepository {
         id: &str,
     ) -> Result<Option<(Listing, Option<String>)>, ApiError> {
         let row = sqlx::query(
-            "SELECT i.id, i.title, i.category, i.brand, i.condition_score, i.suggested_price_cny, \
+            "SELECT i.id, i.title, i.category, i.brand, i.direction, i.condition_score, i.suggested_price_cny, \
              i.defects, i.description, i.image_url, i.owner_id, i.status, i.created_at, \
              u.username as owner_username \
              FROM inventory i \
@@ -427,6 +533,7 @@ impl ListingRepository for PostgresListingRepository {
                     title: r.get("title"),
                     category: r.get("category"),
                     brand: r.get("brand"),
+                    direction: r.get("direction"),
                     condition_score: r.get("condition_score"),
                     suggested_price_cny: r.get("suggested_price_cny"),
                     defects: r.get("defects"),
@@ -717,6 +824,7 @@ mod tests {
                     title: "Desk".to_string(),
                     category: "other".to_string(),
                     brand: Some("Brand".to_string()),
+                    direction: "offer".to_string(),
                     condition_score: 8,
                     suggested_price_cny: 123.45,
                     defects: vec!["scratch".to_string()],
@@ -740,6 +848,74 @@ mod tests {
             assert_eq!(row.get::<Uuid, _>("new_owner_id"), owner_uuid);
             assert_eq!(row.get::<i64, _>("suggested_price_cny"), 12345);
             assert_eq!(row.get::<String, _>("status"), "active");
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn idempotent_create_replays_same_request_and_rejects_key_reuse() {
+        with_test_pool(|pool| async move {
+            sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')")
+                .bind("idempotent-listing-owner")
+                .bind("idempotent-owner")
+                .execute(&pool)
+                .await
+                .expect("insert owner");
+
+            let repo = PostgresListingRepository::new(pool.clone());
+            let input = CreateListingInput {
+                title: "Desk".to_string(),
+                category: "other".to_string(),
+                brand: Some("Campus".to_string()),
+                direction: "offer".to_string(),
+                condition_score: 8,
+                suggested_price_cny: 123.45,
+                defects: vec!["scratch".to_string()],
+                description: "usable".to_string(),
+                image_url: None,
+                owner_id: "idempotent-listing-owner".to_string(),
+            };
+            let request_hash = "a".repeat(64);
+
+            let first = repo
+                .create_idempotent(
+                    input.clone(),
+                    Some("publish-attempt-1"),
+                    Some(&request_hash),
+                )
+                .await
+                .expect("first create");
+            let replay = repo
+                .create_idempotent(
+                    input.clone(),
+                    Some("publish-attempt-1"),
+                    Some(&request_hash),
+                )
+                .await
+                .expect("replay create");
+
+            assert!(!first.replayed);
+            assert!(replay.replayed);
+            assert_eq!(first.id, replay.id);
+
+            let count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM inventory WHERE owner_id = $1 AND idempotency_key = $2",
+            )
+            .bind("idempotent-listing-owner")
+            .bind("publish-attempt-1")
+            .fetch_one(&pool)
+            .await
+            .expect("count listings");
+            assert_eq!(count, 1);
+
+            let mut changed = input;
+            changed.title = "Different desk".to_string();
+            let different_hash = "b".repeat(64);
+            let error = repo
+                .create_idempotent(changed, Some("publish-attempt-1"), Some(&different_hash))
+                .await
+                .expect_err("key reuse must fail");
+            assert!(matches!(error, ApiError::Conflict(_)));
         })
         .await;
     }

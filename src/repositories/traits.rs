@@ -20,6 +20,7 @@ pub struct Listing {
     pub title: String,
     pub category: String,
     pub brand: Option<String>,
+    pub direction: String,
     pub condition_score: i32,
     pub suggested_price_cny: i32,
     pub defects: Option<String>,
@@ -30,12 +31,13 @@ pub struct Listing {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 #[allow(dead_code)]
 pub struct CreateListingInput {
     pub title: String,
     pub category: String,
     pub brand: Option<String>,
+    pub direction: String,
     pub condition_score: i32,
     pub suggested_price_cny: f64,
     pub defects: Vec<String>,
@@ -66,6 +68,7 @@ pub trait ListingRepository: Send + Sync {
         category: Option<&str>,
         categories: Option<&str>, // comma-separated
         search: Option<&str>,
+        direction: Option<&str>,
         min_price_cny: Option<f64>,
         max_price_cny: Option<f64>,
         sort: &str, // "newest" | "price_asc" | "price_desc" | "condition_desc"

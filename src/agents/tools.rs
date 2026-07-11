@@ -115,6 +115,7 @@ impl Tool for CreateListingTool {
             title: args.title.clone(),
             category: args.category.clone(),
             brand: Some(args.brand.clone()),
+            direction: "offer".to_string(),
             condition_score: args.condition_score as i32,
             suggested_price_cny: args.suggested_price_cny as f64 / 100.0,
             defects: args.defects.clone(),
@@ -771,7 +772,7 @@ impl Tool for PurchaseItemIntentTool {
             })?;
 
         Ok(format!(
-            "Deal intent sent! Record ID: {}. Listing: '{}'. Buyer: {}, Seller: {}, Price: {:.2} CNY. The seller must confirm before the item is considered sold; Good4NCU does not escrow funds.",
+            "Deal intent sent! Record ID: {}. Listing: '{}'. Buyer: {}, Seller: {}, Price: {:.2} CNY. The seller must confirm before the item is considered sold; Goods4ncu does not escrow funds.",
             order_id,
             args.listing_id,
             buyer_id,
