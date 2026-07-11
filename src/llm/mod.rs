@@ -183,7 +183,7 @@ pub trait ReplyAssistant: Send + Sync {
 
 /// Chinese preamble injected into all marketplace agents.
 pub const PREAMBLE: &str = "\
-你是一个校园二手交易平台的智能助手。
+你是续樟校园二手交易平台的智能助手。
 
 ### 核心行为准则：
 1. **区分信息来源**：

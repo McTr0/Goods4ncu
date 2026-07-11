@@ -51,7 +51,7 @@ pub async fn get_upload_token(
         access_key_id,
         access_key_secret,
         role_arn,
-        "good4ncu-mobile",
+        "goods4ncu-mobile",
         3600,
     )
     .await

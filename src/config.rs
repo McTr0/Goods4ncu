@@ -2,7 +2,7 @@
 //! All environment variables are loaded and validated at startup.
 //! Use `AppConfig::load()` once in `main()`, then pass `Arc<AppConfig>` to components.
 //!
-//! A TOML config file (e.g. `good4ncu.toml`) can supplement env vars.
+//! A TOML config file (e.g. `goods4ncu.toml`) can supplement env vars.
 //! Use `AppConfig::load_with_file()` to merge TOML + env vars.
 //! Environment variables always override TOML file values.
 
@@ -213,9 +213,10 @@ impl AppConfig {
     ///
     /// The config file path is determined by (in order):
     /// 1. `$CONFIG_FILE` env var (if set)
-    /// 2. `./good4ncu.toml` (if exists)
-    /// 3. `./config/good4ncu.toml` (if exists)
-    /// 4. No file (env vars only, all TOML fields use defaults)
+    /// 2. `./goods4ncu.toml` (if exists)
+    /// 3. `./config/goods4ncu.toml` (if exists)
+    /// 4. legacy `./good4ncu.toml` or `./config/good4ncu.toml` (if exists)
+    /// 5. No file (env vars only, all TOML fields use defaults)
     pub fn load_with_file(config_path: Option<&Path>) -> Arc<Self> {
         // Phase 1: Load TOML file (ignore if missing or invalid)
         let file = file::load(config_path);
@@ -336,7 +337,7 @@ impl AppConfig {
         let oss_bucket = std::env::var("OSS_BUCKET")
             .ok()
             .or_else(|| file.as_ref()?.oss.bucket.clone())
-            .unwrap_or_else(|| "good4ncu".into());
+            .unwrap_or_else(|| "goods4ncu".into());
 
         let oss_role_arn = std::env::var("OSS_ROLE_ARN").ok();
         let oss_access_key_id = std::env::var("OSS_ACCESS_KEY_ID").ok();

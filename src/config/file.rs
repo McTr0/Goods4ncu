@@ -1,6 +1,6 @@
 //! TOML configuration file support.
 //!
-//! Non-secret configuration lives in a TOML file (e.g., `good4ncu.toml`).
+//! Non-secret configuration lives in a TOML file (e.g., `goods4ncu.toml`).
 //! Environment variables always override file values — env vars win.
 //!
 //! Secrets (API keys, JWT secret, DATABASE_URL) MUST stay in environment variables.
@@ -182,7 +182,7 @@ pub struct OssConfig {
     /// OSS endpoint URL. Defaults to "https://oss-cn-beijing.aliyuncs.com".
     #[serde(default)]
     pub endpoint: Option<String>,
-    /// OSS bucket name. Defaults to "good4ncu".
+    /// OSS bucket name. Defaults to "goods4ncu".
     #[serde(default)]
     pub bucket: Option<String>,
 }
@@ -202,7 +202,12 @@ pub fn config_file_env() -> Option<String> {
 }
 
 /// Default config file search paths (checked in order).
-const DEFAULT_CONFIG_PATHS: [&str; 2] = ["./good4ncu.toml", "./config/good4ncu.toml"];
+const DEFAULT_CONFIG_PATHS: [&str; 4] = [
+    "./goods4ncu.toml",
+    "./config/goods4ncu.toml",
+    "./good4ncu.toml",
+    "./config/good4ncu.toml",
+];
 
 /// Attempt to load FileConfig from a TOML file.
 /// Returns None if the file does not exist or is invalid.

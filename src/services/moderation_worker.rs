@@ -163,7 +163,7 @@ async fn moderate_image(image_url: &str, cfg: &ModerationApiConfig) -> anyhow::R
 
     let body = serde_json::json!({
         "image_url": image_url,
-        "source": "good4ncu"
+        "source": "goods4ncu"
     });
 
     let resp = client

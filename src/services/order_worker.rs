@@ -1,6 +1,6 @@
 //! Order lifecycle background worker.
 //!
-//! Good4NCU only records offline deal intent and seller confirmation. It does
+//! Goods4ncu only records offline deal intent and seller confirmation. It does
 //! not intermediate funds, verify handoff, or run payment/logistics timers. The
 //! worker remains as a no-op compatibility task so startup wiring stays stable.
 
