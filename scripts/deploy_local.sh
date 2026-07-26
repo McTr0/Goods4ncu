@@ -90,7 +90,19 @@ DB_NAME="$DB_NAME" APP_ROLE="$APP_ROLE" APP_PASSWORD="$APP_PASSWORD" \
 # include a platform admin. The app refuses to start in production while they
 # exist (src/db.rs), so removing them here is both the fix and a demonstration
 # of the required production procedure.
-psql -d "$DB_NAME" -qtA -f scripts/remove_demo_seed.sql >/dev/null \
+# Order matters, and getting it wrong bricked fresh deployments. The seed
+# accounts are created *by a migration*, so on a new database there is nothing
+# to remove until migrations have run — and the server will not run them,
+# because it refuses to boot in production while the seed exists. So: migrate
+# with the CLI, then clean, then start.
+env DATABASE_URL="postgres://$APP_ROLE:$APP_PASSWORD@127.0.0.1:5432/$DB_NAME" \
+    "$BIN" migrate >/dev/null 2>&1 || fail "failed to apply migrations"
+say "  ✓ migrations applied"
+
+# ON_ERROR_STOP matters here: without it psql exits 0 even when individual
+# statements fail, so a removal that aborted halfway reported success and the
+# replicas then refused to start on a seed the deployment thought it had cleaned.
+psql -d "$DB_NAME" -qtA -v ON_ERROR_STOP=1 -f scripts/remove_demo_seed.sql >/dev/null \
     || fail "failed to remove demo seed accounts"
 say "  ✓ demo seed accounts removed (production requirement)"
 
@@ -135,16 +147,24 @@ provision_bucket ncu
 say "  ✓ Redis :$REDIS_PORT, MinIO :$S3_PORT (private per-campus buckets)"
 
 # Delivery webhook stand-in: production points this at the real mail gateway.
-python3 - "$WEBHOOK_PORT" > "$DEPLOY_HOME/logs/webhook.log" 2>&1 <<'PY' &
+#
+# It records every code it is handed, because the deployment completes the real
+# OTP flow rather than shortcutting the database. Without somewhere to read the
+# code back from, the one path every student must pass through would be the one
+# path nothing ever exercises.
+DELIVERED_CODES="$DEPLOY_HOME/delivered-codes.json"
+: > "$DELIVERED_CODES"
+chmod 600 "$DELIVERED_CODES"
+python3 - "$WEBHOOK_PORT" "$DELIVERED_CODES" > "$DEPLOY_HOME/logs/webhook.log" 2>&1 <<'PY' &
 import http.server, sys, json
 CODES = {}
 class H(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))) or b'{}')
-        # Record the delivered code so the deployment can complete OTP flows.
         CODES[body.get('to', '')] = body.get('code', '')
-        with open(sys.argv[2] if len(sys.argv) > 2 else '/dev/null', 'w') as f:
+        with open(sys.argv[2], 'w') as f:
             json.dump(CODES, f)
+        print(f"delivered {body.get('template')} to {body.get('to')}", flush=True)
         self.send_response(200); self.end_headers(); self.wfile.write(b'{}')
     def log_message(self, *a): pass
 http.server.HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
@@ -252,11 +272,40 @@ register_member() {
             -d "{\"username\":\"$username\",\"password\":\"$MEMBER_PASS\"}" | jq_get token)
     fi
     [ -n "$token" ] || fail "registration/login failed for $username"
-    # Verify the campus membership: request the OTP, read the delivered code
-    # from the database challenge (the webhook records it too), confirm.
+    # Verify through the real OTP flow — request a code, read what was actually
+    # delivered, confirm — rather than writing 'verified' into the database.
+    #
+    # This used to be a direct UPDATE, which meant the one flow every single
+    # student has to pass through was the one flow the deployment never ran.
+    # A broken onboarding path would have looked perfectly healthy right up to
+    # the moment real people tried to sign up.
     local uid; uid=$(psql -d "$DB_NAME" -qtA -c "SELECT id FROM users WHERE username='$username';" | tr -d ' ')
     local mid; mid=$(psql -d "$DB_NAME" -qtA -c "SELECT id FROM campus_memberships WHERE user_id='$uid' LIMIT 1;" | tr -d ' ')
-    psql -d "$DB_NAME" -c "UPDATE campus_memberships SET status='verified', verification_method='local_deploy', verified_at=NOW() WHERE id='$mid';" >/dev/null
+    [ -n "$mid" ] || fail "$username got no campus membership on registration"
+
+    curl -s -o /dev/null -X POST "$API/api/user/campus-memberships/$mid/verification/request" \
+        -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d '{}'
+
+    local code=""
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        code=$(python3 -c "
+import json,sys
+try: print(json.load(open('$DELIVERED_CODES')).get('$email',''))
+except Exception: print('')
+")
+        [ -n "$code" ] && break
+        sleep 0.3
+    done
+    [ -n "$code" ] || fail "no verification code was delivered for $email"
+
+    local confirmed
+    confirmed=$(curl -s -X POST "$API/api/user/campus-memberships/$mid/verification/confirm" \
+        -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+        -d "{\"code\":\"$code\"}")
+    local status
+    status=$(psql -d "$DB_NAME" -qtA -c "SELECT status FROM campus_memberships WHERE id='$mid';" | tr -d ' ')
+    [ "$status" = "verified" ] \
+        || fail "OTP confirmation left $username as '$status' (response: $confirmed)"
     echo "$token"
 }
 

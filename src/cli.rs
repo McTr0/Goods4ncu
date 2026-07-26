@@ -38,8 +38,32 @@ pub async fn run_cli(args: &[String]) -> Result<bool> {
                 }
             }
         }
+        "migrate" => {
+            run_migrate().await?;
+            Ok(true)
+        }
         _ => Ok(false),
     }
+}
+
+/// Apply migrations and exit, without starting the server.
+///
+/// Production deployments need the schema step separate from the application
+/// rollout, and here it also breaks a deadlock: `migrations/0005_seed_data.sql`
+/// creates the demo accounts, and the server refuses to boot in production while
+/// those exist. Something has to apply migrations before they can be cleaned up,
+/// and it cannot be the server.
+///
+///     goods4ncu migrate
+///     psql -d <db> -v ON_ERROR_STOP=1 -f scripts/remove_demo_seed.sql
+///     # then start the app
+async fn run_migrate() -> Result<()> {
+    let database_url = env::var("DATABASE_URL")
+        .map_err(|_| anyhow::anyhow!("DATABASE_URL must be set to run migrations"))?;
+    // init_db applies the migration set and prepares the vector extension.
+    crate::db::init_db(&database_url).await?;
+    println!("migrations applied");
+    Ok(())
 }
 
 /// Container health check probe.
