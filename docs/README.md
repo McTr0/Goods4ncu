@@ -45,6 +45,7 @@
 
 1. [生产架构](production-architecture.md)：理解容量、租户、持久事件、SLO 和灾备目标。
 2. [运行、配置与排错](operations.md)：处理本地与当前部署问题。
+- [首次上线检查清单](first-launch-checklist.md) —— 第一次对真实学生开放前逐条走一遍。列的都是只在第一次出现的坑
 3. [生产路线图](roadmap.md)：查看阶段、前置条件、验收门槛和退出标准。
 4. [集成测试手册](integration-testing.md)：按真实用户操作验证系统。
 

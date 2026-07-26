@@ -9,6 +9,8 @@
 
 这篇文档面向“系统跑不起来、跑着不对、上线前要确认什么”。它集中维护配置、数据库、迁移、metrics、日志和排错路径。目标拓扑和 SLO 见[生产架构](production-architecture.md)，开发步骤见 [开发指南](development.md)，业务状态见 [业务流程](domain-flows.md)。
 
+> **第一次**对真实学生开放前，先走[首次上线检查清单](first-launch-checklist.md)。本文讲日常运行；那份讲的是只在第一次出现、且会在上线当天爆发的问题。
+
 ## 环境变量
 
 密钥和连接串放在 `.env` 或运行环境里，模板见 [.env.example](.env.example)。不要把真实密钥写进 TOML 或提交到仓库。
