@@ -174,7 +174,19 @@ say "  ✓ Redis :$REDIS_PORT, MinIO :$S3_PORT (private per-campus buckets)"
 DELIVERED_CODES="$DEPLOY_HOME/delivered-codes.json"
 : > "$DELIVERED_CODES"
 chmod 600 "$DELIVERED_CODES"
-python3 - "$WEBHOOK_PORT" "$DELIVERED_CODES" > "$DEPLOY_HOME/logs/webhook.log" 2>&1 <<'PY' &
+# A leftover webhook from an earlier run holds the port, so ours fails to bind
+# and the old one — which may predate the recording fix and so write codes
+# nowhere — keeps serving. Exactly the shape of the Redis instance that answered
+# PING while refusing writes: "the service started" is not the property that
+# matters. Take the port back first.
+# A distinctive marker in the argv so this exact process can be found later.
+# `lsof` was the obvious way to reclaim the port and it hangs on macOS, which
+# turned a restart into a deployment that simply stopped.
+WEBHOOK_MARKER="goods4ncu-delivery-webhook"
+pkill -f "$WEBHOOK_MARKER" >/dev/null 2>&1 || true
+sleep 1
+python3 - "$WEBHOOK_PORT" "$DELIVERED_CODES" "$WEBHOOK_MARKER" \
+    > "$DEPLOY_HOME/logs/webhook.log" 2>&1 <<'PY' &
 import http.server, sys, json
 CODES = {}
 class H(http.server.BaseHTTPRequestHandler):
@@ -190,6 +202,26 @@ http.server.HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
 PY
 track $!
 disown %% 2>/dev/null || true
+
+# Prove the webhook records what it is handed, rather than merely answering.
+# Without this the OTP flow fails much later with "no verification code was
+# delivered", which points the finger at campus verification instead of at the
+# stand-in that quietly dropped the code.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    curl -sf -o /dev/null -X POST "http://127.0.0.1:$WEBHOOK_PORT/deliver" \
+        -H 'Content-Type: application/json' \
+        -d '{"to":"probe@example.test","template":"probe","code":"000000"}' && break
+    sleep 0.3
+done
+python3 -c "
+import json, sys
+try:
+    codes = json.load(open('$DELIVERED_CODES'))
+except Exception:
+    sys.exit(1)
+sys.exit(0 if codes.get('probe@example.test') == '000000' else 1)
+" || fail "delivery webhook is not recording codes; the OTP flow cannot complete"
+: > "$DELIVERED_CODES"
 
 # --- Two production-mode replicas ---------------------------------------------
 start_replica() {
@@ -301,6 +333,17 @@ register_member() {
     local uid; uid=$(psql -d "$DB_NAME" -qtA -c "SELECT id FROM users WHERE username='$username';" | tr -d ' ')
     local mid; mid=$(psql -d "$DB_NAME" -qtA -c "SELECT id FROM campus_memberships WHERE user_id='$uid' LIMIT 1;" | tr -d ' ')
     [ -n "$mid" ] || fail "$username got no campus membership on registration"
+
+    # Already verified from an earlier run: there is nothing to verify, and
+    # asking again correctly returns 409. Insisting on the OTP flow here broke
+    # every re-run — the fix that made the first deployment correct made the
+    # second one fail, which is its own lesson about only ever testing one.
+    local existing
+    existing=$(psql -d "$DB_NAME" -qtA -c "SELECT status FROM campus_memberships WHERE id='$mid';" | tr -d ' ')
+    if [ "$existing" = "verified" ]; then
+        echo "$token"
+        return 0
+    fi
 
     curl -s -o /dev/null -X POST "$API/api/user/campus-memberships/$mid/verification/request" \
         -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d '{}'

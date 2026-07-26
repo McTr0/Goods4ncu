@@ -185,6 +185,141 @@ pub async fn create_draft_batch(
     })))
 }
 
+#[derive(Deserialize)]
+pub struct DecomposeRequest {
+    /// What the author said. May describe one thing or many.
+    pub raw_input: String,
+    /// Defaults to `goods_offer` — the graduation case this exists for.
+    #[serde(default)]
+    pub kind: Option<String>,
+}
+
+/// POST /api/intents/decompose — read one sentence as possibly several intents.
+///
+/// "毕业了，宿舍里有台灯、小冰箱、两把椅子、一个书架，都便宜出" is five things,
+/// said once. A form asks for that five times and gets it zero times, which is
+/// most of why the supply on a campus never reaches the system.
+///
+/// One sentence stays one intent and goes live directly; several become drafts,
+/// because splitting is guesswork and guessing wrong should cost the author one
+/// dismissal rather than putting five half-understood things in front of the
+/// campus.
+///
+/// The deterministic splitter runs *first*, not as a fallback. When someone
+/// punctuated the list themselves the enumeration is stated rather than
+/// inferred, so asking a model to re-derive it would add latency and cost for a
+/// possibly worse answer. The model is consulted only for prose, and a failure
+/// there degrades to "one thing, as typed" — never to a lost post.
+pub async fn decompose_intent(
+    State(state): State<AppState>,
+    tenant: VerifiedTenant,
+    Json(payload): Json<DecomposeRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    use crate::services::intent::decompose::{
+        model_prompt, parse_model_reply, split_deterministically, Decomposition,
+    };
+
+    let raw_input = payload.raw_input.trim();
+    if raw_input.is_empty() {
+        return Err(ApiError::BadRequest("请说说你想出什么".to_string()));
+    }
+    if raw_input.chars().count() > 1000 {
+        return Err(ApiError::BadRequest("描述请控制在 1000 字以内".to_string()));
+    }
+    let kind = payload.kind.as_deref().unwrap_or(kinds::GOODS_OFFER);
+    if !kinds::ALL.contains(&kind) {
+        return Err(ApiError::BadRequest(format!("未知的意图类型：{}", kind)));
+    }
+
+    let mut decomposition = split_deterministically(raw_input);
+    if matches!(decomposition, Decomposition::Single) {
+        // Prose rather than a list. Worth one model call, on a short timeout —
+        // someone waiting to post should not be held up by a slow provider.
+        decomposition = match state
+            .agents
+            .llm_provider
+            .clone()
+            .create_reply_assistant()
+            .await
+        {
+            Ok(assistant) => {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(8),
+                    assistant.prompt(model_prompt(raw_input)),
+                )
+                .await
+                {
+                    Ok(Ok(reply)) => parse_model_reply(&reply, raw_input),
+                    Ok(Err(error)) => {
+                        tracing::warn!(%error, "decomposition model call failed");
+                        Decomposition::Single
+                    }
+                    Err(_) => {
+                        tracing::warn!("decomposition model call timed out");
+                        Decomposition::Single
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "decomposition assistant unavailable");
+                Decomposition::Single
+            }
+        };
+    }
+
+    let service = IntentService::new(state.infra.db.clone());
+    match decomposition {
+        // One thing: record it live. Making someone confirm a card for the
+        // sentence they just typed is the friction this replaces.
+        Decomposition::Single => {
+            let id = service
+                .create(NewIntent {
+                    campus_id: tenant.campus_id,
+                    author_id: &tenant.session.user_id,
+                    kind,
+                    raw_input,
+                    slots: Slots::default(),
+                    confidence: 1.0,
+                    status: status::ACTIVE,
+                    visibility: "campus",
+                    valid_until: None,
+                })
+                .await
+                .map_err(ApiError::Internal)?;
+            let projected = service
+                .project_to_listing(id)
+                .await
+                .map_err(ApiError::Internal)?;
+            Ok(Json(serde_json::json!({
+                "split": false,
+                "ids": [id],
+                "status": status::ACTIVE,
+                "projected_listing_id": projected,
+            })))
+        }
+        Decomposition::Several(items) => {
+            let ids = service
+                .create_draft_batch(
+                    tenant.campus_id,
+                    &tenant.session.user_id,
+                    raw_input,
+                    kind,
+                    items
+                        .into_iter()
+                        .map(|item| (item.slots, item.confidence))
+                        .collect(),
+                )
+                .await
+                .map_err(ApiError::Internal)?;
+            Ok(Json(serde_json::json!({
+                "split": true,
+                "ids": ids,
+                "status": status::DRAFT,
+            })))
+        }
+    }
+}
+
 /// GET /api/intents — the caller's own intents, drafts included.
 pub async fn list_intents(
     State(state): State<AppState>,

@@ -14,6 +14,7 @@
 //!   Monday. Keeping it alive produces matches nobody wants and quietly makes
 //!   the pool worse.
 
+pub mod decompose;
 pub mod slots;
 
 use anyhow::Result;
