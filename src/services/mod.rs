@@ -9,6 +9,7 @@ pub mod campus;
 pub mod chat;
 pub mod chat_conversation;
 pub mod chat_expire;
+pub mod community_health;
 pub mod hitl_expire;
 pub mod interruption;
 pub mod moderation;

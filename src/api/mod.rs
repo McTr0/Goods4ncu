@@ -423,6 +423,10 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .route("/api/stats", get(stats::get_stats))
         .route("/api/admin/stats", get(admin::get_admin_stats))
         .route(
+            "/api/admin/community-health",
+            get(admin::get_community_health),
+        )
+        .route(
             "/api/admin/capabilities",
             get(admin::get_admin_capabilities),
         )

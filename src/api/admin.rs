@@ -264,6 +264,51 @@ pub struct CategoryCount {
     pub count: i64,
 }
 
+/// GET /api/admin/community-health — outcome metrics for the selected campus.
+///
+/// Kept apart from [`get_admin_stats`] on purpose. That endpoint reports how
+/// much stuff exists — listings, members, orders — which is the wrong thing to
+/// steer by: every one of those numbers rises when a community turns into a
+/// feed. This one reports whether the place works. Whether posts get answered,
+/// whether arrangements actually happen, whether strangers come back to each
+/// other, whether newcomers stay, whether proactive notifications earn the
+/// interruption.
+///
+/// Relationship figures are counts only. On a single campus, *which* people
+/// deal with each other is sensitive, and an operations dashboard has no
+/// business surfacing it.
+pub async fn get_community_health(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<CommunityHealthQuery>,
+) -> Result<Json<crate::services::community_health::CommunityHealth>, ApiError> {
+    let scope = require_admin_scope(
+        &state,
+        &headers,
+        query.scope.campus_id,
+        query.scope.reason.as_deref(),
+        false,
+    )
+    .await?;
+    record_cross_campus_read(&state, &scope, "community_health").await;
+
+    let health =
+        crate::services::community_health::CommunityHealthService::new(state.infra.db.clone())
+            .measure(scope.campus_id, query.days.unwrap_or(30))
+            .await
+            .map_err(ApiError::Internal)?;
+
+    Ok(Json(health))
+}
+
+#[derive(Deserialize)]
+pub struct CommunityHealthQuery {
+    #[serde(flatten)]
+    pub scope: AdminScopeQuery,
+    /// Look-back window in days; clamped to 1–365 by the service.
+    pub days: Option<i64>,
+}
+
 /// GET /api/admin/stats - statistics for the selected administrative campus.
 pub async fn get_admin_stats(
     State(state): State<AppState>,
