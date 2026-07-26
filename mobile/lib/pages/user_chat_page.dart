@@ -3,6 +3,10 @@ import 'dart:async';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../components/agreement_card.dart';
+import '../components/handoff_prompt.dart';
+import '../services/agreement_service.dart';
+import '../services/reputation_service.dart';
 import '../models/models.dart';
 import '../providers/chat_notifier.dart';
 import '../services/chat_service.dart';
@@ -25,6 +29,10 @@ class UserChatPage extends StatefulWidget {
   final String otherUserId;
   final String otherUsername;
   final ChatService? chatService;
+
+  /// Injectable for tests, like the services above it.
+  final AgreementService? agreementService;
+  final ReputationService? reputationService;
   final UserService? userService;
   final UploadService? uploadService;
   final ChatNotifier? chatNotifier;
@@ -39,6 +47,8 @@ class UserChatPage extends StatefulWidget {
     required this.otherUserId,
     required this.otherUsername,
     this.chatService,
+    this.agreementService,
+    this.reputationService,
     this.userService,
     this.uploadService,
     this.chatNotifier,
@@ -81,6 +91,11 @@ class _UserChatPageState extends State<UserChatPage> {
 
   String? get _currentUserId => _chatData?.currentUserId;
 
+  Agreement? _agreement;
+  bool _awaitingHandoff = false;
+  late final AgreementService _agreementService;
+  late final ReputationService _reputationService;
+
   String? get _editingMessageId => _chatData?.editingMessageId;
   ConversationMessage? get _replyingToMessage => _chatData?.replyingToMessage;
 
@@ -115,6 +130,10 @@ class _UserChatPageState extends State<UserChatPage> {
     super.initState();
     _chatService = widget.chatService ?? context.read<ChatService>();
     _userService = widget.userService ?? context.read<UserService>();
+    _agreementService =
+        widget.agreementService ?? context.read<AgreementService>();
+    _reputationService =
+        widget.reputationService ?? context.read<ReputationService>();
     final uploadService = widget.uploadService ?? context.read<UploadService>();
     _mediaSender =
         widget.mediaSender ?? UserChatMediaSender(uploadService: uploadService);
@@ -144,6 +163,7 @@ class _UserChatPageState extends State<UserChatPage> {
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _conversation?.expiresAt != null) setState(() {});
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadArrangement());
   }
 
   @override
@@ -670,10 +690,66 @@ class _UserChatPageState extends State<UserChatPage> {
   }
 
   @override
+  void didUpdateWidget(UserChatPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The same page object can be reused for a different conversation, in which
+    // case initState does not run again. Without this the card from the
+    // previous conversation stays on screen — showing one person's arrangement
+    // inside another person's thread.
+    if (oldWidget.conversationId != widget.conversationId) {
+      setState(() {
+        _agreement = null;
+        _awaitingHandoff = false;
+      });
+      _loadArrangement();
+    }
+  }
+
+  /// The arrangement card and the handoff question, loaded lazily.
+  ///
+  /// Failures here are swallowed: neither is worth taking the conversation down
+  /// for, and a chat that will not open because a card failed to load is a much
+  /// worse outcome than a missing card.
+  Future<void> _loadArrangement() async {
+    try {
+      final agreement = await _agreementService.ensure(
+        widget.conversationId,
+        'deal',
+      );
+      if (!mounted) return;
+      setState(() => _agreement = agreement);
+      if (agreement.isSettled) {
+        final pending = await _reputationService.pending();
+        if (!mounted) return;
+        setState(() => _awaitingHandoff = pending.contains(agreement.id));
+      }
+    } catch (_) {}
+  }
+
+  @override
   Widget build(BuildContext context) {
     final body = Column(
       children: [
         if (widget.embedded) _buildEmbeddedHeader(),
+        // Pinned above the messages: the whole point is that "how much, when,
+        // where" stops living in the scrollback.
+        if (_agreement != null)
+          AgreementCard(
+            agreement: _agreement!,
+            service: _agreementService,
+            currentUserId: _currentUserId ?? '',
+            onChanged: (updated) => setState(() {
+              _agreement = updated;
+              if (updated.isSettled) _awaitingHandoff = true;
+            }),
+          ),
+        // Asked only after the arrangement was settled, and only once.
+        if (_awaitingHandoff && _agreement != null)
+          HandoffPrompt(
+            agreementId: _agreement!.id,
+            service: _reputationService,
+            onAnswered: () => setState(() => _awaitingHandoff = false),
+          ),
         if (_conversation != null)
           _ConversationProtocolBanner(
             conversation: _conversation!,

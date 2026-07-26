@@ -7,6 +7,12 @@ import 'package:goods4ncu_mobile/pages/user_chat_composer_controller.dart';
 import 'package:goods4ncu_mobile/pages/user_chat_components.dart';
 import 'package:goods4ncu_mobile/pages/user_chat_page.dart';
 import 'package:goods4ncu_mobile/providers/chat_notifier.dart';
+import 'package:provider/provider.dart';
+import 'package:goods4ncu_mobile/components/agreement_card.dart';
+import 'package:goods4ncu_mobile/components/handoff_prompt.dart';
+import 'package:goods4ncu_mobile/services/agreement_service.dart';
+import 'package:goods4ncu_mobile/services/reputation_service.dart';
+import 'package:goods4ncu_mobile/services/upload_service.dart';
 import 'package:goods4ncu_mobile/services/chat_service.dart';
 import 'package:goods4ncu_mobile/services/user_service.dart';
 
@@ -27,13 +33,71 @@ class _FakePageUserService extends UserService {
   Future<Map<String, dynamic>> getUserProfile() async => {'user_id': 'user-me'};
 }
 
+class _BrokenAgreementService extends AgreementService {
+  @override
+  Future<Agreement> ensure(String conversationId, String kind) async =>
+      throw Exception('unreachable');
+}
+
+class _FakePageAgreementService extends AgreementService {
+  _FakePageAgreementService({required this.agreement});
+  Agreement agreement;
+  @override
+  Future<Agreement> ensure(String conversationId, String kind) async =>
+      agreement;
+}
+
+class _FakePageReputationService extends ReputationService {
+  _FakePageReputationService({this.awaiting = const []});
+  final List<String> awaiting;
+  @override
+  Future<List<String>> pending() async => awaiting;
+}
+
+Agreement _pageAgreement({
+  List<AgreementTerm> terms = const [],
+  String status = 'forming',
+}) => Agreement(
+  id: 'agreement-1',
+  kind: 'deal',
+  status: status,
+  terms: terms,
+  participants: const ['user-me', 'user-other'],
+  fullyAgreed: false,
+  availableSlots: const ['item', 'price', 'time', 'place', 'conditions'],
+);
+
+UserChatPage _pageWith({
+  required AgreementService agreements,
+  required ReputationService reputation,
+  String conversationId = 'conv-1',
+  Key? key,
+}) => UserChatPage(
+  // A distinct key gives a fresh State, which is what real navigation does:
+  // opening another conversation pushes a new page rather than mutating this
+  // one.
+  key: key,
+  conversationId: conversationId,
+  otherUserId: 'user-other',
+  otherUsername: 'Other User',
+  chatService: _FakePageChatService(),
+  userService: _FakePageUserService(),
+  agreementService: agreements,
+  reputationService: reputation,
+);
+
 void main() {
   Widget buildTestableWidget(Widget child) {
     return MaterialApp(
       locale: const Locale('zh'),
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
-      home: Scaffold(body: child),
+      // UserChatPage takes most of its collaborators as parameters; this is the
+      // one it still reads from context.
+      home: Provider<UploadService>(
+        create: (_) => UploadService(),
+        child: Scaffold(body: child),
+      ),
     );
   }
 
@@ -59,6 +123,96 @@ void main() {
         ),
         throwsA(isA<AssertionError>()),
       );
+    });
+  });
+
+  group('the arrangement is reachable from the conversation', () {
+    // Three times this session a feature landed complete at the widget level
+    // and unreachable at the page level, so nobody could actually use it. These
+    // assert the wiring; the widgets are covered on their own.
+
+    testWidgets('the card is pinned above the messages', (tester) async {
+      await tester.pumpWidget(
+        buildTestableWidget(
+          _pageWith(
+            agreements: _FakePageAgreementService(
+              agreement: _pageAgreement(
+                terms: [
+                  const AgreementTerm(
+                    slot: 'price',
+                    value: '300 元',
+                    proposedBy: 'user-other',
+                    agreedBy: ['user-other'],
+                    isSuggestion: false,
+                  ),
+                ],
+              ),
+            ),
+            reputation: _FakePageReputationService(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AgreementCard), findsOneWidget);
+      expect(find.text('300 元'), findsOneWidget);
+    });
+
+    testWidgets('the handoff question waits until it is settled', (
+      tester,
+    ) async {
+      // Asking before anything was arranged would be asking about a meeting
+      // that was never planned.
+      await tester.pumpWidget(
+        buildTestableWidget(
+          _pageWith(
+            key: const ValueKey('conv-1'),
+            agreements: _FakePageAgreementService(agreement: _pageAgreement()),
+            reputation: _FakePageReputationService(
+              awaiting: const ['agreement-1'],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(HandoffPrompt), findsNothing);
+
+      await tester.pumpWidget(
+        buildTestableWidget(
+          _pageWith(
+            key: const ValueKey('conv-2'),
+            conversationId: 'conv-2',
+            agreements: _FakePageAgreementService(
+              agreement: _pageAgreement(status: 'settled'),
+            ),
+            reputation: _FakePageReputationService(
+              awaiting: const ['agreement-1'],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(HandoffPrompt), findsOneWidget);
+    });
+
+    testWidgets('a card that fails to load does not break the chat', (
+      tester,
+    ) async {
+      // A conversation that will not open because a card failed is a much worse
+      // outcome than a missing card.
+      await tester.pumpWidget(
+        buildTestableWidget(
+          _pageWith(
+            agreements: _BrokenAgreementService(),
+            reputation: _FakePageReputationService(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AgreementCard), findsNothing);
+      expect(tester.takeException(), isNull);
+      expect(find.byType(UserChatPage), findsOneWidget);
     });
   });
 
