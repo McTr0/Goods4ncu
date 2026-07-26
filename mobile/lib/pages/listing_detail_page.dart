@@ -754,6 +754,46 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     );
   }
 
+  Future<void> _handleFulfillWanted() async {
+    final l = AppLocalizations.of(context)!;
+    setState(() => _isOperating = true);
+    try {
+      await _apiService.fulfillWanted(_listing!.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.wantedFulfilledToast)));
+      await _loadDetail();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.operationFailed(e.toString()))));
+    } finally {
+      if (mounted) setState(() => _isOperating = false);
+    }
+  }
+
+  Future<void> _handleReopenWanted() async {
+    final l = AppLocalizations.of(context)!;
+    setState(() => _isOperating = true);
+    try {
+      await _apiService.relistListing(_listing!.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.wantedReopenedToast)));
+      await _loadDetail();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.operationFailed(e.toString()))));
+    } finally {
+      if (mounted) setState(() => _isOperating = false);
+    }
+  }
+
   Widget _buildActionButtons() {
     final l = AppLocalizations.of(context)!;
     final listing = _listing;
@@ -764,29 +804,55 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         listing?.ownerId != null && listing?.ownerId == _currentUserId;
     if (listing?.isWanted == true) {
       if (isOwner) {
-        return Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(AppTheme.sp14),
-          decoration: BoxDecoration(
-            color: AppTheme.primary.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-            border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.check_circle_outline, color: AppTheme.primary),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  l.wantedOwnerHint,
-                  style: const TextStyle(
-                    color: AppTheme.primary,
-                    fontWeight: FontWeight.w800,
-                  ),
+        final isFulfilled = listing?.status == 'fulfilled';
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppTheme.sp14),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                border: Border.all(
+                  color: AppTheme.primary.withValues(alpha: 0.2),
                 ),
               ),
-            ],
-          ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.check_circle_outline,
+                    color: AppTheme.primary,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      isFulfilled ? l.wantedFulfilledHint : l.wantedOwnerHint,
+                      style: const TextStyle(
+                        color: AppTheme.primary,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton.icon(
+              onPressed: _isOperating
+                  ? null
+                  : (isFulfilled ? _handleReopenWanted : _handleFulfillWanted),
+              icon: Icon(isFulfilled ? Icons.replay : Icons.task_alt),
+              label: Text(
+                isFulfilled ? l.reopenWantedAction : l.fulfillWantedAction,
+              ),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
         );
       }
       return Row(

@@ -526,6 +526,62 @@ class AppLocalizationsEn extends AppLocalizations {
   String get profileTab => 'Profile';
 
   @override
+  String get campusMembershipVerified => 'Campus verified';
+
+  @override
+  String get campusMembershipPending => 'Verification pending';
+
+  @override
+  String get campusMembershipSuspended => 'Membership suspended';
+
+  @override
+  String get campusMembershipRevoked => 'Membership revoked';
+
+  @override
+  String get campusEmail => 'Campus email';
+
+  @override
+  String get campusEmailHint => 'student-id@email.ncu.edu.cn';
+
+  @override
+  String get campusEmailRequired => 'A campus email is required to register';
+
+  @override
+  String get verifyCampusIdentity => 'Verify campus identity';
+
+  @override
+  String get campusVerificationSendHint =>
+      'We will send a code to your current campus email. It expires in 5 minutes.';
+
+  @override
+  String get sendVerificationCode => 'Send verification code';
+
+  @override
+  String get verificationCodeSent => 'Code sent. Check your campus inbox.';
+
+  @override
+  String get verificationCode => '6-digit code';
+
+  @override
+  String get confirmVerification => 'Confirm verification';
+
+  @override
+  String get campusVerificationSuccess => 'Campus identity verified';
+
+  @override
+  String get campusSwitchTitle => 'Switch active campus';
+
+  @override
+  String get campusSwitchDescription =>
+      'Browsing, publishing, and communication stay within this campus. Each device can choose independently.';
+
+  @override
+  String get campusActive => 'Active campus';
+
+  @override
+  String get campusSwitchSuccess => 'Active campus switched';
+
+  @override
   String get publishTab => 'Publish';
 
   @override
@@ -753,6 +809,68 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminNoListingsFound => 'No listings found';
 
   @override
+  String get adminSensitiveActionsLocked => 'Sensitive actions are locked';
+
+  @override
+  String get adminSensitiveActionsLockedSubtitle =>
+      'Viewing is unaffected. Bans, takedowns, role changes, and moderation decisions require password verification.';
+
+  @override
+  String get adminUnlockActions => 'Verify and unlock';
+
+  @override
+  String get adminReauthenticateTitle => 'Verify administrator identity';
+
+  @override
+  String get adminReauthenticateHint =>
+      'Sensitive actions stay unlocked for 10 minutes';
+
+  @override
+  String get adminTotpCodeLabel => 'Authenticator code (if enabled)';
+
+  @override
+  String get adminTotpCodeHint => '6-digit code from your authenticator app';
+
+  @override
+  String get agentPlanPendingHeader =>
+      'Pending actions (proposed by assistant, run only after you confirm)';
+
+  @override
+  String get agentPlanConfirmAction => 'Confirm';
+
+  @override
+  String get agentPlanExecuted => 'Action executed';
+
+  @override
+  String get agentPlanCancelled => 'Action cancelled';
+
+  @override
+  String get fulfillWantedAction => 'Mark fulfilled';
+
+  @override
+  String get reopenWantedAction => 'Reopen request';
+
+  @override
+  String get wantedFulfilledHint =>
+      'This request is fulfilled and no longer receives matches';
+
+  @override
+  String get wantedFulfilledToast => 'Request marked fulfilled';
+
+  @override
+  String get wantedReopenedToast => 'Request reopened';
+
+  @override
+  String get agentPlanSecondConfirmTitle => 'High-risk action — confirm again';
+
+  @override
+  String get agentPlanSecondConfirmAction => 'Confirm and run';
+
+  @override
+  String get adminReauthenticateSuccess =>
+      'Administrator verified. Sensitive actions are temporarily unlocked.';
+
+  @override
   String get adminLoginAs => 'Login as user';
 
   @override
@@ -912,7 +1030,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get emailChangeHint => 'Enter @email.ncu.edu.cn email';
 
   @override
-  String get emailDomainError => 'Must use @email.ncu.edu.cn email';
+  String get emailDomainError => 'Enter a valid campus email address';
 
   @override
   String get emailChangeSuccess => 'Email updated';
@@ -2109,4 +2227,123 @@ class AppLocalizationsEn extends AppLocalizations {
   String negotiationStatusLine(String status) {
     return 'Negotiation $status';
   }
+
+  @override
+  String get adminModerationTab => 'Review';
+
+  @override
+  String get moderationCenter => 'Content review';
+
+  @override
+  String get moderationCenterSubtitle =>
+      'View decisions affecting your content and submit appeals';
+
+  @override
+  String get moderationNoCases => 'There are no moderation cases affecting you';
+
+  @override
+  String get moderationReadOnly =>
+      'You can inspect cases for this campus. Only platform admins can take action.';
+
+  @override
+  String get moderationCase => 'Moderation case';
+
+  @override
+  String get moderationResource => 'Related content';
+
+  @override
+  String get moderationReason => 'Public reason';
+
+  @override
+  String get moderationCreatedAt => 'Created';
+
+  @override
+  String get moderationResolution => 'Resolution';
+
+  @override
+  String get moderationInternalEvidence => 'Internal evidence';
+
+  @override
+  String get moderationStartReview => 'Start review';
+
+  @override
+  String get moderationRestrict => 'Restrict content';
+
+  @override
+  String get moderationDismiss => 'No violation';
+
+  @override
+  String get moderationRestore => 'Restore content';
+
+  @override
+  String get moderationActionNote => 'Internal decision note';
+
+  @override
+  String get moderationPublicReason => 'Reason shown to the user (optional)';
+
+  @override
+  String get moderationActionSuccess => 'Case status updated';
+
+  @override
+  String get moderationStatusOpen => 'Open';
+
+  @override
+  String get moderationStatusReviewing => 'In review';
+
+  @override
+  String get moderationStatusActioned => 'Action taken';
+
+  @override
+  String get moderationStatusDismissed => 'No violation';
+
+  @override
+  String get moderationStatusAppealed => 'Under appeal';
+
+  @override
+  String get moderationStatusResolved => 'Resolved';
+
+  @override
+  String get moderationSourceMachine => 'Automated review';
+
+  @override
+  String get moderationSourceUserReport => 'User report';
+
+  @override
+  String get moderationSourceManual => 'Manual case';
+
+  @override
+  String get moderationAppeal => 'Submit appeal';
+
+  @override
+  String get moderationAppealHint =>
+      'Explain why the decision may be wrong and what another reviewer should check (10–2000 characters).';
+
+  @override
+  String get moderationAppealSubmitted =>
+      'Appeal submitted for independent review';
+
+  @override
+  String get moderationPendingAppeal => 'Appeal awaiting review';
+
+  @override
+  String get moderationCannotAppeal =>
+      'This case cannot be appealed in its current state';
+
+  @override
+  String get moderationFilterAll => 'All';
+
+  @override
+  String get moderationNoInternalDetails => 'No additional internal evidence';
+
+  @override
+  String get listingImage => 'Listing image';
+
+  @override
+  String get imageMessage => 'Chat image';
+
+  @override
+  String get avatar => 'Avatar';
+
+  @override
+  String get warning => 'Warning';
 }

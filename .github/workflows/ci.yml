@@ -47,6 +47,28 @@ jobs:
       - name: Run Clippy (all targets)
         run: cargo clippy --all-targets -- -D warnings
 
+  audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      # Fails on any advisory not explicitly justified in .cargo/audit.toml.
+      # Unmaintained/unsound crates stay as warnings so they remain visible
+      # without blocking on dependencies that have no fix available yet.
+      - name: Audit dependencies
+        run: cargo audit
+
   check:
     name: Cargo Check
     runs-on: ubuntu-latest

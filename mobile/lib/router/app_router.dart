@@ -18,6 +18,7 @@ import '../pages/admin_page.dart';
 import '../pages/settings_page.dart';
 import '../pages/watchlist_page.dart';
 import '../pages/notifications_page.dart';
+import '../pages/moderation_cases_page.dart';
 import '../models/models.dart';
 import '../services/base_service.dart';
 import '../services/user_service.dart';
@@ -36,17 +37,17 @@ Future<bool> getLoginStatus() async {
   return token != null && token.isNotEmpty;
 }
 
-Future<bool> _isAdmin(UserService userService) async {
+Future<bool> _hasAdminAccess(UserService userService) async {
   try {
     final cached = await AdminRoleCache.instance.getCachedForCurrentToken();
     if (cached != null) {
       return cached;
     }
 
-    final profile = await userService.getUserProfile();
-    final isAdmin = profile['role'] == 'admin';
-    await AdminRoleCache.instance.saveForCurrentToken(isAdmin);
-    return isAdmin;
+    final capabilities = await userService.getAdminCapabilities();
+    final canRead = capabilities['can_read'] == true;
+    await AdminRoleCache.instance.saveForCurrentToken(canRead);
+    return canRead;
   } catch (_) {
     AdminRoleCache.instance.invalidate();
     return false;
@@ -72,8 +73,8 @@ final GoRouter appRouter = GoRouter(
         WsService.instance.connect();
       }
       if (state.matchedLocation == '/admin') {
-        final admin = await _isAdmin(userService);
-        if (!admin) return '/';
+        final hasAdminAccess = await _hasAdminAccess(userService);
+        if (!hasAdminAccess) return '/';
       }
     } catch (e) {
       if (state.matchedLocation != '/login') {
@@ -97,6 +98,10 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/notifications',
       builder: (context, state) => const NotificationsPage(),
+    ),
+    GoRoute(
+      path: '/moderation',
+      builder: (context, state) => const ModerationCasesPage(),
     ),
 
     // Detail routes (Hide bottom bar)

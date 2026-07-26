@@ -11,7 +11,28 @@ use axum::{
 
 use super::error::error_payload;
 
+use crate::api::error::ApiError;
+use axum::http::HeaderMap;
+
 pub const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
+
+/// Parse the optional idempotency key shared by state-changing endpoints.
+/// Keep the validation at the HTTP boundary so services only receive a
+/// normalized, bounded opaque value.
+pub fn idempotency_key_from_headers(headers: &HeaderMap) -> Result<Option<String>, ApiError> {
+    let Some(value) = headers.get("idempotency-key") else {
+        return Ok(None);
+    };
+    let key = value
+        .to_str()
+        .map_err(|_| ApiError::BadRequest("Idempotency-Key 必须是 ASCII 文本".to_string()))?;
+    if key.is_empty() || key.len() > 128 || !key.bytes().all(|byte| (0x21..=0x7e).contains(&byte)) {
+        return Err(ApiError::BadRequest(
+            "Idempotency-Key 必须为 1–128 个不含空格的 ASCII 字符".to_string(),
+        ));
+    }
+    Ok(Some(key.to_string()))
+}
 
 tokio::task_local! {
     static REQUEST_ID: String;

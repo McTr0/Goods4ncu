@@ -42,6 +42,9 @@ pub struct FileConfig {
     pub moderation: ModerationConfig,
 
     #[serde(default)]
+    pub chat: ChatConfig,
+
+    #[serde(default)]
     pub cors: CorsConfig,
 
     #[serde(default)]
@@ -57,6 +60,16 @@ pub struct ServerConfig {
     /// TCP port to listen on. Defaults to 3000.
     #[serde(default)]
     pub port: Option<u16>,
+    /// Seconds to keep serving after SIGTERM while readiness reports failure,
+    /// so the load balancer can deregister this instance before it stops
+    /// accepting. Defaults to 5.
+    #[serde(default)]
+    pub shutdown_drain_secs: Option<u64>,
+    /// Seconds to wait for in-flight requests and workers to finish once the
+    /// listener has closed. Must fit inside the orchestrator's grace period.
+    /// Defaults to 25.
+    #[serde(default)]
+    pub shutdown_timeout_secs: Option<u64>,
 }
 
 /// LLM provider configuration.
@@ -145,6 +158,16 @@ pub struct MarketplaceConfig {
     /// Allowed listing categories.
     #[serde(default)]
     pub categories: Option<Vec<String>>,
+}
+
+/// Chat feature configuration.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ChatConfig {
+    /// Whether new Secret Chat sessions may be created. Secret Chat is
+    /// deprecated (it conflicts with server-side moderation duties); existing
+    /// sessions stay readable regardless of this flag. Defaults to false.
+    #[serde(default)]
+    pub secret_new_sessions_enabled: Option<bool>,
 }
 
 /// Content moderation configuration.

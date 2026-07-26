@@ -17,6 +17,16 @@ async fn insert_user(pool: &sqlx::PgPool, id: &str, username: &str) {
         .execute(pool)
         .await
         .unwrap();
+    sqlx::query(
+        "INSERT INTO campus_memberships (
+            campus_id, user_id, status, verification_method, verified_at
+         ) SELECT id, $1, 'verified', 'test_fixture', NOW()
+           FROM campuses WHERE slug = 'ncu'",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 fn realtime_input(
@@ -26,6 +36,7 @@ fn realtime_input(
 ) -> CreateConversationInput {
     CreateConversationInput {
         client_request_id: Uuid::new_v4(),
+        campus_id: Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap(),
         initiator_id: initiator_id.to_string(),
         recipient_id: recipient_id.to_string(),
         listing_id: None,
@@ -43,6 +54,7 @@ fn mail_input(
 ) -> CreateConversationInput {
     CreateConversationInput {
         client_request_id: Uuid::new_v4(),
+        campus_id: Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap(),
         initiator_id: initiator_id.to_string(),
         recipient_id: recipient_id.to_string(),
         listing_id: None,
@@ -217,6 +229,40 @@ async fn message_reply_reaction_hide_and_report_are_member_scoped() {
         .await
         .unwrap();
         assert_eq!(report_count, 1);
+
+        let linked_case = sqlx::query(
+            "SELECT report.case_id, moderation_case.campus_id,
+                    moderation_case.subject_user_id, moderation_case.status,
+                    moderation_case.internal_details->>'details' AS details
+             FROM chat_message_reports report
+             JOIN moderation_cases moderation_case ON moderation_case.id = report.case_id
+             WHERE report.id = $1",
+        )
+        .bind(report_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(linked_case.get::<Option<Uuid>, _>("case_id").is_some());
+        assert_eq!(
+            linked_case.get::<Uuid, _>("campus_id"),
+            Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap()
+        );
+        assert_eq!(
+            linked_case.get::<Option<String>, _>("subject_user_id"),
+            Some("user-a".to_string())
+        );
+        assert_eq!(linked_case.get::<String, _>("status"), "open");
+        assert_eq!(linked_case.get::<String, _>("details"), "更新说明");
+
+        let case_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM moderation_cases
+             WHERE source_type = 'user_report' AND source_ref_id = $1",
+        )
+        .bind(report_id.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(case_count, 1);
     })
     .await;
 }
@@ -625,6 +671,57 @@ async fn expire_stale_invites_is_idempotent() {
         .await
         .unwrap();
         assert_eq!(expire_events, 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn direct_conversation_rejects_cross_campus_participants() {
+    with_test_pool(|pool| async move {
+        insert_user(&pool, "user-a", "alice").await;
+
+        let other_campus_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO campuses (id, slug, name_zh, name_en, email_domains)
+             VALUES ($1, $2, '测试大学', 'Test University', ARRAY['test.edu.cn'])",
+        )
+        .bind(other_campus_id)
+        .bind(format!("test-{}", &other_campus_id.to_string()[..8]))
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO users (id, username, password_hash)
+             VALUES ('user-b', 'bob', 'hash')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO campus_memberships (
+                campus_id, user_id, status, verification_method, verified_at
+             ) VALUES ($1, 'user-b', 'verified', 'test_fixture', NOW())",
+        )
+        .bind(other_campus_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let service = ChatConversationService::new(pool.clone());
+        let error = service
+            .create_conversation(realtime_input("user-a", "user-b", "跨校联系"))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ApiError::CampusScopeMismatch));
+
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM chat_conversations
+             WHERE initiator_id = 'user-a' AND recipient_id = 'user-b'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 0);
     })
     .await;
 }

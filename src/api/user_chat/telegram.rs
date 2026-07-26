@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::api::error::ApiError;
 use crate::api::{ws, AppState};
 
-use super::{authenticated_user, moderate_text};
+use super::{authenticated_session, authenticated_user, moderate_text};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -154,7 +154,11 @@ pub async fn create_space(
     headers: HeaderMap,
     Json(body): Json<CreateSpaceBody>,
 ) -> Result<Json<SpaceView>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    let tenant = crate::services::campus::CampusService::new(state.infra.db.clone())
+        .require_tenant_context_for_session(&session.user_id, session.campus_id)
+        .await?;
+    let user_id = session.user_id;
     let kind = normalize_space_kind(&body.kind)?;
     let name = body.name.trim();
     if name.is_empty() || name.chars().count() > 80 {
@@ -169,10 +173,11 @@ pub async fn create_space(
         .filter(|v| !v.is_empty());
     let mut tx = state.infra.db.begin().await.map_err(db_error)?;
     let row = sqlx::query(
-        "INSERT INTO chat_spaces (kind, name, description, owner_id)
-         VALUES ($1, $2, $3, $4)
+        "INSERT INTO chat_spaces (campus_id, kind, name, description, owner_id)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING id",
     )
+    .bind(tenant.campus_id)
     .bind(kind)
     .bind(name)
     .bind(description)
@@ -199,7 +204,11 @@ pub async fn list_spaces(
     headers: HeaderMap,
     Query(query): Query<SpaceListQuery>,
 ) -> Result<Json<SpaceListResponse>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    let campus_id = crate::services::campus::CampusService::new(state.infra.db.clone())
+        .resolve_session_campus(&session.user_id, session.campus_id)
+        .await?;
+    let user_id = session.user_id;
     let kind = query
         .kind
         .as_deref()
@@ -210,12 +219,14 @@ pub async fn list_spaces(
          FROM chat_spaces s
          JOIN chat_space_members m ON m.space_id = s.id AND m.user_id = $1
          WHERE s.status = 'active'
+           AND s.campus_id = $2
            AND m.role <> 'banned'
-           AND ($2::TEXT IS NULL OR s.kind = $2)
+           AND ($3::TEXT IS NULL OR s.kind = $3)
          ORDER BY s.updated_at DESC
-         LIMIT $3 OFFSET $4",
+         LIMIT $4 OFFSET $5",
     )
     .bind(&user_id)
+    .bind(campus_id)
     .bind(kind)
     .bind(query.limit.unwrap_or(30).clamp(1, 100))
     .bind(query.offset.unwrap_or(0).max(0))
@@ -247,6 +258,14 @@ pub async fn add_space_member(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user_id = authenticated_user(&state, &headers)?;
     ensure_space_admin(&state, space_id, &user_id).await?;
+    let campus_id = load_space_campus(&state, space_id).await?;
+    let campus_service = crate::services::campus::CampusService::new(state.infra.db.clone());
+    campus_service
+        .require_verified_in_campus(&user_id, campus_id)
+        .await?;
+    campus_service
+        .require_verified_in_campus(&body.user_id, campus_id)
+        .await?;
     let role = normalize_member_role(body.role.as_deref().unwrap_or("member"))?;
     sqlx::query(
         "INSERT INTO chat_space_members (space_id, user_id, role)
@@ -494,18 +513,30 @@ pub async fn create_secret_session(
     headers: HeaderMap,
     Json(body): Json<CreateSecretSessionBody>,
 ) -> Result<Json<SecretSessionView>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    // Secret Chat conflicts with the platform's server-side moderation duties
+    // and is deprecated. Creation is refused unless a deployment explicitly
+    // opts in for a migration window; history endpoints stay available so
+    // existing sessions remain readable.
+    if !state.infra.secret_chat_new_sessions_enabled {
+        return Err(ApiError::Forbidden);
+    }
+    let session = authenticated_session(&state, &headers)?;
+    let user_id = session.user_id;
     if user_id == body.recipient_id {
         return Err(ApiError::BadRequest("不能和自己创建加密聊天".to_string()));
     }
+    let tenant = crate::services::campus::CampusService::new(state.infra.db.clone())
+        .require_shared_verified_campus_for_session(&user_id, &body.recipient_id, session.campus_id)
+        .await?;
     let row = sqlx::query(
         "INSERT INTO chat_secret_sessions (
-            initiator_id, recipient_id, initiator_key_fingerprint,
+            campus_id, initiator_id, recipient_id, initiator_key_fingerprint,
             recipient_key_fingerprint, expires_at
          )
-         VALUES ($1, $2, $3, $4, $5::TIMESTAMPTZ)
+         VALUES ($1, $2, $3, $4, $5, $6::TIMESTAMPTZ)
          RETURNING id, initiator_id, recipient_id, status, expires_at, created_at",
     )
+    .bind(tenant.campus_id)
     .bind(&user_id)
     .bind(&body.recipient_id)
     .bind(&body.initiator_key_fingerprint)
@@ -676,6 +707,15 @@ async fn ensure_space_admin(
 
 async fn load_space_kind(state: &AppState, space_id: Uuid) -> Result<String, ApiError> {
     sqlx::query_scalar("SELECT kind FROM chat_spaces WHERE id = $1")
+        .bind(space_id)
+        .fetch_optional(&state.infra.db)
+        .await
+        .map_err(db_error)?
+        .ok_or(ApiError::NotFound)
+}
+
+async fn load_space_campus(state: &AppState, space_id: Uuid) -> Result<Uuid, ApiError> {
+    sqlx::query_scalar("SELECT campus_id FROM chat_spaces WHERE id = $1")
         .bind(space_id)
         .fetch_optional(&state.infra.db)
         .await

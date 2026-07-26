@@ -5,7 +5,7 @@ use argon2::{
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
 use good4ncu::agents::router::IntentRouter;
-use good4ncu::api::auth::generate_access_token;
+use good4ncu::api::auth::{generate_access_token, generate_access_token_for_campus};
 use good4ncu::api::{create_router, ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
 use good4ncu::repositories::{
     PostgresAuthRepository, PostgresChatRepository, PostgresListingRepository,
@@ -82,6 +82,8 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
                     rate_limit_window_secs: 60,
                     server_host: "127.0.0.1".to_string(),
                     server_port: 3000,
+                    shutdown_drain_secs: 5,
+                    shutdown_timeout_secs: 25,
                     event_bus_capacity: 2048,
                     hitl_expire_scan_interval_secs: 600,
                     hitl_expire_timeout_hours: 48,
@@ -96,9 +98,17 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
                     moderation_image_enabled: false,
                     moderation_image_api_url: None,
                     moderation_image_api_key: None,
+                    secret_chat_new_sessions_enabled: false,
+                    media_private_bucket: false,
+                    media_url_ttl_secs: 600,
+                    media_path_style: true,
+                    media_region: "us-east-1".to_string(),
                 },
             ),
             token_denylist: services::token_denylist::TokenDenylist::new(),
+            secret_chat_new_sessions_enabled: false,
+            media_signer: None,
+            shutdown: good4ncu::lifecycle::ShutdownSignal::never(),
         },
         agents: ApiAgents {
             llm_provider: Arc::new(
@@ -149,6 +159,698 @@ async fn insert_user(
     .execute(pool)
     .await
     .expect("insert user");
+
+    sqlx::query(
+        "INSERT INTO campus_memberships (
+            campus_id, user_id, status, verification_method, verified_at
+         )
+         SELECT id, $1, 'verified', 'test_fixture', NOW()
+         FROM campuses WHERE slug = 'ncu'
+         ON CONFLICT (campus_id, user_id) DO NOTHING",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .expect("insert test campus membership");
+}
+
+#[tokio::test]
+async fn active_campus_scopes_recommendations_and_public_user_pages() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let viewer_id = Uuid::new_v4().to_string();
+        let ncu_owner_id = Uuid::new_v4().to_string();
+        let other_owner_id = Uuid::new_v4().to_string();
+        insert_user(
+            &pool,
+            &viewer_id,
+            &format!("campus_viewer_{}", Uuid::new_v4()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &ncu_owner_id,
+            &format!("ncu_owner_{}", Uuid::new_v4()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &other_owner_id,
+            &format!("other_owner_{}", Uuid::new_v4()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+
+        let ncu_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("ncu campus");
+        let other_campus_id = Uuid::new_v4();
+        let other_slug = format!("api-campus-{}", &other_campus_id.to_string()[..8]);
+        sqlx::query(
+            "INSERT INTO campuses (id, slug, name_zh, name_en, email_domains)
+             VALUES ($1, $2, '路由测试大学', 'Route Test University', ARRAY['route.test'])",
+        )
+        .bind(other_campus_id)
+        .bind(&other_slug)
+        .execute(&pool)
+        .await
+        .expect("insert second campus");
+
+        for user_id in [&viewer_id, &other_owner_id] {
+            sqlx::query(
+                "INSERT INTO campus_memberships (
+                    campus_id, user_id, status, verification_method, verified_at
+                 ) VALUES ($1, $2, 'verified', 'test_fixture', NOW())",
+            )
+            .bind(other_campus_id)
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .expect("insert second campus membership");
+        }
+
+        let ncu_listing_id = Uuid::new_v4().to_string();
+        let other_listing_id = Uuid::new_v4().to_string();
+        for (id, campus_id, owner_id, title) in [
+            (&ncu_listing_id, ncu_id, &ncu_owner_id, "NCU-only listing"),
+            (
+                &other_listing_id,
+                other_campus_id,
+                &other_owner_id,
+                "Other-campus listing",
+            ),
+        ] {
+            sqlx::query(
+                "INSERT INTO inventory (
+                    id, campus_id, title, category, brand, condition_score,
+                    suggested_price_cny, defects, owner_id, status, direction
+                 ) VALUES ($1, $2, $3, 'other', 'Test', 8, 10000, '[]', $4, 'active', 'offer')",
+            )
+            .bind(id)
+            .bind(campus_id)
+            .bind(title)
+            .bind(owner_id)
+            .execute(&pool)
+            .await
+            .expect("insert scoped listing");
+        }
+
+        let (token, _, _) = generate_access_token_for_campus(
+            &viewer_id,
+            "user",
+            Some(other_campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("campus token");
+        let app = create_router(build_state(pool.clone()), &[]);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/recommendations/feed?direction=all")
+                    .header("Authorization", bearer(&token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let feed = response_json(response).await;
+        let feed_ids: Vec<&str> = feed["items"]
+            .as_array()
+            .expect("feed items")
+            .iter()
+            .filter_map(|item| item["id"].as_str())
+            .collect();
+        assert!(feed_ids.contains(&other_listing_id.as_str()));
+        assert!(!feed_ids.contains(&ncu_listing_id.as_str()));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/users/{other_owner_id}"))
+                    .header("Authorization", bearer(&token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let profile = response_json(response).await;
+        assert_eq!(profile["listing_count"], 1);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/users/{ncu_owner_id}"))
+                    .header("Authorization", bearer(&token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn moderation_cases_are_private_and_allow_one_safe_appeal() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let subject_id = Uuid::new_v4().to_string();
+        let other_user_id = Uuid::new_v4().to_string();
+        insert_user(
+            &pool,
+            &subject_id,
+            &format!("case_subject_{}", Uuid::new_v4()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &other_user_id,
+            &format!("case_other_{}", Uuid::new_v4()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+        let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("ncu campus");
+        let case_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO moderation_cases (
+                id, campus_id, subject_user_id, resource_type, resource_id,
+                source_type, source_ref_id, status, reason_category,
+                public_reason, internal_details, resolution, opened_by,
+                decided_by, decided_at
+             ) VALUES (
+                $1, $2, $3, 'listing_image', $4, 'manual', $5,
+                'actioned', 'image_policy', '图片未通过内容安全审核',
+                '{\"matched_keyword\":\"internal-secret\"}'::jsonb,
+                'content_restricted', $6, $6, NOW()
+             )",
+        )
+        .bind(case_id)
+        .bind(campus_id)
+        .bind(&subject_id)
+        .bind(format!("resource-{case_id}"))
+        .bind(format!("manual-{case_id}"))
+        .bind(&other_user_id)
+        .execute(&pool)
+        .await
+        .expect("insert moderation case");
+
+        let (subject_token, _, _) = generate_access_token_for_campus(
+            &subject_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("subject token");
+        let (other_token, _, _) = generate_access_token_for_campus(
+            &other_user_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("other token");
+        let app = create_router(build_state(pool.clone()), &[]);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/moderation/cases/{case_id}"))
+                    .header("Authorization", bearer(&subject_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["id"], case_id.to_string());
+        assert_eq!(body["can_appeal"], true);
+        assert!(body.get("internal_details").is_none());
+        assert!(body.get("opened_by").is_none());
+        assert!(body.get("decided_by").is_none());
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/moderation/cases/{case_id}"))
+                    .header("Authorization", bearer(&other_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let appeal_body = json!({
+            "reason": "该图片是普通商品实拍，请重新进行人工审核。"
+        });
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/moderation/cases/{case_id}/appeals"))
+                    .header("Authorization", bearer(&subject_token))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(appeal_body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let appeal = response_json(response).await;
+        assert_eq!(appeal["status"], "pending");
+        assert!(appeal.get("reviewed_by").is_none());
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/moderation/cases/{case_id}/appeals"))
+                    .header("Authorization", bearer(&subject_token))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(appeal_body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/moderation/cases")
+                    .header("Authorization", bearer(&subject_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let list = response_json(response).await;
+        assert_eq!(list["items"][0]["status"], "appealed");
+        assert_eq!(list["items"][0]["pending_appeal"], true);
+        assert_eq!(list["items"][0]["can_appeal"], false);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn listing_creation_requires_verified_campus_membership() {
+    with_test_pool(|pool| async move {
+        let user_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO users (id, username, email, password_hash)
+             VALUES ($1, $2, $3, 'hash')",
+        )
+        .bind(&user_id)
+        .bind(format!("pending_listing_{}", Uuid::new_v4()))
+        .bind("202600000010@email.ncu.edu.cn")
+        .execute(&pool)
+        .await
+        .expect("pending user");
+        let membership_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO campus_memberships (id, campus_id, user_id, status)
+             SELECT $1, id, $2, 'pending' FROM campuses WHERE slug = 'ncu'",
+        )
+        .bind(membership_id)
+        .bind(&user_id)
+        .execute(&pool)
+        .await
+        .expect("pending membership");
+
+        let (token, _, _) = generate_access_token(
+            &user_id,
+            "user",
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("token");
+        let app = create_router(build_state(pool.clone()), &[]);
+        let body = json!({
+            "title": "Campus gated listing",
+            "category": "other",
+            "brand": "Test",
+            "condition_score": 8,
+            "suggested_price_cny": 100.0,
+            "defects": []
+        });
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/listings")
+            .header("Content-Type", "application/json")
+            .header("Authorization", bearer(&token))
+            .header("Idempotency-Key", Uuid::new_v4().to_string())
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let error = response_json(response).await;
+        assert_eq!(error["code"], "campus_verification_required");
+
+        sqlx::query(
+            "UPDATE campus_memberships
+             SET status = 'verified', verification_method = 'test', verified_at = NOW()
+             WHERE id = $1",
+        )
+        .bind(membership_id)
+        .execute(&pool)
+        .await
+        .expect("verify membership");
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/listings")
+            .header("Content-Type", "application/json")
+            .header("Authorization", bearer(&token))
+            .header("Idempotency-Key", Uuid::new_v4().to_string())
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    })
+    .await;
+}
+
+/// Object-storage credentials are a write capability and must be gated like
+/// every other write path. A `pending` account cannot publish or contact
+/// anyone; it must not be able to obtain bucket credentials either, or it can
+/// use platform storage to host arbitrary content.
+#[tokio::test]
+async fn upload_token_requires_verified_campus_membership() {
+    with_test_pool(|pool| async move {
+        let user_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO users (id, username, email, password_hash)
+             VALUES ($1, $2, $3, 'hash')",
+        )
+        .bind(&user_id)
+        .bind(format!("pending_upload_{}", Uuid::new_v4()))
+        .bind("202600000011@email.ncu.edu.cn")
+        .execute(&pool)
+        .await
+        .expect("pending user");
+        let membership_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO campus_memberships (id, campus_id, user_id, status)
+             SELECT $1, id, $2, 'pending' FROM campuses WHERE slug = 'ncu'",
+        )
+        .bind(membership_id)
+        .bind(&user_id)
+        .execute(&pool)
+        .await
+        .expect("pending membership");
+
+        let app = create_router(build_state(pool.clone()), &[]);
+
+        let anonymous = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/upload/token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            anonymous.status(),
+            StatusCode::UNAUTHORIZED,
+            "guests must not receive storage credentials"
+        );
+
+        let (token, _, _) = generate_access_token(
+            &user_id,
+            "user",
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("token");
+        let pending = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/upload/token")
+                    .header("Authorization", bearer(&token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            pending.status(),
+            StatusCode::FORBIDDEN,
+            "an unverified membership must not receive storage credentials"
+        );
+        let error = response_json(pending).await;
+        assert_eq!(error["code"], "campus_verification_required");
+
+        sqlx::query(
+            "UPDATE campus_memberships
+             SET status = 'verified', verification_method = 'test', verified_at = NOW()
+             WHERE id = $1",
+        )
+        .bind(membership_id)
+        .execute(&pool)
+        .await
+        .expect("verify membership");
+
+        let verified = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/upload/token")
+                    .header("Authorization", bearer(&token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // OSS is intentionally unconfigured in tests, so the request fails
+        // later on missing config rather than on authorization. What matters is
+        // that a verified member is no longer rejected by the campus gate.
+        assert_ne!(verified.status(), StatusCode::UNAUTHORIZED);
+        assert_ne!(
+            verified.status(),
+            StatusCode::FORBIDDEN,
+            "a verified member must pass the campus gate"
+        );
+    })
+    .await;
+}
+
+/// Secret Chat is deprecated: new sessions are refused unless a deployment
+/// explicitly opts in, while message history on existing sessions stays
+/// readable so nothing a user already wrote becomes inaccessible.
+#[tokio::test]
+async fn secret_chat_creation_is_disabled_by_default_but_history_stays_readable() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let alice_id = Uuid::new_v4().to_string();
+        let bob_id = Uuid::new_v4().to_string();
+        insert_user(
+            &pool,
+            &alice_id,
+            &format!("secret_alice_{}", Uuid::new_v4()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &bob_id,
+            &format!("secret_bob_{}", Uuid::new_v4()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+
+        // A pre-existing session, as left behind by a deployment that had the
+        // feature enabled.
+        let session_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO chat_secret_sessions (
+                campus_id, initiator_id, recipient_id,
+                initiator_key_fingerprint, recipient_key_fingerprint
+             )
+             SELECT id, $1, $2, 'fp-alice', 'fp-bob' FROM campuses WHERE slug = 'ncu'
+             RETURNING id",
+        )
+        .bind(&alice_id)
+        .bind(&bob_id)
+        .fetch_one(&pool)
+        .await
+        .expect("seed legacy secret session");
+
+        let (token, _, _) = generate_access_token(
+            &alice_id,
+            "user",
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("token");
+        let create_body = json!({
+            "recipient_id": bob_id,
+            "initiator_key_fingerprint": "fp-alice-2",
+            "recipient_key_fingerprint": "fp-bob-2",
+        });
+
+        // Default configuration: creation is refused even for a verified member.
+        let app = create_router(build_state(pool.clone()), &[]);
+        let denied = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/chat/secret-sessions")
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", bearer(&token))
+                    .body(Body::from(create_body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            denied.status(),
+            StatusCode::FORBIDDEN,
+            "deprecated secret chat must not accept new sessions by default"
+        );
+
+        // History on the legacy session must remain readable.
+        let history = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/chat/secret-sessions/{}/messages", session_id))
+                    .header("Authorization", bearer(&token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            history.status(),
+            StatusCode::OK,
+            "existing sessions must stay readable after deprecation"
+        );
+
+        // Explicit opt-in (migration window) restores creation.
+        let mut opted_in_state = build_state(pool.clone());
+        opted_in_state.infra.secret_chat_new_sessions_enabled = true;
+        let opted_in = create_router(opted_in_state, &[]);
+        let created = opted_in
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/chat/secret-sessions")
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", bearer(&token))
+                    .body(Body::from(create_body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(created.status(), StatusCode::OK);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn public_marketplace_hides_other_campus_listings() {
+    with_test_pool(|pool| async move {
+        let campus_id = Uuid::new_v4();
+        let owner_id = Uuid::new_v4().to_string();
+        let listing_id = Uuid::new_v4().to_string();
+        let title = format!("Cross Campus {}", Uuid::new_v4());
+        sqlx::query(
+            "INSERT INTO campuses (id, slug, name_zh, name_en, email_domains)
+             VALUES ($1, $2, '测试大学', 'Test University', ARRAY['test.edu.cn'])",
+        )
+        .bind(campus_id)
+        .bind(format!("test-{}", &campus_id.to_string()[..8]))
+        .execute(&pool)
+        .await
+        .expect("insert campus");
+        sqlx::query(
+            "INSERT INTO users (id, username, password_hash)
+             VALUES ($1, $2, 'hash')",
+        )
+        .bind(&owner_id)
+        .bind(format!("other_campus_{}", Uuid::new_v4()))
+        .execute(&pool)
+        .await
+        .expect("insert owner");
+        sqlx::query(
+            "INSERT INTO inventory (
+                id, campus_id, title, category, brand, condition_score,
+                suggested_price_cny, defects, owner_id, status
+             ) VALUES ($1, $2, $3, 'misc', 'Brand', 8, 10000, '[]', $4, 'active')",
+        )
+        .bind(&listing_id)
+        .bind(campus_id)
+        .bind(&title)
+        .bind(&owner_id)
+        .execute(&pool)
+        .await
+        .expect("insert listing");
+
+        let app = create_router(build_state(pool.clone()), &[]);
+        let list_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/listings?direction=all&search={}",
+                        title.replace(' ', "%20")
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(list_response.status(), StatusCode::OK);
+        let list_body = response_json(list_response).await;
+        assert_eq!(list_body["total"], 0);
+
+        let detail_response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/listings/{listing_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(detail_response.status(), StatusCode::NOT_FOUND);
+    })
+    .await;
 }
 
 async fn insert_listing(pool: &sqlx::PgPool, listing_id: &str, owner_id: &str, status: &str) {
@@ -1047,6 +1749,903 @@ async fn conversation_messages_offset_is_applied_in_sql() {
         assert_eq!(body["messages"].as_array().map(Vec::len), Some(2));
         assert_eq!(body["messages"][0]["content"], "msg-3");
         assert_eq!(body["messages"][1]["content"], "msg-2");
+    })
+    .await;
+}
+
+/// Phase 2 wanted lifecycle: fulfill removes the wanted from matching surfaces
+/// while preserving history, and relist reopens it.
+#[tokio::test]
+async fn wanted_fulfill_and_reopen_lifecycle() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let requester_id = Uuid::new_v4().to_string();
+        let responder_id = Uuid::new_v4().to_string();
+        insert_user(
+            &pool,
+            &requester_id,
+            &format!("wl_requester_{}", Uuid::new_v4().simple()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &responder_id,
+            &format!("wl_responder_{}", Uuid::new_v4().simple()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+
+        let wanted_id = Uuid::new_v4().to_string();
+        let offer_id = Uuid::new_v4().to_string();
+        for (id, owner, direction, title) in [
+            (&wanted_id, &requester_id, "wanted", "Lifecycle Wanted"),
+            (&offer_id, &responder_id, "offer", "Lifecycle Offer"),
+        ] {
+            sqlx::query(
+                "INSERT INTO inventory (id, campus_id, title, category, brand, condition_score,
+                                        suggested_price_cny, defects, owner_id, status, direction)
+                 SELECT $1, id, $2, 'misc', 'Brand', 8, 10000, '[]', $3, 'active', $4
+                 FROM campuses WHERE slug = 'ncu'",
+            )
+            .bind(id)
+            .bind(title)
+            .bind(owner)
+            .bind(direction)
+            .execute(&pool)
+            .await
+            .expect("insert listing");
+        }
+        // A pending response exists before fulfillment.
+        sqlx::query(
+            "INSERT INTO wanted_responses (campus_id, wanted_listing_id, offer_listing_id,
+                                           responder_id, requester_id)
+             SELECT id, $1, $2, $3, $4 FROM campuses WHERE slug = 'ncu'",
+        )
+        .bind(&wanted_id)
+        .bind(&offer_id)
+        .bind(&responder_id)
+        .bind(&requester_id)
+        .execute(&pool)
+        .await
+        .expect("insert response");
+
+        let (owner_token, _, _) = generate_access_token(
+            &requester_id,
+            "user",
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("token");
+        let (outsider_token, _, _) = generate_access_token(
+            &responder_id,
+            "user",
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("token");
+        let app = create_router(build_state(pool.clone()), &[]);
+        let post_empty = |uri: String, token: &str| {
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("Authorization", bearer(token))
+                .body(Body::empty())
+                .unwrap()
+        };
+
+        // Only the owner can fulfill.
+        let response = app
+            .clone()
+            .oneshot(post_empty(
+                format!("/api/listings/{wanted_id}/fulfill"),
+                &outsider_token,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        // An offer cannot be fulfilled.
+        let response = app
+            .clone()
+            .oneshot(post_empty(
+                format!("/api/listings/{offer_id}/fulfill"),
+                &outsider_token,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        // Owner fulfills the wanted.
+        let response = app
+            .clone()
+            .oneshot(post_empty(
+                format!("/api/listings/{wanted_id}/fulfill"),
+                &owner_token,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let status: String = sqlx::query_scalar("SELECT status FROM inventory WHERE id = $1")
+            .bind(&wanted_id)
+            .fetch_one(&pool)
+            .await
+            .expect("status");
+        assert_eq!(status, "fulfilled");
+
+        // Fulfilled again → conflict (no lost-update surprises).
+        let response = app
+            .clone()
+            .oneshot(post_empty(
+                format!("/api/listings/{wanted_id}/fulfill"),
+                &owner_token,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+
+        // Fulfilled wanted leaves the public feed…
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/recommendations/feed?direction=wanted")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let feed = response_json(response).await;
+        assert!(
+            !feed["items"]
+                .as_array()
+                .expect("items")
+                .iter()
+                .any(|item| item["id"] == wanted_id),
+            "fulfilled wanted must not appear in the feed"
+        );
+
+        // …and cannot receive new responses.
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/listings/{wanted_id}/responses"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", bearer(&outsider_token))
+                    .body(Body::from(
+                        json!({ "offer_listing_id": offer_id }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        // The pending response history is preserved, and its responder was
+        // notified of fulfillment.
+        let response_status: String =
+            sqlx::query_scalar("SELECT status FROM wanted_responses WHERE wanted_listing_id = $1")
+                .bind(&wanted_id)
+                .fetch_one(&pool)
+                .await
+                .expect("response status");
+        assert_eq!(response_status, "pending");
+        let notified: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM notifications
+             WHERE user_id = $1 AND event_type = 'wanted_fulfilled'",
+        )
+        .bind(&responder_id)
+        .fetch_one(&pool)
+        .await
+        .expect("notified");
+        assert_eq!(notified, 1);
+
+        // Relist reopens the wanted.
+        let response = app
+            .clone()
+            .oneshot(post_empty(
+                format!("/api/listings/{wanted_id}/relist"),
+                &owner_token,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let status: String = sqlx::query_scalar("SELECT status FROM inventory WHERE id = $1")
+            .bind(&wanted_id)
+            .fetch_one(&pool)
+            .await
+            .expect("status after reopen");
+        assert_eq!(status, "active");
+    })
+    .await;
+}
+
+/// Phase 2 response actions: accept/dismiss (requester) and withdraw
+/// (responder), single-winner transitions, counterpart notifications.
+#[tokio::test]
+async fn wanted_response_actions_transition_once_and_notify() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let requester_id = Uuid::new_v4().to_string();
+        let responder_id = Uuid::new_v4().to_string();
+        insert_user(
+            &pool,
+            &requester_id,
+            &format!("ra_requester_{}", Uuid::new_v4().simple()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &responder_id,
+            &format!("ra_responder_{}", Uuid::new_v4().simple()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+
+        let wanted_id = Uuid::new_v4().to_string();
+        let offer_id = Uuid::new_v4().to_string();
+        for (id, owner, direction) in [
+            (&wanted_id, &requester_id, "wanted"),
+            (&offer_id, &responder_id, "offer"),
+        ] {
+            sqlx::query(
+                "INSERT INTO inventory (id, campus_id, title, category, brand, condition_score,
+                                        suggested_price_cny, defects, owner_id, status, direction)
+                 SELECT $1, id, 'Action Item', 'misc', 'Brand', 8, 10000, '[]', $2, 'active', $3
+                 FROM campuses WHERE slug = 'ncu'",
+            )
+            .bind(id)
+            .bind(owner)
+            .bind(direction)
+            .execute(&pool)
+            .await
+            .expect("insert listing");
+        }
+        let seed_response = |pool: sqlx::PgPool,
+                             wanted: String,
+                             offer: String,
+                             responder: String,
+                             requester: String| async move {
+            sqlx::query_scalar::<_, Uuid>(
+                "INSERT INTO wanted_responses (campus_id, wanted_listing_id, offer_listing_id,
+                                               responder_id, requester_id)
+                 SELECT id, $1, $2, $3, $4 FROM campuses WHERE slug = 'ncu' RETURNING id",
+            )
+            .bind(wanted)
+            .bind(offer)
+            .bind(responder)
+            .bind(requester)
+            .fetch_one(&pool)
+            .await
+            .expect("insert response")
+        };
+
+        let (requester_token, _, _) = generate_access_token(
+            &requester_id,
+            "user",
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("token");
+        let (responder_token, _, _) = generate_access_token(
+            &responder_id,
+            "user",
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("token");
+        let app = create_router(build_state(pool.clone()), &[]);
+        let post_empty = |uri: String, token: &str| {
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("Authorization", bearer(token))
+                .body(Body::empty())
+                .unwrap()
+        };
+
+        // Accept: responder cannot act as requester (404, no existence leak).
+        let response_id = seed_response(
+            pool.clone(),
+            wanted_id.clone(),
+            offer_id.clone(),
+            responder_id.clone(),
+            requester_id.clone(),
+        )
+        .await;
+        let response = app
+            .clone()
+            .oneshot(post_empty(
+                format!("/api/wanted-responses/{response_id}/accept"),
+                &responder_token,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        // Requester accepts; responder is notified.
+        let response = app
+            .clone()
+            .oneshot(post_empty(
+                format!("/api/wanted-responses/{response_id}/accept"),
+                &requester_token,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM wanted_responses WHERE id = $1")
+                .bind(response_id)
+                .fetch_one(&pool)
+                .await
+                .expect("status");
+        assert_eq!(status, "accepted");
+        let notified: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM notifications
+             WHERE user_id = $1 AND event_type = 'wanted_response_accepted'",
+        )
+        .bind(&responder_id)
+        .fetch_one(&pool)
+        .await
+        .expect("notify count");
+        assert_eq!(notified, 1);
+
+        // A second action on the same response conflicts.
+        let response = app
+            .clone()
+            .oneshot(post_empty(
+                format!("/api/wanted-responses/{response_id}/dismiss"),
+                &requester_token,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+
+        // Withdraw: responder retracts their own pending recommendation.
+        sqlx::query("DELETE FROM wanted_responses WHERE id = $1")
+            .bind(response_id)
+            .execute(&pool)
+            .await
+            .expect("cleanup");
+        let response_id = seed_response(
+            pool.clone(),
+            wanted_id.clone(),
+            offer_id.clone(),
+            responder_id.clone(),
+            requester_id.clone(),
+        )
+        .await;
+        let response = app
+            .clone()
+            .oneshot(post_empty(
+                format!("/api/wanted-responses/{response_id}/withdraw"),
+                &responder_token,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM wanted_responses WHERE id = $1")
+                .bind(response_id)
+                .fetch_one(&pool)
+                .await
+                .expect("status");
+        assert_eq!(status, "withdrawn");
+
+        // Role-scoped listing works for both sides.
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/wanted-responses?role=responder")
+                    .header("Authorization", bearer(&responder_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let listed = response_json(response).await;
+        assert!(!listed["items"].as_array().expect("items").is_empty());
+    })
+    .await;
+}
+
+/// Phase 2 explainability: every feed item carries a user-readable
+/// rank_reason and a machine-readable source; responses carry the ranking
+/// version.
+#[tokio::test]
+async fn recommendation_feed_explains_ranking() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let viewer_id = Uuid::new_v4().to_string();
+        let seller_id = Uuid::new_v4().to_string();
+        insert_user(
+            &pool,
+            &viewer_id,
+            &format!("rr_viewer_{}", Uuid::new_v4().simple()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &seller_id,
+            &format!("rr_seller_{}", Uuid::new_v4().simple()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+
+        // The viewer watches an electronics item, so a fresh electronics
+        // listing by someone else should rank with a category-affinity reason.
+        let watched_id = Uuid::new_v4().to_string();
+        let candidate_id = Uuid::new_v4().to_string();
+        let unrelated_id = Uuid::new_v4().to_string();
+        for (id, category) in [
+            (&watched_id, "electronics"),
+            (&candidate_id, "electronics"),
+            (&unrelated_id, "misc"),
+        ] {
+            sqlx::query(
+                "INSERT INTO inventory (id, campus_id, title, category, brand, condition_score,
+                                        suggested_price_cny, defects, owner_id, status, direction)
+                 SELECT $1, id, 'Reason Item', $2, 'Brand', 8, 10000, '[]', $3, 'active', 'offer'
+                 FROM campuses WHERE slug = 'ncu'",
+            )
+            .bind(id)
+            .bind(category)
+            .bind(&seller_id)
+            .execute(&pool)
+            .await
+            .expect("insert listing");
+        }
+        sqlx::query("INSERT INTO watchlist (user_id, listing_id) VALUES ($1, $2)")
+            .bind(&viewer_id)
+            .bind(&watched_id)
+            .execute(&pool)
+            .await
+            .expect("watch");
+
+        let app = create_router(build_state(pool.clone()), &[]);
+
+        // Anonymous: recency source with a readable reason.
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/recommendations/feed?direction=offer")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let feed = response_json(response).await;
+        assert_eq!(feed["ranking_version"], "2026.07-affinity-v1");
+        for item in feed["items"].as_array().expect("items") {
+            assert_eq!(item["source"], "recency");
+            assert!(!item["rank_reason"].as_str().expect("reason").is_empty());
+        }
+
+        // Authenticated: the affinity match explains itself with the category.
+        let (token, _, _) = generate_access_token(
+            &viewer_id,
+            "user",
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("token");
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/recommendations/feed?direction=offer")
+                    .header("Authorization", bearer(&token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let feed = response_json(response).await;
+        let candidate = feed["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .find(|item| item["id"] == candidate_id)
+            .expect("affinity candidate present");
+        assert_eq!(candidate["source"], "category_affinity");
+        assert!(
+            candidate["rank_reason"]
+                .as_str()
+                .expect("reason")
+                .contains("electronics"),
+            "reason must name the category: {}",
+            candidate["rank_reason"]
+        );
+    })
+    .await;
+}
+
+/// Phase 1 media quarantine at the API layer: unreviewed or rejected media
+/// URLs never leave the server through public read paths, while owners keep
+/// seeing their own uploads.
+#[tokio::test]
+async fn unapproved_media_is_not_served_publicly() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let owner_id = Uuid::new_v4().to_string();
+        let viewer_id = Uuid::new_v4().to_string();
+        insert_user(
+            &pool,
+            &owner_id,
+            &format!("mq_owner_{}", Uuid::new_v4().simple()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &viewer_id,
+            &format!("mq_viewer_{}", Uuid::new_v4().simple()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+
+        let listing_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO inventory (id, campus_id, title, category, brand, condition_score,
+                                    suggested_price_cny, defects, owner_id, status, direction,
+                                    image_url, images_moderation_status)
+             SELECT $1, id, 'Quarantined Item', 'misc', 'Brand', 8, 10000, '[]', $2, 'active',
+                    'offer', 'https://cdn.example.com/pending.jpg', 'pending'
+             FROM campuses WHERE slug = 'ncu'",
+        )
+        .bind(&listing_id)
+        .bind(&owner_id)
+        .execute(&pool)
+        .await
+        .expect("insert pending-media listing");
+
+        // Owner avatar pending moderation.
+        sqlx::query(
+            "UPDATE users SET avatar_url = 'https://cdn.example.com/avatar.jpg',
+                              avatar_moderation_status = 'pending'
+             WHERE id = $1",
+        )
+        .bind(&owner_id)
+        .execute(&pool)
+        .await
+        .expect("set pending avatar");
+
+        let app = create_router(build_state(pool.clone()), &[]);
+        let (owner_token, _, _) = generate_access_token(
+            &owner_id,
+            "user",
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("token");
+
+        // Public listing list and detail hide the URL.
+        for uri in [
+            "/api/listings?limit=50".to_string(),
+            format!("/api/listings/{listing_id}"),
+            "/api/recommendations/feed?direction=offer".to_string(),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(uri.clone())
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{uri}");
+            let body = response_json(response).await;
+            let text = body.to_string();
+            assert!(
+                !text.contains("pending.jpg"),
+                "unreviewed media leaked via {uri}: {text}"
+            );
+        }
+
+        // Public user profile hides the pending avatar; public user listings
+        // hide the pending listing image.
+        for uri in [
+            format!("/api/users/{owner_id}"),
+            format!("/api/users/{owner_id}/listings"),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(uri.clone())
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{uri}");
+            let text = response_json(response).await.to_string();
+            assert!(
+                !text.contains("avatar.jpg") && !text.contains("pending.jpg"),
+                "unreviewed media leaked via {uri}: {text}"
+            );
+        }
+
+        // The owner still sees their own upload in “my listings”.
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/user/listings")
+                    .header("Authorization", bearer(&owner_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let text = response_json(response).await.to_string();
+        assert!(
+            text.contains("pending.jpg"),
+            "owner must keep seeing their own pending media"
+        );
+
+        // Approval makes the media public; rejection hides it again.
+        sqlx::query("UPDATE inventory SET images_moderation_status = 'approved' WHERE id = $1")
+            .bind(&listing_id)
+            .execute(&pool)
+            .await
+            .expect("approve");
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/listings/{listing_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let text = response_json(response).await.to_string();
+        assert!(text.contains("pending.jpg"), "approved media must serve");
+
+        sqlx::query("UPDATE inventory SET images_moderation_status = 'rejected' WHERE id = $1")
+            .bind(&listing_id)
+            .execute(&pool)
+            .await
+            .expect("reject");
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/listings/{listing_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let text = response_json(response).await.to_string();
+        assert!(
+            !text.contains("pending.jpg"),
+            "rejected media must never serve"
+        );
+    })
+    .await;
+}
+
+/// Submission quarantines atomically: with moderation enabled the resource
+/// flips to 'pending' in the same transaction as the job insert; with it
+/// disabled the resource is explicitly marked review-exempt.
+#[tokio::test]
+async fn image_submission_quarantines_resource_with_job() {
+    with_test_pool(|pool| async move {
+        let owner_id = Uuid::new_v4().to_string();
+        insert_user(
+            &pool,
+            &owner_id,
+            &format!("mq_submit_{}", Uuid::new_v4().simple()),
+            &hash_password("Test1234"),
+            "user",
+            "active",
+        )
+        .await;
+        let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("campus");
+        let listing_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO inventory (id, campus_id, title, category, brand, condition_score,
+                                    suggested_price_cny, defects, owner_id, status,
+                                    image_url)
+             VALUES ($1, $2, 'Submit Item', 'misc', 'Brand', 8, 10000, '[]', $3, 'active',
+                     'https://cdn.example.com/new.jpg')",
+        )
+        .bind(&listing_id)
+        .bind(campus_id)
+        .bind(&owner_id)
+        .execute(&pool)
+        .await
+        .expect("insert listing");
+
+        // Enabled moderation: job + pending status committed together.
+        let enabled = services::moderation::ModerationService::new_for_test(true);
+        enabled
+            .submit_image_job(
+                &pool,
+                campus_id,
+                &listing_id,
+                "https://cdn.example.com/new.jpg",
+                "listing_image",
+            )
+            .await
+            .expect("submit enabled");
+        let (status, jobs): (String, i64) = (
+            sqlx::query_scalar("SELECT images_moderation_status FROM inventory WHERE id = $1")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("status"),
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM moderation_jobs WHERE resource_id = $1 AND status = 'pending'",
+            )
+            .bind(&listing_id)
+            .fetch_one(&pool)
+            .await
+            .expect("jobs"),
+        );
+        assert_eq!((status.as_str(), jobs), ("pending", 1));
+
+        // Disabled moderation: resource marked review-exempt, no job.
+        let disabled = services::moderation::ModerationService::new_for_test(false);
+        disabled
+            .submit_image_job(
+                &pool,
+                campus_id,
+                &listing_id,
+                "https://cdn.example.com/new.jpg",
+                "listing_image",
+            )
+            .await
+            .expect("submit disabled");
+        let status: String =
+            sqlx::query_scalar("SELECT images_moderation_status FROM inventory WHERE id = $1")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("status");
+        assert_eq!(status, "approved");
+    })
+    .await;
+}
+
+/// The embedding upsert uses `ON CONFLICT (id)`, which requires a unique
+/// constraint on `documents.id`. There was only a plain index, so every real
+/// (non-noop) embed write failed and rolled back its transaction — invisible to
+/// tests that inject a NoopEmbedUpdater. This asserts the schema supports the
+/// upsert and that re-embedding the same listing replaces rather than duplicates.
+#[tokio::test]
+async fn documents_upsert_by_id_is_supported_by_the_schema() {
+    with_test_pool(|pool| async move {
+        let has_unique: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conrelid = 'documents'::regclass
+                  AND contype IN ('u', 'p')
+                  AND conkey = ARRAY[(
+                      SELECT attnum FROM pg_attribute
+                      WHERE attrelid = 'documents'::regclass AND attname = 'id'
+                  )]::smallint[]
+             )",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("constraint lookup");
+        assert!(
+            has_unique,
+            "documents.id needs a UNIQUE/PRIMARY KEY constraint or ON CONFLICT (id) fails"
+        );
+
+        // Exercise the exact statement the EmbedUpdater issues, twice.
+        let listing_id = format!("embed-upsert-{}", Uuid::new_v4().simple());
+        let embedding: Vec<f64> = vec![0.0; 768];
+        for text in ["first version", "second version"] {
+            sqlx::query(
+                "INSERT INTO documents (id, document, embedded_text, embedding) \
+                 VALUES ($1, $2::jsonb, $3, $4) \
+                 ON CONFLICT (id) DO UPDATE SET \
+                   document = EXCLUDED.document, \
+                   embedded_text = EXCLUDED.embedded_text, \
+                   embedding = EXCLUDED.embedding",
+            )
+            .bind(&listing_id)
+            .bind(serde_json::json!({ "id": listing_id, "content": text }))
+            .bind(text)
+            .bind(&embedding)
+            .execute(&pool)
+            .await
+            .unwrap_or_else(|e| panic!("embed upsert must succeed ({text}): {e}"));
+        }
+
+        let (rows, stored): (i64, String) =
+            sqlx::query_as("SELECT count(*), max(embedded_text) FROM documents WHERE id = $1")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("stored document");
+        assert_eq!(rows, 1, "re-embedding must replace, not duplicate");
+        assert_eq!(
+            stored, "second version",
+            "upsert must apply the new content"
+        );
+    })
+    .await;
+}
+
+/// `migrations/0005_seed_data.sql` is labelled "run manually" but lives in
+/// `migrations/`, so sqlx applies it everywhere — shipping an `admin` account
+/// whose password (`Test1234`) is published in the repo. Production must refuse
+/// to start while those rows exist; non-production keeps them for convenience.
+#[tokio::test]
+async fn production_refuses_to_start_with_demo_seed_accounts() {
+    with_test_pool(|pool| async move {
+        // Re-create one seed row exactly as 0005 does (tests truncate users).
+        sqlx::query(
+            "INSERT INTO users (id, username, password_hash, role, status)
+             VALUES ('a0000000-0000-0000-0000-000000000001', 'admin', 'hash', 'admin', 'active')
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .execute(&pool)
+        .await
+        .expect("seed admin");
+
+        // Non-production: allowed.
+        good4ncu::db::assert_no_demo_seed_in_production(&pool, false)
+            .await
+            .expect("non-production must tolerate seed accounts");
+
+        // Production: refused, and the message names the account and the fix.
+        let error = good4ncu::db::assert_no_demo_seed_in_production(&pool, true)
+            .await
+            .expect_err("production must refuse a database with seed accounts");
+        let message = error.to_string();
+        assert!(
+            message.contains("admin"),
+            "must name the account: {message}"
+        );
+        assert!(
+            message.contains("remove_demo_seed.sql"),
+            "must give the cleanup command: {message}"
+        );
+
+        // After removal, production is allowed.
+        sqlx::query("DELETE FROM users WHERE id = 'a0000000-0000-0000-0000-000000000001'")
+            .execute(&pool)
+            .await
+            .expect("remove seed");
+        good4ncu::db::assert_no_demo_seed_in_production(&pool, true)
+            .await
+            .expect("a cleaned database must start in production");
     })
     .await;
 }

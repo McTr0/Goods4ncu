@@ -1,0 +1,28 @@
+# cargo-audit configuration. Consumed by `cargo audit` locally and in CI.
+#
+# Every entry in `ignore` needs a reachability argument, not just a note that
+# the advisory is inconvenient. An unexplained ignore is how a real
+# vulnerability gets silently inherited by the next person who runs the audit.
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071 — Marvin Attack: RSA key recovery via timing sidechannel
+    # in the `rsa` crate. No fixed version exists upstream.
+    #
+    # Not reachable here. `rsa` is compiled in only because `jsonwebtoken`
+    # declares it for RSA-signed tokens, and this service never performs an RSA
+    # operation: tokens are signed and verified with HMAC secrets
+    # (`EncodingKey::from_secret` / `DecodingKey::from_secret` in
+    # src/api/auth.rs) and `Validation::default()` accepts HS256 only, so an
+    # `alg: RS256` token is rejected rather than routed into RSA code.
+    #
+    # Revisit if asymmetric JWT signing is ever introduced — that would make
+    # this advisory live and this ignore wrong.
+    "RUSTSEC-2023-0071",
+]
+
+# Unmaintained/unsound advisories stay visible as warnings rather than being
+# ignored: they should be read on every run and acted on when a fix lands.
+# Current known warning: RUSTSEC-2025-0057 (fxhash unmaintained), reached only
+# through `inquire`, which is used by the local admin CLI and not by the server
+# request path.

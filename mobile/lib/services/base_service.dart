@@ -15,6 +15,25 @@ class AuthException implements Exception {
   String toString() => message;
 }
 
+/// Thrown when a sensitive operation needs a fresh password verification.
+class RecentAuthenticationException implements Exception {
+  final String message;
+  final bool verificationFailed;
+
+  /// The account has a confirmed MFA factor: the step-up additionally needs a
+  /// one-time code from the authenticator app.
+  final bool mfaRequired;
+
+  RecentAuthenticationException(
+    this.message, {
+    this.verificationFailed = false,
+    this.mfaRequired = false,
+  });
+
+  @override
+  String toString() => message;
+}
+
 /// Thrown when API returns 409 Conflict
 class ConflictException implements Exception {
   final String message;
@@ -77,10 +96,24 @@ class BaseService {
 
     // --- Non-200: extract backend error message ---
     String serverMsg = '';
+    String serverCode = '';
     try {
       final body = jsonDecode(response.body);
       serverMsg = (body['error'] ?? body['message'])?.toString() ?? '';
+      serverCode = body['code']?.toString() ?? '';
     } catch (_) {}
+
+    if (serverCode == 'recent_authentication_required' ||
+        serverCode == 'recent_authentication_failed' ||
+        serverCode == 'mfa_required') {
+      // Intercepted before the generic 401 branch: an MFA prompt must not be
+      // treated as an expired login and wipe the session.
+      throw RecentAuthenticationException(
+        serverMsg.isNotEmpty ? serverMsg : '请重新验证密码',
+        verificationFailed: serverCode == 'recent_authentication_failed',
+        mfaRequired: serverCode == 'mfa_required',
+      );
+    }
 
     if (response.statusCode == 401) {
       _clearAuthAndRedirect();

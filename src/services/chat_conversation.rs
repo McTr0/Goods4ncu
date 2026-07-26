@@ -5,6 +5,7 @@ use sqlx::{FromRow, PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
+use crate::services::moderation_case::create_case_for_report;
 use crate::utils::cents_to_yuan;
 
 pub const INVITE_TTL_MINUTES: i64 = 10;
@@ -151,6 +152,7 @@ pub struct ChatThreadDetail {
 #[derive(Debug, Clone)]
 pub struct CreateConversationInput {
     pub client_request_id: Uuid,
+    pub campus_id: Uuid,
     pub initiator_id: String,
     pub recipient_id: String,
     pub listing_id: Option<String>,
@@ -340,12 +342,53 @@ impl ChatConversationService {
 
         let mut tx = self.begin().await?;
 
+        let same_campus: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1
+                FROM campus_memberships initiator
+                JOIN campus_memberships recipient
+                  ON recipient.campus_id = initiator.campus_id
+                 AND recipient.user_id = $2
+                 AND recipient.status = 'verified'
+                JOIN campuses c ON c.id = initiator.campus_id AND c.status = 'active'
+                WHERE initiator.user_id = $1
+                  AND initiator.campus_id = $3
+                  AND initiator.status = 'verified'
+             )",
+        )
+        .bind(&input.initiator_id)
+        .bind(&input.recipient_id)
+        .bind(input.campus_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        if !same_campus {
+            return Err(ApiError::CampusScopeMismatch);
+        }
+        if let Some(listing_id) = input.listing_id.as_deref() {
+            let listing_in_campus: bool = sqlx::query_scalar(
+                "SELECT EXISTS(
+                    SELECT 1 FROM inventory
+                    WHERE id = $1 AND campus_id = $2 AND status = 'active'
+                 )",
+            )
+            .bind(listing_id)
+            .bind(input.campus_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_error)?;
+            if !listing_in_campus {
+                return Err(ApiError::CampusScopeMismatch);
+            }
+        }
+
         if let Some(existing_id) = sqlx::query_scalar::<_, Uuid>(
             "SELECT id FROM chat_conversations
-             WHERE initiator_id = $1 AND client_request_id = $2",
+             WHERE initiator_id = $1 AND client_request_id = $2 AND campus_id = $3",
         )
         .bind(&input.initiator_id)
         .bind(input.client_request_id)
+        .bind(input.campus_id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(db_error)?
@@ -380,6 +423,7 @@ impl ChatConversationService {
                 &input.initiator_id,
                 &input.recipient_id,
                 input.listing_id.as_deref(),
+                input.campus_id,
             )
             .await?
             {
@@ -465,12 +509,13 @@ impl ChatConversationService {
 
         sqlx::query(
             "INSERT INTO chat_conversations (
-                id, client_request_id, mode, state, initiator_id, recipient_id,
+                id, client_request_id, campus_id, mode, state, initiator_id, recipient_id,
                 listing_id, subject, invite_expires_at, last_activity_at, created_at, updated_at
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $10)",
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $11)",
         )
         .bind(conversation_id)
         .bind(input.client_request_id)
+        .bind(input.campus_id)
         .bind(input.mode.as_str())
         .bind(state.as_str())
         .bind(&input.initiator_id)
@@ -1374,6 +1419,7 @@ impl ChatConversationService {
         {
             return Err(ApiError::BadRequest("举报说明最多 1000 字".to_string()));
         }
+        let mut tx = self.begin().await?;
         let row = sqlx::query(
             "INSERT INTO chat_message_reports (message_id, reporter_id, reason, details)
              VALUES ($1, $2, $3, $4)
@@ -1385,10 +1431,13 @@ impl ChatConversationService {
         .bind(user_id)
         .bind(reason)
         .bind(details)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(db_error)?;
-        Ok(row.get("id"))
+        let report_id = row.get("id");
+        create_case_for_report(&mut tx, report_id).await?;
+        tx.commit().await.map_err(db_error)?;
+        Ok(report_id)
     }
 
     pub async fn block_user(&self, blocker_id: &str, blocked_id: &str) -> Result<(), ApiError> {
@@ -1565,6 +1614,7 @@ async fn find_live_realtime(
     user_a: &str,
     user_b: &str,
     listing_id: Option<&str>,
+    campus_id: Uuid,
 ) -> Result<Option<ConversationRow>, ApiError> {
     sqlx::query_as::<_, ConversationRow>(
         "SELECT id, mode, state, initiator_id, recipient_id, listing_id, subject,
@@ -1575,11 +1625,13 @@ async fn find_live_realtime(
            AND ((initiator_id = $1 AND recipient_id = $2)
              OR (initiator_id = $2 AND recipient_id = $1))
            AND listing_id IS NOT DISTINCT FROM $3
+           AND campus_id = $4
          FOR UPDATE",
     )
     .bind(user_a)
     .bind(user_b)
     .bind(listing_id)
+    .bind(campus_id)
     .fetch_optional(&mut **tx)
     .await
     .map_err(db_error)
@@ -2174,6 +2226,7 @@ mod tests {
     fn realtime_input() -> CreateConversationInput {
         CreateConversationInput {
             client_request_id: Uuid::new_v4(),
+            campus_id: Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap(),
             initiator_id: "buyer".to_string(),
             recipient_id: "seller".to_string(),
             listing_id: Some("listing".to_string()),

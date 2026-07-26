@@ -1,10 +1,11 @@
 use crate::repositories::{CreateListingInput, PostgresListingRepository, UpdateListingInput};
+use crate::services::campus::CampusService;
 use crate::services::order::{OrderError, OrderService};
 use crate::utils::cents_to_yuan;
 use async_trait::async_trait;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{PgConnection, PgPool};
 use std::sync::Arc;
@@ -41,6 +42,7 @@ pub struct ToolContext {
     /// is safe to use without affecting the Tool::call() Send bound.
     pub embed_updater: Arc<dyn EmbedUpdater>,
     pub current_user_id: Option<String>,
+    pub current_campus_id: Option<uuid::Uuid>,
     /// Notification service for sending in-app alerts (e.g., negotiation requests).
     pub notification: crate::services::notification::NotificationService,
 }
@@ -50,11 +52,72 @@ pub struct ToolContext {
 #[error("Tool error: {0}")]
 pub struct ToolError(pub String);
 
+async fn require_verified_campus(
+    ctx: &ToolContext,
+    user_id: &str,
+) -> Result<uuid::Uuid, ToolError> {
+    CampusService::new(ctx.db_pool.clone())
+        .require_tenant_context_for_session(user_id, ctx.current_campus_id)
+        .await
+        .map(|tenant| tenant.campus_id)
+        .map_err(|_| ToolError("请先完成校园身份验证后再进行此操作".to_string()))
+}
+
+/// Create a pending [`agent_action_plans`] row instead of executing a write.
+///
+/// This is the ActionPlan boundary: the model can *propose* L2/L3 actions but
+/// never perform them. Execution happens only after the user confirms through
+/// the authenticated plans API, which re-runs full validation. The text
+/// returned to the model deliberately excludes the confirmation token — a
+/// prompt-injected model must not be able to confirm its own plan.
+async fn propose_action_plan<A: serde::Serialize>(
+    ctx: &ToolContext,
+    action: &str,
+    risk_level: &str,
+    args: &A,
+    summary: String,
+) -> Result<String, ToolError> {
+    let user_id = ctx
+        .current_user_id
+        .clone()
+        .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
+    // Fail fast so unverified users get immediate feedback instead of a plan
+    // that can never execute.
+    let campus_id = require_verified_campus(ctx, &user_id).await?;
+    let args_json =
+        serde_json::to_value(args).map_err(|e| ToolError(format!("序列化参数失败: {}", e)))?;
+
+    let plan = crate::services::agent_plan::AgentPlanService::new(ctx.db_pool.clone())
+        .create_plan(
+            campus_id, &user_id, action, risk_level, &args_json, &summary,
+        )
+        .await
+        .map_err(|e| ToolError(format!("创建待确认操作失败: {}", e)))?;
+
+    Ok(format!(
+        "已创建待确认操作：{}。该操作需要你在应用中确认后才会执行（10 分钟内有效，计划编号 {}）。请在“待确认操作”里查看并确认或取消。",
+        summary, plan
+    ))
+}
+
+async fn resolve_read_campus(ctx: &ToolContext) -> Result<uuid::Uuid, ToolError> {
+    let service = CampusService::new(ctx.db_pool.clone());
+    match ctx.current_user_id.as_deref() {
+        Some(user_id) => {
+            service
+                .resolve_session_campus(user_id, ctx.current_campus_id)
+                .await
+        }
+        None => service.default_public_campus_id().await,
+    }
+    .map_err(|_| ToolError("暂时无法确定当前校园".to_string()))
+}
+
 // ---------------------------------------------------------------------------
 // 1. CreateListingTool
 // ---------------------------------------------------------------------------
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct CreateListingArgs {
     pub title: String,
     pub category: String,
@@ -97,21 +160,56 @@ impl Tool for CreateListingTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let owner = self
-            .ctx
+        let summary = format!(
+            "发布商品《{}》，价格 ¥{:.2}",
+            args.title,
+            cents_to_yuan(args.suggested_price_cny)
+        );
+        propose_action_plan(&self.ctx, Self::NAME, "L2", &args, summary).await
+    }
+}
+
+/// Validated execution body for `create_listing` — invoked only from a
+/// user-confirmed [`AgentActionPlan`](crate::services::agent_plan), never
+/// directly from the model.
+pub async fn execute_create_listing(
+    ctx: &ToolContext,
+    args: CreateListingArgs,
+) -> Result<String, ToolError> {
+    {
+        let owner = ctx
             .current_user_id
             .clone()
             .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
+        let campus_id = require_verified_campus(ctx, &owner).await?;
+
+        // Model-supplied arguments are untrusted input. Mirror the HTTP
+        // handler's validation so a polluted tool call cannot slip records
+        // past the API-level rules (parameter-pollution defense).
+        let title = args.title.trim();
+        if title.is_empty() || title.len() > 200 {
+            return Err(ToolError("商品标题不能为空且不超过 200 字符".to_string()));
+        }
+        if args.brand.trim().len() > 100 {
+            return Err(ToolError("品牌不能超过 100 字符".to_string()));
+        }
+        if args.condition_score < 1 || args.condition_score > 10 {
+            return Err(ToolError("成色必须在 1 到 10 之间".to_string()));
+        }
+        if args.suggested_price_cny <= 0 || args.suggested_price_cny > 1_000_000_000 {
+            return Err(ToolError("价格必须为正且在合理范围内".to_string()));
+        }
 
         let content_to_embed = format!(
             "Title: {}\nCategory: {}\nBrand: {}\nCondition: {}/10\nDescription: {}",
             args.title, args.category, args.brand, args.condition_score, args.original_description
         );
 
-        let db_pool = self.ctx.db_pool.clone();
-        let listing_repo = PostgresListingRepository::new(self.ctx.db_pool.clone());
-        let embed_updater = self.ctx.embed_updater.clone();
+        let db_pool = ctx.db_pool.clone();
+        let listing_repo = PostgresListingRepository::new(ctx.db_pool.clone());
+        let embed_updater = ctx.embed_updater.clone();
         let input = CreateListingInput {
+            campus_id,
             title: args.title.clone(),
             category: args.category.clone(),
             brand: Some(args.brand.clone()),
@@ -216,8 +314,9 @@ impl Tool for SearchInventoryTool {
             }
         }
 
-        let mut sql = String::from("SELECT id, title, brand, category, condition_score, suggested_price_cny FROM inventory WHERE status = 'active'");
-        let mut param_idx: usize = 1;
+        let campus_id = resolve_read_campus(&self.ctx).await?;
+        let mut sql = String::from("SELECT id, title, brand, category, condition_score, suggested_price_cny FROM inventory WHERE status = 'active' AND campus_id = $1");
+        let mut param_idx: usize = 2;
 
         if args.keyword.is_some() {
             sql.push_str(&format!(
@@ -240,7 +339,7 @@ impl Tool for SearchInventoryTool {
         }
         sql.push_str(" LIMIT 10");
 
-        let mut query = sqlx::query_as::<_, InventoryRow>(&sql);
+        let mut query = sqlx::query_as::<_, InventoryRow>(&sql).bind(campus_id);
 
         if let Some(ref kw) = args.keyword {
             query = query.bind(format!("%{}%", kw)).bind(format!("%{}%", kw));
@@ -335,10 +434,12 @@ impl Tool for GetListingDetailsTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let campus_id = resolve_read_campus(&self.ctx).await?;
         let row = sqlx::query_as::<_, FullListingRow>(
-            "SELECT id, title, category, brand, condition_score, suggested_price_cny, defects, description, owner_id, status FROM inventory WHERE id = $1",
+            "SELECT id, title, category, brand, condition_score, suggested_price_cny, defects, description, owner_id, status FROM inventory WHERE id = $1 AND campus_id = $2",
         )
         .bind(&args.listing_id)
+        .bind(campus_id)
         .fetch_optional(&self.ctx.db_pool)
         .await
         .map_err(|e| ToolError(format!("Query error: {}", e)))?;
@@ -391,7 +492,7 @@ struct FullListingRow {
 // 4. UpdateListingTool
 // ---------------------------------------------------------------------------
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct UpdateListingArgs {
     pub listing_id: String,
     pub new_price: Option<i64>,
@@ -429,8 +530,21 @@ impl Tool for UpdateListingTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let owner_id = self
-            .ctx
+        if args.new_price.is_none() && args.new_title.is_none() && args.new_description.is_none() {
+            return Ok("No fields to update were provided.".to_string());
+        }
+        let summary = format!("修改商品 {} 的信息", args.listing_id);
+        propose_action_plan(&self.ctx, Self::NAME, "L2", &args, summary).await
+    }
+}
+
+/// Validated execution body for `update_listing`; plan-confirmed only.
+pub async fn execute_update_listing(
+    ctx: &ToolContext,
+    args: UpdateListingArgs,
+) -> Result<String, ToolError> {
+    {
+        let owner_id = ctx
             .current_user_id
             .clone()
             .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
@@ -452,7 +566,7 @@ impl Tool for UpdateListingTool {
             )
             .bind(&args.listing_id)
             .bind(&owner_id)
-            .fetch_optional(&self.ctx.db_pool)
+            .fetch_optional(&ctx.db_pool)
             .await
             .map_err(|e| ToolError(format!("Fetch listing error: {}", e)))?;
 
@@ -481,9 +595,9 @@ impl Tool for UpdateListingTool {
                 final_title, category, brand, condition_score, final_description
             );
 
-            let db_pool = self.ctx.db_pool.clone();
-            let listing_repo = PostgresListingRepository::new(self.ctx.db_pool.clone());
-            let embed_updater = self.ctx.embed_updater.clone();
+            let db_pool = ctx.db_pool.clone();
+            let listing_repo = PostgresListingRepository::new(ctx.db_pool.clone());
+            let embed_updater = ctx.embed_updater.clone();
             let listing_id = args.listing_id.clone();
             let owner_id_clone = owner_id.clone();
             let new_price = args.new_price;
@@ -556,7 +670,7 @@ impl Tool for UpdateListingTool {
             }
         } else {
             // Price-only update — no re-embedding needed; keep it simple
-            let listing_repo = PostgresListingRepository::new(self.ctx.db_pool.clone());
+            let listing_repo = PostgresListingRepository::new(ctx.db_pool.clone());
             let result = listing_repo
                 .update_owned_active(
                     &args.listing_id,
@@ -591,7 +705,7 @@ impl Tool for UpdateListingTool {
 // 5. DeleteListingTool
 // ---------------------------------------------------------------------------
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct DeleteListingArgs {
     pub listing_id: String,
 }
@@ -622,14 +736,23 @@ impl Tool for DeleteListingTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let owner_id = self
-            .ctx
+        let summary = format!("下架商品 {}", args.listing_id);
+        propose_action_plan(&self.ctx, Self::NAME, "L2", &args, summary).await
+    }
+}
+
+/// Validated execution body for `delete_listing`; plan-confirmed only.
+pub async fn execute_delete_listing(
+    ctx: &ToolContext,
+    args: DeleteListingArgs,
+) -> Result<String, ToolError> {
+    {
+        let owner_id = ctx
             .current_user_id
             .clone()
             .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
-        let listing_repo = PostgresListingRepository::new(self.ctx.db_pool.clone());
-        let mut tx = self
-            .ctx
+        let listing_repo = PostgresListingRepository::new(ctx.db_pool.clone());
+        let mut tx = ctx
             .db_pool
             .begin()
             .await
@@ -670,7 +793,7 @@ impl Tool for DeleteListingTool {
 // 6. PurchaseItemIntentTool
 // ---------------------------------------------------------------------------
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct PurchaseItemIntentArgs {
     pub listing_id: String,
     pub offered_price: i64,
@@ -704,19 +827,34 @@ impl Tool for PurchaseItemIntentTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let buyer_id = self
-            .ctx
+        let summary = format!(
+            "对商品 {} 发起线下成交意向，出价 ¥{:.2}",
+            args.listing_id,
+            cents_to_yuan(args.offered_price)
+        );
+        propose_action_plan(&self.ctx, Self::NAME, "L3", &args, summary).await
+    }
+}
+
+/// Validated execution body for `purchase_item`; plan-confirmed only.
+pub async fn execute_purchase_item(
+    ctx: &ToolContext,
+    args: PurchaseItemIntentArgs,
+) -> Result<String, ToolError> {
+    {
+        let buyer_id = ctx
             .current_user_id
             .clone()
             .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
+        let campus_id = require_verified_campus(ctx, &buyer_id).await?;
 
         // The service creates only an intent; seller confirmation performs any
         // optional delisting later.
         let listing = sqlx::query_as::<_, ListingCheckRow>(
-            "SELECT id, owner_id, suggested_price_cny, status FROM inventory WHERE id = $1",
+            "SELECT id, campus_id, owner_id, suggested_price_cny, status FROM inventory WHERE id = $1",
         )
         .bind(&args.listing_id)
-        .fetch_optional(&self.ctx.db_pool)
+        .fetch_optional(&ctx.db_pool)
         .await
         .map_err(|e| ToolError(format!("Query error: {}", e)))?;
 
@@ -724,6 +862,14 @@ impl Tool for PurchaseItemIntentTool {
             Some(l) => l,
             None => return Ok(format!("No listing found with ID: {}", args.listing_id)),
         };
+
+        if listing.campus_id != campus_id {
+            return Err(ToolError("只能对当前校园的商品发起成交意向".to_string()));
+        }
+        CampusService::new(ctx.db_pool.clone())
+            .require_verified_in_campus(&listing.owner_id, campus_id)
+            .await
+            .map_err(|_| ToolError("只能与当前校园的已认证用户成交".to_string()))?;
 
         if listing.status != "active" {
             return Ok(format!(
@@ -752,7 +898,7 @@ impl Tool for PurchaseItemIntentTool {
             )));
         }
 
-        let order_id = OrderService::new(self.ctx.db_pool.clone())
+        let order_id = OrderService::new(ctx.db_pool.clone())
             .create_order(
                 &args.listing_id,
                 &buyer_id,
@@ -789,7 +935,7 @@ impl Tool for PurchaseItemIntentTool {
 /// Args for the negotiate_item tool.
 /// The seller will receive a notification and must approve/reject/counter via
 /// PATCH /api/negotiations/{id}/respond. The deal only proceeds if the seller approves.
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct NegotiateItemArgs {
     /// The listing the buyer wants to negotiate on
     pub listing_id: String,
@@ -827,18 +973,33 @@ impl Tool for NegotiateItemTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let buyer_id = self
-            .ctx
+        let summary = format!(
+            "对商品 {} 发起还价 ¥{:.2}",
+            args.listing_id,
+            cents_to_yuan(args.offered_price)
+        );
+        propose_action_plan(&self.ctx, Self::NAME, "L3", &args, summary).await
+    }
+}
+
+/// Validated execution body for `negotiate_item`; plan-confirmed only.
+pub async fn execute_negotiate_item(
+    ctx: &ToolContext,
+    args: NegotiateItemArgs,
+) -> Result<String, ToolError> {
+    {
+        let buyer_id = ctx
             .current_user_id
             .clone()
             .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
+        let campus_id = require_verified_campus(ctx, &buyer_id).await?;
 
         // Fetch the listing to get the seller and check it's active
         let listing_row = sqlx::query_as::<_, ListingCheckRow>(
-            "SELECT id, owner_id, suggested_price_cny, status FROM inventory WHERE id = $1",
+            "SELECT id, campus_id, owner_id, suggested_price_cny, status FROM inventory WHERE id = $1",
         )
         .bind(&args.listing_id)
-        .fetch_optional(&self.ctx.db_pool)
+        .fetch_optional(&ctx.db_pool)
         .await
         .map_err(|e| ToolError(format!("DB error: {}", e)))?;
 
@@ -846,6 +1007,14 @@ impl Tool for NegotiateItemTool {
             Some(l) => l,
             None => return Ok(format!("No listing found with ID: {}", args.listing_id)),
         };
+
+        if listing.campus_id != campus_id {
+            return Err(ToolError("只能对当前校园的商品发起还价".to_string()));
+        }
+        CampusService::new(ctx.db_pool.clone())
+            .require_verified_in_campus(&listing.owner_id, campus_id)
+            .await
+            .map_err(|_| ToolError("只能与当前校园的已认证用户议价".to_string()))?;
 
         if listing.status != "active" {
             return Ok(format!("商品 {} 已下架或售出，无法还价", args.listing_id));
@@ -874,7 +1043,7 @@ impl Tool for NegotiateItemTool {
         )
         .bind(&args.listing_id)
         .bind(&buyer_id)
-        .fetch_optional(&self.ctx.db_pool)
+        .fetch_optional(&ctx.db_pool)
         .await
         .map_err(|e| ToolError(format!("DB error: {}", e)))?;
         if existing.is_some() {
@@ -885,35 +1054,37 @@ impl Tool for NegotiateItemTool {
         let hitl_id = uuid::Uuid::new_v4().to_string();
         sqlx::query(
             r#"INSERT INTO hitl_requests
-               (id, listing_id, buyer_id, seller_id, proposed_price, reason, status, expires_at)
-               VALUES ($1, $2, $3, $4, $5, $6, 'pending', CURRENT_TIMESTAMP + INTERVAL '48 hours')"#,
+               (id, campus_id, listing_id, buyer_id, seller_id, proposed_price, reason, status, expires_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', CURRENT_TIMESTAMP + INTERVAL '48 hours')"#,
         )
         .bind(&hitl_id)
+        .bind(campus_id)
         .bind(&args.listing_id)
         .bind(&buyer_id)
         .bind(&listing.owner_id)
         .bind(args.offered_price)
         .bind(&args.reason)
-        .execute(&self.ctx.db_pool)
+        .execute(&ctx.db_pool)
         .await
         .map_err(|e| ToolError(format!("DB error: {}", e)))?;
 
         // Notify the seller immediately
-        let _ = self
-            .ctx
+        let _ = ctx
             .notification
-            .create(
-                &listing.owner_id,
-                "negotiation_request",
-                "有新的还价请求",
-                &format!(
+            .create(crate::services::notification::NewNotification {
+                campus_id,
+                user_id: &listing.owner_id,
+                event_type: "negotiation_request",
+                title: "有新的还价请求",
+                body: &format!(
                     "买家出价 ¥{:.2}，理由：{}",
                     cents_to_yuan(args.offered_price),
                     args.reason
                 ),
-                Some(&hitl_id),
-                Some(&args.listing_id),
-            )
+                related_order_id: Some(&hitl_id),
+                related_listing_id: Some(&args.listing_id),
+                related_conversation_id: None,
+            })
             .await;
 
         Ok(format!(
@@ -929,6 +1100,7 @@ impl Tool for NegotiateItemTool {
 struct ListingCheckRow {
     #[sqlx(rename = "id")]
     _id: String,
+    campus_id: uuid::Uuid,
     owner_id: String,
     suggested_price_cny: i64,
     status: String,
@@ -1043,6 +1215,7 @@ mod tests {
             db_pool: pool.clone(),
             embed_updater: Arc::new(NoopEmbedUpdater),
             current_user_id,
+            current_campus_id: None,
             notification: crate::services::notification::NotificationService::new(pool),
         }
     }
@@ -1056,6 +1229,17 @@ mod tests {
         .execute(pool)
         .await
         .expect("insert user");
+        sqlx::query(
+            "INSERT INTO campus_memberships (
+                campus_id, user_id, status, verification_method, verified_at
+             )
+             SELECT id, $1, 'verified', 'test_fixture', NOW()
+             FROM campuses WHERE slug = 'ncu'",
+        )
+        .bind(id)
+        .execute(pool)
+        .await
+        .expect("insert campus membership");
     }
 
     async fn insert_tool_listing(
@@ -1223,17 +1407,16 @@ mod tests {
             insert_tool_user(&pool, &buyer_id, "purchase_buyer").await;
             insert_tool_listing(&pool, &listing_id, &seller_id, 10_000, "active").await;
 
-            let tool = PurchaseItemIntentTool {
-                ctx: tool_context(pool.clone(), Some(buyer_id.clone())),
-            };
-
-            let result = tool
-                .call(PurchaseItemIntentArgs {
+            let ctx = tool_context(pool.clone(), Some(buyer_id.clone()));
+            let result = execute_purchase_item(
+                &ctx,
+                PurchaseItemIntentArgs {
                     listing_id: listing_id.clone(),
                     offered_price: 10_000,
-                })
-                .await
-                .expect("purchase listing");
+                },
+            )
+            .await
+            .expect("purchase listing");
 
             assert!(result.contains("Deal intent sent!"));
             assert!(result.contains("Record ID:"));
@@ -1274,17 +1457,16 @@ mod tests {
             insert_tool_user(&pool, &buyer_id, "sold_buyer").await;
             insert_tool_listing(&pool, &listing_id, &seller_id, 10_000, "sold").await;
 
-            let tool = PurchaseItemIntentTool {
-                ctx: tool_context(pool.clone(), Some(buyer_id)),
-            };
-
-            let result = tool
-                .call(PurchaseItemIntentArgs {
+            let ctx = tool_context(pool.clone(), Some(buyer_id));
+            let result = execute_purchase_item(
+                &ctx,
+                PurchaseItemIntentArgs {
                     listing_id: listing_id.clone(),
                     offered_price: 10_000,
-                })
-                .await
-                .expect("sold listing produces user-facing response");
+                },
+            )
+            .await
+            .expect("sold listing produces user-facing response");
 
             assert!(result.contains("no longer available"));
 
@@ -1333,28 +1515,21 @@ mod tests {
         with_test_pool(|pool| async move {
             let owner_id = Uuid::new_v4().to_string();
 
-            sqlx::query(
-                "INSERT INTO users (id, username, password_hash, role) VALUES ($1, $2, 'hash', 'user')",
-            )
-            .bind(&owner_id)
-            .bind("tool_listing_owner")
-            .execute(&pool)
-            .await
-            .expect("insert owner");
+            insert_tool_user(&pool, &owner_id, "tool_listing_owner").await;
 
-            let tool = CreateListingTool {
-                ctx: ToolContext {
-                    db_pool: pool.clone(),
-                    embed_updater: Arc::new(NoopEmbedUpdater),
-                    current_user_id: Some(owner_id.clone()),
-                    notification: crate::services::notification::NotificationService::new(
-                        pool.clone(),
-                    ),
-                },
+            let ctx = ToolContext {
+                db_pool: pool.clone(),
+                embed_updater: Arc::new(NoopEmbedUpdater),
+                current_user_id: Some(owner_id.clone()),
+                current_campus_id: None,
+                notification: crate::services::notification::NotificationService::new(
+                    pool.clone(),
+                ),
             };
 
-            let result = tool
-                .call(CreateListingArgs {
+            let result = execute_create_listing(
+                &ctx,
+                CreateListingArgs {
                     title: "Shadow Tool Listing".to_string(),
                     category: "electronics".to_string(),
                     brand: "Acme".to_string(),
@@ -1362,9 +1537,10 @@ mod tests {
                     suggested_price_cny: 12_345,
                     defects: vec!["scuff".to_string()],
                     original_description: "Tool-created listing".to_string(),
-                })
-                .await
-                .expect("create listing");
+                },
+            )
+            .await
+            .expect("create listing");
             assert!(result.contains("Shadow Tool Listing"));
 
             let row = sqlx::query(

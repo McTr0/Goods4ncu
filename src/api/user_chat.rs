@@ -23,5 +23,5 @@ pub use telegram::{
     send_secret_message, send_space_message,
 };
 
-pub(crate) use connection::{authenticated_user, moderate_text};
+pub(crate) use connection::{authenticated_session, authenticated_user, moderate_text};
 pub(crate) use models::*;

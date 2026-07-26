@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:uuid/uuid.dart';
 import 'base_service.dart';
 
 /// Order service — records offline deal intents and seller confirmations.
@@ -78,8 +79,13 @@ class OrderService extends BaseService {
 
   /// Seller confirms the offline deal.
   /// POST /api/orders/{id}/confirm
-  Future<void> confirmOrder(String orderId, {bool autoDelist = true}) async {
+  Future<void> confirmOrder(
+    String orderId, {
+    bool autoDelist = true,
+    String? idempotencyKey,
+  }) async {
     final headers = await authHeaders();
+    headers['Idempotency-Key'] = idempotencyKey ?? const Uuid().v4();
     final response = await post(
       Uri.parse('$baseUrl/api/orders/$orderId/confirm'),
       headers,

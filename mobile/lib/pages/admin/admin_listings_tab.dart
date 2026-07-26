@@ -7,8 +7,13 @@ import '../../utils/category_utils.dart';
 
 class AdminListingsTab extends StatefulWidget {
   final ApiService apiService;
+  final bool canManage;
 
-  const AdminListingsTab({super.key, required this.apiService});
+  const AdminListingsTab({
+    super.key,
+    required this.apiService,
+    this.canManage = true,
+  });
 
   @override
   State<AdminListingsTab> createState() => _AdminListingsTabState();
@@ -186,95 +191,101 @@ class _AdminListingsTabState extends State<AdminListingsTab> {
             Text('${l.status}: ${item['status']}'),
             Text('${l.ownerIdLabel} ${item['owner_id']}'),
             const SizedBox(height: AppTheme.sp16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: () async {
-                  final confirmed = await showDialog<bool>(
-                    context: ctx,
-                    builder: (dialogCtx) => AlertDialog(
-                      title: Text(l.adminTakedownConfirm),
-                      content: Text(
-                        l.adminTakedownConfirmMessage(item['title'] ?? ''),
+            if (widget.canManage)
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () async {
+                    final confirmed = await showDialog<bool>(
+                      context: ctx,
+                      builder: (dialogCtx) => AlertDialog(
+                        title: Text(l.adminTakedownConfirm),
+                        content: Text(
+                          l.adminTakedownConfirmMessage(item['title'] ?? ''),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(dialogCtx, false),
+                            child: Text(l.cancel),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.pop(dialogCtx, true),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppTheme.error,
+                            ),
+                            child: Text(l.adminTakedown),
+                          ),
+                        ],
                       ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(dialogCtx, false),
-                          child: Text(l.cancel),
-                        ),
-                        FilledButton(
-                          onPressed: () => Navigator.pop(dialogCtx, true),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppTheme.error,
-                          ),
-                          child: Text(l.adminTakedown),
-                        ),
-                      ],
-                    ),
-                  );
-                  if (confirmed != true) return;
-                  if (ctx.mounted) {
-                    Navigator.pop(ctx);
-                    try {
-                      await widget.apiService.takedownListing(
-                        item['id'] as String,
-                      );
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(l.adminTakedownSuccess),
-                            backgroundColor: AppTheme.success,
-                          ),
+                    );
+                    if (confirmed != true) return;
+                    if (ctx.mounted) {
+                      Navigator.pop(ctx);
+                      try {
+                        await widget.apiService.takedownListing(
+                          item['id'] as String,
                         );
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(l.adminTakedownSuccess),
+                              backgroundColor: AppTheme.success,
+                            ),
+                          );
+                        }
+                        _load();
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(l.operationFailed(e.toString())),
+                              backgroundColor: AppTheme.error,
+                            ),
+                          );
+                        }
                       }
+                    }
+                  },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.error,
+                  ),
+                  icon: const Icon(Icons.archive),
+                  label: Text(l.adminTakedown),
+                ),
+              ),
+            if (widget.canManage) const SizedBox(height: AppTheme.sp8),
+            if (widget.canManage)
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    try {
+                      await widget.apiService.updateListing(
+                        item['id'] as String,
+                        {
+                          'status': item['status'] == 'active'
+                              ? 'sold'
+                              : 'active',
+                        },
+                      );
+                      if (ctx.mounted) Navigator.pop(ctx);
                       _load();
                     } catch (e) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
+                      if (ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
                           SnackBar(
                             content: Text(l.operationFailed(e.toString())),
-                            backgroundColor: AppTheme.error,
                           ),
                         );
                       }
                     }
-                  }
-                },
-                style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
-                icon: const Icon(Icons.archive),
-                label: Text(l.adminTakedown),
+                  },
+                  icon: const Icon(Icons.toggle_on),
+                  label: Text(
+                    item['status'] == 'active' ? l.sold : l.adminUnban,
+                  ),
+                ),
               ),
-            ),
-            const SizedBox(height: AppTheme.sp8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () async {
-                  try {
-                    await widget.apiService.updateListing(
-                      item['id'] as String,
-                      {
-                        'status': item['status'] == 'active'
-                            ? 'sold'
-                            : 'active',
-                      },
-                    );
-                    if (ctx.mounted) Navigator.pop(ctx);
-                    _load();
-                  } catch (e) {
-                    if (ctx.mounted) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        SnackBar(
-                          content: Text(l.operationFailed(e.toString())),
-                        ),
-                      );
-                    }
-                  }
-                },
-                icon: const Icon(Icons.toggle_on),
-                label: Text(item['status'] == 'active' ? l.sold : l.adminUnban),
-              ),
-            ),
           ],
         ),
       ),

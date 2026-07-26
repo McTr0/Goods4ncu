@@ -6,15 +6,15 @@
 
 use axum::{
     extract::{Path, State},
-    http::HeaderMap,
     Json,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, Row, Transaction};
 
-use crate::api::auth::extract_user_id_from_token_with_fallback;
 use crate::api::error::ApiError;
+use crate::api::session::Session;
 use crate::api::AppState;
+use crate::services::notification::NewNotification;
 use crate::services::order::OrderError;
 
 fn map_order_creation_error(error: OrderError) -> ApiError {
@@ -101,15 +101,10 @@ pub struct HitlRequestItem {
 /// (for sellers: requests awaiting their approval; for buyers: their sent offers)
 pub async fn list_negotiations(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Json(_params): Json<ListNegotiationsParams>,
 ) -> Result<Json<ListNegotiationsResponse>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id.clone();
 
     // Sellers see: pending (awaiting their response) and expired (auto-cancelled).
     // Buyers see: countered (awaiting their accept/reject), approved/rejected (final),
@@ -179,16 +174,11 @@ pub struct ListNegotiationsResponse {
 /// body: { "action": "approve" | "reject" | "counter", "counter_price": 180000 }
 pub async fn respond_negotiation(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Path(id): Path<String>,
     Json(payload): Json<NegotiationResponse>,
 ) -> Result<Json<NegotiationResponseResult>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id.clone();
 
     let mut tx = state
         .infra
@@ -199,7 +189,8 @@ pub async fn respond_negotiation(
 
     // Fetch the request and verify ownership while locking the HITL row.
     let row = sqlx::query(
-        "SELECT id, seller_id, listing_id, buyer_id, status, proposed_price FROM hitl_requests WHERE id = $1 FOR UPDATE",
+        "SELECT id, campus_id, seller_id, listing_id, buyer_id, status, proposed_price
+         FROM hitl_requests WHERE id = $1 FOR UPDATE",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
@@ -218,6 +209,7 @@ pub async fn respond_negotiation(
     }
 
     let listing_id: String = row.get("listing_id");
+    let campus_id: uuid::Uuid = row.get("campus_id");
     let buyer_id: String = row.get("buyer_id");
     let proposed_price: i64 = row.get("proposed_price");
 
@@ -330,14 +322,16 @@ pub async fn respond_negotiation(
     let _ = state
         .infra
         .notification
-        .create(
-            &buyer_id,
-            "negotiation_response",
-            &notif_title,
-            &notif_body,
-            Some(&id),
-            Some(&listing_id),
-        )
+        .create(NewNotification {
+            campus_id,
+            user_id: &buyer_id,
+            event_type: "negotiation_response",
+            title: &notif_title,
+            body: &notif_body,
+            related_order_id: Some(&id),
+            related_listing_id: Some(&listing_id),
+            related_conversation_id: None,
+        })
         .await;
 
     Ok(Json(NegotiationResponseResult {
@@ -352,15 +346,10 @@ pub async fn respond_negotiation(
 /// This creates the order in the same transaction and notifies the seller.
 pub async fn accept_counter_negotiation(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Path(id): Path<String>,
 ) -> Result<Json<NegotiationResponseResult>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id.clone();
 
     let mut tx = state
         .infra
@@ -371,7 +360,8 @@ pub async fn accept_counter_negotiation(
 
     // Fetch the request and verify the buyer owns it.
     let row = sqlx::query(
-        "SELECT id, buyer_id, seller_id, listing_id, status, counter_price FROM hitl_requests WHERE id = $1 FOR UPDATE",
+        "SELECT id, campus_id, buyer_id, seller_id, listing_id, status, counter_price
+         FROM hitl_requests WHERE id = $1 FOR UPDATE",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
@@ -395,6 +385,7 @@ pub async fn accept_counter_negotiation(
         .get::<Option<i64>, _>("counter_price")
         .ok_or_else(|| ApiError::BadRequest("还价缺少 counter_price".to_string()))?;
     let listing_id: String = row.get("listing_id");
+    let campus_id: uuid::Uuid = row.get("campus_id");
     let seller_id: String = row.get("seller_id");
 
     create_confirmed_offline_order_in_tx(
@@ -448,14 +439,16 @@ pub async fn accept_counter_negotiation(
     let _ = state
         .infra
         .notification
-        .create(
-            &seller_id,
-            "negotiation_buyer_accepted",
-            "买家接受了您的还价",
-            "买家接受了您的还价，线下成交已确认",
-            Some(&id),
-            Some(&listing_id),
-        )
+        .create(NewNotification {
+            campus_id,
+            user_id: &seller_id,
+            event_type: "negotiation_buyer_accepted",
+            title: "买家接受了您的还价",
+            body: "买家接受了您的还价，线下成交已确认",
+            related_order_id: Some(&id),
+            related_listing_id: Some(&listing_id),
+            related_conversation_id: None,
+        })
         .await;
 
     Ok(Json(NegotiationResponseResult {
@@ -469,15 +462,10 @@ pub async fn accept_counter_negotiation(
 /// After seller counters, buyer can reject. The negotiation closes without a deal.
 pub async fn reject_counter_negotiation(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Path(id): Path<String>,
 ) -> Result<Json<NegotiationResponseResult>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id.clone();
 
     let mut tx = state
         .infra
@@ -487,7 +475,8 @@ pub async fn reject_counter_negotiation(
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
     let row = sqlx::query(
-        "SELECT id, buyer_id, seller_id, listing_id, status FROM hitl_requests WHERE id = $1 FOR UPDATE",
+        "SELECT id, campus_id, buyer_id, seller_id, listing_id, status
+         FROM hitl_requests WHERE id = $1 FOR UPDATE",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
@@ -508,6 +497,7 @@ pub async fn reject_counter_negotiation(
     }
 
     let listing_id: String = row.get("listing_id");
+    let campus_id: uuid::Uuid = row.get("campus_id");
     let seller_id: String = row.get("seller_id");
 
     sqlx::query(
@@ -542,14 +532,16 @@ pub async fn reject_counter_negotiation(
     let _ = state
         .infra
         .notification
-        .create(
-            &seller_id,
-            "negotiation_buyer_rejected",
-            "买家拒绝了您的还价",
-            "抱歉，买家未能接受您的还价",
-            Some(&id),
-            Some(&listing_id),
-        )
+        .create(NewNotification {
+            campus_id,
+            user_id: &seller_id,
+            event_type: "negotiation_buyer_rejected",
+            title: "买家拒绝了您的还价",
+            body: "抱歉，买家未能接受您的还价",
+            related_order_id: Some(&id),
+            related_listing_id: Some(&listing_id),
+            related_conversation_id: None,
+        })
         .await;
 
     Ok(Json(NegotiationResponseResult {

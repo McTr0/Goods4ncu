@@ -10,6 +10,7 @@
 
 use crate::api::auth;
 use crate::api::error::ApiError;
+use crate::api::session::Session;
 use crate::api::{AppState, PeerAddr};
 use crate::llm::MarketplaceAgent;
 use crate::services::chat::{ChatService, AGENT_CONVERSATION_SENTINEL};
@@ -110,15 +111,10 @@ fn resolve_chat_conversation_id(
 
 pub(crate) async fn get_assistant_history(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Query(query): Query<AssistantHistoryQuery>,
 ) -> Result<Json<AssistantHistoryResponse>, ApiError> {
-    let user_id = auth::extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id.clone();
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
     let offset = query.offset.unwrap_or(0).max(0);
     let service = ChatService::new(state.infra.db.clone());
@@ -195,6 +191,7 @@ pub(crate) async fn handle_chat(
     State(state): State<AppState>,
     PeerAddr(addr): PeerAddr,
     headers: HeaderMap,
+    Session(session): Session,
     Json(payload): Json<ChatRequest>,
 ) -> Result<Json<ChatResponse>, ApiError> {
     let ChatRequest {
@@ -235,12 +232,7 @@ pub(crate) async fn handle_chat(
         tracing::debug!(client_ip = %proxy_ip, peer = %addr, "Chat request");
     }
 
-    let current_user_id = auth::extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let current_user_id = session.user_id;
     let (conversation_id, response_conversation_id, is_assistant_conversation) =
         resolve_chat_conversation_id(conversation_id, &current_user_id);
     let chat_svc = ChatService::new(state.infra.db.clone());
@@ -326,6 +318,7 @@ pub(crate) async fn handle_chat(
             &state.infra.db,
             state.infra.event_tx.clone(),
             Some(current_user_id.clone()),
+            session.campus_id,
         )
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!(e)))?;
@@ -424,12 +417,13 @@ async fn handle_chat_stream_request(
         .await
         .map_err(|_| ApiError::Unauthorized)?;
 
-    let current_user_id = auth::extract_user_id_from_token_str_with_fallback(
+    let session = auth::extract_auth_session_from_token_str_with_fallback(
         token,
         &state.secrets.jwt_secret,
         state.secrets.jwt_secret_old.as_deref(),
     )
     .map_err(|_| ApiError::Unauthorized)?;
+    let current_user_id = session.user_id;
     auth::ensure_user_not_banned(&state, &current_user_id).await?;
     let (conversation_id, response_conversation_id, is_assistant_conversation) =
         resolve_chat_conversation_id(conversation_id, &current_user_id);
@@ -516,6 +510,7 @@ async fn handle_chat_stream_request(
             &state.infra.db,
             state.infra.event_tx.clone(),
             Some(current_user_id.clone()),
+            session.campus_id,
         )
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!(e)))?;

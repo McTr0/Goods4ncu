@@ -4,11 +4,14 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::Row;
 
-use crate::api::auth::extract_user_id_from_token_with_fallback;
 use crate::api::error::ApiError;
+use crate::api::request_context::idempotency_key_from_headers;
+use crate::api::session::Session;
 use crate::api::AppState;
+use crate::services::campus::CampusService;
 use crate::services::order::OrderError;
 use crate::utils::cents_to_yuan;
 
@@ -137,15 +140,10 @@ impl OrderDetail {
 
 pub async fn get_orders(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Query(params): Query<OrderQuery>,
 ) -> Result<Json<OrdersResponse>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id.clone();
 
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
     let offset = params.offset.unwrap_or(0).max(0);
@@ -170,15 +168,10 @@ pub async fn get_orders(
 
 pub async fn get_order(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Path(order_id): Path<String>,
 ) -> Result<Json<OrderDetail>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id.clone();
 
     let has_access = state
         .infra
@@ -217,36 +210,39 @@ pub struct CreateOrderRequest {
 
 pub async fn create_order(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Json(payload): Json<CreateOrderRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let buyer_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
+    let listing_row = sqlx::query(
+        "SELECT owner_id, suggested_price_cny, status, campus_id FROM inventory WHERE id = $1",
     )
-    .map_err(|_| ApiError::Unauthorized)?;
+    .bind(&payload.listing_id)
+    .fetch_optional(&state.infra.db)
+    .await
+    .map_err(|e| {
+        tracing::error!("fetch listing error: {}", e);
+        ApiError::Internal(anyhow::anyhow!("Failed to fetch listing"))
+    })?;
 
-    let listing_row =
-        sqlx::query("SELECT owner_id, suggested_price_cny, status FROM inventory WHERE id = $1")
-            .bind(&payload.listing_id)
-            .fetch_optional(&state.infra.db)
-            .await
-            .map_err(|e| {
-                tracing::error!("fetch listing error: {}", e);
-                ApiError::Internal(anyhow::anyhow!("Failed to fetch listing"))
-            })?;
+    let (seller_id, suggested_price, listing_status, campus_id): (String, i64, String, uuid::Uuid) =
+        match listing_row {
+            Some(row) => (
+                row.get("owner_id"),
+                row.get("suggested_price_cny"),
+                row.get("status"),
+                row.get("campus_id"),
+            ),
+            None => return Err(ApiError::NotFound),
+        };
 
-    let (seller_id, suggested_price, listing_status): (String, i64, String) = match listing_row {
-        Some(row) => (
-            row.get("owner_id"),
-            row.get("suggested_price_cny"),
-            row.get("status"),
-        ),
-        None => return Err(ApiError::NotFound),
-    };
+    let tenant = CampusService::new(state.infra.db.clone())
+        .require_shared_verified_campus_for_session(&session.user_id, &seller_id, session.campus_id)
+        .await?;
+    if tenant.campus_id != campus_id {
+        return Err(ApiError::CampusScopeMismatch);
+    }
 
-    if seller_id == buyer_id {
+    if seller_id == session.user_id {
         return Err(ApiError::BadRequest(
             "Cannot create a deal intent for your own listing".to_string(),
         ));
@@ -279,7 +275,7 @@ pub async fn create_order(
         .order_service
         .create_order(
             &payload.listing_id,
-            &buyer_id,
+            &session.user_id,
             &seller_id,
             final_price_cents,
         )
@@ -310,6 +306,14 @@ pub struct ConfirmOrderRequest {
     pub auto_delist: Option<bool>,
 }
 
+fn confirm_request_hash(order_id: &str, auto_delist: bool) -> String {
+    let canonical = serde_json::json!({
+        "order_id": order_id,
+        "auto_delist": auto_delist,
+    });
+    hex::encode(Sha256::digest(canonical.to_string().as_bytes()))
+}
+
 pub async fn pay_order(
     State(_state): State<AppState>,
     _headers: HeaderMap,
@@ -333,29 +337,39 @@ pub async fn ship_order(
 pub async fn confirm_order(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Session(session): Session,
     Path(order_id): Path<String>,
     payload: Option<Json<ConfirmOrderRequest>>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id.clone();
 
     let auto_delist = payload
         .map(|Json(payload)| payload.auto_delist.unwrap_or(true))
         .unwrap_or(true);
+    let idempotency_key = idempotency_key_from_headers(&headers)?;
+    let request_hash = idempotency_key
+        .as_deref()
+        .map(|_| confirm_request_hash(&order_id, auto_delist));
 
     let success = state
         .infra
         .order_service
-        .confirm_order(&order_id, &user_id, auto_delist, false)
+        .confirm_order_with_idempotency(
+            &order_id,
+            &user_id,
+            auto_delist,
+            false,
+            idempotency_key.as_deref(),
+            request_hash.as_deref(),
+        )
         .await
         .map_err(|e| match e {
             OrderError::NotFound => ApiError::NotFound,
             OrderError::Forbidden => ApiError::Forbidden,
             OrderError::AlreadySold => ApiError::Conflict("此商品已经不可售".to_string()),
+            OrderError::IdempotencyConflict => {
+                ApiError::Conflict("Idempotency-Key 已用于不同的确认内容".to_string())
+            }
             other => {
                 tracing::error!("confirm_order error: {}", other);
                 ApiError::Internal(anyhow::anyhow!("Failed to confirm deal intent"))
@@ -374,16 +388,11 @@ pub async fn confirm_order(
 
 pub async fn cancel_order(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Path(order_id): Path<String>,
     Json(payload): Json<OrderActionRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id.clone();
 
     let success = state
         .infra
@@ -449,5 +458,21 @@ mod tests {
         assert_eq!(query.role, Some("buyer".to_string()));
         assert_eq!(query.limit, Some(10));
         assert_eq!(query.offset, Some(20));
+    }
+
+    #[test]
+    fn test_confirm_request_hash_covers_order_and_auto_delist_choice() {
+        assert_eq!(
+            confirm_request_hash("order-1", true),
+            confirm_request_hash("order-1", true)
+        );
+        assert_ne!(
+            confirm_request_hash("order-1", true),
+            confirm_request_hash("order-1", false)
+        );
+        assert_ne!(
+            confirm_request_hash("order-1", true),
+            confirm_request_hash("order-2", true)
+        );
     }
 }

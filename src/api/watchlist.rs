@@ -1,13 +1,12 @@
 use axum::{
     extract::{Path, Query, State},
-    http::HeaderMap,
     Json,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
-use crate::api::auth::extract_user_id_from_token_with_fallback;
 use crate::api::error::ApiError;
+use crate::api::session::Session;
 use crate::api::AppState;
 use crate::utils::cents_to_yuan;
 
@@ -41,15 +40,10 @@ pub struct WatchlistResponse {
 /// GET /api/watchlist - get user's watchlist (paginated)
 pub async fn get_watchlist(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Query(params): Query<WatchlistQuery>,
 ) -> Result<Json<WatchlistResponse>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id;
 
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
     let offset = params.offset.unwrap_or(0).max(0);
@@ -96,7 +90,7 @@ pub async fn get_watchlist(
                 category: row.get("category"),
                 brand: row.try_get("brand").ok().flatten().unwrap_or_default(),
                 condition_score: row.get("condition_score"),
-                suggested_price_cny: cents_to_yuan(row.get::<i32, _>("suggested_price_cny") as i64),
+                suggested_price_cny: cents_to_yuan(row.get::<i64, _>("suggested_price_cny")),
                 status: row.get("status"),
                 owner_id: row.get("owner_id"),
                 created_at,
@@ -115,15 +109,10 @@ pub async fn get_watchlist(
 /// POST /api/watchlist/:listing_id - add listing to watchlist
 pub async fn add_to_watchlist(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Path(listing_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id;
 
     // Verify listing exists and reject self-watchlisting.
     let owner_id = sqlx::query_scalar::<_, String>("SELECT owner_id FROM inventory WHERE id = $1")
@@ -158,15 +147,10 @@ pub async fn add_to_watchlist(
 /// DELETE /api/watchlist/:listing_id - remove listing from watchlist
 pub async fn remove_from_watchlist(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Path(listing_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id;
 
     sqlx::query("DELETE FROM watchlist WHERE user_id = $1 AND listing_id = $2")
         .bind(&user_id)
@@ -184,15 +168,10 @@ pub async fn remove_from_watchlist(
 /// GET /api/watchlist/:listing_id - check if listing is in watchlist
 pub async fn check_watchlist(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Path(listing_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id;
 
     let exists = sqlx::query("SELECT 1 FROM watchlist WHERE user_id = $1 AND listing_id = $2")
         .bind(&user_id)

@@ -90,13 +90,14 @@ impl PostgresOrderRepository {
         sqlx::query(
             r#"
             INSERT INTO orders (
-                id, new_id,
+                id, new_id, campus_id,
                 listing_id, new_listing_id,
                 buyer_id, new_buyer_id,
                 seller_id, new_seller_id,
                 final_price, status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'intent_pending')
+            VALUES ($1, $2, (SELECT campus_id FROM inventory WHERE id = $3),
+                    $3, $4, $5, $6, $7, $8, $9, 'intent_pending')
             "#,
         )
         .bind(id)
@@ -170,7 +171,7 @@ impl OrderRepository for PostgresOrderRepository {
         sqlx::query(
             r#"
             INSERT INTO orders (
-                id, new_id,
+                id, new_id, campus_id,
                 listing_id, new_listing_id,
                 buyer_id, new_buyer_id,
                 seller_id, new_seller_id,
@@ -178,6 +179,7 @@ impl OrderRepository for PostgresOrderRepository {
             )
             VALUES (
                 $1, $2,
+                (SELECT campus_id FROM inventory WHERE id = $3),
                 $3, (SELECT new_id FROM inventory WHERE id = $3),
                 $4, (SELECT new_id FROM users WHERE id = $4),
                 $5, (SELECT new_id FROM users WHERE id = $5),

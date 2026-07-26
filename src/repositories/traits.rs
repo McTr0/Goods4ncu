@@ -17,12 +17,13 @@ pub use crate::api::error::ApiError;
 #[allow(dead_code)]
 pub struct Listing {
     pub id: String,
+    pub campus_id: uuid::Uuid,
     pub title: String,
     pub category: String,
     pub brand: Option<String>,
     pub direction: String,
     pub condition_score: i32,
-    pub suggested_price_cny: i32,
+    pub suggested_price_cny: i64,
     pub defects: Option<String>,
     pub description: Option<String>,
     pub image_url: Option<String>,
@@ -34,6 +35,7 @@ pub struct Listing {
 #[derive(Debug, Clone, serde::Serialize)]
 #[allow(dead_code)]
 pub struct CreateListingInput {
+    pub campus_id: uuid::Uuid,
     pub title: String,
     pub category: String,
     pub brand: Option<String>,
@@ -65,6 +67,7 @@ pub trait ListingRepository: Send + Sync {
     #[allow(clippy::too_many_arguments)]
     async fn find_listings(
         &self,
+        campus_id: uuid::Uuid,
         category: Option<&str>,
         categories: Option<&str>, // comma-separated
         search: Option<&str>,
@@ -84,6 +87,12 @@ pub trait ListingRepository: Send + Sync {
     async fn find_by_id_with_owner(
         &self,
         id: &str,
+    ) -> Result<Option<(Listing, Option<String>)>, ApiError>;
+
+    async fn find_by_id_with_owner_in_campus(
+        &self,
+        id: &str,
+        campus_id: uuid::Uuid,
     ) -> Result<Option<(Listing, Option<String>)>, ApiError>;
 
     /// Create a new listing.
@@ -209,9 +218,11 @@ pub trait UserRepository: Send + Sync {
     async fn get_user_listings(
         &self,
         user_id: &str,
+        campus_id: uuid::Uuid,
         limit: i64,
         offset: i64,
         status_filter: &str,
+        only_approved_media: bool,
     ) -> Result<(Vec<Listing>, i64), ApiError>;
 
     /// Search users by username prefix.
@@ -220,6 +231,7 @@ pub trait UserRepository: Send + Sync {
     /// Search users with their active listing counts (JOIN with inventory).
     async fn search_users_with_listing_count(
         &self,
+        campus_id: uuid::Uuid,
         query: Option<&str>,
         limit: i64,
         offset: i64,
@@ -229,6 +241,7 @@ pub trait UserRepository: Send + Sync {
     async fn lookup_users(
         &self,
         requester_id: &str,
+        campus_id: uuid::Uuid,
         query: &str,
         method: UserLookupMethod,
         limit: i64,
@@ -412,26 +425,28 @@ pub trait AuthRepository: Send + Sync {
         user_id: &str,
         token_hash: &str,
         expires_at: chrono::DateTime<chrono::Utc>,
+        campus_id: Option<uuid::Uuid>,
     ) -> Result<(), ApiError>;
 
     /// Find a refresh token record.
     async fn find_refresh_token(
         &self,
         token_hash: &str,
-    ) -> Result<
-        Option<(
-            String,
-            Option<chrono::DateTime<chrono::Utc>>,
-            chrono::DateTime<chrono::Utc>,
-        )>,
-        ApiError,
-    >;
+    ) -> Result<Option<RefreshTokenRecord>, ApiError>;
 
     /// Revoke a refresh token.
     async fn revoke_refresh_token(&self, token_hash: &str) -> Result<(), ApiError>;
 
     /// Revoke all refresh tokens for a user.
     async fn revoke_all_user_tokens(&self, user_id: &str) -> Result<(), ApiError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct RefreshTokenRecord {
+    pub user_id: String,
+    pub revoked_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub campus_id: Option<uuid::Uuid>,
 }
 
 // ---------------------------------------------------------------------------

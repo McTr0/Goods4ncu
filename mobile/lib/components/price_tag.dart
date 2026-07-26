@@ -162,6 +162,19 @@ class ListingCard extends StatelessWidget {
                             ),
                           ),
                         ],
+                        if ((listing.rankReason ?? '').isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            listing.rankReason!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.primary.withValues(alpha: 0.75),
+                            ),
+                          ),
+                        ],
                         const Spacer(),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,

@@ -44,9 +44,66 @@ pub fn new_ws_state() -> Arc<WsConnections> {
     Arc::clone(&WS_CONNECTIONS)
 }
 
-/// Global broadcast — pushes a JSON payload to ALL active connections for a user.
-/// Automatically removes dead senders (channel closed).
+/// Fanout publisher: when installed (Redis configured), broadcasts route
+/// through pub/sub so every replica delivers to its own sockets.
+#[cfg(feature = "redis")]
+static FANOUT_TX: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<(String, String)>> =
+    std::sync::OnceLock::new();
+
+/// Install the Redis-backed fanout publisher. Spawns a forwarding task that
+/// owns the connection; broadcast callers stay synchronous. On publish failure
+/// the message is delivered locally instead — degraded to single-instance
+/// semantics, never silently dropped.
+#[cfg(feature = "redis")]
+pub fn install_fanout_publisher(mut conn: redis::aio::ConnectionManager) {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(String, String)>();
+    if FANOUT_TX.set(tx).is_err() {
+        tracing::warn!("WS fanout publisher already installed");
+        return;
+    }
+    tokio::spawn(async move {
+        while let Some((user_id, payload)) = rx.recv().await {
+            if let Err(error) =
+                crate::services::ws_fanout::publish(&mut conn, &user_id, &payload).await
+            {
+                tracing::warn!(%error, user_id = %user_id, "WS fanout publish failed; delivering locally");
+                deliver_local(&user_id, &payload);
+            }
+        }
+    });
+}
+
+/// Broadcast a payload to a user. With the fanout installed this publishes to
+/// Redis and delivery happens on every replica (including this one) through
+/// the subscription; without it, it delivers to local sockets directly.
 pub fn broadcast_to_user(user_id: &str, payload: &str) {
+    #[cfg(feature = "redis")]
+    if let Some(tx) = FANOUT_TX.get() {
+        if tx.send((user_id.to_string(), payload.to_string())).is_ok() {
+            return;
+        }
+        tracing::warn!("WS fanout channel closed; delivering locally");
+    }
+    deliver_local(user_id, payload);
+}
+
+/// Register a bare connection sender for a user — the same registration the
+/// upgrade handler performs. Exposed so integration tests can observe local
+/// delivery without a real socket.
+#[doc(hidden)]
+#[allow(dead_code)] // used from the lib crate by integration tests
+pub fn register_test_connection(user_id: &str) -> mpsc::Receiver<Message> {
+    let (tx, rx) = mpsc::channel(16);
+    WS_CONNECTIONS
+        .entry(user_id.to_string())
+        .or_default()
+        .push(tx);
+    rx
+}
+
+/// Deliver a payload to this instance's active connections for a user.
+/// Automatically removes dead senders (channel closed).
+pub fn deliver_local(user_id: &str, payload: &str) {
     let metrics = crate::api::metrics::GLOBAL_METRICS.get().cloned();
 
     if let Some(connections) = WS_CONNECTIONS.get(user_id) {

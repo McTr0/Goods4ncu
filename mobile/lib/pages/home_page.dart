@@ -684,17 +684,27 @@ class _SectionTitle extends StatelessWidget {
           ),
         ),
         SegmentedButton<String>(
+          showSelectedIcon: false,
           segments: [
-            ButtonSegment(value: 'all', label: Text(l.listingDirectionAll)),
-            ButtonSegment(value: 'offer', label: Text(l.listingDirectionOffer)),
+            ButtonSegment(
+              value: 'all',
+              label: Text(l.listingDirectionAll, softWrap: false),
+            ),
+            ButtonSegment(
+              value: 'offer',
+              label: Text(l.listingDirectionOffer, softWrap: false),
+            ),
             ButtonSegment(
               value: 'wanted',
-              label: Text(l.listingDirectionWanted),
+              label: Text(l.listingDirectionWanted, softWrap: false),
             ),
           ],
           selected: {selectedDirection},
           onSelectionChanged: (values) => onDirectionChanged(values.first),
           style: ButtonStyle(
+            padding: WidgetStateProperty.all(
+              const EdgeInsets.symmetric(horizontal: AppTheme.sp12),
+            ),
             visualDensity: VisualDensity.compact,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             textStyle: WidgetStateProperty.all(

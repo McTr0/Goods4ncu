@@ -1,7 +1,7 @@
 //! PostgreSQL implementation of the AuthRepository trait.
 
 use crate::api::error::ApiError;
-use crate::repositories::{AuthRepository, User};
+use crate::repositories::{AuthRepository, RefreshTokenRecord, User};
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
@@ -50,6 +50,12 @@ impl AuthRepository for PostgresAuthRepository {
                 e
             ))
         })?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
         let result = if let Some(e) = email {
             sqlx::query(
                 "INSERT INTO users (id, new_id, username, email, password_hash, role) VALUES ($1, $2, $3, $4, $5, $6)",
@@ -60,7 +66,7 @@ impl AuthRepository for PostgresAuthRepository {
             .bind(e)
             .bind(password_hash)
             .bind("user")
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
         } else {
             sqlx::query(
@@ -71,12 +77,56 @@ impl AuthRepository for PostgresAuthRepository {
             .bind(username)
             .bind(password_hash)
             .bind("user")
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
         };
 
         match result {
-            Ok(_) => Ok(user_id),
+            Ok(_) => {
+                // Route the initial pending membership by the registration
+                // email's domain (second-campus onboarding); fall back to the
+                // NCU default for email-less or unmatched registrations.
+                let membership = sqlx::query(
+                    "WITH matched AS (
+                        SELECT c.id
+                        FROM campuses c
+                        WHERE c.status = 'active'
+                          AND $2::text IS NOT NULL
+                          AND EXISTS (
+                              SELECT 1 FROM unnest(c.email_domains) AS d
+                              WHERE lower($2) LIKE '%@' || lower(d)
+                          )
+                        ORDER BY (c.slug = 'ncu') DESC, c.created_at ASC
+                        LIMIT 1
+                     )
+                     INSERT INTO campus_memberships (
+                        campus_id, user_id, status, role, verification_method
+                     )
+                     SELECT COALESCE(
+                                (SELECT id FROM matched),
+                                (SELECT id FROM campuses
+                                 WHERE slug = 'ncu' AND status = 'active')
+                            ),
+                            $1, 'pending', 'member', 'registration'
+                     ON CONFLICT (campus_id, user_id) DO NOTHING",
+                )
+                .bind(&user_id)
+                .bind(email)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+                if membership.rows_affected() != 1 {
+                    return Err(ApiError::Internal(anyhow::anyhow!(
+                        "Default campus is missing or inactive"
+                    )));
+                }
+
+                tx.commit()
+                    .await
+                    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+                Ok(user_id)
+            }
             Err(e) => {
                 // PostgreSQL unique violation code = "23505"
                 if let sqlx::Error::Database(db_err) = &e {
@@ -96,13 +146,16 @@ impl AuthRepository for PostgresAuthRepository {
         user_id: &str,
         token_hash: &str,
         expires_at: DateTime<Utc>,
+        campus_id: Option<Uuid>,
     ) -> Result<(), ApiError> {
         sqlx::query(
-            "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
+            "INSERT INTO refresh_tokens (user_id, token_hash, expires_at, campus_id)
+             VALUES ($1, $2, $3, $4)",
         )
         .bind(user_id)
         .bind(token_hash)
         .bind(expires_at)
+        .bind(campus_id)
         .execute(&self.pool)
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
@@ -112,20 +165,21 @@ impl AuthRepository for PostgresAuthRepository {
     async fn find_refresh_token(
         &self,
         token_hash: &str,
-    ) -> Result<Option<(String, Option<DateTime<Utc>>, DateTime<Utc>)>, ApiError> {
+    ) -> Result<Option<RefreshTokenRecord>, ApiError> {
         let row = sqlx::query(
-            "SELECT user_id, revoked_at, expires_at FROM refresh_tokens WHERE token_hash = $1",
+            "SELECT user_id, revoked_at, expires_at, campus_id
+             FROM refresh_tokens WHERE token_hash = $1",
         )
         .bind(token_hash)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
-        Ok(row.map(|r| {
-            let user_id: String = r.get("user_id");
-            let revoked_at: Option<DateTime<Utc>> = r.get("revoked_at");
-            let expires_at: DateTime<Utc> = r.get("expires_at");
-            (user_id, revoked_at, expires_at)
+        Ok(row.map(|r| RefreshTokenRecord {
+            user_id: r.get("user_id"),
+            revoked_at: r.get("revoked_at"),
+            expires_at: r.get("expires_at"),
+            campus_id: r.get("campus_id"),
         }))
     }
 

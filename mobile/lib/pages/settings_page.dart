@@ -788,7 +788,10 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _updateEmail(BuildContext context, String email) async {
     final l = AppLocalizations.of(context)!;
     final messenger = ScaffoldMessenger.of(context);
-    if (email.isNotEmpty && !email.endsWith('@email.ncu.edu.cn')) {
+    // Campus email domains are validated server-side against the active
+    // campus list — a hardcoded single-campus check here would block every
+    // newly onboarded campus.
+    if (email.isNotEmpty && !email.contains('@')) {
       messenger.showSnackBar(SnackBar(content: Text(l.emailDomainError)));
       return;
     }

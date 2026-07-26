@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:uuid/uuid.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../services/order_service.dart';
@@ -32,11 +33,13 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
   String? _error;
   bool _acting = false;
   bool _autoDelist = true;
+  late String _confirmIdempotencyKey;
 
   @override
   void initState() {
     super.initState();
     _orderService = widget.orderService ?? context.read<OrderService>();
+    _confirmIdempotencyKey = const Uuid().v4();
     _load();
   }
 
@@ -230,7 +233,11 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           child: ElevatedButton(
             onPressed: () => _doAction(
               () =>
-                  _orderService.confirmOrder(order.id, autoDelist: _autoDelist),
+                  _orderService.confirmOrder(
+                    order.id,
+                    autoDelist: _autoDelist,
+                    idempotencyKey: _confirmIdempotencyKey,
+                  ),
             ),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.primary,
@@ -285,7 +292,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                 value: _autoDelist,
                 onChanged: _acting
                     ? null
-                    : (value) => setState(() => _autoDelist = value),
+                    : (value) => setState(() {
+                        _autoDelist = value;
+                        _confirmIdempotencyKey = const Uuid().v4();
+                      }),
                 title: Text(l.autoDelistAfterConfirm),
                 subtitle: Text(l.autoDelistAfterConfirmSubtitle),
               ),

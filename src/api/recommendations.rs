@@ -12,9 +12,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgRow, Row};
 
-use crate::api::auth::extract_user_id_from_token_with_fallback;
+use crate::api::auth::extract_auth_session_from_token_with_fallback;
 use crate::api::error::ApiError;
 use crate::api::AppState;
+use crate::services::campus::CampusService;
 
 #[derive(Deserialize)]
 pub struct SimilarQuery {
@@ -41,18 +42,70 @@ pub struct RecommendationItem {
     pub status: String,
     pub image_url: Option<String>,
     pub defect_hint: Option<String>,
+    /// User-facing explanation of why this item ranks here (Phase 2: every
+    /// personalized recommendation must carry an understandable reason).
+    pub rank_reason: String,
+    /// Machine-readable recall source: `recency` | `category_affinity` | `vector_similarity`.
+    pub source: String,
 }
+
+/// Version tag for the current ranking logic. Clients and offline evaluation
+/// reference this when comparing ranking behaviour across releases.
+pub const RANKING_VERSION: &str = "2026.07-affinity-v1";
 
 #[derive(Serialize)]
 pub struct RecommendationResponse {
     pub items: Vec<RecommendationItem>,
+    pub ranking_version: &'static str,
+}
+
+async fn resolve_recommendation_context(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(Option<String>, uuid::Uuid), ApiError> {
+    let campus_service = CampusService::new(state.infra.db.clone());
+    match extract_auth_session_from_token_with_fallback(
+        headers,
+        &state.secrets.jwt_secret,
+        state.secrets.jwt_secret_old.as_deref(),
+    ) {
+        Ok(session) => {
+            let campus_id = campus_service
+                .resolve_session_campus(&session.user_id, session.campus_id)
+                .await?;
+            Ok((Some(session.user_id), campus_id))
+        }
+        Err(_) => Ok((None, campus_service.default_public_campus_id().await?)),
+    }
 }
 
 fn clamp_feed_limit(limit: Option<i64>) -> i64 {
     limit.unwrap_or(20).clamp(1, 50)
 }
 
+/// Rewrite approved media to presigned URLs when the bucket is private.
+fn sign_recommendation_media(
+    state: &AppState,
+    items: Vec<RecommendationItem>,
+) -> Vec<RecommendationItem> {
+    items
+        .into_iter()
+        .map(|mut item| {
+            item.image_url = state.public_media_url(item.image_url);
+            item
+        })
+        .collect()
+}
+
 fn recommendation_item_from_row(row: &PgRow) -> RecommendationItem {
+    recommendation_item_with_reason(row, "最新发布".to_string(), "recency")
+}
+
+fn recommendation_item_with_reason(
+    row: &PgRow,
+    rank_reason: String,
+    source: &str,
+) -> RecommendationItem {
     let defects_text: String = row.get("defects");
     let defects: Vec<String> = serde_json::from_str(&defects_text).unwrap_or_default();
     let defect_hint = defects.first().cloned();
@@ -66,12 +119,12 @@ fn recommendation_item_from_row(row: &PgRow) -> RecommendationItem {
             .ok()
             .unwrap_or_else(|| "offer".to_string()),
         condition_score: row.get("condition_score"),
-        suggested_price_cny: crate::utils::cents_to_yuan(
-            row.get::<i32, _>("suggested_price_cny") as i64
-        ),
+        suggested_price_cny: crate::utils::cents_to_yuan(row.get::<i64, _>("suggested_price_cny")),
         status: row.get("status"),
         image_url: row.get("image_url"),
         defect_hint,
+        rank_reason,
+        source: source.to_string(),
     }
 }
 
@@ -89,6 +142,7 @@ fn remove_source_listing(
 
 async fn fetch_recency_feed(
     state: &AppState,
+    campus_id: uuid::Uuid,
     direction: &str,
     limit: i64,
     offset: i64,
@@ -96,16 +150,20 @@ async fn fetch_recency_feed(
     let rows = sqlx::query(
         r#"
         SELECT id, title, category, brand, direction, condition_score,
-               suggested_price_cny, status, image_url, defects
+               suggested_price_cny, status,
+               CASE WHEN images_moderation_status = 'approved' THEN image_url ELSE NULL END AS image_url,
+               defects
         FROM inventory
         WHERE status = 'active'
-          AND ($3 = 'all' OR direction = $3)
+          AND campus_id = $3
+          AND ($4 = 'all' OR direction = $4)
         ORDER BY created_at DESC
         LIMIT $1 OFFSET $2
         "#,
     )
     .bind(limit)
     .bind(offset)
+    .bind(campus_id)
     .bind(direction)
     .fetch_all(&state.infra.db)
     .await
@@ -125,6 +183,7 @@ async fn fetch_recency_feed(
 async fn fetch_personalized_feed(
     state: &AppState,
     user_id: &str,
+    campus_id: uuid::Uuid,
     direction: &str,
     limit: i64,
     offset: i64,
@@ -142,10 +201,14 @@ async fn fetch_personalized_feed(
             GROUP BY i.category
         )
         SELECT inv.id, inv.title, inv.category, inv.brand, inv.direction, inv.condition_score,
-               inv.suggested_price_cny, inv.status, inv.image_url, inv.defects
+               inv.suggested_price_cny, inv.status,
+               CASE WHEN inv.images_moderation_status = 'approved' THEN inv.image_url ELSE NULL END AS image_url,
+               inv.defects,
+               COALESCE(a.weight, 0) AS affinity_weight
         FROM inventory inv
         LEFT JOIN affinity a ON a.category = inv.category
         WHERE inv.status = 'active'
+          AND inv.campus_id = $5
           AND inv.owner_id <> $1
           AND ($4 = 'all' OR inv.direction = $4)
           AND NOT EXISTS (
@@ -160,35 +223,62 @@ async fn fetch_personalized_feed(
     .bind(limit)
     .bind(offset)
     .bind(direction)
+    .bind(campus_id)
     .fetch_all(&state.infra.db)
     .await
     .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
-    Ok(rows.iter().map(recommendation_item_from_row).collect())
+    Ok(rows
+        .iter()
+        .map(|row| {
+            let weight: f64 = row.try_get("affinity_weight").unwrap_or(0.0);
+            if weight > 0.0 {
+                let category: String = row.get("category");
+                recommendation_item_with_reason(
+                    row,
+                    format!("与你关注的“{}”类相关", category),
+                    "category_affinity",
+                )
+            } else {
+                recommendation_item_with_reason(row, "最新发布".to_string(), "recency")
+            }
+        })
+        .collect())
 }
 
 /// GET /api/recommendations/similar?listing_id=xxx
 /// Returns Top-N similar active listings using pgvector cosine distance.
 pub async fn get_similar_listings(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(params): Query<SimilarQuery>,
 ) -> Result<Json<RecommendationResponse>, ApiError> {
     let limit = params.limit.unwrap_or(10).clamp(1, 20);
+    let (_, campus_id) = resolve_recommendation_context(&state, &headers).await?;
 
-    let source_embedding: Option<Vec<f32>> =
-        sqlx::query_scalar("SELECT embedding FROM documents WHERE id = $1")
-            .bind(&params.listing_id)
-            .fetch_optional(&state.infra.db)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    let source_embedding: Option<Vec<f32>> = sqlx::query_scalar(
+        "SELECT d.embedding
+         FROM documents d
+         JOIN inventory i ON i.id = d.id
+         WHERE d.id = $1 AND i.campus_id = $2",
+    )
+    .bind(&params.listing_id)
+    .bind(campus_id)
+    .fetch_optional(&state.infra.db)
+    .await
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
     let source_vec = match source_embedding {
         Some(v) => v,
         None => {
             // No embedding for this listing — return newest active as fallback
-            let candidates = fetch_recency_feed(&state, "offer", limit + 1, 0).await?;
+            let candidates = fetch_recency_feed(&state, campus_id, "offer", limit + 1, 0).await?;
             let items = remove_source_listing(candidates, &params.listing_id, limit);
-            return Ok(Json(RecommendationResponse { items }));
+            let items = sign_recommendation_media(&state, items);
+            return Ok(Json(RecommendationResponse {
+                items,
+                ranking_version: RANKING_VERSION,
+            }));
         }
     };
 
@@ -197,10 +287,12 @@ pub async fn get_similar_listings(
         r#"
         SELECT i.id, i.title, i.category, i.brand, i.direction,
                i.condition_score, i.suggested_price_cny, i.status,
-               i.image_url, i.defects
+               CASE WHEN i.images_moderation_status = 'approved' THEN i.image_url ELSE NULL END AS image_url,
+               i.defects
         FROM inventory i
         JOIN documents d ON d.id = i.id
         WHERE i.id != $1 AND i.status = 'active' AND i.direction = 'offer'
+          AND i.campus_id = $4
         ORDER BY d.embedding <=> $2
         LIMIT $3
         "#,
@@ -208,12 +300,22 @@ pub async fn get_similar_listings(
     .bind(&params.listing_id)
     .bind(&source_vec)
     .bind(limit)
+    .bind(campus_id)
     .fetch_all(&state.infra.db)
     .await
     .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
-    let items = rows.iter().map(recommendation_item_from_row).collect();
-    Ok(Json(RecommendationResponse { items }))
+    let items = rows
+        .iter()
+        .map(|row| {
+            recommendation_item_with_reason(row, "与当前商品相似".to_string(), "vector_similarity")
+        })
+        .collect();
+    let items = sign_recommendation_media(&state, items);
+    Ok(Json(RecommendationResponse {
+        items,
+        ranking_version: RANKING_VERSION,
+    }))
 }
 
 /// GET /api/recommendations/feed
@@ -229,25 +331,25 @@ pub async fn get_recommendation_feed(
     let limit = clamp_feed_limit(params.limit);
     let offset = params.offset.unwrap_or(0).max(0);
     let direction = params.direction.as_deref().unwrap_or("offer");
+    let (user_id, campus_id) = resolve_recommendation_context(&state, &headers).await?;
     if !["offer", "wanted", "all"].contains(&direction) {
         return Err(ApiError::BadRequest(
             "无效的 direction 参数，可选值：offer, wanted, all".to_string(),
         ));
     }
 
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .ok();
-
     let items = match user_id.as_deref() {
-        Some(uid) => fetch_personalized_feed(&state, uid, direction, limit, offset).await?,
-        None => fetch_recency_feed(&state, direction, limit, offset).await?,
+        Some(uid) => {
+            fetch_personalized_feed(&state, uid, campus_id, direction, limit, offset).await?
+        }
+        None => fetch_recency_feed(&state, campus_id, direction, limit, offset).await?,
     };
 
-    Ok(Json(RecommendationResponse { items }))
+    let items = sign_recommendation_media(&state, items);
+    Ok(Json(RecommendationResponse {
+        items,
+        ranking_version: RANKING_VERSION,
+    }))
 }
 
 #[cfg(test)]
@@ -267,6 +369,8 @@ mod tests {
             status: "active".to_string(),
             image_url: Some("http://localhost/image.webp".to_string()),
             defect_hint: None,
+            rank_reason: "最新发布".to_string(),
+            source: "recency".to_string(),
         };
 
         let json = serde_json::to_value(item).expect("recommendation should serialize");
@@ -296,6 +400,8 @@ mod tests {
             status: "active".to_string(),
             image_url: None,
             defect_hint: None,
+            rank_reason: "最新发布".to_string(),
+            source: "recency".to_string(),
         };
         let items = vec![
             make_item("source"),

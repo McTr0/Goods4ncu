@@ -6,11 +6,14 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::api::auth::extract_user_id_from_token_with_fallback;
 use crate::api::error::ApiError;
+use crate::api::request_context::idempotency_key_from_headers;
+use crate::api::session::{OptionalSession, Session, VerifiedTenant};
 use crate::api::AppState;
 use crate::categories::{normalize_category, valid_category_message, MARKETPLACE_CATEGORIES};
 use crate::repositories::{CreateListingInput, ListingRepository, UpdateListingInput};
+use crate::services::campus::CampusService;
+use crate::services::notification::NewNotification;
 use crate::utils::cents_to_yuan;
 
 // ---------------------------------------------------------------------------
@@ -141,21 +144,6 @@ fn normalize_direction(value: Option<&str>, default: &str) -> Result<String, Api
     }
 }
 
-fn idempotency_key_from_headers(headers: &HeaderMap) -> Result<Option<String>, ApiError> {
-    let Some(value) = headers.get("idempotency-key") else {
-        return Ok(None);
-    };
-    let key = value
-        .to_str()
-        .map_err(|_| ApiError::BadRequest("Idempotency-Key 必须是 ASCII 文本".to_string()))?;
-    if key.is_empty() || key.len() > 128 || !key.bytes().all(|byte| (0x21..=0x7e).contains(&byte)) {
-        return Err(ApiError::BadRequest(
-            "Idempotency-Key 必须为 1–128 个不含空格的 ASCII 字符".to_string(),
-        ));
-    }
-    Ok(Some(key.to_string()))
-}
-
 fn create_listing_request_hash(input: &CreateListingInput) -> Result<String, ApiError> {
     let canonical = serde_json::to_vec(input).map_err(|e| {
         ApiError::Internal(anyhow::anyhow!(
@@ -180,7 +168,7 @@ fn listing_summary_from_listing(listing: crate::repositories::Listing) -> Listin
         brand: listing.brand.unwrap_or_default(),
         direction: listing.direction,
         condition_score: listing.condition_score,
-        suggested_price_cny: cents_to_yuan(listing.suggested_price_cny as i64),
+        suggested_price_cny: cents_to_yuan(listing.suggested_price_cny),
         status: listing.status,
         image_url: listing.image_url,
         defect_hint,
@@ -191,12 +179,22 @@ fn listing_summary_from_listing(listing: crate::repositories::Listing) -> Listin
 /// full-text search, price range, and sort.
 pub async fn get_listings(
     State(state): State<AppState>,
+    OptionalSession(session): OptionalSession,
     Query(params): Query<ListingQuery>,
 ) -> Result<Json<ListingsResponse>, ApiError> {
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
     let offset = params.offset.unwrap_or(0).max(0);
     let sort = params.sort.as_deref().unwrap_or("newest");
     let direction = normalize_direction(params.direction.as_deref(), "offer")?;
+    let campus_service = CampusService::new(state.infra.db.clone());
+    let campus_id = match session {
+        Some(session) => {
+            campus_service
+                .resolve_session_campus(&session.user_id, session.campus_id)
+                .await?
+        }
+        None => campus_service.default_public_campus_id().await?,
+    };
 
     // Validate search query length
     if let Some(ref srch) = params.search {
@@ -210,6 +208,7 @@ pub async fn get_listings(
     let (listings, total) = state
         .listing_repo
         .find_listings(
+            campus_id,
             params.category.as_deref(),
             params.categories.as_deref(),
             params.search.as_deref(),
@@ -227,6 +226,15 @@ pub async fn get_listings(
         .map(listing_summary_from_listing)
         .collect();
 
+    // Private-bucket deployments serve approved media as presigned URLs; the
+    // moderation gate already nulled anything unapproved.
+    let items = items
+        .into_iter()
+        .map(|mut item| {
+            item.image_url = state.public_media_url(item.image_url);
+            item
+        })
+        .collect::<Vec<_>>();
     Ok(Json(ListingsResponse {
         items,
         total,
@@ -238,22 +246,26 @@ pub async fn get_listings(
 /// GET /api/listings/:id — public; listing info is not sensitive
 pub async fn get_listing(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    OptionalSession(session): OptionalSession,
     Path(id): Path<String>,
 ) -> Result<Json<ListingDetail>, ApiError> {
     // Auth optional — guests can browse listing details. The only owner info
     // exposed is username (no email/phone), which is appropriate for a marketplace.
-    let viewer_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .ok();
+    let viewer_id = session.as_ref().map(|session| session.user_id.clone());
+    let campus_service = CampusService::new(state.infra.db.clone());
+    let campus_id = match session {
+        Some(session) => {
+            campus_service
+                .resolve_session_campus(&session.user_id, session.campus_id)
+                .await?
+        }
+        None => campus_service.default_public_campus_id().await?,
+    };
 
     // Single query with JOIN to fetch listing and owner username together (avoids N+1)
     let (listing, owner_username) = state
         .listing_repo
-        .find_by_id_with_owner(&id)
+        .find_by_id_with_owner_in_campus(&id, campus_id)
         .await?
         .ok_or(ApiError::NotFound)?;
 
@@ -272,10 +284,10 @@ pub async fn get_listing(
         brand: listing.brand.unwrap_or_default(),
         direction: listing.direction,
         condition_score: listing.condition_score,
-        suggested_price_cny: cents_to_yuan(listing.suggested_price_cny as i64),
+        suggested_price_cny: cents_to_yuan(listing.suggested_price_cny),
         defects,
         description: listing.description,
-        image_url: listing.image_url,
+        image_url: state.public_media_url(listing.image_url),
         // Reveal owner_id to all authenticated users so they can contact the seller via chat
         owner_id: viewer_id.as_ref().map(|_| listing.owner_id.clone()),
         owner_username,
@@ -288,14 +300,10 @@ pub async fn get_listing(
 pub async fn create_listing(
     State(state): State<AppState>,
     headers: HeaderMap,
+    tenant: VerifiedTenant,
     Json(payload): Json<CreateListingRequest>,
 ) -> Result<Json<CreateListingResponse>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let session = tenant.session.clone();
     let idempotency_key = idempotency_key_from_headers(&headers)?;
 
     // Validate input
@@ -373,6 +381,7 @@ pub async fn create_listing(
 
     let image_url = payload.image_url.clone();
     let input = CreateListingInput {
+        campus_id: tenant.campus_id,
         title: payload.title,
         category,
         brand: Some(brand),
@@ -382,7 +391,7 @@ pub async fn create_listing(
         defects: payload.defects,
         description: payload.description.unwrap_or_default(),
         image_url: image_url.clone(),
-        owner_id: user_id,
+        owner_id: session.user_id,
     };
     let request_hash = idempotency_key
         .as_ref()
@@ -400,6 +409,7 @@ pub async fn create_listing(
                 .moderation
                 .submit_image_job(
                     &state.infra.db,
+                    tenant.campus_id,
                     &create_result.id,
                     image_url,
                     "listing_image",
@@ -425,12 +435,23 @@ pub async fn create_listing(
 /// GET /api/listings/:id/matches — matching active offers for a wanted listing.
 pub async fn get_wanted_matches(
     State(state): State<AppState>,
+    OptionalSession(session): OptionalSession,
     Path(id): Path<String>,
 ) -> Result<Json<ListingsResponse>, ApiError> {
+    let campus_service = CampusService::new(state.infra.db.clone());
+    let campus_id = match session {
+        Some(session) => {
+            campus_service
+                .resolve_session_campus(&session.user_id, session.campus_id)
+                .await?
+        }
+        None => campus_service.default_public_campus_id().await?,
+    };
     let wanted = state
         .listing_repo
         .find_by_id(&id)
         .await?
+        .filter(|listing| listing.campus_id == campus_id)
         .ok_or(ApiError::NotFound)?;
 
     if wanted.direction != "wanted" {
@@ -450,7 +471,7 @@ pub async fn get_wanted_matches(
     let search_text = format!("%{}%", wanted.title.replace('%', "\\%").replace('_', "\\_"));
     let rows = sqlx::query_as::<_, crate::repositories::Listing>(
         r#"
-        SELECT i.id, i.title, i.category, i.brand, i.direction, i.condition_score,
+        SELECT i.id, i.campus_id, i.title, i.category, i.brand, i.direction, i.condition_score,
                i.suggested_price_cny, i.defects, i.description, i.image_url,
                i.owner_id, i.status, i.created_at
         FROM inventory i
@@ -462,6 +483,7 @@ pub async fn get_wanted_matches(
           AND i.category = $3
           AND i.suggested_price_cny <= $4
           AND i.condition_score >= $5
+          AND i.campus_id = $7
         ORDER BY
           CASE WHEN wanted_doc.embedding IS NULL OR offer_doc.embedding IS NULL THEN 1 ELSE 0 END ASC,
           CASE WHEN wanted_doc.embedding IS NULL OR offer_doc.embedding IS NULL
@@ -477,12 +499,22 @@ pub async fn get_wanted_matches(
     .bind(wanted.suggested_price_cny)
     .bind(wanted.condition_score)
     .bind(&search_text)
+    .bind(wanted.campus_id)
     .fetch_all(&state.infra.db)
     .await
     .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
     let items: Vec<ListingSummary> = rows.into_iter().map(listing_summary_from_listing).collect();
     let total = items.len() as i64;
+    // Private-bucket deployments serve approved media as presigned URLs; the
+    // moderation gate already nulled anything unapproved.
+    let items = items
+        .into_iter()
+        .map(|mut item| {
+            item.image_url = state.public_media_url(item.image_url);
+            item
+        })
+        .collect::<Vec<_>>();
     Ok(Json(ListingsResponse {
         items,
         total,
@@ -494,22 +526,26 @@ pub async fn get_wanted_matches(
 /// POST /api/listings/:id/responses — recommend one of my active offers to a wanted listing.
 pub async fn respond_to_wanted(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Path(id): Path<String>,
     Json(payload): Json<WantedResponseRequest>,
 ) -> Result<Json<WantedResponseResult>, ApiError> {
-    let responder_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
-
     let wanted = state
         .listing_repo
         .find_by_id(&id)
         .await?
         .ok_or(ApiError::NotFound)?;
+
+    let tenant = CampusService::new(state.infra.db.clone())
+        .require_shared_verified_campus_for_session(
+            &session.user_id,
+            &wanted.owner_id,
+            session.campus_id,
+        )
+        .await?;
+    if tenant.campus_id != wanted.campus_id {
+        return Err(ApiError::CampusScopeMismatch);
+    }
     let offer = state
         .listing_repo
         .find_by_id(&payload.offer_listing_id)
@@ -522,10 +558,13 @@ pub async fn respond_to_wanted(
     if offer.direction != "offer" || offer.status != "active" {
         return Err(ApiError::BadRequest("只能推荐正在出的商品".to_string()));
     }
-    if offer.owner_id != responder_id {
+    if offer.campus_id != wanted.campus_id {
+        return Err(ApiError::CampusScopeMismatch);
+    }
+    if offer.owner_id != session.user_id {
         return Err(ApiError::Forbidden);
     }
-    if wanted.owner_id == responder_id {
+    if wanted.owner_id == session.user_id {
         return Err(ApiError::BadRequest("不能给自己的需求推荐商品".to_string()));
     }
 
@@ -544,15 +583,16 @@ pub async fn respond_to_wanted(
     let inserted = sqlx::query_scalar::<_, uuid::Uuid>(
         r#"
         INSERT INTO wanted_responses (
-            wanted_listing_id, offer_listing_id, responder_id, requester_id, message
+            campus_id, wanted_listing_id, offer_listing_id, responder_id, requester_id, message
         )
-        VALUES ($1, $2, $3, $4, $5)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id
         "#,
     )
+    .bind(wanted.campus_id)
     .bind(&wanted.id)
     .bind(&offer.id)
-    .bind(&responder_id)
+    .bind(&session.user_id)
     .bind(&wanted.owner_id)
     .bind(&message)
     .fetch_one(&state.infra.db)
@@ -571,14 +611,16 @@ pub async fn respond_to_wanted(
     if let Err(e) = state
         .infra
         .notification
-        .create(
-            &wanted.owner_id,
-            "wanted_response",
-            "有人给你的收物需求推荐了商品",
-            &format!("“{}”收到一个匹配推荐：{}", wanted.title, offer.title),
-            None,
-            Some(&wanted.id),
-        )
+        .create(NewNotification {
+            campus_id: wanted.campus_id,
+            user_id: &wanted.owner_id,
+            event_type: "wanted_response",
+            title: "有人给你的收物需求推荐了商品",
+            body: &format!("“{}”收到一个匹配推荐：{}", wanted.title, offer.title),
+            related_order_id: None,
+            related_listing_id: Some(&wanted.id),
+            related_conversation_id: None,
+        })
         .await
     {
         tracing::warn!(%e, wanted_id = %wanted.id, offer_id = %offer.id, "Failed to create wanted response notification");
@@ -590,19 +632,94 @@ pub async fn respond_to_wanted(
     }))
 }
 
+/// POST /api/listings/:id/fulfill — owner marks a wanted item as fulfilled.
+///
+/// Fulfilled items disappear from feeds, search and wanted matching (all of
+/// which filter `status = 'active'`); existing threads, responses and deal
+/// records are preserved. `POST /api/listings/:id/relist` reopens it.
+pub async fn fulfill_wanted(
+    State(state): State<AppState>,
+    Session(session): Session,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let listing = state
+        .listing_repo
+        .find_by_id(&id)
+        .await?
+        .ok_or(ApiError::NotFound)?;
+    if listing.owner_id != session.user_id {
+        return Err(ApiError::Forbidden);
+    }
+    if listing.direction != "wanted" {
+        return Err(ApiError::BadRequest(
+            "只有收物需求可以标记为已完成".to_string(),
+        ));
+    }
+
+    // Conditional transition: only an active wanted can become fulfilled, so a
+    // concurrent delete/fulfill cannot produce a lost update.
+    let updated = sqlx::query(
+        "UPDATE inventory SET status = 'fulfilled'
+         WHERE id = $1 AND owner_id = $2 AND direction = 'wanted' AND status = 'active'",
+    )
+    .bind(&id)
+    .bind(&session.user_id)
+    .execute(&state.infra.db)
+    .await
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    if updated.rows_affected() == 0 {
+        return Err(ApiError::Conflict(format!(
+            "当前状态为'{}'，无法标记完成",
+            listing.status
+        )));
+    }
+
+    // Tell pending responders their recommendation is no longer needed. The
+    // responses themselves stay untouched (roadmap: history is preserved).
+    let pending_responders: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT responder_id FROM wanted_responses
+         WHERE wanted_listing_id = $1 AND status = 'pending'",
+    )
+    .bind(&id)
+    .fetch_all(&state.infra.db)
+    .await
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    for responder in pending_responders {
+        if let Err(e) = state
+            .infra
+            .notification
+            .create(NewNotification {
+                campus_id: listing.campus_id,
+                user_id: &responder,
+                event_type: "wanted_fulfilled",
+                title: "对方的收物需求已完成",
+                body: &format!("“{}”已标记完成，感谢你的推荐", listing.title),
+                related_order_id: None,
+                related_listing_id: Some(&id),
+                related_conversation_id: None,
+            })
+            .await
+        {
+            tracing::warn!(%e, wanted_id = %id, "Failed to notify responder of fulfillment");
+        }
+    }
+
+    tracing::info!(listing_id = %id, owner_id = %session.user_id, "Wanted marked fulfilled");
+    Ok(Json(serde_json::json!({
+        "message": "收物需求已标记完成",
+        "id": id,
+        "status": "fulfilled"
+    })))
+}
+
 /// PUT /api/listings/:id - update a listing (owner only)
 pub async fn update_listing(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Path(id): Path<String>,
     Json(payload): Json<UpdateListingRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id.clone();
 
     // Validate individual fields before building update input
     if let Some(ref title) = payload.title {
@@ -709,15 +826,10 @@ pub async fn update_listing(
 /// DELETE /api/listings/:id - delete a listing (owner only)
 pub async fn delete_listing(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id.clone();
 
     state
         .listing_repo
@@ -736,15 +848,10 @@ pub async fn delete_listing(
 /// POST /api/listings/:id/relist — reactivate a sold or deleted listing (seller only)
 pub async fn relist_listing(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id.clone();
 
     state
         .listing_repo
@@ -783,16 +890,9 @@ pub struct RecognizedItem {
 /// POST /api/listings/recognize — auth required; uses Gemini Vision to analyze product image
 pub async fn recognize_item(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _session: Session,
     Json(payload): Json<RecognizeRequest>,
 ) -> Result<Json<RecognizedItem>, ApiError> {
-    let _ = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
-
     if payload.image_base64.is_empty() {
         return Err(ApiError::BadRequest("image_base64 is required".to_string()));
     }
@@ -1040,6 +1140,7 @@ mod tests {
     #[test]
     fn normalized_listing_hash_is_stable_and_content_sensitive() {
         let input = CreateListingInput {
+            campus_id: uuid::Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap(),
             title: "Desk".to_string(),
             category: "other".to_string(),
             brand: Some("Campus".to_string()),

@@ -646,23 +646,6 @@ class _UserChatPageState extends State<UserChatPage> {
     }
   }
 
-  Future<void> _startSecretChat() async {
-    final l = AppLocalizations.of(context)!;
-    final conversation = _conversation;
-    if (conversation == null) return;
-    final fingerprint = DateTime.now().millisecondsSinceEpoch.toString();
-    try {
-      await _chatService.createSecretSession(
-        recipientId: conversation.otherUserId,
-        initiatorKeyFingerprint: 'local-$fingerprint',
-        recipientKeyFingerprint: 'pending-${conversation.otherUserId}',
-      );
-      _showSnackBar(l.secretChatCreated);
-    } catch (error) {
-      _showSnackBar(l.secretChatCreateFailed(error.toString()));
-    }
-  }
-
   Future<void> _restartConversation() async {
     final conversation = _conversation;
     if (conversation == null || !conversation.capabilities.canRestart) return;
@@ -856,9 +839,6 @@ class _UserChatPageState extends State<UserChatPage> {
         if (value == 'call_video') {
           _startCall('video');
         }
-        if (value == 'secret') {
-          _startSecretChat();
-        }
         if (value.startsWith('read_')) {
           _setReadPreference(value.substring('read_'.length));
         }
@@ -887,7 +867,6 @@ class _UserChatPageState extends State<UserChatPage> {
         if (_conversation?.state == ConversationState.active) ...[
           PopupMenuItem(value: 'call_audio', child: Text(l.audioCallMvp)),
           PopupMenuItem(value: 'call_video', child: Text(l.videoCallMvp)),
-          PopupMenuItem(value: 'secret', child: Text(l.secretChatMvp)),
         ],
         if (_conversation?.capabilities.canClose == true)
           PopupMenuItem(value: 'close', child: Text(l.closeConversationAction)),

@@ -30,8 +30,25 @@ pub enum ApiError {
     #[error("认证失败: {0}")]
     AuthFailed(String),
 
+    #[error("需要重新验证密码")]
+    RecentAuthenticationRequired,
+
+    #[error("密码验证失败")]
+    RecentAuthenticationFailed,
+
+    /// The account has a confirmed MFA factor and this step-up requires it.
+    /// Distinct from a failed attempt so clients know to prompt for a code.
+    #[error("需要动态验证码")]
+    MfaRequired,
+
     #[error("无权限访问")]
     Forbidden,
+
+    #[error("需要先完成校园身份验证")]
+    CampusVerificationRequired,
+
+    #[error("该操作仅限同一校园的已认证用户")]
+    CampusScopeMismatch,
 
     #[error("冲突: {0}")]
     Conflict(String),
@@ -41,6 +58,13 @@ pub enum ApiError {
 
     #[error("内容包含违规信息: {0}")]
     ContentViolation(String),
+
+    /// Temporary unavailability the caller should retry: the process is
+    /// draining, or a dependency this endpoint needs is down. Distinct from
+    /// `Internal` so load balancers and clients can retry instead of surfacing
+    /// a hard failure.
+    #[error("服务暂时不可用")]
+    ServiceUnavailable(&'static str),
 
     #[error("服务器内部错误")]
     Internal(#[from] anyhow::Error),
@@ -72,10 +96,35 @@ impl IntoResponse for ApiError {
                 "authentication_failed",
                 format!("认证失败: {}", m),
             ),
+            ApiError::RecentAuthenticationRequired => (
+                StatusCode::FORBIDDEN,
+                "recent_authentication_required",
+                "此操作需要重新验证密码".to_string(),
+            ),
+            ApiError::RecentAuthenticationFailed => (
+                StatusCode::UNAUTHORIZED,
+                "recent_authentication_failed",
+                "密码验证失败".to_string(),
+            ),
+            ApiError::MfaRequired => (
+                StatusCode::UNAUTHORIZED,
+                "mfa_required",
+                "此操作需要动态验证码".to_string(),
+            ),
             ApiError::Forbidden => (
                 StatusCode::FORBIDDEN,
                 "forbidden",
                 "您没有权限执行此操作".to_string(),
+            ),
+            ApiError::CampusVerificationRequired => (
+                StatusCode::FORBIDDEN,
+                "campus_verification_required",
+                "请先完成校园身份验证后再操作".to_string(),
+            ),
+            ApiError::CampusScopeMismatch => (
+                StatusCode::FORBIDDEN,
+                "campus_scope_mismatch",
+                "该操作仅限同一校园的已认证用户".to_string(),
             ),
             ApiError::Conflict(m) => (StatusCode::CONFLICT, "conflict", format!("冲突: {}", m)),
             ApiError::RateLimitExceeded => (
@@ -87,6 +136,11 @@ impl IntoResponse for ApiError {
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "content_violation",
                 format!("内容包含违规信息: {}", msg),
+            ),
+            ApiError::ServiceUnavailable(reason) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "service_unavailable",
+                format!("服务暂时不可用，请稍后再试（{}）", reason),
             ),
             ApiError::Internal(ref e) => {
                 // Log the full error for server-side traceability before hiding it from the client.
@@ -120,10 +174,16 @@ mod tests {
             ApiError::BadRequest(ref m) => format!("请求错误: {}", m),
             ApiError::Unauthorized => "请先登录后再操作".to_string(),
             ApiError::AuthFailed(ref m) => format!("认证失败: {}", m),
+            ApiError::RecentAuthenticationRequired => "需要重新验证密码".to_string(),
+            ApiError::RecentAuthenticationFailed => "密码验证失败".to_string(),
+            ApiError::MfaRequired => "需要动态验证码".to_string(),
             ApiError::Forbidden => "您没有权限执行此操作".to_string(),
+            ApiError::CampusVerificationRequired => "需要先完成校园身份验证".to_string(),
+            ApiError::CampusScopeMismatch => "该操作仅限同一校园的已认证用户".to_string(),
             ApiError::Conflict(ref m) => format!("冲突: {}", m),
             ApiError::RateLimitExceeded => "请求过于频繁，请稍后再试".to_string(),
             ApiError::ContentViolation(ref m) => format!("内容包含违规信息: {}", m),
+            ApiError::ServiceUnavailable(_) => "服务暂时不可用".to_string(),
             ApiError::Internal(_) => "服务器内部错误".to_string(),
         };
         assert_eq!(full_display_msg.as_str(), expected_error_msg);
@@ -250,6 +310,12 @@ mod tests {
     }
 
     #[test]
+    fn test_service_unavailable_is_retryable_and_hides_internals() {
+        let response = ApiError::ServiceUnavailable("draining").into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
     fn test_api_error_conflict_into_response() {
         verify_error_response(
             ApiError::Conflict("resource exists".to_string()),
@@ -284,11 +350,16 @@ mod tests {
                 StatusCode::UNAUTHORIZED,
             ),
             (ApiError::Forbidden, StatusCode::FORBIDDEN),
+            (ApiError::CampusVerificationRequired, StatusCode::FORBIDDEN),
             (ApiError::Conflict("test".to_string()), StatusCode::CONFLICT),
             (ApiError::RateLimitExceeded, StatusCode::TOO_MANY_REQUESTS),
             (
                 ApiError::ContentViolation("测试".to_string()),
                 StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                ApiError::ServiceUnavailable("draining"),
+                StatusCode::SERVICE_UNAVAILABLE,
             ),
             (
                 ApiError::Internal(anyhow::anyhow!("test")),

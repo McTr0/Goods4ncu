@@ -139,6 +139,30 @@ class ListingService extends BaseService {
     handleResponse(response, (_) {});
   }
 
+  /// Mark a wanted item as fulfilled (owner only).
+  /// POST /api/listings/{id}/fulfill
+  Future<void> fulfillWanted(String id) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/listings/$id/fulfill'),
+      headers,
+      '{}',
+    );
+    handleResponse(response, (_) {});
+  }
+
+  /// Reopen a sold/fulfilled/deleted listing (owner only).
+  /// POST /api/listings/{id}/relist
+  Future<void> relistListing(String id) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/listings/$id/relist'),
+      headers,
+      '{}',
+    );
+    handleResponse(response, (_) {});
+  }
+
   /// Delete listing.
   /// DELETE /api/listings/{id}
   Future<void> deleteListing(String id) async {

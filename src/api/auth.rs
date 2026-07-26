@@ -13,6 +13,7 @@ use crate::api::error::ApiError;
 use crate::api::AppState;
 use crate::repositories::traits::{AuthRepository, UserRepository};
 use crate::repositories::{PostgresAuthRepository, PostgresUserRepository};
+use crate::services::campus::CampusService;
 
 #[derive(Deserialize)]
 pub struct AuthRequest {
@@ -27,21 +28,51 @@ pub struct AuthResponse {
     pub refresh_token: String,
     pub user_id: String,
     pub username: String,
+    pub active_campus_id: Option<Uuid>,
     pub message: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
-    sub: String,         // subject (user_id)
-    role: String,        // user role: "user" or "admin"
-    exp: usize,          // expiration time
-    jti: Option<String>, // JWT ID for denylist revocation (optional for legacy tokens)
+    sub: String,             // subject (user_id)
+    role: String,            // user role: "user" or "admin"
+    exp: usize,              // expiration time
+    jti: Option<String>,     // JWT ID for denylist revocation (optional for legacy tokens)
+    campus_id: Option<Uuid>, // active tenant (optional for legacy tokens)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    auth_time: Option<i64>, // last password authentication time (optional for legacy tokens)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthSessionContext {
+    pub user_id: String,
+    pub role: String,
+    pub campus_id: Option<Uuid>,
+    pub auth_time: Option<i64>,
+}
+
+impl AuthSessionContext {
+    pub fn recent_auth_expires_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        let auth_time = self.auth_time?;
+        let now = chrono::Utc::now().timestamp();
+        if auth_time > now + 60 {
+            return None;
+        }
+        chrono::DateTime::<chrono::Utc>::from_timestamp(auth_time + RECENT_AUTH_TTL_SECS, 0)
+    }
+
+    pub fn has_recent_authentication(&self) -> bool {
+        self.recent_auth_expires_at()
+            .is_some_and(|expires_at| expires_at > chrono::Utc::now())
+    }
 }
 
 /// Refresh token: 7 days validity
 const REFRESH_TOKEN_TTL_SECS: u64 = 7 * 24 * 3600;
 /// Access token: 24 hours validity (long enough for persistent WS connections)
 pub const ACCESS_TOKEN_TTL_SECS: u64 = 24 * 3600;
+/// Password step-up remains valid for sensitive operations for 10 minutes.
+pub const RECENT_AUTH_TTL_SECS: i64 = 10 * 60;
 
 /// Generate a secure random refresh token (UUID v4)
 fn generate_refresh_token() -> String {
@@ -58,9 +89,38 @@ fn hash_token(token: &str) -> String {
 
 /// Generate an access token (JWT) with configurable expiry.
 /// Returns `(token_string, jti, expiration_timestamp)`.
+#[allow(dead_code)]
 pub fn generate_access_token(
     user_id: &str,
     role: &str,
+    jwt_secret: &str,
+    ttl_secs: u64,
+) -> Result<(String, String, usize), jsonwebtoken::errors::Error> {
+    generate_access_token_for_campus(user_id, role, None, jwt_secret, ttl_secs)
+}
+
+pub fn generate_access_token_for_campus(
+    user_id: &str,
+    role: &str,
+    campus_id: Option<Uuid>,
+    jwt_secret: &str,
+    ttl_secs: u64,
+) -> Result<(String, String, usize), jsonwebtoken::errors::Error> {
+    generate_access_token_for_campus_with_auth_time(
+        user_id,
+        role,
+        campus_id,
+        Some(chrono::Utc::now().timestamp()),
+        jwt_secret,
+        ttl_secs,
+    )
+}
+
+pub fn generate_access_token_for_campus_with_auth_time(
+    user_id: &str,
+    role: &str,
+    campus_id: Option<Uuid>,
+    auth_time: Option<i64>,
     jwt_secret: &str,
     ttl_secs: u64,
 ) -> Result<(String, String, usize), jsonwebtoken::errors::Error> {
@@ -75,6 +135,8 @@ pub fn generate_access_token(
         role: role.to_string(),
         exp: expiration,
         jti: Some(jti.clone()),
+        campus_id,
+        auth_time,
     };
 
     let token = encode(
@@ -92,12 +154,13 @@ async fn store_refresh_token(
     user_id: &str,
     token: &str,
     ttl_secs: u64,
+    campus_id: Option<Uuid>,
 ) -> anyhow::Result<()> {
     let token_hash = hash_token(token);
     let expires_at = chrono::Utc::now() + chrono::Duration::seconds(ttl_secs as i64);
 
     auth_repo
-        .store_refresh_token(user_id, &token_hash, expires_at)
+        .store_refresh_token(user_id, &token_hash, expires_at, campus_id)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to store refresh token: {}", e))?;
     Ok(())
@@ -110,7 +173,10 @@ async fn rotate_refresh_token(
     user_repo: &PostgresUserRepository,
     token: &str,
     jwt_secret: &str,
-) -> anyhow::Result<(String, String)> {
+    campus_service: &CampusService,
+    campus_override: Option<Uuid>,
+    expected_user_id: Option<&str>,
+) -> anyhow::Result<(String, String, Uuid)> {
     let token_hash = hash_token(token);
 
     // Find the token
@@ -119,13 +185,18 @@ async fn rotate_refresh_token(
         .await
         .map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
 
-    let (user_id, revoked_at, expires_at) = match token_data {
+    let token_record = match token_data {
         Some(data) => data,
         None => return Err(anyhow::anyhow!("Invalid refresh token")),
     };
+    let user_id = token_record.user_id;
+
+    if expected_user_id.is_some_and(|expected| expected != user_id) {
+        return Err(anyhow::anyhow!("Refresh token belongs to another user"));
+    }
 
     // Check revoked
-    if revoked_at.is_some() {
+    if token_record.revoked_at.is_some() {
         auth_repo
             .revoke_all_user_tokens(&user_id)
             .await
@@ -134,7 +205,7 @@ async fn rotate_refresh_token(
     }
 
     // Check expiry
-    if expires_at < chrono::Utc::now() {
+    if token_record.expires_at < chrono::Utc::now() {
         return Err(anyhow::anyhow!("Refresh token has expired"));
     }
 
@@ -165,14 +236,37 @@ async fn rotate_refresh_token(
         return Err(anyhow::anyhow!("User is banned"));
     }
     let role = user.role;
+    let campus_id = match campus_override.or(token_record.campus_id) {
+        Some(campus_id) => campus_service
+            .resolve_session_campus(&user_id, Some(campus_id))
+            .await
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+        None => campus_service
+            .resolve_user_campus(&user_id)
+            .await
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+    };
 
     // Issue new tokens
     let new_refresh = generate_refresh_token();
-    store_refresh_token(auth_repo, &user_id, &new_refresh, REFRESH_TOKEN_TTL_SECS).await?;
-    let (new_access, _jti, _exp) =
-        generate_access_token(&user_id, &role, jwt_secret, ACCESS_TOKEN_TTL_SECS)?;
+    store_refresh_token(
+        auth_repo,
+        &user_id,
+        &new_refresh,
+        REFRESH_TOKEN_TTL_SECS,
+        Some(campus_id),
+    )
+    .await?;
+    let (new_access, _jti, _exp) = generate_access_token_for_campus_with_auth_time(
+        &user_id,
+        &role,
+        Some(campus_id),
+        None,
+        jwt_secret,
+        ACCESS_TOKEN_TTL_SECS,
+    )?;
 
-    Ok((new_access, new_refresh))
+    Ok((new_access, new_refresh, campus_id))
 }
 
 /// Revoke all refresh tokens for a user
@@ -200,7 +294,11 @@ async fn revoke_refresh_token(
     Ok(())
 }
 
-fn validate_ncu_email(email: &str) -> Result<(), ApiError> {
+/// Format-validate a registration email and return its domain part. Campus
+/// eligibility (does an active campus own this domain?) is checked against
+/// the database by the caller — hardcoding one campus's domain here is what
+/// made second-campus onboarding impossible.
+fn validate_registration_email(email: &str) -> Result<&str, ApiError> {
     if email.is_empty() {
         return Err(ApiError::BadRequest("邮箱不能为空".to_string()));
     }
@@ -211,10 +309,8 @@ fn validate_ncu_email(email: &str) -> Result<(), ApiError> {
     let Some((local, domain)) = email.split_once('@') else {
         return Err(ApiError::BadRequest("邮箱格式无效".to_string()));
     };
-    if domain.contains('@') || !domain.eq_ignore_ascii_case("email.ncu.edu.cn") {
-        return Err(ApiError::BadRequest(
-            "必须使用 @email.ncu.edu.cn 邮箱注册".to_string(),
-        ));
+    if domain.contains('@') || domain.is_empty() {
+        return Err(ApiError::BadRequest("邮箱格式无效".to_string()));
     }
     if local.is_empty() || local.len() > 64 {
         return Err(ApiError::BadRequest("邮箱格式无效".to_string()));
@@ -229,6 +325,31 @@ fn validate_ncu_email(email: &str) -> Result<(), ApiError> {
         return Err(ApiError::BadRequest("邮箱格式无效".to_string()));
     }
 
+    Ok(domain)
+}
+
+/// The domain must belong to an active campus; the resulting membership is
+/// routed to that campus at creation time.
+async fn ensure_campus_email_domain(db: &sqlx::PgPool, domain: &str) -> Result<(), ApiError> {
+    let allowed: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1 FROM campuses c
+            WHERE c.status = 'active'
+              AND EXISTS (
+                  SELECT 1 FROM unnest(c.email_domains) AS d
+                  WHERE lower(d) = lower($1)
+              )
+         )",
+    )
+    .bind(domain)
+    .fetch_one(db)
+    .await
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    if !allowed {
+        return Err(ApiError::BadRequest(
+            "必须使用已接入校园的学校邮箱注册".to_string(),
+        ));
+    }
     Ok(())
 }
 
@@ -241,11 +362,33 @@ pub struct RefreshTokenRequest {
 pub struct RefreshResponse {
     pub token: String,
     pub refresh_token: String,
+    pub active_campus_id: Uuid,
+}
+
+#[derive(Deserialize)]
+pub struct SwitchCampusRequest {
+    pub campus_id: Uuid,
+    pub refresh_token: String,
 }
 
 #[derive(Deserialize)]
 pub struct LogoutRequest {
     pub refresh_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ReauthenticateRequest {
+    pub password: String,
+    /// Required when the account has a confirmed TOTP factor. Absent for
+    /// ordinary users and admins who have not yet enrolled.
+    #[serde(default)]
+    pub totp_code: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ReauthenticateResponse {
+    pub token: String,
+    pub recent_auth_expires_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// POST /api/auth/register — returns 201 Created on success, 409 Conflict on duplicate.
@@ -270,9 +413,12 @@ pub async fn register(
         return Err(ApiError::BadRequest("密码至少需要8个字符".to_string()));
     }
 
-    // Validate email domain (optional but validated if provided)
+    // Validate email format and campus eligibility (optional but validated if
+    // provided): the domain must belong to an active campus, and the initial
+    // pending membership routes to that campus.
     if let Some(ref email) = payload.email {
-        validate_ncu_email(email)?;
+        let domain = validate_registration_email(email)?;
+        ensure_campus_email_domain(&state.infra.db, domain).await?;
     }
 
     let password = payload.password.clone();
@@ -310,23 +456,34 @@ pub async fn register(
 
     match user_id {
         Ok(user_id) => {
-            let (token, _jti, _exp) = generate_access_token(
+            let campus_id = CampusService::new(state.infra.db.clone())
+                .resolve_user_campus(&user_id)
+                .await?;
+            let (token, _jti, _exp) = generate_access_token_for_campus(
                 &user_id,
                 "user",
+                Some(campus_id),
                 &state.secrets.jwt_secret,
                 ACCESS_TOKEN_TTL_SECS,
             )?;
             let refresh = generate_refresh_token();
-            store_refresh_token(&state.auth_repo, &user_id, &refresh, REFRESH_TOKEN_TTL_SECS)
-                .await
-                .map_err(|e| {
-                    ApiError::Internal(anyhow::anyhow!("Failed to store refresh token: {}", e))
-                })?;
+            store_refresh_token(
+                &state.auth_repo,
+                &user_id,
+                &refresh,
+                REFRESH_TOKEN_TTL_SECS,
+                Some(campus_id),
+            )
+            .await
+            .map_err(|e| {
+                ApiError::Internal(anyhow::anyhow!("Failed to store refresh token: {}", e))
+            })?;
             Ok(Json(AuthResponse {
                 token,
                 refresh_token: refresh,
                 user_id,
                 username: payload.username.clone(),
+                active_campus_id: Some(campus_id),
                 message: "注册成功".to_string(),
             }))
         }
@@ -396,23 +553,34 @@ pub async fn login(
 
     match verify_result {
         Ok(true) => {
-            let (token, _jti, _exp) = generate_access_token(
+            let campus_id = CampusService::new(state.infra.db.clone())
+                .resolve_user_campus(&user.id)
+                .await?;
+            let (token, _jti, _exp) = generate_access_token_for_campus(
                 &user.id,
                 &user.role,
+                Some(campus_id),
                 &state.secrets.jwt_secret,
                 ACCESS_TOKEN_TTL_SECS,
             )?;
             let refresh = generate_refresh_token();
-            store_refresh_token(&state.auth_repo, &user.id, &refresh, REFRESH_TOKEN_TTL_SECS)
-                .await
-                .map_err(|e| {
-                    ApiError::Internal(anyhow::anyhow!("Failed to store refresh token: {}", e))
-                })?;
+            store_refresh_token(
+                &state.auth_repo,
+                &user.id,
+                &refresh,
+                REFRESH_TOKEN_TTL_SECS,
+                Some(campus_id),
+            )
+            .await
+            .map_err(|e| {
+                ApiError::Internal(anyhow::anyhow!("Failed to store refresh token: {}", e))
+            })?;
             Ok(Json(AuthResponse {
                 token,
                 refresh_token: refresh,
                 user_id: user.id,
                 username: user.username.clone(),
+                active_campus_id: Some(campus_id),
                 message: "登录成功".to_string(),
             }))
         }
@@ -428,16 +596,118 @@ pub async fn login(
     }
 }
 
+/// POST /api/auth/reauth — verify the current password and issue a recently-authenticated access token.
+pub async fn reauthenticate(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<ReauthenticateRequest>,
+) -> Result<Json<ReauthenticateResponse>, ApiError> {
+    let session = extract_auth_session_from_token_with_fallback(
+        &headers,
+        &state.secrets.jwt_secret,
+        state.secrets.jwt_secret_old.as_deref(),
+    )
+    .map_err(|_| ApiError::Unauthorized)?;
+    if payload.password.is_empty() || payload.password.len() > 128 {
+        return Err(ApiError::RecentAuthenticationFailed);
+    }
+
+    let user = state
+        .user_repo
+        .find_by_id(&session.user_id)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?
+        .ok_or(ApiError::Unauthorized)?;
+    if user.status != "active" {
+        return Err(ApiError::Forbidden);
+    }
+
+    let password = payload.password;
+    let password_hash = user.password_hash;
+    let verified = tokio::task::spawn_blocking(move || {
+        let Ok(parsed_hash) = PasswordHash::new(&password_hash) else {
+            return false;
+        };
+        Argon2::default()
+            .verify_password(password.as_bytes(), &parsed_hash)
+            .is_ok()
+    })
+    .await
+    .map_err(|error| {
+        ApiError::Internal(anyhow::anyhow!("Password verification failed: {}", error))
+    })?;
+    if !verified {
+        tracing::warn!(user_id = %session.user_id, "Recent authentication failed");
+        return Err(ApiError::RecentAuthenticationFailed);
+    }
+
+    // Second factor: once an admin has confirmed a TOTP enrollment, password
+    // alone must never open the sensitive-write window again. The check runs
+    // only after the password has been verified so a stolen token cannot use
+    // this endpoint as a TOTP-validity oracle.
+    if user.role == "admin" {
+        let mfa = crate::services::admin_mfa::AdminMfaService::new(state.infra.db.clone());
+        if mfa
+            .is_enforced(&session.user_id)
+            .await
+            .map_err(ApiError::Internal)?
+        {
+            let code = payload
+                .totp_code
+                .as_deref()
+                .filter(|code| !code.is_empty())
+                .ok_or(ApiError::MfaRequired)?;
+            let now = chrono::Utc::now().timestamp();
+            match mfa
+                .verify_and_consume(&session.user_id, code, now)
+                .await
+                .map_err(ApiError::Internal)?
+            {
+                Ok(()) => {}
+                Err(_) => {
+                    tracing::warn!(user_id = %session.user_id, "Admin TOTP verification failed");
+                    return Err(ApiError::RecentAuthenticationFailed);
+                }
+            }
+        }
+    }
+
+    let auth_time = chrono::Utc::now().timestamp();
+    let (token, _, _) = generate_access_token_for_campus_with_auth_time(
+        &session.user_id,
+        &user.role,
+        session.campus_id,
+        Some(auth_time),
+        &state.secrets.jwt_secret,
+        ACCESS_TOKEN_TTL_SECS,
+    )?;
+    let recent_auth_expires_at =
+        chrono::DateTime::<chrono::Utc>::from_timestamp(auth_time + RECENT_AUTH_TTL_SECS, 0)
+            .ok_or_else(|| {
+                ApiError::Internal(anyhow::anyhow!("Invalid authentication timestamp"))
+            })?;
+
+    tracing::info!(user_id = %session.user_id, "Recent authentication completed");
+    Ok(Json(ReauthenticateResponse {
+        token,
+        recent_auth_expires_at,
+    }))
+}
+
 /// POST /api/auth/refresh — rotate a refresh token, returns new access + refresh token pair
 pub async fn refresh_token(
     State(state): State<AppState>,
     Json(payload): Json<RefreshTokenRequest>,
 ) -> Result<Json<RefreshResponse>, ApiError> {
-    let (new_access, new_refresh) = rotate_refresh_token(
+    let campus_service = CampusService::new(state.infra.db.clone());
+    let (new_access, new_refresh, active_campus_id) = rotate_refresh_token(
         &state.auth_repo,
         &state.user_repo,
         &payload.refresh_token,
         &state.secrets.jwt_secret,
+        &campus_service,
+        None,
+        None,
     )
     .await
     .map_err(|e| {
@@ -448,6 +718,59 @@ pub async fn refresh_token(
     Ok(Json(RefreshResponse {
         token: new_access,
         refresh_token: new_refresh,
+        active_campus_id,
+    }))
+}
+
+/// POST /api/user/active-campus — rotate this device session into another verified campus.
+pub async fn switch_active_campus(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<SwitchCampusRequest>,
+) -> Result<Json<RefreshResponse>, ApiError> {
+    let context = extract_auth_session_from_token_with_fallback(
+        &headers,
+        &state.secrets.jwt_secret,
+        state.secrets.jwt_secret_old.as_deref(),
+    )
+    .map_err(|_| ApiError::Unauthorized)?;
+    let campus_service = CampusService::new(state.infra.db.clone());
+    campus_service
+        .require_verified_in_campus(&context.user_id, payload.campus_id)
+        .await?;
+
+    let (new_access, new_refresh, active_campus_id) = rotate_refresh_token(
+        &state.auth_repo,
+        &state.user_repo,
+        &payload.refresh_token,
+        &state.secrets.jwt_secret,
+        &campus_service,
+        Some(payload.campus_id),
+        Some(&context.user_id),
+    )
+    .await
+    .map_err(|error| {
+        tracing::warn!(err = %error, user_id = %context.user_id, "Campus switch failed");
+        ApiError::Unauthorized
+    })?;
+
+    let token = bearer_token(&headers)?;
+    let claims = decode_claims_from_token_str_with_fallback(
+        token,
+        &state.secrets.jwt_secret,
+        state.secrets.jwt_secret_old.as_deref(),
+    )
+    .map_err(|_| ApiError::Unauthorized)?;
+    if let Some(jti) = claims.jti.as_deref() {
+        let expires_at = chrono::DateTime::<chrono::Utc>::from_timestamp(claims.exp as i64, 0)
+            .unwrap_or_else(chrono::Utc::now);
+        revoke_access_token_jti(&state, jti, expires_at).await?;
+    }
+
+    Ok(Json(RefreshResponse {
+        token: new_access,
+        refresh_token: new_refresh,
+        active_campus_id,
     }))
 }
 
@@ -586,6 +909,19 @@ pub fn extract_user_id_from_token_str(token: &str, jwt_secret: &str) -> Result<S
     let claims = decode_claims_from_token_str(token, jwt_secret)?;
 
     Ok(claims.sub)
+}
+
+pub fn extract_auth_session_from_token_str(
+    token: &str,
+    jwt_secret: &str,
+) -> Result<AuthSessionContext, String> {
+    let claims = decode_claims_from_token_str(token, jwt_secret)?;
+    Ok(AuthSessionContext {
+        user_id: claims.sub,
+        role: claims.role,
+        campus_id: claims.campus_id,
+        auth_time: claims.auth_time,
+    })
 }
 
 fn decode_claims_from_token_str(token: &str, jwt_secret: &str) -> Result<Claims, String> {
@@ -740,6 +1076,24 @@ pub fn extract_user_id_from_token_str_with_fallback(
     }
 }
 
+pub fn extract_auth_session_from_token_str_with_fallback(
+    token: &str,
+    jwt_secret: &str,
+    jwt_secret_old: Option<&str>,
+) -> Result<AuthSessionContext, String> {
+    match extract_auth_session_from_token_str(token, jwt_secret) {
+        Ok(context) => Ok(context),
+        Err(primary_err) => {
+            if let Some(old) = jwt_secret_old {
+                extract_auth_session_from_token_str(token, old)
+                    .map_err(|_| format!("Invalid token (primary+fallback): {}", primary_err))
+            } else {
+                Err(primary_err)
+            }
+        }
+    }
+}
+
 /// Extract and validate the user_id and role from a raw JWT token string.
 /// Returns `Ok((user_id, role))` if the token is valid, or `Err(message)` if invalid.
 pub fn extract_user_id_and_role_from_token_str(
@@ -800,6 +1154,29 @@ pub fn extract_user_id_from_token_with_fallback(
         .ok_or_else(|| "Invalid Authorization format".to_string())?;
 
     extract_user_id_from_token_str_with_fallback(token, jwt_secret, jwt_secret_old)
+}
+
+pub fn extract_auth_session_from_token_with_fallback(
+    headers: &HeaderMap,
+    jwt_secret: &str,
+    jwt_secret_old: Option<&str>,
+) -> Result<AuthSessionContext, String> {
+    let auth_header = headers
+        .get("Authorization")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| "Missing Authorization header".to_string())?;
+    let token = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or_else(|| "Invalid Authorization format".to_string())?;
+    extract_auth_session_from_token_str_with_fallback(token, jwt_secret, jwt_secret_old)
+}
+
+fn bearer_token(headers: &HeaderMap) -> Result<&str, ApiError> {
+    headers
+        .get("Authorization")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .ok_or(ApiError::Unauthorized)
 }
 
 /// Extract and validate the user_id and role from the Authorization header using the provided secret.
@@ -903,6 +1280,8 @@ mod tests {
                         rate_limit_window_secs: 60,
                         server_host: "127.0.0.1".to_string(),
                         server_port: 3000,
+                        shutdown_drain_secs: 5,
+                        shutdown_timeout_secs: 25,
                         event_bus_capacity: 2048,
                         hitl_expire_scan_interval_secs: 600,
                         hitl_expire_timeout_hours: 48,
@@ -917,9 +1296,17 @@ mod tests {
                         moderation_image_enabled: false,
                         moderation_image_api_url: None,
                         moderation_image_api_key: None,
+                        secret_chat_new_sessions_enabled: false,
+                        media_private_bucket: false,
+                        media_url_ttl_secs: 600,
+                        media_path_style: true,
+                        media_region: "us-east-1".to_string(),
                     },
                 ),
                 token_denylist: services::token_denylist::TokenDenylist::new(),
+                secret_chat_new_sessions_enabled: false,
+                media_signer: None,
+                shutdown: crate::lifecycle::ShutdownSignal::never(),
             },
             agents: ApiAgents {
                 llm_provider: Arc::new(
@@ -977,6 +1364,34 @@ mod tests {
     }
 
     #[test]
+    fn test_campus_claim_round_trips_and_legacy_token_stays_compatible() {
+        let secret = "test_jwt_secret_at_least_32_characters_long";
+        let campus_id = Uuid::new_v4();
+        let (token, _, _) =
+            generate_access_token_for_campus("campus-user", "user", Some(campus_id), secret, 3600)
+                .expect("campus token");
+        let context =
+            extract_auth_session_from_token_str(&token, secret).expect("decode campus token");
+        assert_eq!(context.user_id, "campus-user");
+        assert_eq!(context.campus_id, Some(campus_id));
+        assert!(context.has_recent_authentication());
+
+        let (legacy_token, _, _) = generate_access_token_for_campus_with_auth_time(
+            "legacy-user",
+            "user",
+            None,
+            None,
+            secret,
+            3600,
+        )
+        .expect("legacy-compatible token");
+        let legacy_context = extract_auth_session_from_token_str(&legacy_token, secret)
+            .expect("decode legacy-compatible token");
+        assert_eq!(legacy_context.campus_id, None);
+        assert!(!legacy_context.has_recent_authentication());
+    }
+
+    #[test]
     fn test_auth_request_validation_concerns() {
         // These are compile-time checks via struct validation
         // The actual validation happens in the handler, but we can test the logic
@@ -1004,6 +1419,7 @@ mod tests {
             refresh_token: "refresh.here".to_string(),
             user_id: "user-abc".to_string(),
             username: "alice".to_string(),
+            active_campus_id: None,
             message: "登录成功".to_string(),
         };
         let json = serde_json::to_string(&resp).unwrap();
@@ -1021,6 +1437,8 @@ mod tests {
             role: "user".to_string(),
             exp: 1700000000,
             jti: Some("jti-xyz".to_string()),
+            campus_id: None,
+            auth_time: Some(1699999999),
         };
         let json = serde_json::to_string(&claims).unwrap();
         assert!(json.contains("user-xyz"));
@@ -1036,6 +1454,7 @@ mod tests {
         assert_eq!(claims.role, "admin");
         assert_eq!(claims.exp, 1700000000);
         assert_eq!(claims.jti.as_deref(), Some("jti-123"));
+        assert!(claims.auth_time.is_none());
     }
 
     #[test]
@@ -1046,6 +1465,7 @@ mod tests {
         assert_eq!(claims.role, "user");
         assert_eq!(claims.exp, 1700000000);
         assert!(claims.jti.is_none());
+        assert!(claims.auth_time.is_none());
     }
 
     #[test]
@@ -1269,12 +1689,16 @@ mod tests {
 
             let auth_repo = PostgresAuthRepository::new(pool.clone());
             let user_repo = PostgresUserRepository::new(pool.clone());
+            let campus_service = CampusService::new(pool.clone());
 
             let result = rotate_refresh_token(
                 &auth_repo,
                 &user_repo,
                 "revoked-refresh-token",
                 "test_jwt_secret_at_least_32_characters_long",
+                &campus_service,
+                None,
+                None,
             )
             .await;
             assert!(result.is_err());
@@ -1371,6 +1795,180 @@ mod tests {
             Argon2::default()
                 .verify_password("brand-new-pass-456".as_bytes(), &parsed_hash)
                 .expect("new password verifies");
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_reauthenticate_rejects_wrong_password_and_issues_recent_token() {
+        with_test_pool(|pool| async move {
+            let password = "reauth-pass-123";
+            let salt = SaltString::generate(&mut OsRng);
+            let password_hash = Argon2::default()
+                .hash_password(password.as_bytes(), &salt)
+                .expect("hash password")
+                .to_string();
+            let user_repo = PostgresUserRepository::new(pool.clone());
+            let user_id = user_repo
+                .create(
+                    &format!("reauth_{}", Uuid::new_v4()),
+                    None,
+                    &password_hash,
+                    "admin",
+                )
+                .await
+                .expect("create admin");
+            let state = build_test_state(pool);
+            let (stale_token, _, _) = generate_access_token_for_campus_with_auth_time(
+                &user_id,
+                "admin",
+                None,
+                None,
+                &state.secrets.jwt_secret,
+                3600,
+            )
+            .expect("stale token");
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                "Authorization",
+                format!("Bearer {stale_token}").parse().expect("header"),
+            );
+
+            let error = reauthenticate(
+                State(state.clone()),
+                headers.clone(),
+                Json(ReauthenticateRequest {
+                    password: "wrong-password".to_string(),
+                    totp_code: None,
+                }),
+            )
+            .await
+            .err()
+            .expect("wrong password must fail");
+            assert!(matches!(error, ApiError::RecentAuthenticationFailed));
+
+            let response = reauthenticate(
+                State(state.clone()),
+                headers,
+                Json(ReauthenticateRequest {
+                    password: password.to_string(),
+                    totp_code: None,
+                }),
+            )
+            .await
+            .expect("reauthenticate")
+            .0;
+            let context =
+                extract_auth_session_from_token_str(&response.token, &state.secrets.jwt_secret)
+                    .expect("decode recent token");
+            assert_eq!(context.user_id, user_id);
+            assert!(context.has_recent_authentication());
+            assert!(response.recent_auth_expires_at > chrono::Utc::now());
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_switch_active_campus_rotates_session_and_revokes_access_token() {
+        with_test_pool(|pool| async move {
+            let suffix = Uuid::new_v4();
+            let user_repo = PostgresUserRepository::new(pool.clone());
+            let user_id = user_repo
+                .create(&format!("campus_switch_{suffix}"), None, "hash", "user")
+                .await
+                .expect("create user");
+            let ncu_id = Uuid::parse_str("c0000000-0000-0000-0000-000000000001").expect("ncu id");
+            let second_campus_id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO campuses (id, slug, name_zh, name_en, email_domains)
+                 VALUES ($1, $2, '第二校园', 'Second Campus', ARRAY['second.example.edu'])",
+            )
+            .bind(second_campus_id)
+            .bind(format!("second-{suffix}"))
+            .execute(&pool)
+            .await
+            .expect("insert second campus");
+            sqlx::query(
+                "UPDATE campus_memberships
+                 SET status = 'verified', verification_method = 'test', verified_at = NOW()
+                 WHERE campus_id = $1 AND user_id = $2",
+            )
+            .bind(ncu_id)
+            .bind(&user_id)
+            .execute(&pool)
+            .await
+            .expect("verify ncu membership");
+            sqlx::query(
+                "INSERT INTO campus_memberships (
+                    campus_id, user_id, status, role, verification_method, verified_at
+                 ) VALUES ($1, $2, 'verified', 'member', 'test', NOW())",
+            )
+            .bind(second_campus_id)
+            .bind(&user_id)
+            .execute(&pool)
+            .await
+            .expect("insert second verified membership");
+
+            let state = build_test_state(pool.clone());
+            let current_refresh = format!("refresh-{suffix}");
+            state
+                .auth_repo
+                .store_refresh_token(
+                    &user_id,
+                    &hash_token(&current_refresh),
+                    chrono::Utc::now() + chrono::Duration::hours(1),
+                    Some(ncu_id),
+                )
+                .await
+                .expect("store current refresh token");
+            let (current_access, current_jti, _) = generate_access_token_for_campus(
+                &user_id,
+                "user",
+                Some(ncu_id),
+                &state.secrets.jwt_secret,
+                3600,
+            )
+            .expect("current access token");
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                "Authorization",
+                format!("Bearer {current_access}").parse().expect("header"),
+            );
+
+            let response = switch_active_campus(
+                State(state.clone()),
+                headers,
+                Json(SwitchCampusRequest {
+                    campus_id: second_campus_id,
+                    refresh_token: current_refresh,
+                }),
+            )
+            .await
+            .expect("switch active campus")
+            .0;
+            assert_eq!(response.active_campus_id, second_campus_id);
+            let new_context =
+                extract_auth_session_from_token_str(&response.token, &state.secrets.jwt_secret)
+                    .expect("decode switched access token");
+            assert_eq!(new_context.campus_id, Some(second_campus_id));
+            assert!(!new_context.has_recent_authentication());
+
+            let new_record = state
+                .auth_repo
+                .find_refresh_token(&hash_token(&response.refresh_token))
+                .await
+                .expect("load switched refresh token")
+                .expect("switched refresh token exists");
+            assert_eq!(new_record.user_id, user_id);
+            assert_eq!(new_record.campus_id, Some(second_campus_id));
+            let revoked: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM revoked_access_tokens WHERE jti = $1)",
+            )
+            .bind(current_jti)
+            .fetch_one(&pool)
+            .await
+            .expect("check access revocation");
+            assert!(revoked);
         })
         .await;
     }

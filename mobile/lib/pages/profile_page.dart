@@ -6,6 +6,7 @@ import '../services/api_service.dart';
 import '../services/admin_role_cache.dart';
 import '../services/ws_service.dart';
 import '../services/token_storage.dart';
+import '../services/user_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
 
@@ -21,6 +22,8 @@ class ProfilePage extends StatefulWidget {
 class _ProfilePageState extends State<ProfilePage> {
   late final ApiService _apiService;
   Map<String, dynamic>? _profile;
+  List<CampusMembership> _campusMemberships = const [];
+  String? _activeCampusId;
   bool _loading = true;
   String? _error;
 
@@ -37,10 +40,16 @@ class _ProfilePageState extends State<ProfilePage> {
       _error = null;
     });
     try {
-      final profile = await _apiService.getUserProfile();
+      final results = await Future.wait<dynamic>([
+        _apiService.getUserProfile(),
+        _apiService.getCampusMembershipState(),
+      ]);
       if (mounted) {
         setState(() {
-          _profile = profile;
+          _profile = results[0] as Map<String, dynamic>;
+          final campusState = results[1] as CampusMembershipState;
+          _campusMemberships = campusState.items;
+          _activeCampusId = campusState.activeCampusId;
           _loading = false;
         });
       }
@@ -83,6 +92,152 @@ class _ProfilePageState extends State<ProfilePage> {
       // Disconnect global WebSocket singleton on logout.
       await WsService.instance.disconnect();
       if (mounted) context.go('/login');
+    }
+  }
+
+  Future<void> _verifyCampusMembership(CampusMembership membership) async {
+    final l = AppLocalizations.of(context)!;
+    final shouldSend = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l.verifyCampusIdentity),
+        content: Text(l.campusVerificationSendHint),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(l.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(l.sendVerificationCode),
+          ),
+        ],
+      ),
+    );
+    if (shouldSend != true || !mounted) return;
+
+    try {
+      await _apiService.requestCampusVerification(membership.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.verificationCodeSent)));
+
+      var enteredCode = '';
+      final code = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(l.verifyCampusIdentity),
+          content: TextField(
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            maxLength: 6,
+            onChanged: (value) => enteredCode = value,
+            decoration: InputDecoration(labelText: l.verificationCode),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text(l.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, enteredCode.trim()),
+              child: Text(l.confirmVerification),
+            ),
+          ],
+        ),
+      );
+      if (code == null || code.isEmpty || !mounted) return;
+
+      await _apiService.confirmCampusVerification(membership.id, code);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.campusVerificationSuccess)));
+      await _loadProfile();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('${l.error}: $error')));
+    }
+  }
+
+  Future<void> _showCampusSwitcher() async {
+    final l = AppLocalizations.of(context)!;
+    final verified = _campusMemberships
+        .where((membership) => membership.isVerified)
+        .toList();
+    if (verified.length < 2) return;
+
+    final selected = await showModalBottomSheet<CampusMembership>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final locale = Localizations.localeOf(sheetContext);
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppTheme.sp20,
+                  0,
+                  AppTheme.sp20,
+                  AppTheme.sp8,
+                ),
+                child: Text(
+                  l.campusSwitchTitle,
+                  style: Theme.of(sheetContext).textTheme.titleLarge,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppTheme.sp20),
+                child: Text(
+                  l.campusSwitchDescription,
+                  style: Theme.of(sheetContext).textTheme.bodyMedium,
+                ),
+              ),
+              const SizedBox(height: AppTheme.sp8),
+              for (final membership in verified)
+                ListTile(
+                  leading: const Icon(Icons.school_outlined),
+                  title: Text(
+                    locale.languageCode == 'zh'
+                        ? membership.campusNameZh
+                        : membership.campusNameEn,
+                  ),
+                  subtitle: membership.campusId == _activeCampusId
+                      ? Text(l.campusActive)
+                      : null,
+                  trailing: membership.campusId == _activeCampusId
+                      ? const Icon(Icons.check_circle, color: AppTheme.success)
+                      : const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.pop(sheetContext, membership),
+                ),
+              const SizedBox(height: AppTheme.sp8),
+            ],
+          ),
+        );
+      },
+    );
+    if (selected == null || selected.campusId == _activeCampusId || !mounted) {
+      return;
+    }
+
+    try {
+      await _apiService.switchActiveCampus(selected.campusId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.campusSwitchSuccess)));
+      await _loadProfile();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('${l.error}: $error')));
     }
   }
 
@@ -130,6 +285,23 @@ class _ProfilePageState extends State<ProfilePage> {
     final avatarUrl = _profile?['avatar_url'] as String?;
     final isAdmin = _profile?['role'] == 'admin';
     final userId = _profile?['user_id']?.toString();
+    CampusMembership? campusMembership;
+    if (_campusMemberships.isNotEmpty) {
+      campusMembership = _campusMemberships.first;
+      for (final membership in _campusMemberships) {
+        if (membership.campusId == _activeCampusId) {
+          campusMembership = membership;
+          break;
+        }
+      }
+    }
+    final canSwitchCampus =
+        _campusMemberships.where((membership) => membership.isVerified).length >
+        1;
+    final canAccessAdmin =
+        isAdmin ||
+        (campusMembership?.isVerified == true &&
+            const {'operator', 'admin'}.contains(campusMembership?.role));
 
     return ResponsiveContent(
       maxWidth: 760,
@@ -161,6 +333,18 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
               ),
             ],
+            if (campusMembership != null) ...[
+              const SizedBox(height: AppTheme.sp12),
+              _CampusMembershipBadge(
+                membership: campusMembership,
+                onVerify: campusMembership.status == 'pending'
+                    ? () => _verifyCampusMembership(campusMembership!)
+                    : null,
+                onSwitch: campusMembership.isVerified && canSwitchCampus
+                    ? _showCampusSwitcher
+                    : null,
+              ),
+            ],
             const SizedBox(height: AppTheme.sp32),
 
             _MenuCard(
@@ -181,7 +365,13 @@ class _ProfilePageState extends State<ProfilePage> {
               subtitle: l.notificationsCenterSubtitle,
               onTap: () => context.push('/notifications'),
             ),
-            if (isAdmin)
+            _MenuCard(
+              icon: Icons.policy_outlined,
+              title: l.moderationCenter,
+              subtitle: l.moderationCenterSubtitle,
+              onTap: () => context.push('/moderation'),
+            ),
+            if (canAccessAdmin)
               _MenuCard(
                 icon: Icons.admin_panel_settings_outlined,
                 title: l.adminConsole,
@@ -212,6 +402,105 @@ class _ProfilePageState extends State<ProfilePage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _CampusMembershipBadge extends StatelessWidget {
+  const _CampusMembershipBadge({
+    required this.membership,
+    this.onVerify,
+    this.onSwitch,
+  });
+
+  final CampusMembership membership;
+  final VoidCallback? onVerify;
+  final VoidCallback? onSwitch;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    final locale = Localizations.localeOf(context);
+    final campusName = locale.languageCode == 'zh'
+        ? membership.campusNameZh
+        : membership.campusNameEn;
+    final (label, color, icon) = switch (membership.status) {
+      'verified' => (
+        l.campusMembershipVerified,
+        AppTheme.success,
+        Icons.verified_rounded,
+      ),
+      'suspended' => (
+        l.campusMembershipSuspended,
+        AppTheme.error,
+        Icons.block_rounded,
+      ),
+      'revoked' => (
+        l.campusMembershipRevoked,
+        AppTheme.textSecondary,
+        Icons.cancel_rounded,
+      ),
+      _ => (
+        l.campusMembershipPending,
+        AppTheme.warning,
+        Icons.schedule_rounded,
+      ),
+    };
+
+    final badge = Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTheme.sp12,
+        vertical: AppTheme.sp8,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.school_rounded, size: 17, color: color),
+          const SizedBox(width: AppTheme.sp8),
+          Text(
+            campusName,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(width: AppTheme.sp8),
+          Container(width: 1, height: 14, color: color.withValues(alpha: 0.3)),
+          const SizedBox(width: AppTheme.sp8),
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          if (onVerify != null || onSwitch != null) ...[
+            const SizedBox(width: AppTheme.sp8),
+            Icon(Icons.chevron_right_rounded, size: 17, color: color),
+          ],
+        ],
+      ),
+    );
+
+    final onTap = onVerify ?? onSwitch;
+    return Semantics(
+      label: '$campusName, $label',
+      button: onTap != null,
+      child: onTap == null
+          ? badge
+          : Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(999),
+                child: badge,
+              ),
+            ),
     );
   }
 }

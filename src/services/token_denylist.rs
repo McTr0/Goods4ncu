@@ -1,3 +1,4 @@
+use crate::lifecycle::{tick_or_shutdown, ShutdownSignal};
 use dashmap::DashMap;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -57,12 +58,14 @@ impl Default for TokenDenylist {
 }
 
 /// Periodically removes expired rows from persisted revoked token table.
-pub async fn run_cleanup_worker(db: PgPool) {
+pub async fn run_cleanup_worker(db: PgPool, shutdown: ShutdownSignal) {
     let mut ticker = interval(Duration::from_secs(60 * 60));
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-    loop {
-        ticker.tick().await;
+    while tick_or_shutdown(&mut ticker, &shutdown)
+        .await
+        .should_continue()
+    {
         match sqlx::query("DELETE FROM revoked_access_tokens WHERE expires_at <= NOW()")
             .execute(&db)
             .await
@@ -83,6 +86,8 @@ pub async fn run_cleanup_worker(db: PgPool) {
             }
         }
     }
+
+    tracing::info!("Revoked token cleanup worker stopped");
 }
 
 #[cfg(test)]

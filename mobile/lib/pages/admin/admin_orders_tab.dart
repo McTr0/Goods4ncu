@@ -6,8 +6,13 @@ import '../../theme/app_theme.dart';
 
 class AdminOrdersTab extends StatefulWidget {
   final ApiService apiService;
+  final bool canManage;
 
-  const AdminOrdersTab({super.key, required this.apiService});
+  const AdminOrdersTab({
+    super.key,
+    required this.apiService,
+    this.canManage = true,
+  });
 
   @override
   State<AdminOrdersTab> createState() => _AdminOrdersTabState();
@@ -159,67 +164,73 @@ class _AdminOrdersTabState extends State<AdminOrdersTab> {
                   value: item['auto_delisted_at'],
                 ),
               const Divider(height: 28),
-              SwitchListTile.adaptive(
-                contentPadding: EdgeInsets.zero,
-                value: autoDelist,
-                onChanged: (value) => setSheetState(() => autoDelist = value),
-                title: Text(l.autoDelistAfterConfirm),
-                subtitle: Text(l.autoDelistAfterConfirmSubtitle),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () async {
-                        try {
-                          await widget.apiService.updateAdminOrderStatus(
-                            item['id'],
-                            'cancelled',
-                            reason: 'admin_cancelled',
-                          );
-                          if (ctx.mounted) Navigator.pop(ctx);
-                          _load();
-                        } catch (e) {
-                          if (ctx.mounted) {
-                            ScaffoldMessenger.of(ctx).showSnackBar(
-                              SnackBar(
-                                content: Text(l.operationFailed(e.toString())),
-                              ),
+              if (widget.canManage)
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  value: autoDelist,
+                  onChanged: (value) => setSheetState(() => autoDelist = value),
+                  title: Text(l.autoDelistAfterConfirm),
+                  subtitle: Text(l.autoDelistAfterConfirmSubtitle),
+                ),
+              if (widget.canManage) const SizedBox(height: 12),
+              if (widget.canManage)
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () async {
+                          try {
+                            await widget.apiService.updateAdminOrderStatus(
+                              item['id'],
+                              'cancelled',
+                              reason: 'admin_cancelled',
                             );
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            _load();
+                          } catch (e) {
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    l.operationFailed(e.toString()),
+                                  ),
+                                ),
+                              );
+                            }
                           }
-                        }
-                      },
-                      child: Text(l.cancel),
+                        },
+                        child: Text(l.cancel),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: () async {
-                        try {
-                          await widget.apiService.updateAdminOrderStatus(
-                            item['id'],
-                            'confirmed',
-                            autoDelist: autoDelist,
-                          );
-                          if (ctx.mounted) Navigator.pop(ctx);
-                          _load();
-                        } catch (e) {
-                          if (ctx.mounted) {
-                            ScaffoldMessenger.of(ctx).showSnackBar(
-                              SnackBar(
-                                content: Text(l.operationFailed(e.toString())),
-                              ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () async {
+                          try {
+                            await widget.apiService.updateAdminOrderStatus(
+                              item['id'],
+                              'confirmed',
+                              autoDelist: autoDelist,
                             );
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            _load();
+                          } catch (e) {
+                            if (ctx.mounted) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    l.operationFailed(e.toString()),
+                                  ),
+                                ),
+                              );
+                            }
                           }
-                        }
-                      },
-                      child: Text(l.confirmOfflineDeal),
+                        },
+                        child: Text(l.confirmOfflineDeal),
+                      ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
             ],
           ),
         ),

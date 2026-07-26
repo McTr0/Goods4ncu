@@ -8,6 +8,50 @@ import 'base_service.dart';
 class ChatService extends BaseService {
   static const _uuid = Uuid();
 
+  /// GET /api/agent/plans — pending agent action plans awaiting user
+  /// confirmation. The confirmation token only ever travels through this
+  /// authenticated API, never through model-visible chat text.
+  Future<List<AgentPlan>> getAgentPlans() async {
+    final headers = await authHeaders();
+    final response = await get(Uri.parse('$baseUrl/api/agent/plans'), headers);
+    final data = handleResponse(response, (d) => d as Map<String, dynamic>);
+    final items = data['items'] as List<dynamic>? ?? [];
+    return items
+        .map((e) => AgentPlan.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// POST /api/agent/plans/{id}/confirm — confirm a proposed agent action.
+  /// L2 plans execute on the first confirmation; L3 plans return
+  /// `needs_second_confirmation` first and execute on the second call.
+  Future<AgentPlanConfirmResult> confirmAgentPlan(
+    String id,
+    String confirmationToken,
+  ) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/agent/plans/$id/confirm'),
+      headers,
+      jsonEncode({'confirmation_token': confirmationToken}),
+    );
+    final data = handleResponse(response, (d) => d as Map<String, dynamic>);
+    return AgentPlanConfirmResult(
+      status: data['status']?.toString() ?? '',
+      result: data['result']?.toString() ?? '',
+    );
+  }
+
+  /// POST /api/agent/plans/{id}/cancel — discard a proposed agent action.
+  Future<void> cancelAgentPlan(String id) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/agent/plans/$id/cancel'),
+      headers,
+      jsonEncode({}),
+    );
+    handleResponse(response, (_) {});
+  }
+
   Future<AssistantConversationHistory> getAssistantHistory({
     int limit = 50,
     int offset = 0,
@@ -374,26 +418,6 @@ class ChatService extends BaseService {
         'conversation_id': conversationId,
         'media': media,
         'offer_sdp': offerSdp,
-      }),
-    );
-    return handleResponse(response, (data) => data as Map<String, dynamic>);
-  }
-
-  Future<Map<String, dynamic>> createSecretSession({
-    required String recipientId,
-    required String initiatorKeyFingerprint,
-    required String recipientKeyFingerprint,
-    String? expiresAt,
-  }) async {
-    final headers = await authHeaders();
-    final response = await post(
-      Uri.parse('$baseUrl/api/chat/secret-sessions'),
-      headers,
-      jsonEncode({
-        'recipient_id': recipientId,
-        'initiator_key_fingerprint': initiatorKeyFingerprint,
-        'recipient_key_fingerprint': recipientKeyFingerprint,
-        'expires_at': ?expiresAt,
       }),
     );
     return handleResponse(response, (data) => data as Map<String, dynamic>);

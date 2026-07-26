@@ -113,6 +113,8 @@ pub struct AppConfig {
     // --- TOML-only fields (with hardcoded defaults when no file) ---
     pub server_host: String,
     pub server_port: u16,
+    pub shutdown_drain_secs: u64,
+    pub shutdown_timeout_secs: u64,
     pub event_bus_capacity: usize,
     pub hitl_expire_scan_interval_secs: u64,
     pub hitl_expire_timeout_hours: u64,
@@ -128,6 +130,14 @@ pub struct AppConfig {
     pub moderation_image_enabled: bool,
     pub moderation_image_api_url: Option<String>,
     pub moderation_image_api_key: Option<String>,
+    // Chat features
+    pub secret_chat_new_sessions_enabled: bool,
+    // Media serving: when the bucket is private, approved media is served via
+    // short-lived presigned URLs instead of raw bucket links.
+    pub media_private_bucket: bool,
+    pub media_url_ttl_secs: u32,
+    pub media_path_style: bool,
+    pub media_region: String,
 }
 
 impl fmt::Debug for AppConfig {
@@ -173,6 +183,8 @@ impl fmt::Debug for AppConfig {
             .field("rate_limit_window_secs", &self.rate_limit_window_secs)
             .field("server_host", &self.server_host)
             .field("server_port", &self.server_port)
+            .field("shutdown_drain_secs", &self.shutdown_drain_secs)
+            .field("shutdown_timeout_secs", &self.shutdown_timeout_secs)
             .field("event_bus_capacity", &self.event_bus_capacity)
             .field(
                 "hitl_expire_scan_interval_secs",
@@ -195,6 +207,11 @@ impl fmt::Debug for AppConfig {
                 "moderation_image_api_key",
                 &self.moderation_image_api_key.as_ref().map(|_| "[REDACTED]"),
             )
+            .field(
+                "secret_chat_new_sessions_enabled",
+                &self.secret_chat_new_sessions_enabled,
+            )
+            .field("media_private_bucket", &self.media_private_bucket)
             .finish()
     }
 }
@@ -310,8 +327,19 @@ impl AppConfig {
         if jwt_secret.len() < 32 {
             panic!("JWT_SECRET must be at least 32 characters for security");
         }
+        if running_in_production() {
+            validate_production_secret_hygiene(&jwt_secret)
+                .unwrap_or_else(|message| panic!("{message}"));
+        }
 
         let jwt_secret_old = std::env::var("JWT_SECRET_OLD").ok();
+
+        validate_campus_verification_delivery(
+            running_in_production(),
+            read_non_empty_env("CAMPUS_VERIFICATION_DELIVERY_URL").as_deref(),
+            read_non_empty_env("CAMPUS_VERIFICATION_DELIVERY_TOKEN").as_deref(),
+        )
+        .unwrap_or_else(|message| panic!("{message}"));
 
         // CORS: env > file > default (empty = allow all in non-production only)
         let cors_origins = std::env::var("CORS_ORIGINS")
@@ -378,6 +406,26 @@ impl AppConfig {
             file.as_ref().and_then(|f| f.server.port).unwrap_or(3000)
         };
 
+        // Shutdown timings: env > file > default. Deploy tooling usually sets
+        // these per environment, so env has to win over a baked-in TOML.
+        let shutdown_drain_secs: u64 = if let Some(v) = read_non_empty_env("SHUTDOWN_DRAIN_SECS") {
+            v.parse().expect("SHUTDOWN_DRAIN_SECS must be a valid u64")
+        } else {
+            file.as_ref()
+                .and_then(|f| f.server.shutdown_drain_secs)
+                .unwrap_or(5)
+        };
+
+        let shutdown_timeout_secs: u64 =
+            if let Some(v) = read_non_empty_env("SHUTDOWN_TIMEOUT_SECS") {
+                v.parse()
+                    .expect("SHUTDOWN_TIMEOUT_SECS must be a valid u64")
+            } else {
+                file.as_ref()
+                    .and_then(|f| f.server.shutdown_timeout_secs)
+                    .unwrap_or(25)
+            };
+
         let event_bus_capacity = file
             .as_ref()
             .and_then(|f| f.event_bus.capacity)
@@ -442,6 +490,29 @@ impl AppConfig {
         let moderation_image_api_key = read_non_empty_env("MODERATION_IMAGE_API_KEY")
             .or_else(|| file.as_ref()?.moderation.image_api_key.clone());
 
+        // Private-bucket media serving. Default OFF so existing public-bucket
+        // deployments keep working; production should enable it together with a
+        // private bucket policy (see docs/.env.production.example).
+        let media_private_bucket = read_non_empty_env("MEDIA_PRIVATE_BUCKET")
+            .and_then(|v| v.parse::<bool>().ok())
+            .unwrap_or(false);
+        let media_url_ttl_secs = read_non_empty_env("MEDIA_URL_TTL_SECS")
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(600);
+        let media_path_style = read_non_empty_env("MEDIA_PATH_STYLE")
+            .and_then(|v| v.parse::<bool>().ok())
+            .unwrap_or(false);
+        let media_region =
+            read_non_empty_env("MEDIA_REGION").unwrap_or_else(|| "us-east-1".to_string());
+
+        // Secret Chat is deprecated: default OFF, opt-in only during the
+        // migration window. env > file > default like the other flags.
+        let secret_chat_new_sessions_enabled =
+            read_non_empty_env("SECRET_CHAT_NEW_SESSIONS_ENABLED")
+                .and_then(|v| v.parse::<bool>().ok())
+                .or_else(|| file.as_ref()?.chat.secret_new_sessions_enabled)
+                .unwrap_or(false);
+
         Arc::new(Self {
             gemini_api_key: gemini_api_key.unwrap_or_default(),
             minimax_api_key,
@@ -467,6 +538,8 @@ impl AppConfig {
             rate_limit_window_secs,
             server_host,
             server_port,
+            shutdown_drain_secs,
+            shutdown_timeout_secs,
             event_bus_capacity,
             hitl_expire_scan_interval_secs,
             hitl_expire_timeout_hours,
@@ -480,7 +553,68 @@ impl AppConfig {
             moderation_image_enabled,
             moderation_image_api_url,
             moderation_image_api_key,
+            secret_chat_new_sessions_enabled,
+            media_private_bucket,
+            media_url_ttl_secs,
+            media_path_style,
+            media_region,
         })
+    }
+}
+
+impl AppConfig {
+    /// Deterministic config for tests and test-only service constructors.
+    /// No secrets are real; nothing here reads the environment.
+    #[allow(dead_code)] // used from the lib crate by integration tests
+    pub fn test_defaults() -> Self {
+        Self {
+            gemini_api_key: "test-gemini-key".to_string(),
+            minimax_api_key: None,
+            minimax_api_base_url: None,
+            llm_api_key: None,
+            jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),
+            jwt_secret_old: None,
+            database_url: "postgres://test/test".to_string(),
+            oss_access_key_id: None,
+            oss_access_key_secret: None,
+            llm_provider: "gemini".to_string(),
+            llm_model: "gemini-3-flash-preview".to_string(),
+            llm_base_url: None,
+            vector_dim: 768,
+            cors_origins: vec![],
+            oss_endpoint: "https://oss-cn-beijing.aliyuncs.com".to_string(),
+            oss_bucket: "test-bucket".to_string(),
+            oss_role_arn: None,
+            redis_url: None,
+            rate_limit_max_requests: 100,
+            rate_limit_window_secs: 60,
+            server_host: "127.0.0.1".to_string(),
+            server_port: 3000,
+            shutdown_drain_secs: 5,
+            shutdown_timeout_secs: 25,
+            event_bus_capacity: 2048,
+            hitl_expire_scan_interval_secs: 600,
+            hitl_expire_timeout_hours: 48,
+            moka_cache_max_capacity: 100_000,
+            access_token_ttl_secs: 86_400,
+            refresh_token_ttl_secs: 604_800,
+            conversation_history_limit: 10,
+            max_keyword_len: 200,
+            price_tolerance: 0.5,
+            categories: DEFAULT_CATEGORIES
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect(),
+            blocked_keywords: vec![],
+            moderation_image_enabled: false,
+            moderation_image_api_url: None,
+            moderation_image_api_key: None,
+            secret_chat_new_sessions_enabled: false,
+            media_private_bucket: false,
+            media_url_ttl_secs: 600,
+            media_path_style: true,
+            media_region: "us-east-1".to_string(),
+        }
     }
 }
 
@@ -491,11 +625,42 @@ fn is_production_label(value: &str) -> bool {
     )
 }
 
-fn running_in_production() -> bool {
+/// Whether this process is configured as a production deployment. Public so
+/// startup guards (secret hygiene, demo-seed rejection) can key on it.
+pub fn running_in_production() -> bool {
     ["APP_ENV", "ENVIRONMENT", "RUST_ENV"]
         .into_iter()
         .filter_map(|key| std::env::var(key).ok())
         .any(|value| is_production_label(&value))
+}
+
+/// Refuse to boot production with development-grade secrets (staging/production
+/// secret isolation, Phase 1). This catches the classic incident where a dev
+/// `.env` or an example template is copied to a production host: the token
+/// signing key would be public knowledge and every session forgeable.
+fn validate_production_secret_hygiene(jwt_secret: &str) -> Result<(), String> {
+    let lowered = jwt_secret.to_ascii_lowercase();
+    const DEV_MARKERS: &[&str] = &["test", "example", "changeme", "placeholder", "dev-secret"];
+    if let Some(marker) = DEV_MARKERS.iter().find(|m| lowered.contains(**m)) {
+        return Err(format!(
+            "JWT_SECRET contains development marker '{marker}'; production must use a \
+             dedicated randomly generated secret (see docs/.env.production.example)"
+        ));
+    }
+    // A secret of one repeated character passes the length check but has no
+    // entropy worth speaking of.
+    let distinct = jwt_secret
+        .chars()
+        .collect::<std::collections::HashSet<_>>()
+        .len();
+    if distinct < 8 {
+        return Err(
+            "JWT_SECRET has too little character variety for production; generate one with \
+             `openssl rand -base64 48`"
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 fn validate_cors_origins(cors_origins: &[String]) -> Result<(), String> {
@@ -504,6 +669,20 @@ fn validate_cors_origins(cors_origins: &[String]) -> Result<(), String> {
     if running_in_production() && allows_any_origin {
         return Err(
             "Refusing to start with permissive CORS in production. Set CORS_ORIGINS to explicit origins.".to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_campus_verification_delivery(
+    production: bool,
+    delivery_url: Option<&str>,
+    delivery_token: Option<&str>,
+) -> Result<(), String> {
+    if production && (delivery_url.is_none() || delivery_token.is_none()) {
+        return Err(
+            "CAMPUS_VERIFICATION_DELIVERY_URL and CAMPUS_VERIFICATION_DELIVERY_TOKEN are required in production"
+                .to_string(),
         );
     }
     Ok(())
@@ -538,6 +717,8 @@ mod tests {
             rate_limit_window_secs: 60,
             server_host: "0.0.0.0".to_string(),
             server_port: 3000,
+            shutdown_drain_secs: 5,
+            shutdown_timeout_secs: 25,
             event_bus_capacity: 2048,
             hitl_expire_scan_interval_secs: 600,
             hitl_expire_timeout_hours: 48,
@@ -555,6 +736,11 @@ mod tests {
             moderation_image_enabled: true,
             moderation_image_api_url: None,
             moderation_image_api_key: Some("test-api-key".to_string()),
+            secret_chat_new_sessions_enabled: false,
+            media_private_bucket: false,
+            media_url_ttl_secs: 600,
+            media_path_style: true,
+            media_region: "us-east-1".to_string(),
         };
         let debug_str = format!("{:?}", config);
         assert!(debug_str.contains("[REDACTED]"));
@@ -562,6 +748,23 @@ mod tests {
         assert!(!debug_str.contains("minimax-secret"));
         assert!(!debug_str.contains("generic-llm-secret"));
         assert!(!debug_str.contains("jwt-secret-that-is-at-least-32-characters"));
+    }
+
+    #[test]
+    fn production_secret_hygiene_rejects_dev_markers_and_low_entropy() {
+        for bad in [
+            "test_jwt_secret_at_least_32_characters_long",
+            "example-secret-value-with-enough-length!!",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ] {
+            assert!(
+                validate_production_secret_hygiene(bad).is_err(),
+                "{bad:?} must be rejected in production"
+            );
+        }
+        assert!(
+            validate_production_secret_hygiene("u8Zr#kQ2pV9wLx4TmN7cGdY5bHsJfE3aRi6oW1").is_ok()
+        );
     }
 
     #[test]
@@ -638,5 +841,23 @@ mod tests {
         assert!(is_production_label("production"));
         assert!(is_production_label(" PROD "));
         assert!(!is_production_label("development"));
+    }
+
+    #[test]
+    fn production_requires_campus_verification_delivery_credentials() {
+        assert!(validate_campus_verification_delivery(true, None, None).is_err());
+        assert!(validate_campus_verification_delivery(
+            true,
+            Some("https://mailer.example.test/send"),
+            None
+        )
+        .is_err());
+        assert!(validate_campus_verification_delivery(
+            true,
+            Some("https://mailer.example.test/send"),
+            Some("secret")
+        )
+        .is_ok());
+        assert!(validate_campus_verification_delivery(false, None, None).is_ok());
     }
 }

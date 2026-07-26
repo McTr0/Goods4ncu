@@ -159,6 +159,11 @@ impl UserRepository for PostgresUserRepository {
             ))
         })?;
         let student_id = email.and_then(derive_student_id);
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
         sqlx::query(
             "INSERT INTO users (id, new_id, username, email, student_id, password_hash, role)
              VALUES ($1, $2, $3, $4, $5, $6, $7)",
@@ -170,9 +175,51 @@ impl UserRepository for PostgresUserRepository {
         .bind(student_id.as_deref())
         .bind(password_hash)
         .bind(role)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| db_conflict_or_internal(e, "用户已存在"))?;
+
+        // Initial membership routes by the registration email's domain: a
+        // student registering with campus B's email lands as a pending member
+        // of campus B. No email or no matching active campus falls back to
+        // the NCU default (compatibility with the single-campus launch).
+        let membership = sqlx::query(
+            "WITH matched AS (
+                SELECT c.id
+                FROM campuses c
+                WHERE c.status = 'active'
+                  AND $2::text IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1 FROM unnest(c.email_domains) AS d
+                      WHERE lower($2) LIKE '%@' || lower(d)
+                  )
+                ORDER BY (c.slug = 'ncu') DESC, c.created_at ASC
+                LIMIT 1
+             )
+             INSERT INTO campus_memberships (
+                campus_id, user_id, status, role, verification_method
+             )
+             SELECT COALESCE(
+                        (SELECT id FROM matched),
+                        (SELECT id FROM campuses WHERE slug = 'ncu' AND status = 'active')
+                    ),
+                    $1, 'pending', 'member', 'repository_create'
+             ON CONFLICT (campus_id, user_id) DO NOTHING",
+        )
+        .bind(&user_id)
+        .bind(email)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+        if membership.rows_affected() != 1 {
+            return Err(ApiError::Internal(anyhow::anyhow!(
+                "Default campus is missing or inactive"
+            )));
+        }
+
+        tx.commit()
+            .await
+            .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
         Ok(user_id)
     }
 
@@ -197,9 +244,11 @@ impl UserRepository for PostgresUserRepository {
     async fn get_user_listings(
         &self,
         user_id: &str,
+        campus_id: Uuid,
         limit: i64,
         offset: i64,
         status_filter: &str,
+        only_approved_media: bool,
     ) -> Result<(Vec<crate::repositories::Listing>, i64), ApiError> {
         use crate::repositories::Listing;
 
@@ -209,26 +258,36 @@ impl UserRepository for PostgresUserRepository {
             format!("AND status = '{}'", status_filter.replace('\'', "''"))
         };
 
+        // Public viewers never see unreviewed media; owners see their own
+        // uploads regardless of moderation state.
+        let image_column = if only_approved_media {
+            "CASE WHEN images_moderation_status = 'approved' THEN image_url ELSE NULL END AS image_url"
+        } else {
+            "image_url"
+        };
+
         let query = format!(
-            "SELECT id, title, category, brand, direction, condition_score, suggested_price_cny, \
-             defects, description, image_url, owner_id, status, created_at \
-             FROM inventory WHERE owner_id = $1 {} \
+            "SELECT id, campus_id, title, category, brand, direction, condition_score, suggested_price_cny, \
+             defects, description, {image_column}, owner_id, status, created_at \
+             FROM inventory WHERE owner_id = $1 AND campus_id = $2 {} \
              ORDER BY created_at DESC LIMIT {} OFFSET {}",
             status_clause, limit, offset
         );
 
         let rows = sqlx::query_as::<_, Listing>(&query)
             .bind(user_id)
+            .bind(campus_id)
             .fetch_all(&self.pool)
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
         let count_query = format!(
-            "SELECT COUNT(*) FROM inventory WHERE owner_id = $1 {}",
+            "SELECT COUNT(*) FROM inventory WHERE owner_id = $1 AND campus_id = $2 {}",
             status_clause
         );
         let count_row = sqlx::query(&count_query)
             .bind(user_id)
+            .bind(campus_id)
             .fetch_one(&self.pool)
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
@@ -266,6 +325,7 @@ impl UserRepository for PostgresUserRepository {
 
     async fn search_users_with_listing_count(
         &self,
+        campus_id: Uuid,
         query: Option<&str>,
         limit: i64,
         offset: i64,
@@ -274,11 +334,16 @@ impl UserRepository for PostgresUserRepository {
             let pattern = format!("%{}%", q.replace('\'', "''"));
             let count_row = sqlx::query(
                 "SELECT COUNT(*) as cnt
-                 FROM users
-                 WHERE discover_by_username = TRUE
-                   AND status = 'active'
-                   AND username ILIKE $1",
+                 FROM users u
+                 JOIN campus_memberships membership
+                   ON membership.user_id = u.id
+                  AND membership.campus_id = $1
+                  AND membership.status = 'verified'
+                 WHERE u.discover_by_username = TRUE
+                   AND u.status = 'active'
+                   AND u.username ILIKE $2",
             )
+            .bind(campus_id)
             .bind(&pattern)
             .fetch_one(&self.pool)
             .await
@@ -293,10 +358,15 @@ impl UserRepository for PostgresUserRepository {
                        u.role, u.created_at,
                        COUNT(i.id) as listing_count
                 FROM users u
-                LEFT JOIN inventory i ON u.id = i.owner_id AND i.status = 'active'
+                JOIN campus_memberships membership
+                  ON membership.user_id = u.id
+                 AND membership.campus_id = $1
+                 AND membership.status = 'verified'
+                LEFT JOIN inventory i ON u.id = i.owner_id
+                 AND i.status = 'active' AND i.campus_id = $1
                 WHERE u.discover_by_username = TRUE
                   AND u.status = 'active'
-                  AND u.username ILIKE $1
+                  AND u.username ILIKE $2
                 GROUP BY u.id, u.username, u.email, u.student_id,
                          u.discover_by_username, u.discover_by_email,
                          u.discover_by_student_id, u.chat_read_receipt_mode, u.avatar_url,
@@ -304,9 +374,10 @@ impl UserRepository for PostgresUserRepository {
                          u.show_wechat_pay_qr, u.show_alipay_qr,
                          u.role, u.created_at
                 ORDER BY listing_count DESC
-                LIMIT $2 OFFSET $3
+                LIMIT $3 OFFSET $4
                 "#,
             )
+            .bind(campus_id)
             .bind(&pattern)
             .bind(limit)
             .bind(offset)
@@ -317,10 +388,15 @@ impl UserRepository for PostgresUserRepository {
         } else {
             let count_row = sqlx::query(
                 "SELECT COUNT(*) as cnt
-                 FROM users
-                 WHERE discover_by_username = TRUE
-                   AND status = 'active'",
+                 FROM users u
+                 JOIN campus_memberships membership
+                   ON membership.user_id = u.id
+                  AND membership.campus_id = $1
+                  AND membership.status = 'verified'
+                 WHERE u.discover_by_username = TRUE
+                   AND u.status = 'active'",
             )
+            .bind(campus_id)
             .fetch_one(&self.pool)
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
@@ -334,7 +410,12 @@ impl UserRepository for PostgresUserRepository {
                        u.role, u.created_at,
                        COUNT(i.id) as listing_count
                 FROM users u
-                LEFT JOIN inventory i ON u.id = i.owner_id AND i.status = 'active'
+                JOIN campus_memberships membership
+                  ON membership.user_id = u.id
+                 AND membership.campus_id = $1
+                 AND membership.status = 'verified'
+                LEFT JOIN inventory i ON u.id = i.owner_id
+                 AND i.status = 'active' AND i.campus_id = $1
                 WHERE u.discover_by_username = TRUE
                   AND u.status = 'active'
                 GROUP BY u.id, u.username, u.email, u.student_id,
@@ -344,9 +425,10 @@ impl UserRepository for PostgresUserRepository {
                          u.show_wechat_pay_qr, u.show_alipay_qr,
                          u.role, u.created_at
                 ORDER BY listing_count DESC
-                LIMIT $1 OFFSET $2
+                LIMIT $2 OFFSET $3
                 "#,
             )
+            .bind(campus_id)
             .bind(limit)
             .bind(offset)
             .fetch_all(&self.pool)
@@ -372,6 +454,7 @@ impl UserRepository for PostgresUserRepository {
     async fn lookup_users(
         &self,
         requester_id: &str,
+        campus_id: Uuid,
         query: &str,
         method: UserLookupMethod,
         limit: i64,
@@ -387,11 +470,16 @@ impl UserRepository for PostgresUserRepository {
                     SELECT u.id AS user_id, u.username, NULL::text AS matched_identifier,
                            COUNT(i.id) AS listing_count
                     FROM users u
-                    LEFT JOIN inventory i ON u.id = i.owner_id AND i.status = 'active'
+                    JOIN campus_memberships membership
+                      ON membership.user_id = u.id
+                     AND membership.campus_id = $2
+                     AND membership.status = 'verified'
+                    LEFT JOIN inventory i ON u.id = i.owner_id
+                     AND i.status = 'active' AND i.campus_id = $2
                     WHERE u.id != $1
                       AND u.status = 'active'
                       AND u.discover_by_username = TRUE
-                      AND u.username ILIKE $2
+                      AND u.username ILIKE $3
                       AND NOT EXISTS (
                           SELECT 1 FROM chat_blocks block
                           WHERE (block.blocker_id = $1 AND block.blocked_id = u.id)
@@ -400,16 +488,17 @@ impl UserRepository for PostgresUserRepository {
                     GROUP BY u.id, u.username
                     ORDER BY
                       CASE
-                        WHEN lower(u.username) = lower($4) THEN 0
-                        WHEN lower(u.username) LIKE lower($3) THEN 1
+                        WHEN lower(u.username) = lower($5) THEN 0
+                        WHEN lower(u.username) LIKE lower($4) THEN 1
                         ELSE 2
                       END,
                       listing_count DESC,
                       u.username ASC
-                    LIMIT $5
+                    LIMIT $6
                     "#,
                 )
                 .bind(requester_id)
+                .bind(campus_id)
                 .bind(&pattern)
                 .bind(&prefix)
                 .bind(query)
@@ -423,21 +512,27 @@ impl UserRepository for PostgresUserRepository {
                     SELECT u.id AS user_id, u.username, u.email AS matched_identifier,
                            COUNT(i.id) AS listing_count
                     FROM users u
-                    LEFT JOIN inventory i ON u.id = i.owner_id AND i.status = 'active'
+                    JOIN campus_memberships membership
+                      ON membership.user_id = u.id
+                     AND membership.campus_id = $2
+                     AND membership.status = 'verified'
+                    LEFT JOIN inventory i ON u.id = i.owner_id
+                     AND i.status = 'active' AND i.campus_id = $2
                     WHERE u.id != $1
                       AND u.status = 'active'
                       AND u.discover_by_email = TRUE
-                      AND lower(u.email) = lower($2)
+                      AND lower(u.email) = lower($3)
                       AND NOT EXISTS (
                           SELECT 1 FROM chat_blocks block
                           WHERE (block.blocker_id = $1 AND block.blocked_id = u.id)
                              OR (block.blocker_id = u.id AND block.blocked_id = $1)
                       )
                     GROUP BY u.id, u.username, u.email
-                    LIMIT $3
+                    LIMIT $4
                     "#,
             )
             .bind(requester_id)
+            .bind(campus_id)
             .bind(query)
             .bind(limit)
             .fetch_all(&self.pool)
@@ -448,21 +543,27 @@ impl UserRepository for PostgresUserRepository {
                     SELECT u.id AS user_id, u.username, u.student_id AS matched_identifier,
                            COUNT(i.id) AS listing_count
                     FROM users u
-                    LEFT JOIN inventory i ON u.id = i.owner_id AND i.status = 'active'
+                    JOIN campus_memberships membership
+                      ON membership.user_id = u.id
+                     AND membership.campus_id = $2
+                     AND membership.status = 'verified'
+                    LEFT JOIN inventory i ON u.id = i.owner_id
+                     AND i.status = 'active' AND i.campus_id = $2
                     WHERE u.id != $1
                       AND u.status = 'active'
                       AND u.discover_by_student_id = TRUE
-                      AND u.student_id = $2
+                      AND u.student_id = $3
                       AND NOT EXISTS (
                           SELECT 1 FROM chat_blocks block
                           WHERE (block.blocker_id = $1 AND block.blocked_id = u.id)
                              OR (block.blocker_id = u.id AND block.blocked_id = $1)
                       )
                     GROUP BY u.id, u.username, u.student_id
-                    LIMIT $3
+                    LIMIT $4
                     "#,
             )
             .bind(requester_id)
+            .bind(campus_id)
             .bind(query)
             .bind(limit)
             .fetch_all(&self.pool)
@@ -587,13 +688,44 @@ impl UserRepository for PostgresUserRepository {
             }
         }
 
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+        let current_email = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT email FROM users WHERE id = $1 FOR UPDATE",
+        )
+        .bind(user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?
+        .ok_or(ApiError::NotFound)?;
+
         sqlx::query("UPDATE users SET email = $1, student_id = $2 WHERE id = $3")
             .bind(new_email)
             .bind(student_id.as_deref())
             .bind(user_id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
             .map_err(|e| db_conflict_or_internal(e, "邮箱或学号已被使用"))?;
+
+        if current_email.as_deref() != Some(new_email) {
+            sqlx::query(
+                "UPDATE campus_memberships
+                 SET status = 'pending', verification_method = NULL,
+                     verified_at = NULL, updated_at = NOW()
+                 WHERE user_id = $1 AND status = 'verified'",
+            )
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
 
         Ok(())
     }
@@ -790,10 +922,26 @@ mod tests {
                 )
                 .await
                 .expect("create target");
+            let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+                .fetch_one(&pool)
+                .await
+                .expect("NCU campus");
+            sqlx::query(
+                "UPDATE campus_memberships
+                 SET status = 'verified', verification_method = 'test_fixture', verified_at = NOW()
+                 WHERE user_id IN ($1, $2) AND campus_id = $3",
+            )
+            .bind(&requester_id)
+            .bind(&target_id)
+            .bind(campus_id)
+            .execute(&pool)
+            .await
+            .expect("verify memberships");
 
             let by_username = repo
                 .lookup_users(
                     &requester_id,
+                    campus_id,
                     "lookup_target",
                     UserLookupMethod::Username,
                     10,
@@ -807,6 +955,7 @@ mod tests {
             let by_email_private = repo
                 .lookup_users(
                     &requester_id,
+                    campus_id,
                     "2024987654@email.ncu.edu.cn",
                     UserLookupMethod::Email,
                     10,
@@ -822,6 +971,7 @@ mod tests {
             let by_username_hidden = repo
                 .lookup_users(
                     &requester_id,
+                    campus_id,
                     "lookup_target",
                     UserLookupMethod::Username,
                     10,
@@ -833,6 +983,7 @@ mod tests {
             let by_email = repo
                 .lookup_users(
                     &requester_id,
+                    campus_id,
                     "2024987654@email.ncu.edu.cn",
                     UserLookupMethod::Email,
                     10,
@@ -847,7 +998,13 @@ mod tests {
             );
 
             let by_student_id = repo
-                .lookup_users(&requester_id, "2024987654", UserLookupMethod::Auto, 10)
+                .lookup_users(
+                    &requester_id,
+                    campus_id,
+                    "2024987654",
+                    UserLookupMethod::Auto,
+                    10,
+                )
                 .await
                 .expect("student lookup");
             assert_eq!(by_student_id.len(), 1);
@@ -865,7 +1022,13 @@ mod tests {
                 .expect("insert block");
 
             let blocked = repo
-                .lookup_users(&requester_id, "2024987654", UserLookupMethod::StudentId, 10)
+                .lookup_users(
+                    &requester_id,
+                    campus_id,
+                    "2024987654",
+                    UserLookupMethod::StudentId,
+                    10,
+                )
                 .await
                 .expect("blocked lookup");
             assert!(blocked.is_empty());

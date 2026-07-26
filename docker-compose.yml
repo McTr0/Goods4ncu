@@ -45,6 +45,10 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    # Must exceed SHUTDOWN_DRAIN_SECS + SHUTDOWN_TIMEOUT_SECS (default 5 + 25).
+    # Compose's 10s default would SIGKILL the container mid-drain and undo the
+    # graceful shutdown entirely.
+    stop_grace_period: 40s
 
 volumes:
   goods4ncu_pgdata:

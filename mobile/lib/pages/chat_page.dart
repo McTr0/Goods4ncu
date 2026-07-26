@@ -487,6 +487,7 @@ class _ChatPageState extends State<ChatPage> {
 
   // Active HITL requests shown as cards in the chat.
   List<HitlRequest> _hitlRequests = [];
+  List<AgentPlan> _agentPlans = [];
 
   StreamSubscription? _wsSubscription;
 
@@ -555,6 +556,7 @@ class _ChatPageState extends State<ChatPage> {
         _currentUserId = profile['user_id']?.toString();
       });
       await _loadNegotiations();
+      await _loadAgentPlans();
     } catch (_) {}
   }
 
@@ -568,6 +570,87 @@ class _ChatPageState extends State<ChatPage> {
             .toList();
       });
     } catch (_) {}
+  }
+
+  Future<void> _loadAgentPlans() async {
+    try {
+      final plans = await _apiService.getAgentPlans();
+      if (!mounted) return;
+      setState(() => _agentPlans = plans);
+    } catch (_) {}
+  }
+
+  Future<void> _confirmAgentPlan(AgentPlan plan) async {
+    final l = AppLocalizations.of(context)!;
+    try {
+      var outcome = await _apiService.confirmAgentPlan(
+        plan.id,
+        plan.confirmationToken,
+      );
+      if (!mounted) return;
+      if (outcome.needsSecondConfirmation) {
+        // High-risk action: the backend armed the plan and demands an
+        // explicit second confirmation before executing.
+        final proceed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Text(l.agentPlanSecondConfirmTitle),
+            content: Text(plan.summary),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(l.cancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: Text(l.agentPlanSecondConfirmAction),
+              ),
+            ],
+          ),
+        );
+        if (proceed != true || !mounted) {
+          await _loadAgentPlans();
+          return;
+        }
+        outcome = await _apiService.confirmAgentPlan(
+          plan.id,
+          plan.confirmationToken,
+        );
+        if (!mounted) return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            outcome.result.isEmpty ? l.agentPlanExecuted : outcome.result,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.operationFailed(e.toString()))));
+    }
+    await _loadAgentPlans();
+  }
+
+  Future<void> _cancelAgentPlan(AgentPlan plan) async {
+    final l = AppLocalizations.of(context)!;
+    try {
+      await _apiService.cancelAgentPlan(plan.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.agentPlanCancelled)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.operationFailed(e.toString()))));
+    }
+    await _loadAgentPlans();
   }
 
   void _connectWs() {
@@ -774,8 +857,10 @@ class _ChatPageState extends State<ChatPage> {
         });
       }
 
-      // Refresh negotiations after chat (the agent may have created a HITL request).
+      // Refresh negotiations and pending plans after chat (the agent may have
+      // created a HITL request or proposed an action awaiting confirmation).
       await _loadNegotiations();
+      await _loadAgentPlans();
       widget.onConversationUpdated?.call();
     } on ChatPageMediaUploadException catch (e) {
       if (!mounted) return;
@@ -822,6 +907,61 @@ class _ChatPageState extends State<ChatPage> {
             child: Text(
               l.assistantHistoryLoadFailed,
               style: const TextStyle(fontSize: 12, color: Color(0xFF765A16)),
+            ),
+          ),
+        // Pending agent action plans: the model proposed these writes, and
+        // nothing executes until the user confirms here.
+        if (_agentPlans.isNotEmpty)
+          Container(
+            color: const Color(0xFFF1F5FF),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l.agentPlanPendingHeader,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF3F51B5),
+                  ),
+                ),
+                ..._agentPlans.map(
+                  (plan) => Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Row(
+                      children: [
+                        Icon(
+                          plan.isHighRisk
+                              ? Icons.warning_amber_rounded
+                              : Icons.pending_actions,
+                          size: 18,
+                          color: plan.isHighRisk
+                              ? const Color(0xFFB45309)
+                              : const Color(0xFF3F51B5),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            plan.summary,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => _cancelAgentPlan(plan),
+                          child: Text(l.cancel),
+                        ),
+                        FilledButton(
+                          onPressed: () => _confirmAgentPlan(plan),
+                          child: Text(l.agentPlanConfirmAction),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         // Negotiation cards strip at the top of chat

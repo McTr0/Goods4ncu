@@ -24,7 +24,7 @@ pgvector = "0.4"
 uuid = { version = "1.22.0", features = ["v4", "serde"] }
 axum = { version = "0.8", features = ["json", "ws"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["fs", "cors", "limit"] }
+tower-http = { version = "0.6", features = ["fs", "cors", "limit", "timeout"] }
 argon2 = "0.5.3"
 jsonwebtoken = { version = "10.3.0", default-features = false, features = ["rust_crypto"] }
 rand = "0.10.0"
@@ -42,10 +42,21 @@ hex = "0.4"
 tokio-tungstenite = "0.28"
 futures-util = "0.3"
 futures = "0.3"
-prometheus = "0.13"
+# `default-features = false` drops the protobuf exposition format, which pulls
+# in the unmaintained protobuf 2.x line (RUSTSEC-2024-0437). Only the text
+# format is served, via TextEncoder in src/api/metrics.rs.
+prometheus = { version = "0.13", default-features = false }
+
+[dev-dependencies]
+# `test-util` enables the paused clock used by lifecycle tests, so worker
+# shutdown on long intervals is verified without real sleeps. Not in "full".
+tokio = { version = "1.34", features = ["full", "test-util"] }
 
 [features]
-default = []
+# `redis` is on by default so release binaries can join a multi-replica
+# deployment by just setting REDIS_URL; without it the fanout and distributed
+# rate limiting compile out and the instance runs single-node.
+default = ["redis"]
 redis = ["dep:redis"]
 
 [dependencies.redis]

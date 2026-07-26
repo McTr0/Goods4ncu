@@ -43,11 +43,19 @@ class AuthService extends BaseService {
 
   /// Register new account.
   /// POST /api/auth/register
-  Future<String> register(String username, String password) async {
+  Future<String> register(
+    String username,
+    String password, {
+    String? email,
+  }) async {
     final response = await post(
       Uri.parse('$baseUrl/api/auth/register'),
       {'Content-Type': 'application/json'},
-      jsonEncode({'username': username, 'password': password}),
+      jsonEncode({
+        'username': username,
+        'password': password,
+        if (email != null && email.isNotEmpty) 'email': email,
+      }),
     );
 
     if (response.statusCode == 200) {
@@ -75,6 +83,31 @@ class AuthService extends BaseService {
       } catch (_) {}
       throw Exception(msg);
     }
+  }
+
+  /// Verify the current password and replace the access token with a
+  /// ten-minute recently-authenticated token for sensitive operations.
+  Future<DateTime?> reauthenticate(String password, {String? totpCode}) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/auth/reauth'),
+      headers,
+      jsonEncode({
+        'password': password,
+        if (totpCode != null && totpCode.isNotEmpty) 'totp_code': totpCode,
+      }),
+      allowAuthRetry: false,
+    );
+    final data = handleResponse(
+      response,
+      (value) => value as Map<String, dynamic>,
+    );
+    final token = data['token']?.toString() ?? '';
+    if (token.isEmpty) {
+      throw ServerException(response.statusCode, '重新认证响应不完整');
+    }
+    await setToken(token);
+    return DateTime.tryParse(data['recent_auth_expires_at']?.toString() ?? '');
   }
 
   /// Change password for authenticated user.
@@ -129,6 +162,41 @@ class AuthService extends BaseService {
       } catch (_) {}
       throw Exception(msg);
     }
+  }
+
+  /// Switch this device session to another verified campus.
+  Future<String> switchActiveCampus(String campusId) async {
+    final refreshToken = await getRefreshToken();
+    if (refreshToken == null || refreshToken.isEmpty) {
+      throw Exception('当前登录会话无法切换校园，请重新登录');
+    }
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/user/active-campus'),
+      headers,
+      jsonEncode({'campus_id': campusId, 'refresh_token': refreshToken}),
+    );
+    if (response.statusCode != 200) {
+      String message = '切换校园失败 (${response.statusCode})';
+      try {
+        final body = jsonDecode(response.body);
+        message =
+            body['error']?.toString() ?? body['message']?.toString() ?? message;
+      } catch (_) {}
+      throw Exception(message);
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final token = data['token']?.toString() ?? '';
+    final newRefreshToken = data['refresh_token']?.toString() ?? '';
+    if (token.isEmpty || newRefreshToken.isEmpty) {
+      throw Exception('切换校园响应不完整');
+    }
+
+    await WsService.instance.disconnect();
+    await setToken(token);
+    await setRefreshToken(newRefreshToken);
+    return token;
   }
 
   /// Logout authenticated user.

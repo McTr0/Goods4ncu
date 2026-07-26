@@ -16,15 +16,119 @@ pub async fn init_db(database_url: &str) -> Result<PgPool> {
     // Enable pgvector extension (creates the vector type and operators)
     // This must be done before running migrations since the vector type is needed
     // by the documents table migration.
-    sqlx::query("CREATE EXTENSION IF NOT EXISTS vector")
-        .execute(&db_pool)
+    //
+    // Creating an extension requires superuser (pgvector is not a "trusted"
+    // extension), but the application role MUST NOT be a superuser: superusers
+    // bypass Row-Level Security entirely, which would silently disable the
+    // tenant policies from migration 0042. So: if the extension is already
+    // installed — the correct production state, provisioned once by a DBA — we
+    // skip creation entirely and never need the privilege. Only a fresh
+    // developer database takes the create path, and a permission failure there
+    // is reported with the exact command an operator should run.
+    {
+        const EXTENSION_BOOT_LOCK: i64 = 7_315_900_422;
+        let mut conn = db_pool.acquire().await?;
+        sqlx::query("SELECT pg_advisory_lock($1)")
+            .bind(EXTENSION_BOOT_LOCK)
+            .execute(&mut *conn)
+            .await?;
+
+        let already_installed: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')",
+        )
+        .fetch_one(&mut *conn)
         .await?;
+
+        // Serialized under the advisory lock: `IF NOT EXISTS` does not protect
+        // two replicas booting a fresh database concurrently — both pass the
+        // existence check and one fails on the pg_extension catalog's unique
+        // index. Surfaced by scripts/production_rehearsal.sh.
+        let outcome = if already_installed {
+            Ok(())
+        } else {
+            sqlx::query("CREATE EXTENSION IF NOT EXISTS vector")
+                .execute(&mut *conn)
+                .await
+                .map(|_| ())
+        };
+
+        // Release the session lock before propagating any error so a failed
+        // boot cannot wedge the other replica.
+        sqlx::query("SELECT pg_advisory_unlock($1)")
+            .bind(EXTENSION_BOOT_LOCK)
+            .execute(&mut *conn)
+            .await?;
+
+        if let Err(error) = outcome {
+            let insufficient_privilege = error
+                .as_database_error()
+                .and_then(|db| db.code())
+                .is_some_and(|code| code == "42501");
+            if insufficient_privilege {
+                return Err(anyhow::anyhow!(
+                    "the pgvector extension is not installed and this role may not create it.\n\
+                     Install it once as a superuser, then restart:\n\
+                     \n    psql -d <database> -c 'CREATE EXTENSION vector;'\n\n\
+                     The application role must NOT be a superuser — superusers bypass \
+                     Row-Level Security, which would disable tenant isolation."
+                ));
+            }
+            return Err(error.into());
+        }
+    }
 
     // Run versioned migrations (includes all CREATE TABLE, CREATE INDEX, etc.)
     // Keep the literal path here so sqlx embeds the current on-disk migration set at compile time, including new files.
+    // Migrations are embedded in the binary; deployment must rebuild whenever
+    // files under migrations/ change rather than reusing an older executable.
     sqlx::migrate!("./migrations").run(&db_pool).await?;
 
     Ok(db_pool)
+}
+
+/// Refuse to run in production while the demo seed accounts exist.
+///
+/// `migrations/0005_seed_data.sql` says "run manually" but lives in
+/// `migrations/`, so sqlx applies it to EVERY database — including production.
+/// It inserts `admin`, `buyer1`, `seller1`… all sharing the published password
+/// `Test1234`, and `admin` has the platform-admin role. A production deployment
+/// would therefore ship with a publicly-known administrator login.
+///
+/// Deleting or editing 0005 is not safe (sqlx validates checksums of applied
+/// migrations), so the guard lives here where the environment is known: fail
+/// fast with the exact cleanup command instead of silently serving.
+pub async fn assert_no_demo_seed_in_production(
+    db_pool: &PgPool,
+    is_production: bool,
+) -> Result<()> {
+    if !is_production {
+        return Ok(());
+    }
+    // Match on the seed's fixed ids rather than usernames: a real user could
+    // legitimately be called "admin", but these UUIDs only come from 0005.
+    const SEED_IDS: &[&str] = &[
+        "a0000000-0000-0000-0000-000000000001",
+        "b0000000-0000-0000-0000-000000000001",
+        "b0000000-0000-0000-0000-000000000002",
+        "s0000000-0000-0000-0000-000000000001",
+        "s0000000-0000-0000-0000-000000000002",
+        "banned00-0000-0000-0000-000000000001",
+    ];
+    let present: Vec<String> =
+        sqlx::query_scalar("SELECT username FROM users WHERE id = ANY($1) ORDER BY username")
+            .bind(SEED_IDS)
+            .fetch_all(db_pool)
+            .await?;
+    if present.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "refusing to start in production: demo seed accounts are present ({}).\n\
+         They share the published password 'Test1234' and include a platform admin.\n\
+         Remove them, then restart:\n\
+         \n    psql -d <database> -f scripts/remove_demo_seed.sql\n",
+        present.join(", ")
+    );
 }
 
 pub async fn assert_documents_embedding_dim(db_pool: &PgPool, expected_dim: usize) -> Result<()> {

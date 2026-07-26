@@ -13,6 +13,12 @@ use async_trait::async_trait;
 
 const WHITELISTED_PATHS: &[&str] = &[
     "/api/health",
+    // Orchestrator probes poll every few seconds from a small set of source
+    // addresses. Rate limiting them would report the instance as unhealthy and
+    // trigger a restart loop under exactly the load the limiter exists to
+    // survive.
+    "/api/livez",
+    "/api/readyz",
     "/api/stats",
     "/api/categories",
     "/api/chat/connections",

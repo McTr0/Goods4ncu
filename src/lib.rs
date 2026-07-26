@@ -8,6 +8,7 @@ pub mod categories;
 pub mod cli;
 pub mod config;
 pub mod db;
+pub mod lifecycle;
 pub mod llm;
 pub mod middleware;
 pub mod repositories;

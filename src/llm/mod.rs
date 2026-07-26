@@ -12,6 +12,25 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 
+/// Shared reqwest client for all LLM provider traffic.
+///
+/// `reqwest::Client` has NO timeout by default. Without these bounds a hung
+/// provider connection stalls the user's chat request indefinitely — and the
+/// circuit breaker above never even records the failure, because a hang never
+/// returns. Every provider must build its HTTP client through this helper.
+///
+/// - `connect_timeout` fails fast when the provider endpoint is unreachable.
+/// - `read_timeout` is per-read, so it kills a stalled stream without capping
+///   how long a healthy streaming completion may run in total. A whole-request
+///   `timeout()` would be wrong here: long agent completions stream well past
+///   any limit that is still useful against hangs.
+pub(crate) fn llm_http_client() -> reqwest::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .read_timeout(Duration::from_secs(60))
+        .build()
+}
+
 /// Circuit breaker state for LLM resilience.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CircuitState {
@@ -141,6 +160,7 @@ pub trait LlmProvider: Send + Sync {
         db_pool: &sqlx::PgPool,
         event_tx: mpsc::Sender<BusinessEvent>,
         current_user_id: Option<String>,
+        current_campus_id: Option<uuid::Uuid>,
     ) -> anyhow::Result<Box<dyn MarketplaceAgent>>;
 
     /// Create a negotiation agent.
@@ -148,6 +168,14 @@ pub trait LlmProvider: Send + Sync {
 
     /// Create a tool-free assistant that only drafts non-binding replies.
     async fn create_reply_assistant(self: Arc<Self>) -> anyhow::Result<Box<dyn ReplyAssistant>>;
+
+    /// Build the transactional embed-updater for this provider's embedding
+    /// model. Needed outside agent construction (e.g. by the ActionPlan
+    /// executor, which re-embeds on confirmed listing writes).
+    fn embed_updater(
+        self: Arc<Self>,
+        db_pool: &sqlx::PgPool,
+    ) -> Arc<dyn crate::agents::tools::EmbedUpdater>;
 }
 
 /// Marker trait for marketplace agents — erased via `Box<dyn MarketplaceAgent>`.

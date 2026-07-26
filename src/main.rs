@@ -7,6 +7,7 @@ mod categories;
 mod cli;
 mod config;
 mod db;
+mod lifecycle;
 mod llm;
 mod middleware;
 #[cfg(test)]
@@ -60,6 +61,9 @@ async fn main() -> Result<(), anyhow::Error> {
     let db_pool = db::init_db(&config.database_url).await?;
     db::assert_documents_embedding_dim(&db_pool, config.vector_dim).await?;
     db::assert_uuid_shadow_drift_zero(&db_pool).await?;
+    // A production database must not carry the demo seed accounts: they share a
+    // published password and include a platform admin.
+    db::assert_no_demo_seed_in_production(&db_pool, config::running_in_production()).await?;
 
     // Build the LLM provider based on configuration
     let llm_provider: Arc<dyn LlmProvider> = match config.llm_provider.as_str() {
@@ -115,6 +119,12 @@ async fn main() -> Result<(), anyhow::Error> {
         }
     };
 
+    // One shutdown flag drives readiness, the HTTP listener and every worker,
+    // so a SIGTERM cannot leave part of the process draining and part of it
+    // still accepting new work.
+    let shutdown_controller = lifecycle::ShutdownController::new();
+    let shutdown = shutdown_controller.signal();
+
     let (services, event_rx) = services::ServiceManager::new(db_pool.clone());
     let event_tx = services.event_tx.clone();
     let admin_service = services.admin.clone();
@@ -132,9 +142,40 @@ async fn main() -> Result<(), anyhow::Error> {
             api::ws::broadcast_to_user(&user_id, &payload);
         });
 
-    // Build the notification service with WebSocket broadcast wired in.
-    let notification = crate::services::notification::NotificationService::new(db_pool.clone())
-        .with_broadcast(Arc::clone(&broadcast));
+    // Notification pushes are delivered via the transactional outbox; the
+    // direct broadcast callback remains only for ephemeral worker events.
+    let notification = crate::services::notification::NotificationService::new(db_pool.clone());
+
+    // Outbox worker: dispatches durable events (currently notification pushes)
+    // enqueued in the same transaction as the business write.
+    struct WsPushDispatcher;
+    #[async_trait::async_trait]
+    impl services::outbox::OutboxDispatcher for WsPushDispatcher {
+        async fn dispatch(&self, topic: &str, payload: &serde_json::Value) -> anyhow::Result<()> {
+            match topic {
+                services::outbox::TOPIC_NOTIFICATION_PUSH => {
+                    let user_id = payload["user_id"]
+                        .as_str()
+                        .ok_or_else(|| anyhow::anyhow!("missing user_id"))?;
+                    let message = payload["message"].to_string();
+                    // Idempotent for our purposes: re-delivery re-sends the
+                    // same notification id, which clients key on.
+                    api::ws::broadcast_to_user(user_id, &message);
+                    Ok(())
+                }
+                other => {
+                    // Unknown topics fail (and eventually dead-letter) loudly
+                    // instead of being silently dropped as "processed".
+                    anyhow::bail!("no dispatcher for outbox topic '{other}'")
+                }
+            }
+        }
+    }
+    let outbox_worker_handle = tokio::spawn(services::outbox::run_outbox_worker(
+        db_pool.clone(),
+        Arc::new(WsPushDispatcher),
+        shutdown.clone(),
+    ));
 
     let router = crate::agents::router::IntentRouter::new(config.blocked_keywords.clone());
 
@@ -142,12 +183,14 @@ async fn main() -> Result<(), anyhow::Error> {
     let hitl_expire_handle = tokio::spawn(services::hitl_expire::run(
         db_pool.clone(),
         Arc::clone(&broadcast),
+        shutdown.clone(),
     ));
 
     // Order lifecycle worker is a no-op in offline deal mode.
     let order_worker_handle = tokio::spawn(services::order_worker::run(
         db_pool.clone(),
         Arc::clone(&broadcast),
+        shutdown.clone(),
     ));
 
     // Content moderation worker: polls pending image moderation jobs.
@@ -156,18 +199,32 @@ async fn main() -> Result<(), anyhow::Error> {
         config.moderation_image_api_url.clone(),
         config.moderation_image_api_key.clone(),
     );
-    let moderation_worker_handle = tokio::spawn(
-        services::moderation_worker::run_moderation_worker(db_pool.clone(), moderation_worker_cfg),
-    );
+    let moderation_worker_handle =
+        tokio::spawn(services::moderation_worker::run_moderation_worker(
+            db_pool.clone(),
+            moderation_worker_cfg,
+            shutdown.clone(),
+        ));
 
     // Revoked token cleanup worker: prunes expired DB denylist rows hourly.
     let token_cleanup_handle = tokio::spawn(services::token_denylist::run_cleanup_worker(
         db_pool.clone(),
+        shutdown.clone(),
     ));
 
     let chat_expiry_handle = tokio::spawn(services::chat_expire::run_chat_expiry_worker(
         db_pool.clone(),
+        shutdown.clone(),
     ));
+
+    // Multi-replica realtime: when REDIS_URL is configured, WS broadcasts
+    // route through Redis pub/sub so any replica can deliver to the sockets it
+    // holds. Without it (or without the `redis` feature) delivery stays local.
+    #[cfg(feature = "redis")]
+    let ws_fanout_handle = config
+        .redis_url
+        .clone()
+        .map(|redis_url| tokio::spawn(services::ws_fanout::run(redis_url, shutdown.clone())));
 
     // Build repository layer (concrete types - simpler than dyn traits for now)
     let listing_repo = repositories::PostgresListingRepository::new(db_pool.clone());
@@ -177,6 +234,38 @@ async fn main() -> Result<(), anyhow::Error> {
     let order_repo = repositories::PostgresOrderRepository::new(db_pool.clone());
 
     let token_denylist = services::token_denylist::TokenDenylist::new();
+
+    // Private-bucket media: build the presigner when enabled and fully
+    // configured. Missing credentials with the flag on is a configuration
+    // error, not a silent downgrade to public serving.
+    let media_signer = if config.media_private_bucket {
+        let (Some(access_key_id), Some(secret_access_key)) = (
+            config.oss_access_key_id.clone(),
+            config.oss_access_key_secret.clone(),
+        ) else {
+            return Err(anyhow::anyhow!(
+                "MEDIA_PRIVATE_BUCKET=true requires OSS_ACCESS_KEY_ID and OSS_ACCESS_KEY_SECRET"
+            ));
+        };
+        tracing::info!(
+            bucket = %config.oss_bucket,
+            ttl_secs = config.media_url_ttl_secs,
+            "Private media bucket enabled; approved media served via presigned URLs"
+        );
+        Some(Arc::new(api::MediaSigner {
+            bucket: services::storage::PrivateBucket {
+                endpoint: config.oss_endpoint.clone(),
+                bucket: config.oss_bucket.clone(),
+                region: config.media_region.clone(),
+                access_key_id,
+                secret_access_key,
+                path_style: config.media_path_style,
+            },
+            ttl_secs: config.media_url_ttl_secs,
+        }))
+    } else {
+        None
+    };
 
     let app_state = api::AppState {
         secrets: api::ApiSecrets {
@@ -197,7 +286,28 @@ async fn main() -> Result<(), anyhow::Error> {
                     config.rate_limit_max_requests,
                     config.rate_limit_window_secs,
                 );
-                middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
+                #[cfg(feature = "redis")]
+                let handle = if let Some(redis_url) = config.redis_url.as_deref() {
+                    match factory.build_redis(redis_url).await {
+                        Ok(limiter) => {
+                            tracing::info!("Distributed rate limiting enabled (Redis)");
+                            middleware::rate_limit::RateLimitStateHandle::new(limiter)
+                        }
+                        Err(error) => {
+                            // Fail closed to local limiting rather than
+                            // refusing to boot: a Redis outage should degrade
+                            // per-instance, not take the API down.
+                            tracing::error!(%error, "Redis rate limiter unavailable; using local limiter");
+                            middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
+                        }
+                    }
+                } else {
+                    middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
+                };
+                #[cfg(not(feature = "redis"))]
+                let handle =
+                    middleware::rate_limit::RateLimitStateHandle::new(factory.build_local());
+                handle
             },
             notification,
             ws_connections: ws_state,
@@ -206,6 +316,9 @@ async fn main() -> Result<(), anyhow::Error> {
             admin_service,
             moderation: services::moderation::ModerationService::new(&config),
             token_denylist: token_denylist.clone(),
+            secret_chat_new_sessions_enabled: config.secret_chat_new_sessions_enabled,
+            media_signer: media_signer.clone(),
+            shutdown: shutdown.clone(),
         },
         agents: api::ApiAgents {
             llm_provider: Arc::clone(&llm_provider),
@@ -222,9 +335,15 @@ async fn main() -> Result<(), anyhow::Error> {
 
     // Periodic cleanup of expired denylist entries (every 5 minutes)
     let denylist_cleanup = token_denylist.clone();
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+    let denylist_shutdown = shutdown.clone();
+    let denylist_handle = tokio::spawn(async move {
+        while lifecycle::sleep_or_shutdown(
+            tokio::time::Duration::from_secs(300),
+            &denylist_shutdown,
+        )
+        .await
+        .should_continue()
+        {
             denylist_cleanup.cleanup_expired();
         }
     });
@@ -233,27 +352,97 @@ async fn main() -> Result<(), anyhow::Error> {
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
     tracing::info!(addr = %bind_addr, "Web Server started");
 
+    // Axum stops accepting once this future resolves, then waits for in-flight
+    // requests. Delaying it by the drain grace period gives the load balancer
+    // time to observe the failing readiness probe and stop routing here, so
+    // requests are never accepted onto a socket that is about to close.
+    let drain_grace = tokio::time::Duration::from_secs(config.shutdown_drain_secs);
+    let listener_shutdown = shutdown.clone();
     let server_handle = tokio::spawn(async move {
         let service = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
-        if let Err(e) = axum::serve(listener, service).await {
+        let result = axum::serve(listener, service)
+            .with_graceful_shutdown(async move {
+                listener_shutdown.wait().await;
+                if !drain_grace.is_zero() {
+                    tracing::info!(
+                        drain_secs = drain_grace.as_secs(),
+                        "Draining: readiness now failing, still serving in-flight traffic"
+                    );
+                    tokio::time::sleep(drain_grace).await;
+                }
+                tracing::info!("Drain grace elapsed, closing listener");
+            })
+            .await;
+        if let Err(e) = result {
             tracing::error!(%e, "Server error");
         }
     });
 
-    // Wait for Ctrl+C to shut down gracefully
-    tokio::signal::ctrl_c().await?;
-    tracing::info!("Ctrl+C received, shutting down.");
+    let signal_name = lifecycle::terminate_signal().await;
+    tracing::info!(
+        signal = signal_name,
+        "Termination signal received, draining"
+    );
+    shutdown_controller.trigger();
 
-    server_handle.abort();
+    // Bound the whole drain so a stuck request cannot hold the process past the
+    // orchestrator's grace period and turn an orderly stop into a SIGKILL.
+    let shutdown_timeout = tokio::time::Duration::from_secs(config.shutdown_timeout_secs);
+    let graceful = async {
+        if let Err(e) = server_handle.await {
+            tracing::error!(%e, "HTTP server task failed during shutdown");
+        }
+        tracing::info!("HTTP listener closed, waiting for background workers");
+
+        // Workers stop between iterations, so joining them means no scan is cut
+        // off mid-transaction.
+        let workers = tokio::join!(
+            hitl_expire_handle,
+            order_worker_handle,
+            moderation_worker_handle,
+            token_cleanup_handle,
+            chat_expiry_handle,
+            denylist_handle,
+            outbox_worker_handle,
+        );
+        #[cfg(feature = "redis")]
+        if let Some(handle) = ws_fanout_handle {
+            if let Err(e) = handle.await {
+                tracing::error!(worker = "ws_fanout", %e, "Worker task failed during shutdown");
+            }
+        }
+        for (name, result) in [
+            ("hitl_expire", workers.0),
+            ("order_worker", workers.1),
+            ("moderation_worker", workers.2),
+            ("token_cleanup", workers.3),
+            ("chat_expiry", workers.4),
+            ("denylist_cleanup", workers.5),
+            ("outbox", workers.6),
+        ] {
+            if let Err(e) = result {
+                tracing::error!(worker = name, %e, "Worker task failed during shutdown");
+            }
+        }
+    };
+
+    if tokio::time::timeout(shutdown_timeout, graceful)
+        .await
+        .is_err()
+    {
+        tracing::warn!(
+            timeout_secs = shutdown_timeout.as_secs(),
+            "Graceful shutdown timed out; abandoning remaining work"
+        );
+    }
+
+    // The event loop drains last: workers and handlers can still emit events
+    // while they finish, and aborting it earlier would silently drop them.
     event_loop_handle.abort();
-    hitl_expire_handle.abort();
-    order_worker_handle.abort();
-    moderation_worker_handle.abort();
-    token_cleanup_handle.abort();
-    chat_expiry_handle.abort();
 
-    // Gracefully close the DB pool so Postgres can cleanly收回所有连接
-    // and flush any pending transaction results in the buffer.
+    // Close the pool so Postgres reclaims connections promptly instead of
+    // waiting for TCP timeouts, which otherwise slow the next deploy's
+    // connection budget.
     db_pool.close().await;
 
     tracing::info!("Shutdown complete.");

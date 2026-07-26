@@ -367,6 +367,16 @@ pub struct ModerationService {
 }
 
 impl ModerationService {
+    /// Test-only constructor with image moderation toggled explicitly and no
+    /// provider configuration. Lives in the lib (not #[cfg(test)]) so
+    /// integration tests can exercise the quarantine path.
+    #[allow(dead_code)] // used from the lib crate by integration tests
+    pub fn new_for_test(image_enabled: bool) -> Self {
+        let mut service = Self::new(&crate::config::AppConfig::test_defaults());
+        service.image_enabled = image_enabled;
+        service
+    }
+
     /// Build a new ModerationService from app config.
     pub fn new(config: &AppConfig) -> Self {
         let phone_re = Regex::new(r"1[3-9]\d{9}").expect("valid phone regex");
@@ -487,25 +497,42 @@ impl ModerationService {
     pub async fn submit_image_job(
         &self,
         pool: &PgPool,
+        campus_id: uuid::Uuid,
         resource_id: &str,
         image_url: &str,
         resource_type: &str,
     ) -> Result<String, sqlx::Error> {
         if !self.image_enabled {
+            // Moderation is off: mark the media explicitly reviewed-exempt so
+            // the serving gate (`= 'approved'`) still works. Leaving it
+            // 'pending' forever would hide every image in deployments without
+            // a moderation provider.
+            let mut tx = pool.begin().await?;
+            set_media_moderation_status(&mut tx, resource_type, resource_id, "approved").await?;
+            tx.commit().await?;
             return Ok(String::new());
         }
 
+        // Quarantine and job enqueue commit atomically: from this moment the
+        // media is hidden from public serving until the worker approves it. A
+        // crash between the two would otherwise leave an unreviewed image
+        // publicly visible with no job to ever review it.
         let id = uuid::Uuid::new_v4().to_string();
+        let mut tx = pool.begin().await?;
         sqlx::query(
-            r#"INSERT INTO moderation_jobs (id, resource_type, resource_id, image_url, status)
-               VALUES ($1, $2, $3, $4, 'pending')"#,
+            r#"INSERT INTO moderation_jobs (
+                   id, campus_id, resource_type, resource_id, image_url, status
+               ) VALUES ($1, $2, $3, $4, $5, 'pending')"#,
         )
         .bind(&id)
+        .bind(campus_id)
         .bind(resource_type)
         .bind(resource_id)
         .bind(image_url)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+        set_media_moderation_status(&mut tx, resource_type, resource_id, "pending").await?;
+        tx.commit().await?;
 
         Ok(id)
     }
@@ -515,6 +542,48 @@ impl ModerationService {
     pub fn is_image_enabled(&self) -> bool {
         self.image_enabled
     }
+}
+
+/// Write a media moderation status onto the owning resource. Shared by job
+/// submission (quarantine to 'pending') and the worker (final verdict), so the
+/// resource-type mapping cannot drift between the two.
+pub(crate) async fn set_media_moderation_status(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    resource_type: &str,
+    resource_id: &str,
+    status: &str,
+) -> Result<(), sqlx::Error> {
+    match resource_type {
+        "listing_image" => {
+            sqlx::query("UPDATE inventory SET images_moderation_status = $1 WHERE id = $2")
+                .bind(status)
+                .bind(resource_id)
+                .execute(&mut **tx)
+                .await?;
+        }
+        "chat_image" => {
+            if let Ok(message_id) = resource_id.parse::<i64>() {
+                sqlx::query("UPDATE chat_messages SET moderation_status = $1 WHERE id = $2")
+                    .bind(status)
+                    .bind(message_id)
+                    .execute(&mut **tx)
+                    .await?;
+            } else {
+                tracing::warn!(resource_id, "invalid chat_image resource id");
+            }
+        }
+        "avatar" => {
+            sqlx::query("UPDATE users SET avatar_moderation_status = $1 WHERE id = $2")
+                .bind(status)
+                .bind(resource_id)
+                .execute(&mut **tx)
+                .await?;
+        }
+        other => {
+            tracing::warn!(resource_type = other, "unknown media resource type");
+        }
+    }
+    Ok(())
 }
 
 fn normalize_for_moderation(text: &str) -> String {
@@ -600,6 +669,8 @@ mod tests {
             rate_limit_window_secs: 60,
             server_host: "127.0.0.1".to_string(),
             server_port: 3000,
+            shutdown_drain_secs: 5,
+            shutdown_timeout_secs: 25,
             event_bus_capacity: 2048,
             hitl_expire_scan_interval_secs: 600,
             hitl_expire_timeout_hours: 48,
@@ -613,6 +684,11 @@ mod tests {
             moderation_image_enabled: true,
             moderation_image_api_url: None,
             moderation_image_api_key: None,
+            secret_chat_new_sessions_enabled: false,
+            media_private_bucket: false,
+            media_url_ttl_secs: 600,
+            media_path_style: true,
+            media_region: "us-east-1".to_string(),
         }
     }
 

@@ -1076,6 +1076,114 @@ abstract class AppLocalizations {
   /// **'Profile'**
   String get profileTab;
 
+  /// No description provided for @campusMembershipVerified.
+  ///
+  /// In en, this message translates to:
+  /// **'Campus verified'**
+  String get campusMembershipVerified;
+
+  /// No description provided for @campusMembershipPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Verification pending'**
+  String get campusMembershipPending;
+
+  /// No description provided for @campusMembershipSuspended.
+  ///
+  /// In en, this message translates to:
+  /// **'Membership suspended'**
+  String get campusMembershipSuspended;
+
+  /// No description provided for @campusMembershipRevoked.
+  ///
+  /// In en, this message translates to:
+  /// **'Membership revoked'**
+  String get campusMembershipRevoked;
+
+  /// No description provided for @campusEmail.
+  ///
+  /// In en, this message translates to:
+  /// **'Campus email'**
+  String get campusEmail;
+
+  /// No description provided for @campusEmailHint.
+  ///
+  /// In en, this message translates to:
+  /// **'student-id@email.ncu.edu.cn'**
+  String get campusEmailHint;
+
+  /// No description provided for @campusEmailRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'A campus email is required to register'**
+  String get campusEmailRequired;
+
+  /// No description provided for @verifyCampusIdentity.
+  ///
+  /// In en, this message translates to:
+  /// **'Verify campus identity'**
+  String get verifyCampusIdentity;
+
+  /// No description provided for @campusVerificationSendHint.
+  ///
+  /// In en, this message translates to:
+  /// **'We will send a code to your current campus email. It expires in 5 minutes.'**
+  String get campusVerificationSendHint;
+
+  /// No description provided for @sendVerificationCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Send verification code'**
+  String get sendVerificationCode;
+
+  /// No description provided for @verificationCodeSent.
+  ///
+  /// In en, this message translates to:
+  /// **'Code sent. Check your campus inbox.'**
+  String get verificationCodeSent;
+
+  /// No description provided for @verificationCode.
+  ///
+  /// In en, this message translates to:
+  /// **'6-digit code'**
+  String get verificationCode;
+
+  /// No description provided for @confirmVerification.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm verification'**
+  String get confirmVerification;
+
+  /// No description provided for @campusVerificationSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Campus identity verified'**
+  String get campusVerificationSuccess;
+
+  /// No description provided for @campusSwitchTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Switch active campus'**
+  String get campusSwitchTitle;
+
+  /// No description provided for @campusSwitchDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Browsing, publishing, and communication stay within this campus. Each device can choose independently.'**
+  String get campusSwitchDescription;
+
+  /// No description provided for @campusActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Active campus'**
+  String get campusActive;
+
+  /// No description provided for @campusSwitchSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Active campus switched'**
+  String get campusSwitchSuccess;
+
   /// No description provided for @publishTab.
   ///
   /// In en, this message translates to:
@@ -1502,6 +1610,120 @@ abstract class AppLocalizations {
   /// **'No listings found'**
   String get adminNoListingsFound;
 
+  /// No description provided for @adminSensitiveActionsLocked.
+  ///
+  /// In en, this message translates to:
+  /// **'Sensitive actions are locked'**
+  String get adminSensitiveActionsLocked;
+
+  /// No description provided for @adminSensitiveActionsLockedSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Viewing is unaffected. Bans, takedowns, role changes, and moderation decisions require password verification.'**
+  String get adminSensitiveActionsLockedSubtitle;
+
+  /// No description provided for @adminUnlockActions.
+  ///
+  /// In en, this message translates to:
+  /// **'Verify and unlock'**
+  String get adminUnlockActions;
+
+  /// No description provided for @adminReauthenticateTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Verify administrator identity'**
+  String get adminReauthenticateTitle;
+
+  /// No description provided for @adminReauthenticateHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Sensitive actions stay unlocked for 10 minutes'**
+  String get adminReauthenticateHint;
+
+  /// No description provided for @adminTotpCodeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Authenticator code (if enabled)'**
+  String get adminTotpCodeLabel;
+
+  /// No description provided for @adminTotpCodeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'6-digit code from your authenticator app'**
+  String get adminTotpCodeHint;
+
+  /// No description provided for @agentPlanPendingHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'Pending actions (proposed by assistant, run only after you confirm)'**
+  String get agentPlanPendingHeader;
+
+  /// No description provided for @agentPlanConfirmAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm'**
+  String get agentPlanConfirmAction;
+
+  /// No description provided for @agentPlanExecuted.
+  ///
+  /// In en, this message translates to:
+  /// **'Action executed'**
+  String get agentPlanExecuted;
+
+  /// No description provided for @agentPlanCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Action cancelled'**
+  String get agentPlanCancelled;
+
+  /// No description provided for @fulfillWantedAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Mark fulfilled'**
+  String get fulfillWantedAction;
+
+  /// No description provided for @reopenWantedAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Reopen request'**
+  String get reopenWantedAction;
+
+  /// No description provided for @wantedFulfilledHint.
+  ///
+  /// In en, this message translates to:
+  /// **'This request is fulfilled and no longer receives matches'**
+  String get wantedFulfilledHint;
+
+  /// No description provided for @wantedFulfilledToast.
+  ///
+  /// In en, this message translates to:
+  /// **'Request marked fulfilled'**
+  String get wantedFulfilledToast;
+
+  /// No description provided for @wantedReopenedToast.
+  ///
+  /// In en, this message translates to:
+  /// **'Request reopened'**
+  String get wantedReopenedToast;
+
+  /// No description provided for @agentPlanSecondConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'High-risk action — confirm again'**
+  String get agentPlanSecondConfirmTitle;
+
+  /// No description provided for @agentPlanSecondConfirmAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm and run'**
+  String get agentPlanSecondConfirmAction;
+
+  /// No description provided for @adminReauthenticateSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Administrator verified. Sensitive actions are temporarily unlocked.'**
+  String get adminReauthenticateSuccess;
+
   /// No description provided for @adminLoginAs.
   ///
   /// In en, this message translates to:
@@ -1787,7 +2009,7 @@ abstract class AppLocalizations {
   /// No description provided for @emailDomainError.
   ///
   /// In en, this message translates to:
-  /// **'Must use @email.ncu.edu.cn email'**
+  /// **'Enter a valid campus email address'**
   String get emailDomainError;
 
   /// No description provided for @emailChangeSuccess.
@@ -3827,6 +4049,234 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Negotiation {status}'**
   String negotiationStatusLine(String status);
+
+  /// No description provided for @adminModerationTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Review'**
+  String get adminModerationTab;
+
+  /// No description provided for @moderationCenter.
+  ///
+  /// In en, this message translates to:
+  /// **'Content review'**
+  String get moderationCenter;
+
+  /// No description provided for @moderationCenterSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'View decisions affecting your content and submit appeals'**
+  String get moderationCenterSubtitle;
+
+  /// No description provided for @moderationNoCases.
+  ///
+  /// In en, this message translates to:
+  /// **'There are no moderation cases affecting you'**
+  String get moderationNoCases;
+
+  /// No description provided for @moderationReadOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'You can inspect cases for this campus. Only platform admins can take action.'**
+  String get moderationReadOnly;
+
+  /// No description provided for @moderationCase.
+  ///
+  /// In en, this message translates to:
+  /// **'Moderation case'**
+  String get moderationCase;
+
+  /// No description provided for @moderationResource.
+  ///
+  /// In en, this message translates to:
+  /// **'Related content'**
+  String get moderationResource;
+
+  /// No description provided for @moderationReason.
+  ///
+  /// In en, this message translates to:
+  /// **'Public reason'**
+  String get moderationReason;
+
+  /// No description provided for @moderationCreatedAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Created'**
+  String get moderationCreatedAt;
+
+  /// No description provided for @moderationResolution.
+  ///
+  /// In en, this message translates to:
+  /// **'Resolution'**
+  String get moderationResolution;
+
+  /// No description provided for @moderationInternalEvidence.
+  ///
+  /// In en, this message translates to:
+  /// **'Internal evidence'**
+  String get moderationInternalEvidence;
+
+  /// No description provided for @moderationStartReview.
+  ///
+  /// In en, this message translates to:
+  /// **'Start review'**
+  String get moderationStartReview;
+
+  /// No description provided for @moderationRestrict.
+  ///
+  /// In en, this message translates to:
+  /// **'Restrict content'**
+  String get moderationRestrict;
+
+  /// No description provided for @moderationDismiss.
+  ///
+  /// In en, this message translates to:
+  /// **'No violation'**
+  String get moderationDismiss;
+
+  /// No description provided for @moderationRestore.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore content'**
+  String get moderationRestore;
+
+  /// No description provided for @moderationActionNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Internal decision note'**
+  String get moderationActionNote;
+
+  /// No description provided for @moderationPublicReason.
+  ///
+  /// In en, this message translates to:
+  /// **'Reason shown to the user (optional)'**
+  String get moderationPublicReason;
+
+  /// No description provided for @moderationActionSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Case status updated'**
+  String get moderationActionSuccess;
+
+  /// No description provided for @moderationStatusOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get moderationStatusOpen;
+
+  /// No description provided for @moderationStatusReviewing.
+  ///
+  /// In en, this message translates to:
+  /// **'In review'**
+  String get moderationStatusReviewing;
+
+  /// No description provided for @moderationStatusActioned.
+  ///
+  /// In en, this message translates to:
+  /// **'Action taken'**
+  String get moderationStatusActioned;
+
+  /// No description provided for @moderationStatusDismissed.
+  ///
+  /// In en, this message translates to:
+  /// **'No violation'**
+  String get moderationStatusDismissed;
+
+  /// No description provided for @moderationStatusAppealed.
+  ///
+  /// In en, this message translates to:
+  /// **'Under appeal'**
+  String get moderationStatusAppealed;
+
+  /// No description provided for @moderationStatusResolved.
+  ///
+  /// In en, this message translates to:
+  /// **'Resolved'**
+  String get moderationStatusResolved;
+
+  /// No description provided for @moderationSourceMachine.
+  ///
+  /// In en, this message translates to:
+  /// **'Automated review'**
+  String get moderationSourceMachine;
+
+  /// No description provided for @moderationSourceUserReport.
+  ///
+  /// In en, this message translates to:
+  /// **'User report'**
+  String get moderationSourceUserReport;
+
+  /// No description provided for @moderationSourceManual.
+  ///
+  /// In en, this message translates to:
+  /// **'Manual case'**
+  String get moderationSourceManual;
+
+  /// No description provided for @moderationAppeal.
+  ///
+  /// In en, this message translates to:
+  /// **'Submit appeal'**
+  String get moderationAppeal;
+
+  /// No description provided for @moderationAppealHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Explain why the decision may be wrong and what another reviewer should check (10–2000 characters).'**
+  String get moderationAppealHint;
+
+  /// No description provided for @moderationAppealSubmitted.
+  ///
+  /// In en, this message translates to:
+  /// **'Appeal submitted for independent review'**
+  String get moderationAppealSubmitted;
+
+  /// No description provided for @moderationPendingAppeal.
+  ///
+  /// In en, this message translates to:
+  /// **'Appeal awaiting review'**
+  String get moderationPendingAppeal;
+
+  /// No description provided for @moderationCannotAppeal.
+  ///
+  /// In en, this message translates to:
+  /// **'This case cannot be appealed in its current state'**
+  String get moderationCannotAppeal;
+
+  /// No description provided for @moderationFilterAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get moderationFilterAll;
+
+  /// No description provided for @moderationNoInternalDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'No additional internal evidence'**
+  String get moderationNoInternalDetails;
+
+  /// No description provided for @listingImage.
+  ///
+  /// In en, this message translates to:
+  /// **'Listing image'**
+  String get listingImage;
+
+  /// No description provided for @imageMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat image'**
+  String get imageMessage;
+
+  /// No description provided for @avatar.
+  ///
+  /// In en, this message translates to:
+  /// **'Avatar'**
+  String get avatar;
+
+  /// No description provided for @warning.
+  ///
+  /// In en, this message translates to:
+  /// **'Warning'**
+  String get warning;
 }
 
 class _AppLocalizationsDelegate

@@ -19,6 +19,15 @@ use super::{
     ReportMessageResponse, SendMessageBody,
 };
 
+async fn conversation_campus_id(state: &AppState, conversation_id: Uuid) -> Result<Uuid, ApiError> {
+    sqlx::query_scalar("SELECT campus_id FROM chat_conversations WHERE id = $1")
+        .bind(conversation_id)
+        .fetch_optional(&state.infra.db)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?
+        .ok_or(ApiError::NotFound)
+}
+
 pub async fn get_conversation_messages(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -86,6 +95,7 @@ pub async fn send_conversation_message(
             .moderation
             .submit_image_job(
                 &state.infra.db,
+                conversation_campus_id(&state, conversation_id).await?,
                 &message.id.to_string(),
                 image_url,
                 "chat_image",

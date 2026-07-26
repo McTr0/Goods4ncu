@@ -1,17 +1,36 @@
 use axum::{
     extract::{Path, Query, State},
-    http::HeaderMap,
     Json,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
+use uuid::Uuid;
 
-use crate::api::auth::extract_user_id_from_token_with_fallback;
+use crate::api::auth::AuthSessionContext;
 use crate::api::error::ApiError;
+use crate::api::session::{OptionalSession, Session};
 use crate::api::AppState;
 use crate::repositories::{
     Listing, UserLookupMethod, UserLookupResult, UserProfile, UserRepository,
 };
+use crate::services::campus::{
+    CampusMembershipView, CampusMembershipsResponse, CampusService, VerificationRequestResponse,
+};
+
+async fn resolve_public_request_campus(
+    state: &AppState,
+    session: Option<&AuthSessionContext>,
+) -> Result<Uuid, ApiError> {
+    let campus_service = CampusService::new(state.infra.db.clone());
+    match session {
+        Some(session) => {
+            campus_service
+                .resolve_session_campus(&session.user_id, session.campus_id)
+                .await
+        }
+        None => campus_service.default_public_campus_id().await,
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Response types
@@ -56,18 +75,65 @@ pub struct PaginatedListings {
 /// GET /api/user/profile
 pub async fn get_profile(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
 ) -> Result<Json<UserProfile>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
-
-    let profile = state.user_repo.get_profile(&user_id).await?;
+    let profile = state.user_repo.get_profile(&session.user_id).await?;
 
     Ok(Json(profile))
+}
+
+/// GET /api/user/campus-memberships
+pub async fn get_campus_memberships(
+    State(state): State<AppState>,
+    Session(session): Session,
+) -> Result<Json<CampusMembershipsResponse>, ApiError> {
+    let service = CampusService::new(state.infra.db.clone());
+    Ok(Json(
+        service
+            .list_user_memberships_for_session(&session.user_id, session.campus_id)
+            .await?,
+    ))
+}
+
+/// POST /api/user/campus-memberships/:id/verification/request
+pub async fn request_campus_verification(
+    State(state): State<AppState>,
+    Session(session): Session,
+    Path(membership_id): Path<Uuid>,
+) -> Result<Json<VerificationRequestResponse>, ApiError> {
+    let user_id = session.user_id.clone();
+    let service = CampusService::new(state.infra.db.clone());
+    Ok(Json(
+        service
+            .request_email_verification(&user_id, membership_id, &state.secrets.jwt_secret)
+            .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+pub struct ConfirmCampusVerificationRequest {
+    pub code: String,
+}
+
+/// POST /api/user/campus-memberships/:id/verification/confirm
+pub async fn confirm_campus_verification(
+    State(state): State<AppState>,
+    Session(session): Session,
+    Path(membership_id): Path<Uuid>,
+    Json(body): Json<ConfirmCampusVerificationRequest>,
+) -> Result<Json<CampusMembershipView>, ApiError> {
+    let user_id = session.user_id.clone();
+    let service = CampusService::new(state.infra.db.clone());
+    Ok(Json(
+        service
+            .confirm_email_verification(
+                &user_id,
+                membership_id,
+                body.code.trim(),
+                &state.secrets.jwt_secret,
+            )
+            .await?,
+    ))
 }
 
 /// PATCH /api/user/profile — update current user's profile
@@ -113,15 +179,13 @@ fn validate_optional_image_url(value: &str, label: &str) -> Result<(), ApiError>
 
 pub async fn update_profile(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Json(body): Json<UpdateProfileRequest>,
 ) -> Result<Json<UserProfile>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = session.user_id;
+    let campus_id = CampusService::new(state.infra.db.clone())
+        .resolve_session_campus(&user_id, session.campus_id)
+        .await?;
 
     if let Some(username) = &body.username {
         if username.is_empty() {
@@ -144,15 +208,45 @@ pub async fn update_profile(
         if email.is_empty() {
             return Err(ApiError::BadRequest("邮箱不能为空".to_string()));
         }
-        if !email.ends_with("@email.ncu.edu.cn") {
-            return Err(ApiError::BadRequest(
-                "必须使用 @email.ncu.edu.cn 邮箱".to_string(),
-            ));
-        }
         if email.len() > 100 {
             return Err(ApiError::BadRequest("邮箱不能超过100个字符".to_string()));
         }
+        // The domain must belong to an active campus; switching to another
+        // campus's email creates a pending membership there so the OTP
+        // verification flow has a membership to act on.
+        let Some((_, domain)) = email.split_once('@') else {
+            return Err(ApiError::BadRequest("邮箱格式无效".to_string()));
+        };
+        let campus_id_for_email: Option<uuid::Uuid> = sqlx::query_scalar(
+            "SELECT c.id FROM campuses c
+             WHERE c.status = 'active'
+               AND EXISTS (
+                   SELECT 1 FROM unnest(c.email_domains) AS d
+                   WHERE lower(d) = lower($1)
+               )
+             ORDER BY (c.slug = 'ncu') DESC, c.created_at ASC
+             LIMIT 1",
+        )
+        .bind(domain)
+        .fetch_optional(&state.infra.db)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        let Some(email_campus_id) = campus_id_for_email else {
+            return Err(ApiError::BadRequest(
+                "必须使用已接入校园的学校邮箱".to_string(),
+            ));
+        };
         state.user_repo.update_email(&user_id, email).await?;
+        sqlx::query(
+            "INSERT INTO campus_memberships (campus_id, user_id, status, role, verification_method)
+             VALUES ($1, $2, 'pending', 'member', 'email_change')
+             ON CONFLICT (campus_id, user_id) DO NOTHING",
+        )
+        .bind(email_campus_id)
+        .bind(&user_id)
+        .execute(&state.infra.db)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
     }
 
     if let Some(discoverability) = &body.discoverability {
@@ -186,7 +280,7 @@ pub async fn update_profile(
         state
             .infra
             .moderation
-            .submit_image_job(&state.infra.db, &user_id, avatar_url, "avatar")
+            .submit_image_job(&state.infra.db, campus_id, &user_id, avatar_url, "avatar")
             .await
             .ok();
         state.user_repo.update_avatar(&user_id, avatar_url).await?;
@@ -218,16 +312,9 @@ pub async fn update_profile(
 /// GET /api/user/listings?limit=20&offset=0&status=active
 pub async fn get_user_listings(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<PaginatedListings>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
-
     let limit = params.limit.unwrap_or(20).min(100);
     let offset = params.offset.unwrap_or(0).max(0);
     let status_filter = params.status.as_deref().unwrap_or("active");
@@ -236,10 +323,20 @@ pub async fn get_user_listings(
             "无效的 status 参数，可选值：active, sold, deleted, all".to_string(),
         ));
     }
+    let campus_id = CampusService::new(state.infra.db.clone())
+        .resolve_session_campus(&session.user_id, session.campus_id)
+        .await?;
 
     let (listings, total) = state
         .user_repo
-        .get_user_listings(&user_id, limit, offset, status_filter)
+        .get_user_listings(
+            &session.user_id,
+            campus_id,
+            limit,
+            offset,
+            status_filter,
+            false,
+        )
         .await?;
 
     let items: Vec<ListingItem> = listings
@@ -314,6 +411,7 @@ pub struct UserLookupResponse {
 /// GET /api/users/search?q=keyword - search/browse users
 pub async fn search_users(
     State(state): State<AppState>,
+    OptionalSession(session): OptionalSession,
     Query(params): Query<UserSearchQuery>,
 ) -> Result<Json<UserSearchResponse>, ApiError> {
     let limit = params.limit.unwrap_or(20).min(50);
@@ -328,10 +426,11 @@ pub async fn search_users(
         }
     }
 
+    let campus_id = resolve_public_request_campus(&state, session.as_ref()).await?;
     let query_param = params.q.as_deref();
     let (profiles_with_counts, total): (Vec<(crate::repositories::UserProfile, i64)>, i64) = state
         .user_repo
-        .search_users_with_listing_count(query_param, limit, offset)
+        .search_users_with_listing_count(campus_id, query_param, limit, offset)
         .await?;
 
     let items: Vec<UserSummary> = profiles_with_counts
@@ -349,16 +448,9 @@ pub async fn search_users(
 /// GET /api/users/lookup?q=keyword&method=auto|username|email|student_id
 pub async fn lookup_users(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Query(params): Query<UserLookupQuery>,
 ) -> Result<Json<UserLookupResponse>, ApiError> {
-    let requester_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
-
     let query = params.q.trim();
     if query.is_empty() {
         return Ok(Json(UserLookupResponse { items: Vec::new() }));
@@ -380,6 +472,9 @@ pub async fn lookup_users(
             ))
         }
     };
+    let campus_id = CampusService::new(state.infra.db.clone())
+        .resolve_session_campus(&session.user_id, session.campus_id)
+        .await?;
 
     if matches!(method, UserLookupMethod::Email) && !query.contains('@') {
         return Ok(Json(UserLookupResponse { items: Vec::new() }));
@@ -392,7 +487,13 @@ pub async fn lookup_users(
 
     let items = state
         .user_repo
-        .lookup_users(&requester_id, query, method, params.limit.unwrap_or(10))
+        .lookup_users(
+            &session.user_id,
+            campus_id,
+            query,
+            method,
+            params.limit.unwrap_or(10),
+        )
         .await?;
 
     Ok(Json(UserLookupResponse { items }))
@@ -417,12 +518,15 @@ pub struct UserPublicPaymentQr {
 /// GET /api/users/:id - public user profile (no auth required)
 pub async fn get_user_profile(
     State(state): State<AppState>,
+    OptionalSession(session): OptionalSession,
     Path(user_id): Path<String>,
 ) -> Result<Json<UserPublicProfile>, ApiError> {
+    let campus_id = resolve_public_request_campus(&state, session.as_ref()).await?;
     let row = sqlx::query(
         r#"
         SELECT u.id as user_id, u.username, u.created_at,
-               u.avatar_url,
+               CASE WHEN u.avatar_moderation_status = 'approved' THEN u.avatar_url
+                    ELSE NULL END AS avatar_url,
                CASE
                    WHEN u.show_wechat_pay_qr = TRUE THEN u.wechat_pay_qr_url
                    ELSE NULL
@@ -433,7 +537,12 @@ pub async fn get_user_profile(
                END AS public_alipay_qr_url,
                COUNT(i.id) as listing_count
         FROM users u
-        LEFT JOIN inventory i ON u.id = i.owner_id AND i.status = 'active'
+        JOIN campus_memberships membership
+          ON membership.user_id = u.id
+         AND membership.campus_id = $2
+         AND membership.status = 'verified'
+        LEFT JOIN inventory i ON u.id = i.owner_id
+         AND i.status = 'active' AND i.campus_id = $2
         WHERE u.id = $1
         GROUP BY u.id, u.username, u.created_at, u.avatar_url,
                  u.show_wechat_pay_qr, u.wechat_pay_qr_url,
@@ -441,6 +550,7 @@ pub async fn get_user_profile(
         "#,
     )
     .bind(&user_id)
+    .bind(campus_id)
     .fetch_optional(&state.infra.db)
     .await
     .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
@@ -454,7 +564,7 @@ pub async fn get_user_profile(
     Ok(Json(UserPublicProfile {
         user_id: row.get("user_id"),
         username: row.get("username"),
-        avatar_url: row.get("avatar_url"),
+        avatar_url: state.public_media_url(row.get("avatar_url")),
         listing_count: row.get("listing_count"),
         joined_at: created_at,
         payment_qr: UserPublicPaymentQr {
@@ -467,14 +577,16 @@ pub async fn get_user_profile(
 /// GET /api/users/:id/listings - public active listings for a user
 pub async fn get_public_user_listings(
     State(state): State<AppState>,
+    OptionalSession(session): OptionalSession,
     Path(user_id): Path<String>,
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<PaginatedListings>, ApiError> {
     let limit = params.limit.unwrap_or(20).clamp(1, 50);
     let offset = params.offset.unwrap_or(0).max(0);
+    let campus_id = resolve_public_request_campus(&state, session.as_ref()).await?;
     let (listings, total) = state
         .user_repo
-        .get_user_listings(&user_id, limit, offset, "active")
+        .get_user_listings(&user_id, campus_id, limit, offset, "active", true)
         .await?;
 
     let items = listings

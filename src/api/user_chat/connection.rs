@@ -5,13 +5,18 @@ use axum::{
 };
 use uuid::Uuid;
 
-use crate::api::auth::extract_user_id_from_token_with_fallback;
+use crate::api::auth::{
+    extract_auth_session_from_token_with_fallback, extract_user_id_from_token_with_fallback,
+    AuthSessionContext,
+};
 use crate::api::error::ApiError;
 use crate::api::{ws, AppState};
+use crate::services::campus::CampusService;
 use crate::services::chat_conversation::{
     ChatConversationService, ConversationMode, ConversationView, CreateConversationInput,
     CreateConversationResult,
 };
+use crate::services::notification::NewNotification;
 
 use super::{
     ArchiveConversationBody, BlockListResponse, BlockUserBody, BlockedUserEntry,
@@ -24,7 +29,14 @@ pub async fn create_conversation(
     headers: HeaderMap,
     Json(body): Json<CreateConversationBody>,
 ) -> Result<Json<CreateConversationResult>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    let tenant = CampusService::new(state.infra.db.clone())
+        .require_shared_verified_campus_for_session(
+            &session.user_id,
+            &body.recipient_id,
+            session.campus_id,
+        )
+        .await?;
     let content = body.content.trim().to_string();
     moderate_text(&state, &content)?;
     let subject = body
@@ -41,7 +53,8 @@ pub async fn create_conversation(
     let result = service
         .create_conversation(CreateConversationInput {
             client_request_id: body.client_request_id,
-            initiator_id: user_id,
+            campus_id: tenant.campus_id,
+            initiator_id: session.user_id,
             recipient_id: body.recipient_id,
             listing_id: body.listing_id,
             mode: body.mode,
@@ -63,14 +76,16 @@ pub async fn create_conversation(
         if let Err(error) = state
             .infra
             .notification
-            .create_for_conversation(
-                &result.conversation.recipient_id,
-                "conversation_created",
-                notification_title,
-                notification_body,
-                result.conversation.listing_id.as_deref(),
-                &result.conversation.id,
-            )
+            .create(NewNotification {
+                campus_id: tenant.campus_id,
+                user_id: &result.conversation.recipient_id,
+                event_type: "conversation_created",
+                title: notification_title,
+                body: notification_body,
+                related_order_id: None,
+                related_listing_id: result.conversation.listing_id.as_deref(),
+                related_conversation_id: Some(&result.conversation.id),
+            })
             .await
         {
             tracing::warn!(%error, "failed to persist conversation notification");
@@ -262,6 +277,18 @@ pub(crate) fn authenticated_user(
     headers: &HeaderMap,
 ) -> Result<String, ApiError> {
     extract_user_id_from_token_with_fallback(
+        headers,
+        &state.secrets.jwt_secret,
+        state.secrets.jwt_secret_old.as_deref(),
+    )
+    .map_err(|_| ApiError::Unauthorized)
+}
+
+pub(crate) fn authenticated_session(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<AuthSessionContext, ApiError> {
+    extract_auth_session_from_token_with_fallback(
         headers,
         &state.secrets.jwt_secret,
         state.secrets.jwt_secret_old.as_deref(),

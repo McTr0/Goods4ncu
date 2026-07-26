@@ -3,6 +3,16 @@ import 'base_service.dart';
 
 /// Admin service — handles administrative operations (admin role required).
 class AdminService extends BaseService {
+  /// Resolve authoritative admin capabilities for the active campus.
+  Future<Map<String, dynamic>> getCapabilities() async {
+    final headers = await authHeaders();
+    final response = await get(
+      Uri.parse('$baseUrl/api/admin/capabilities'),
+      headers,
+    );
+    return handleResponse(response, (data) => data as Map<String, dynamic>);
+  }
+
   /// Get admin dashboard statistics.
   /// GET /api/admin/stats
   Future<Map<String, dynamic>> getAdminStats() async {
@@ -191,5 +201,58 @@ class AdminService extends BaseService {
       jsonEncode(body),
     );
     handleResponse(response, (_) {});
+  }
+
+  Future<Map<String, dynamic>> getModerationCases({
+    String? status,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final headers = await authHeaders();
+    final query = <String, String>{
+      'limit': '$limit',
+      'offset': '$offset',
+      if (status != null && status.isNotEmpty) 'status': status,
+    };
+    final uri = Uri.parse(
+      '$baseUrl/api/admin/moderation/cases',
+    ).replace(queryParameters: query);
+    final response = await get(uri, headers);
+    return handleResponse(response, (data) => data as Map<String, dynamic>);
+  }
+
+  Future<Map<String, dynamic>> reviewModerationCase(
+    String caseId, {
+    required String action,
+    String? note,
+    String? publicReason,
+  }) async {
+    final headers = await authHeaders();
+    final body = <String, dynamic>{
+      'action': action,
+      if (note != null && note.isNotEmpty) 'note': note,
+      if (publicReason != null && publicReason.isNotEmpty)
+        'public_reason': publicReason,
+    };
+    final response = await post(
+      Uri.parse('$baseUrl/api/admin/moderation/cases/$caseId/review'),
+      headers,
+      jsonEncode(body),
+    );
+    return handleResponse(response, (data) => data as Map<String, dynamic>);
+  }
+
+  Future<Map<String, dynamic>> reviewModerationAppeal(
+    String appealId, {
+    required String decision,
+    required String note,
+  }) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/admin/moderation/appeals/$appealId/review'),
+      headers,
+      jsonEncode({'decision': decision, 'note': note}),
+    );
+    return handleResponse(response, (data) => data as Map<String, dynamic>);
   }
 }

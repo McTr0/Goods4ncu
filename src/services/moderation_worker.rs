@@ -4,8 +4,11 @@
 //! image moderation API (Alibaba IMAN). Updates job status to approved/rejected/failed.
 
 use serde_json::Value;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use std::time::Duration;
+
+use crate::lifecycle::{sleep_or_shutdown, ShutdownSignal};
+use crate::services::moderation_case::create_case_for_rejected_job;
 
 /// Polling interval between batch scans.
 const POLL_INTERVAL_SECS: u64 = 5;
@@ -35,7 +38,7 @@ impl ModerationApiConfig {
 
 /// Run the moderation worker loop.
 /// Spawn this as a background `tokio::spawn` task in `main.rs`.
-pub async fn run_moderation_worker(db: PgPool, cfg: ModerationApiConfig) {
+pub async fn run_moderation_worker(db: PgPool, cfg: ModerationApiConfig, shutdown: ShutdownSignal) {
     tracing::info!("Moderation worker started");
     if !cfg.enabled {
         tracing::info!("Image moderation is disabled by configuration");
@@ -57,8 +60,18 @@ pub async fn run_moderation_worker(db: PgPool, cfg: ModerationApiConfig) {
                 backoff_secs = (backoff_secs * 2).min(max_backoff_secs);
             }
         }
-        tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+        // Finish the batch already claimed, then stop before claiming more.
+        // Jobs left in `processing` by a hard kill need manual recovery, so the
+        // cycle boundary is the only safe place to exit.
+        if !sleep_or_shutdown(Duration::from_secs(backoff_secs), &shutdown)
+            .await
+            .should_continue()
+        {
+            break;
+        }
     }
+
+    tracing::info!("Moderation worker stopped");
 }
 
 /// Fetch and process up to MAX_JOBS_PER_CYCLE pending jobs.
@@ -116,29 +129,50 @@ async fn process_pending_jobs(db: &PgPool, cfg: &ModerationApiConfig) -> anyhow:
             }
         };
 
-        if let Err(e) = sqlx::query(
-            r#"
-            UPDATE moderation_jobs
-            SET status = $1, reject_reason = $2, processed_at = CURRENT_TIMESTAMP
-            WHERE id = $3
-            "#,
+        if let Err(e) = finalize_job(
+            db,
+            &id,
+            &resource_type,
+            &resource_id,
+            new_status,
+            reject_reason.as_deref(),
         )
-        .bind(new_status)
-        .bind(&reject_reason)
-        .bind(&id)
-        .execute(db)
         .await
         {
-            tracing::error!(job_id = %id, %e, "failed to update moderation job final status");
-        }
-
-        // Update per-resource moderation status.
-        if let Err(e) = update_resource_status(db, &resource_type, &resource_id, new_status).await {
-            tracing::error!(resource_type = %resource_type, resource_id = %resource_id, %e, "failed to update per-resource moderation status");
+            tracing::error!(job_id = %id, resource_type = %resource_type, resource_id = %resource_id, %e, "failed to finalize moderation job");
         }
     }
 
     Ok(count)
+}
+
+async fn finalize_job(
+    db: &PgPool,
+    job_id: &str,
+    resource_type: &str,
+    resource_id: &str,
+    status: &str,
+    reject_reason: Option<&str>,
+) -> anyhow::Result<()> {
+    let mut tx = db.begin().await?;
+    sqlx::query(
+        "UPDATE moderation_jobs
+         SET status = $1, reject_reason = $2, processed_at = CURRENT_TIMESTAMP
+         WHERE id = $3",
+    )
+    .bind(status)
+    .bind(reject_reason)
+    .bind(job_id)
+    .execute(&mut *tx)
+    .await?;
+    update_resource_status(&mut tx, resource_type, resource_id, status).await?;
+    if status == "rejected" {
+        create_case_for_rejected_job(&mut tx, job_id)
+            .await
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 /// Call the external image moderation API for the given URL.
@@ -236,40 +270,18 @@ fn parse_moderation_verdict(payload: &Value) -> Option<bool> {
 
 /// Update the per-resource moderation status column.
 async fn update_resource_status(
-    db: &PgPool,
+    tx: &mut Transaction<'_, Postgres>,
     resource_type: &str,
     resource_id: &str,
     status: &str,
 ) -> anyhow::Result<()> {
-    match resource_type {
-        "listing_image" => {
-            sqlx::query("UPDATE inventory SET images_moderation_status = $1 WHERE id = $2")
-                .bind(status)
-                .bind(resource_id)
-                .execute(db)
-                .await?;
-        }
-        "chat_image" => {
-            let message_id: i64 = resource_id.parse().map_err(|e| {
-                anyhow::anyhow!("invalid chat_image resource_id '{}': {}", resource_id, e)
-            })?;
-            sqlx::query("UPDATE chat_messages SET moderation_status = $1 WHERE id = $2")
-                .bind(status)
-                .bind(message_id)
-                .execute(db)
-                .await?;
-        }
-        "avatar" => {
-            sqlx::query("UPDATE users SET avatar_moderation_status = $1 WHERE id = $2")
-                .bind(status)
-                .bind(resource_id)
-                .execute(db)
-                .await?;
-        }
-        _ => {
-            tracing::warn!(resource_type, "unknown resource type in moderation job");
-        }
-    }
+    crate::services::moderation::set_media_moderation_status(
+        tx,
+        resource_type,
+        resource_id,
+        status,
+    )
+    .await?;
     Ok(())
 }
 

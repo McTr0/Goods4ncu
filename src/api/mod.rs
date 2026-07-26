@@ -14,21 +14,27 @@ use axum::{
     Router,
 };
 pub mod admin;
+pub mod agent_plans;
 pub mod auth;
+pub mod campuses;
 pub mod chat;
 pub mod conversations;
 pub mod error;
 pub mod listings;
 pub mod metrics;
+pub mod mfa;
+pub mod moderation_cases;
 pub mod negotiate;
 pub mod notifications;
 pub mod orders;
 pub mod recommendations;
 pub mod request_context;
+pub mod session;
 pub mod stats;
 pub mod upload;
 pub mod user;
 pub mod user_chat;
+pub mod wanted_responses;
 pub mod watchlist;
 pub mod ws;
 use error::ApiError;
@@ -40,6 +46,7 @@ use tokio::sync::mpsc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::services::ServeDir;
+use tower_http::timeout::TimeoutLayer;
 
 use crate::middleware::rate_limit::{is_whitelisted, RateLimitStateHandle};
 use regex::Regex;
@@ -307,6 +314,34 @@ pub struct ApiInfrastructure {
     pub admin_service: crate::services::admin::AdminService,
     pub moderation: ModerationService,
     pub token_denylist: crate::services::token_denylist::TokenDenylist,
+    /// Secret Chat is deprecated; new sessions are refused unless explicitly
+    /// enabled for a migration window. Existing sessions stay readable.
+    pub secret_chat_new_sessions_enabled: bool,
+    /// When set, the media bucket is private and approved media is served as
+    /// short-lived presigned URLs instead of raw bucket links. `None` keeps the
+    /// legacy public-bucket behaviour.
+    pub media_signer: Option<Arc<MediaSigner>>,
+    /// Observes process draining so readiness probes can shed traffic before
+    /// the listener closes. Defaults to a signal that never fires, which is the
+    /// correct behaviour for tests and any embedding without a supervisor.
+    pub shutdown: crate::lifecycle::ShutdownSignal,
+}
+
+/// Serves approved media from a private bucket via presigned URLs.
+pub struct MediaSigner {
+    pub bucket: crate::services::storage::PrivateBucket,
+    pub ttl_secs: u32,
+}
+
+impl MediaSigner {
+    /// Rewrite a stored media URL into a short-lived presigned URL. Returns
+    /// `None` for values that do not belong to our bucket — signing a foreign
+    /// URL would produce a broken link and imply we vouch for it.
+    pub fn sign(&self, stored: &str) -> Option<String> {
+        let key =
+            crate::services::storage::object_key_from_stored_url(stored, &self.bucket.bucket)?;
+        Some(self.bucket.presigned_get(&key, self.ttl_secs))
+    }
 }
 
 /// LLM provider + intent routing.
@@ -332,6 +367,20 @@ pub struct AppState {
     pub auth_repo: repositories::PostgresAuthRepository,
     #[allow(dead_code)]
     pub order_repo: repositories::PostgresOrderRepository,
+}
+
+impl AppState {
+    /// Public media URL for an already moderation-approved value. With a
+    /// private bucket this returns a presigned URL; otherwise the stored value
+    /// passes through unchanged. Callers must have applied the moderation gate
+    /// first — this function does not check approval.
+    pub fn public_media_url(&self, stored: Option<String>) -> Option<String> {
+        let stored = stored?;
+        match self.infra.media_signer.as_ref() {
+            Some(signer) => signer.sign(&stored).or(Some(stored)),
+            None => Some(stored),
+        }
+    }
 }
 
 pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
@@ -366,13 +415,40 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
     Router::new()
         .nest_service("/uploads", ServeDir::new("uploads"))
         .route("/api/health", get(health_check))
+        .route("/api/livez", get(livez))
+        .route("/api/readyz", get(readyz))
         .route("/api/metrics", get(get_metrics))
         .route("/api/stats", get(stats::get_stats))
         .route("/api/admin/stats", get(admin::get_admin_stats))
+        .route(
+            "/api/admin/capabilities",
+            get(admin::get_admin_capabilities),
+        )
         .route("/api/admin/users", get(admin::get_admin_users))
         .route("/api/admin/listings", get(admin::get_admin_listings))
         .route("/api/admin/orders", get(admin::get_admin_orders))
         .route("/api/admin/audit-logs", get(admin::get_admin_audit_logs))
+        .route("/api/admin/campuses", post(admin::create_campus))
+        .route(
+            "/api/admin/campuses/{id}/{action}",
+            post(admin::set_campus_status),
+        )
+        .route(
+            "/api/admin/moderation/jobs",
+            get(admin::get_moderation_jobs),
+        )
+        .route(
+            "/api/admin/moderation/cases",
+            get(admin::get_moderation_cases),
+        )
+        .route(
+            "/api/admin/moderation/cases/{id}/review",
+            post(admin::review_moderation_case),
+        )
+        .route(
+            "/api/admin/moderation/appeals/{id}/review",
+            post(admin::review_moderation_appeal),
+        )
         .route("/api/admin/users/{id}/ban", post(admin::ban_user))
         .route("/api/admin/users/{id}/unban", post(admin::unban_user))
         .route(
@@ -398,6 +474,7 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             get(recommendations::get_similar_listings),
         )
         .route("/api/categories", get(listings::get_categories))
+        .route("/api/campuses", get(campuses::list_campuses))
         .route("/api/chat", post(chat::handle_chat))
         .route(
             "/api/chat/stream",
@@ -406,9 +483,23 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .route("/api/chat/assistant", get(chat::get_assistant_history))
         .route("/api/auth/register", post(auth::register))
         .route("/api/auth/login", post(auth::login))
+        .route("/api/auth/reauth", post(auth::reauthenticate))
+        .route("/api/auth/mfa/totp", get(mfa::totp_status))
+        .route("/api/auth/mfa/totp/setup", post(mfa::totp_setup))
+        .route("/api/auth/mfa/totp/confirm", post(mfa::totp_confirm))
+        .route("/api/agent/plans", get(agent_plans::list_plans))
+        .route(
+            "/api/agent/plans/{id}/confirm",
+            post(agent_plans::confirm_plan),
+        )
+        .route(
+            "/api/agent/plans/{id}/cancel",
+            post(agent_plans::cancel_plan),
+        )
         .route("/api/auth/change-password", post(auth::change_password))
         .route("/api/auth/refresh", post(auth::refresh_token))
         .route("/api/auth/logout", post(auth::logout))
+        .route("/api/user/active-campus", post(auth::switch_active_campus))
         .route(
             "/api/listings",
             get(listings::get_listings).post(listings::create_listing),
@@ -429,9 +520,38 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             post(listings::respond_to_wanted),
         )
         .route("/api/listings/{id}/relist", post(listings::relist_listing))
+        .route("/api/listings/{id}/fulfill", post(listings::fulfill_wanted))
+        .route(
+            "/api/wanted-responses",
+            get(wanted_responses::list_wanted_responses),
+        )
+        .route(
+            "/api/wanted-responses/{id}/accept",
+            post(wanted_responses::accept_wanted_response),
+        )
+        .route(
+            "/api/wanted-responses/{id}/dismiss",
+            post(wanted_responses::dismiss_wanted_response),
+        )
+        .route(
+            "/api/wanted-responses/{id}/withdraw",
+            post(wanted_responses::withdraw_wanted_response),
+        )
         .route(
             "/api/user/profile",
             get(user::get_profile).patch(user::update_profile),
+        )
+        .route(
+            "/api/user/campus-memberships",
+            get(user::get_campus_memberships),
+        )
+        .route(
+            "/api/user/campus-memberships/{id}/verification/request",
+            post(user::request_campus_verification),
+        )
+        .route(
+            "/api/user/campus-memberships/{id}/verification/confirm",
+            post(user::confirm_campus_verification),
         )
         .route("/api/user/listings", get(user::get_user_listings))
         .route("/api/users/search", get(user::search_users))
@@ -470,6 +590,22 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .route(
             "/api/notifications/read-all",
             post(notifications::mark_all_notifications_read),
+        )
+        .route(
+            "/api/moderation/cases",
+            get(moderation_cases::list_my_cases),
+        )
+        .route(
+            "/api/moderation/cases/{id}",
+            get(moderation_cases::get_my_case),
+        )
+        .route(
+            "/api/moderation/cases/{id}/appeals",
+            post(moderation_cases::submit_appeal),
+        )
+        .route(
+            "/api/moderation/appeals/{id}",
+            get(moderation_cases::get_my_appeal),
         )
         .route("/api/negotiations", get(negotiate::list_negotiations))
         .route(
@@ -584,6 +720,20 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         )
         .route("/api/upload/token", get(upload::get_upload_token))
         .route("/api/ws", get(ws::ws_handler))
+        // Bound time-to-response so a hung handler (stuck DB query, wedged
+        // provider call) cannot hold connections open indefinitely; without
+        // this, hangs accumulate until the connection budget is gone. 60s
+        // leaves headroom for the slowest legitimate path — a full
+        // non-streaming agent run with tools. This does NOT cap response
+        // bodies: SSE streams and WebSocket sessions produce their response
+        // upfront and stream afterwards, outside this layer's window.
+        // 504 (not the default 408): the timeout is the server's fault, and
+        // 408 invites clients to blindly retry a request that may have already
+        // committed its write.
+        .layer(TimeoutLayer::with_status_code(
+            axum::http::StatusCode::GATEWAY_TIMEOUT,
+            std::time::Duration::from_secs(60),
+        ))
         .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -610,15 +760,49 @@ async fn get_metrics(State(state): State<AppState>) -> String {
     state.infra.metrics.render()
 }
 
-async fn health_check(State(state): State<AppState>) -> Result<&'static str, ApiError> {
-    // Verify database connectivity — critical for production deployments
+/// GET /api/livez — liveness probe: is this process running at all?
+///
+/// Deliberately checks nothing external. A liveness probe that pings the
+/// database turns a database outage into a rolling restart of every replica,
+/// which removes the capacity needed to recover and makes the outage worse.
+/// Dependency health belongs in readiness, which sheds traffic without killing
+/// the process.
+async fn livez() -> axum::Json<serde_json::Value> {
+    axum::Json(serde_json::json!({ "status": "alive" }))
+}
+
+/// GET /api/readyz — readiness probe: should this instance receive traffic?
+///
+/// Fails while draining so the load balancer stops sending new requests before
+/// the listener closes, and fails when the database is unreachable because
+/// nearly every endpoint needs it.
+async fn readyz(State(state): State<AppState>) -> Result<axum::Json<serde_json::Value>, ApiError> {
+    check_ready(&state).await?;
+    Ok(axum::Json(serde_json::json!({ "status": "ready" })))
+}
+
+/// Shared readiness logic for `/api/readyz` and the legacy `/api/health`.
+async fn check_ready(state: &AppState) -> Result<(), ApiError> {
+    if state.infra.shutdown.is_draining() {
+        // Not an error condition: the instance is being retired on purpose.
+        return Err(ApiError::ServiceUnavailable("draining"));
+    }
+
     sqlx::query("SELECT 1")
         .fetch_one(&state.infra.db)
         .await
         .map_err(|e| {
-            tracing::error!(%e, "Health check failed: database unreachable");
-            ApiError::Internal(anyhow::anyhow!("Database unreachable: {}", e))
+            tracing::error!(%e, "Readiness check failed: database unreachable");
+            ApiError::ServiceUnavailable("database_unreachable")
         })?;
+
+    Ok(())
+}
+
+/// GET /api/health — legacy readiness alias kept for existing clients, probes
+/// and Compose health checks. Prefer `/api/readyz` and `/api/livez`.
+async fn health_check(State(state): State<AppState>) -> Result<&'static str, ApiError> {
+    check_ready(&state).await?;
     Ok("OK")
 }
 

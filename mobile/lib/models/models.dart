@@ -18,6 +18,9 @@ class Listing {
   final String? ownerUsername;
   final String? createdAt;
 
+  /// Why the feed ranked this item here (server-provided, personalized feeds).
+  final String? rankReason;
+
   Listing({
     required this.id,
     required this.title,
@@ -34,6 +37,7 @@ class Listing {
     this.ownerId,
     this.ownerUsername,
     this.createdAt,
+    this.rankReason,
   });
 
   factory Listing.fromJson(Map<String, dynamic> json) {
@@ -57,6 +61,7 @@ class Listing {
       ownerId: json['owner_id'],
       ownerUsername: json['owner_username'],
       createdAt: json['created_at'],
+      rankReason: json['rank_reason'],
     );
   }
 
@@ -874,6 +879,47 @@ class ConversationMessage {
       kind: kind ?? this.kind,
     );
   }
+}
+
+/// A pending agent action awaiting user confirmation (ActionPlan protocol).
+/// The agent proposes writes; nothing executes until the user confirms via the
+/// authenticated plans API.
+class AgentPlan {
+  final String id;
+  final String action;
+  final String riskLevel;
+  final String summary;
+  final String confirmationToken;
+  final DateTime? expiresAt;
+
+  AgentPlan({
+    required this.id,
+    required this.action,
+    required this.riskLevel,
+    required this.summary,
+    required this.confirmationToken,
+    this.expiresAt,
+  });
+
+  factory AgentPlan.fromJson(Map<String, dynamic> json) => AgentPlan(
+    id: json['id']?.toString() ?? '',
+    action: json['action']?.toString() ?? '',
+    riskLevel: json['risk_level']?.toString() ?? 'L2',
+    summary: json['summary']?.toString() ?? '',
+    confirmationToken: json['confirmation_token']?.toString() ?? '',
+    expiresAt: DateTime.tryParse(json['expires_at']?.toString() ?? ''),
+  );
+
+  bool get isHighRisk => riskLevel == 'L3';
+}
+
+/// Outcome of confirming an agent plan.
+class AgentPlanConfirmResult {
+  final String status;
+  final String result;
+  AgentPlanConfirmResult({required this.status, required this.result});
+  bool get needsSecondConfirmation => status == 'needs_second_confirmation';
+  bool get executed => status == 'executed';
 }
 
 class HitlRequest {

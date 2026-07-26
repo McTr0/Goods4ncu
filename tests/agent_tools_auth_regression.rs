@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use good4ncu::agents::tools::{
-    CreateListingArgs, CreateListingTool, DeleteListingArgs, DeleteListingTool, EmbedUpdater,
-    ToolContext, ToolError, UpdateListingArgs, UpdateListingTool,
+    execute_create_listing, execute_delete_listing, execute_update_listing, CreateListingArgs,
+    CreateListingTool, DeleteListingArgs, DeleteListingTool, EmbedUpdater, ToolContext, ToolError,
+    UpdateListingArgs, UpdateListingTool,
 };
 use good4ncu::services::notification::NotificationService;
 use good4ncu::test_infra::with_test_pool;
@@ -53,6 +54,7 @@ fn build_tool_context_with_updater(
         db_pool: db_pool.clone(),
         embed_updater,
         current_user_id: current_user_id.map(ToString::to_string),
+        current_campus_id: None,
         notification: NotificationService::new(db_pool),
     }
 }
@@ -90,18 +92,18 @@ async fn test_update_listing_tool_denies_cross_owner_mutation() {
         .await
         .unwrap();
 
-        let tool = UpdateListingTool {
-            ctx: build_tool_context(pool.clone(), Some(attacker_id.as_str())),
-        };
-        let result = tool
-            .call(UpdateListingArgs {
+        let ctx = build_tool_context(pool.clone(), Some(attacker_id.as_str()));
+        let result = execute_update_listing(
+            &ctx,
+            UpdateListingArgs {
                 listing_id: listing_id.clone(),
                 new_price: Some(9999),
                 new_title: None,
                 new_description: None,
-            })
-            .await
-            .unwrap();
+            },
+        )
+        .await
+        .unwrap();
 
         assert!(result.contains("or you don't own it"));
 
@@ -149,15 +151,15 @@ async fn test_delete_listing_tool_denies_cross_owner_mutation() {
         .await
         .unwrap();
 
-        let tool = DeleteListingTool {
-            ctx: build_tool_context(pool.clone(), Some(attacker_id.as_str())),
-        };
-        let result = tool
-            .call(DeleteListingArgs {
+        let ctx = build_tool_context(pool.clone(), Some(attacker_id.as_str()));
+        let result = execute_delete_listing(
+            &ctx,
+            DeleteListingArgs {
                 listing_id: listing_id.clone(),
-            })
-            .await
-            .unwrap();
+            },
+        )
+        .await
+        .unwrap();
 
         assert!(result.contains("or you don't own it"));
 
@@ -186,17 +188,26 @@ async fn create_listing_tool_rolls_back_inventory_when_embedding_fails() {
             .execute(&pool)
             .await
             .unwrap();
+        sqlx::query(
+            "INSERT INTO campus_memberships (
+                campus_id, user_id, status, verification_method, verified_at
+             ) SELECT id, $1, 'verified', 'test_fixture', NOW()
+               FROM campuses WHERE slug = 'ncu'",
+        )
+        .bind(&owner_id)
+        .execute(&pool)
+        .await
+        .unwrap();
 
-        let tool = CreateListingTool {
-            ctx: build_tool_context_with_updater(
-                pool.clone(),
-                Some(owner_id.as_str()),
-                Arc::new(FailingEmbedUpdater),
-            ),
-        };
+        let ctx = build_tool_context_with_updater(
+            pool.clone(),
+            Some(owner_id.as_str()),
+            Arc::new(FailingEmbedUpdater),
+        );
 
-        let err = tool
-            .call(CreateListingArgs {
+        let err = execute_create_listing(
+            &ctx,
+            CreateListingArgs {
                 title: title.clone(),
                 category: "misc".to_string(),
                 brand: "Brand".to_string(),
@@ -204,9 +215,10 @@ async fn create_listing_tool_rolls_back_inventory_when_embedding_fails() {
                 suggested_price_cny: 10_000,
                 defects: vec![],
                 original_description: "should rollback".to_string(),
-            })
-            .await
-            .unwrap_err();
+            },
+        )
+        .await
+        .unwrap_err();
 
         assert!(err.to_string().contains("Embedding error"));
 
@@ -257,15 +269,15 @@ async fn delete_listing_tool_removes_listing_document_in_same_operation() {
         .await
         .unwrap();
 
-        let tool = DeleteListingTool {
-            ctx: build_tool_context(pool.clone(), Some(owner_id.as_str())),
-        };
-        let result = tool
-            .call(DeleteListingArgs {
+        let ctx = build_tool_context(pool.clone(), Some(owner_id.as_str()));
+        let result = execute_delete_listing(
+            &ctx,
+            DeleteListingArgs {
                 listing_id: listing_id.clone(),
-            })
-            .await
-            .unwrap();
+            },
+        )
+        .await
+        .unwrap();
 
         assert!(result.contains("Successfully removed"));
 
@@ -283,6 +295,50 @@ async fn delete_listing_tool_removes_listing_document_in_same_operation() {
             .await
             .unwrap();
         assert_eq!(document_count, 0);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_listing_tool_requires_verified_campus_membership() {
+    with_test_pool(|pool| async move {
+        let suffix = Uuid::new_v4().to_string();
+        let user_id = format!("pending-campus-user-{suffix}");
+        let username = format!("pending-campus-user-{suffix}");
+        let title = format!("Blocked Listing {suffix}");
+
+        sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')")
+            .bind(&user_id)
+            .bind(&username)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let tool = CreateListingTool {
+            ctx: build_tool_context(pool.clone(), Some(user_id.as_str())),
+        };
+        let error = tool
+            .call(CreateListingArgs {
+                title: title.clone(),
+                category: "misc".to_string(),
+                brand: "Brand".to_string(),
+                condition_score: 8,
+                suggested_price_cny: 10_000,
+                defects: vec![],
+                original_description: "must not be persisted".to_string(),
+            })
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("校园身份验证"));
+        let listing_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE owner_id = $1 AND title = $2")
+                .bind(&user_id)
+                .bind(&title)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(listing_count, 0);
     })
     .await;
 }

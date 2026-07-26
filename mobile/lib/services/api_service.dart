@@ -140,8 +140,11 @@ class ApiService extends BaseService {
   Future<String> login(String username, String password) =>
       _authService.login(username, password);
 
-  Future<String> register(String username, String password) =>
-      _authService.register(username, password);
+  Future<String> register(String username, String password, {String? email}) =>
+      _authService.register(username, password, email: email);
+
+  Future<DateTime?> reauthenticate(String password, {String? totpCode}) =>
+      _authService.reauthenticate(password, totpCode: totpCode);
 
   // -----------------------------------------------------------------
   // Backward-compatibility wrappers (delegate to UserService)
@@ -149,6 +152,23 @@ class ApiService extends BaseService {
 
   Future<Map<String, dynamic>> getUserProfile() =>
       _userService.getUserProfile();
+
+  Future<List<CampusMembership>> getCampusMemberships() =>
+      _userService.getCampusMemberships();
+
+  Future<CampusMembershipState> getCampusMembershipState() =>
+      _userService.getCampusMembershipState();
+
+  Future<String> switchActiveCampus(String campusId) =>
+      _authService.switchActiveCampus(campusId);
+
+  Future<void> requestCampusVerification(String membershipId) =>
+      _userService.requestCampusVerification(membershipId);
+
+  Future<CampusMembership> confirmCampusVerification(
+    String membershipId,
+    String code,
+  ) => _userService.confirmCampusVerification(membershipId, code);
 
   Future<Map<String, dynamic>> getUserListings({
     int limit = 20,
@@ -209,6 +229,10 @@ class ApiService extends BaseService {
   Future<void> updateListing(String id, Map<String, dynamic> updates) =>
       _listingService.updateListing(id, updates);
 
+  Future<void> fulfillWanted(String id) => _listingService.fulfillWanted(id);
+
+  Future<void> relistListing(String id) => _listingService.relistListing(id);
+
   Future<ListingsResponse> getWantedMatches(String wantedId) =>
       _listingService.getWantedMatches(wantedId);
 
@@ -232,6 +256,15 @@ class ApiService extends BaseService {
   Future<List<HitlRequest>> getNegotiations() =>
       _negotiateService.getNegotiations();
 
+  Future<List<AgentPlan>> getAgentPlans() => _chatService.getAgentPlans();
+
+  Future<AgentPlanConfirmResult> confirmAgentPlan(
+    String id,
+    String confirmationToken,
+  ) => _chatService.confirmAgentPlan(id, confirmationToken);
+
+  Future<void> cancelAgentPlan(String id) => _chatService.cancelAgentPlan(id);
+
   Future<Map<String, dynamic>> respondNegotiation(
     String id, {
     required String action,
@@ -253,6 +286,9 @@ class ApiService extends BaseService {
   // -----------------------------------------------------------------
 
   Future<Map<String, dynamic>> getAdminStats() => _adminService.getAdminStats();
+
+  Future<Map<String, dynamic>> getAdminCapabilities() =>
+      _adminService.getCapabilities();
 
   Future<Map<String, dynamic>> getAdminListings({
     String? status,
@@ -301,4 +337,51 @@ class ApiService extends BaseService {
 
   Future<String> impersonateUserToken(String userId) =>
       _adminService.impersonateUserToken(userId);
+
+  Future<Map<String, dynamic>> getAdminModerationCases({
+    String? status,
+    int limit = 50,
+    int offset = 0,
+  }) => _adminService.getModerationCases(
+    status: status,
+    limit: limit,
+    offset: offset,
+  );
+
+  Future<Map<String, dynamic>> reviewModerationCase(
+    String caseId, {
+    required String action,
+    String? note,
+    String? publicReason,
+  }) => _adminService.reviewModerationCase(
+    caseId,
+    action: action,
+    note: note,
+    publicReason: publicReason,
+  );
+
+  Future<Map<String, dynamic>> reviewModerationAppeal(
+    String appealId, {
+    required String decision,
+    required String note,
+  }) => _adminService.reviewModerationAppeal(
+    appealId,
+    decision: decision,
+    note: note,
+  );
+
+  Future<Map<String, dynamic>> getModerationCases({
+    String? status,
+    int limit = 20,
+    int offset = 0,
+  }) => _userService.getModerationCases(
+    status: status,
+    limit: limit,
+    offset: offset,
+  );
+
+  Future<Map<String, dynamic>> submitModerationAppeal(
+    String caseId,
+    String reason,
+  ) => _userService.submitModerationAppeal(caseId, reason);
 }

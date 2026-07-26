@@ -11,8 +11,14 @@ import '../../theme/app_theme.dart';
 class AdminUsersTab extends StatefulWidget {
   final ApiService? apiService;
   final AdminImpersonationService? impersonationService;
+  final bool canManage;
 
-  const AdminUsersTab({super.key, this.apiService, this.impersonationService});
+  const AdminUsersTab({
+    super.key,
+    this.apiService,
+    this.impersonationService,
+    this.canManage = true,
+  });
 
   @override
   State<AdminUsersTab> createState() => _AdminUsersTabState();
@@ -254,7 +260,7 @@ class _AdminUsersTabState extends State<AdminUsersTab> {
               Text('${l.joinedLabel} ${u['created_at'] ?? l.unknown}'),
               Text('Role: ${u['role'] ?? 'user'}'),
               const SizedBox(height: AppTheme.sp16),
-              if (!isBanned)
+              if (widget.canManage && !isBanned)
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
@@ -320,7 +326,7 @@ class _AdminUsersTabState extends State<AdminUsersTab> {
                     label: Text(l.adminBan),
                   ),
                 )
-              else
+              else if (widget.canManage)
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
@@ -398,7 +404,7 @@ class _AdminUsersTabState extends State<AdminUsersTab> {
                   label: Text(l.adminViewListings),
                 ),
               ),
-              if (canAdminImpersonateUser(u))
+              if (widget.canManage && canAdminImpersonateUser(u))
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(

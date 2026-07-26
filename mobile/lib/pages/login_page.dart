@@ -17,6 +17,7 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _usernameController = TextEditingController();
+  final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   late final ApiService _apiService;
@@ -43,12 +44,16 @@ class _LoginPageState extends State<LoginPage> {
       if (!_isLogin && password != _confirmPasswordController.text) {
         throw Exception(l.registerError);
       }
+      final email = _emailController.text.trim();
+      if (!_isLogin && email.isEmpty) {
+        throw Exception(l.campusEmailRequired);
+      }
 
       String token;
       if (_isLogin) {
         token = await _apiService.login(username, password);
       } else {
-        token = await _apiService.register(username, password);
+        token = await _apiService.register(username, password, email: email);
       }
 
       if (token.isNotEmpty) {
@@ -72,6 +77,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void dispose() {
     _usernameController.dispose();
+    _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
@@ -175,6 +181,26 @@ class _LoginPageState extends State<LoginPage> {
               labelText: l.username,
               prefixIcon: const Icon(Icons.person_outline_rounded),
             ),
+          ),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            child: _isLogin
+                ? const SizedBox.shrink()
+                : Padding(
+                    key: const ValueKey('campus-email'),
+                    padding: const EdgeInsets.only(top: AppTheme.sp16),
+                    child: TextField(
+                      controller: _emailController,
+                      autofillHints: const [AutofillHints.email],
+                      keyboardType: TextInputType.emailAddress,
+                      textInputAction: TextInputAction.next,
+                      decoration: InputDecoration(
+                        labelText: l.campusEmail,
+                        hintText: l.campusEmailHint,
+                        prefixIcon: const Icon(Icons.school_outlined),
+                      ),
+                    ),
+                  ),
           ),
           const SizedBox(height: AppTheme.sp16),
           TextField(

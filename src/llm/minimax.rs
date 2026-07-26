@@ -57,12 +57,12 @@ impl MiniMaxProvider {
         let chat_client = openai::Client::builder()
             .api_key(api_key)
             .base_url(base_url)
+            .http_client(crate::llm::llm_http_client()?)
             .build()?;
 
-        let reqwest_client = reqwest::Client::builder().build()?;
         let embedding_client = gemini::Client::builder()
             .api_key(gemini_api_key)
-            .http_client(reqwest_client)
+            .http_client(crate::llm::llm_http_client()?)
             .build()?;
 
         Ok(Self {
@@ -167,6 +167,7 @@ impl super::LlmProvider for MiniMaxProvider {
         db_pool: &sqlx::PgPool,
         _event_tx: mpsc::Sender<BusinessEvent>,
         current_user_id: Option<String>,
+        current_campus_id: Option<uuid::Uuid>,
     ) -> anyhow::Result<Box<dyn MarketplaceAgent>> {
         let (rag_store, embed_updater) = self.build_vector_store(db_pool);
 
@@ -174,6 +175,7 @@ impl super::LlmProvider for MiniMaxProvider {
             db_pool: db_pool.clone(),
             embed_updater,
             current_user_id,
+            current_campus_id,
             notification: crate::services::notification::NotificationService::new(db_pool.clone()),
         };
 
@@ -193,6 +195,13 @@ impl super::LlmProvider for MiniMaxProvider {
             .build();
 
         Ok(Box::new(MiniMaxMarketplaceAgent(agent)))
+    }
+
+    fn embed_updater(
+        self: Arc<Self>,
+        db_pool: &PgPool,
+    ) -> Arc<dyn crate::agents::tools::EmbedUpdater> {
+        self.build_vector_store(db_pool).1
     }
 
     async fn create_negotiate_agent(self: Arc<Self>) -> anyhow::Result<Box<dyn NegotiateAgent>> {

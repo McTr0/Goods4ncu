@@ -1,13 +1,13 @@
 use axum::{
     extract::{Path, Query, State},
-    http::HeaderMap,
     Json,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::api::auth::extract_user_id_from_token_with_fallback;
 use crate::api::error::ApiError;
+use crate::api::session::Session;
 use crate::api::AppState;
+use crate::services::campus::CampusService;
 
 #[derive(Deserialize)]
 pub struct NotificationQuery {
@@ -20,6 +20,7 @@ pub struct NotificationQuery {
 #[derive(Serialize)]
 pub struct NotificationItem {
     pub id: String,
+    pub campus_id: uuid::Uuid,
     pub event_type: String,
     pub title: String,
     pub body: String,
@@ -42,15 +43,12 @@ pub struct NotificationResponse {
 /// By default returns only unread. Use ?include_read=true to get all history.
 pub async fn get_notifications(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Query(query): Query<NotificationQuery>,
 ) -> Result<Json<NotificationResponse>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let campus_id = CampusService::new(state.infra.db.clone())
+        .resolve_session_campus(&session.user_id, session.campus_id)
+        .await?;
 
     let limit = query.limit.unwrap_or(20).min(100);
     let offset = query.offset.unwrap_or(0);
@@ -59,7 +57,7 @@ pub async fn get_notifications(
     let unread_count = state
         .infra
         .notification
-        .count_unread(&user_id)
+        .count_unread(&session.user_id, campus_id)
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
@@ -67,14 +65,14 @@ pub async fn get_notifications(
         state
             .infra
             .notification
-            .list_all(&user_id, limit, offset)
+            .list_all(&session.user_id, campus_id, limit, offset)
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
     } else {
         state
             .infra
             .notification
-            .list_unread(&user_id, limit, offset)
+            .list_unread(&session.user_id, campus_id, limit, offset)
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
     };
@@ -83,6 +81,7 @@ pub async fn get_notifications(
         .into_iter()
         .map(|n| NotificationItem {
             id: n.id,
+            campus_id: n.campus_id,
             event_type: n.event_type,
             title: n.title,
             body: n.body,
@@ -105,20 +104,17 @@ pub async fn get_notifications(
 /// POST /api/notifications/{id}/read — mark a single notification as read.
 pub async fn mark_notification_read(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     Path(notification_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let campus_id = CampusService::new(state.infra.db.clone())
+        .resolve_session_campus(&session.user_id, session.campus_id)
+        .await?;
 
     let marked = state
         .infra
         .notification
-        .mark_read(&notification_id, &user_id)
+        .mark_read(&notification_id, &session.user_id, campus_id)
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
@@ -132,19 +128,16 @@ pub async fn mark_notification_read(
 /// POST /api/notifications/read-all — mark all unread notifications as read.
 pub async fn mark_all_notifications_read(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let campus_id = CampusService::new(state.infra.db.clone())
+        .resolve_session_campus(&session.user_id, session.campus_id)
+        .await?;
 
     let count = state
         .infra
         .notification
-        .mark_all_read(&user_id)
+        .mark_all_read(&session.user_id, campus_id)
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 

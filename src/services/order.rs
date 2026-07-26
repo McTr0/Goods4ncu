@@ -68,6 +68,8 @@ pub enum OrderError {
     Forbidden,
     #[error("Listing already sold")]
     AlreadySold,
+    #[error("Idempotency key was reused with different confirmation data")]
+    IdempotencyConflict,
     #[error("Database error: {0}")]
     Db(#[from] sqlx::Error),
     #[error("Repository error: {0}")]
@@ -163,10 +165,31 @@ impl OrderService {
         auto_delist: bool,
         allow_admin: bool,
     ) -> Result<bool, OrderError> {
+        self.confirm_order_with_idempotency(
+            order_id,
+            actor_id,
+            auto_delist,
+            allow_admin,
+            None,
+            None,
+        )
+        .await
+    }
+
+    pub async fn confirm_order_with_idempotency(
+        &self,
+        order_id: &str,
+        actor_id: &str,
+        auto_delist: bool,
+        allow_admin: bool,
+        idempotency_key: Option<&str>,
+        request_hash: Option<&str>,
+    ) -> Result<bool, OrderError> {
         let mut tx = self.db.begin().await.map_err(OrderError::Db)?;
         let row = sqlx::query(
             r#"
-            SELECT status, listing_id, seller_id
+            SELECT status, listing_id, seller_id,
+                   confirm_idempotency_key, confirm_request_hash
             FROM orders
             WHERE id = $1
             FOR UPDATE
@@ -181,9 +204,38 @@ impl OrderService {
         let current_status: String = row.get("status");
         let listing_id: String = row.get("listing_id");
         let seller_id: String = row.get("seller_id");
+        let stored_key: Option<String> = row.get("confirm_idempotency_key");
+        let stored_hash: Option<String> = row.get("confirm_request_hash");
 
         if !allow_admin && seller_id != actor_id {
             return Err(OrderError::Forbidden);
+        }
+
+        if let (Some(key), Some(hash)) = (idempotency_key, request_hash) {
+            if stored_key.as_deref() == Some(key) {
+                if stored_hash.as_deref() != Some(hash) {
+                    return Err(OrderError::IdempotencyConflict);
+                }
+                return Ok(current_status == OrderStatus::Confirmed.canonical());
+            }
+
+            let key_used_elsewhere: bool = sqlx::query_scalar(
+                "SELECT EXISTS(
+                    SELECT 1 FROM orders
+                    WHERE seller_id = $1
+                      AND confirm_idempotency_key = $2
+                      AND id <> $3
+                )",
+            )
+            .bind(&seller_id)
+            .bind(key)
+            .bind(order_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(OrderError::Db)?;
+            if key_used_elsewhere {
+                return Err(OrderError::IdempotencyConflict);
+            }
         }
 
         let current = OrderStatus::parse_status(&current_status)
@@ -218,7 +270,9 @@ impl OrderService {
                 confirmed_at = NOW(),
                 confirmed_by = $2,
                 auto_delist = $3,
-                auto_delisted_at = CASE WHEN $3 THEN NOW() ELSE NULL END
+                auto_delisted_at = CASE WHEN $3 THEN NOW() ELSE NULL END,
+                confirm_idempotency_key = $4,
+                confirm_request_hash = $5
             WHERE id = $1
               AND status IN ('intent_pending', 'pending')
             "#,
@@ -226,6 +280,8 @@ impl OrderService {
         .bind(order_id)
         .bind(confirmed_by)
         .bind(auto_delist)
+        .bind(idempotency_key)
+        .bind(request_hash)
         .execute(&mut *tx)
         .await
         .map_err(OrderError::Db)?;
@@ -398,6 +454,7 @@ impl OrderService {
 
     pub async fn admin_list_orders(
         &self,
+        campus_id: uuid::Uuid,
         status: Option<&str>,
         limit: i64,
         offset: i64,
@@ -405,12 +462,15 @@ impl OrderService {
         let normalized_status = status
             .and_then(OrderStatus::parse_status)
             .map(|s| s.canonical());
-        let total: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM orders WHERE $1::text IS NULL OR status = $1")
-                .bind(normalized_status)
-                .fetch_one(&self.db)
-                .await
-                .map_err(OrderError::Db)?;
+        let total: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM orders
+                 WHERE campus_id = $1 AND ($2::text IS NULL OR status = $2)",
+        )
+        .bind(campus_id)
+        .bind(normalized_status)
+        .fetch_one(&self.db)
+        .await
+        .map_err(OrderError::Db)?;
 
         let rows = sqlx::query_as::<_, SqlxOrderSummaryRow>(
             r#"
@@ -424,11 +484,12 @@ impl OrderService {
             JOIN inventory i ON i.id = o.listing_id
             JOIN users buyer ON buyer.id = o.buyer_id
             JOIN users seller ON seller.id = o.seller_id
-            WHERE $1::text IS NULL OR o.status = $1
+            WHERE o.campus_id = $1 AND ($2::text IS NULL OR o.status = $2)
             ORDER BY o.created_at DESC
-            LIMIT $2 OFFSET $3
+            LIMIT $3 OFFSET $4
             "#,
         )
+        .bind(campus_id)
         .bind(normalized_status)
         .bind(limit)
         .bind(offset)
@@ -554,6 +615,8 @@ pub struct SqlxOrderSummaryRow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_infra::with_test_pool;
+    use uuid::Uuid;
 
     #[test]
     fn test_order_status_display() {
@@ -599,5 +662,104 @@ mod tests {
         assert!(!OrderStatus::Confirmed.can_transition_to(&OrderStatus::IntentPending));
         assert!(!OrderStatus::Cancelled.can_transition_to(&OrderStatus::Confirmed));
         assert!(!OrderStatus::Cancelled.can_transition_to(&OrderStatus::IntentPending));
+    }
+
+    #[tokio::test]
+    async fn confirm_order_is_idempotent_and_rejects_key_reuse() {
+        with_test_pool(|pool| async move {
+            let seller_id = Uuid::new_v4().to_string();
+            let buyer_id = Uuid::new_v4().to_string();
+            let listing_id = Uuid::new_v4().to_string();
+            let order_id = Uuid::new_v4().to_string();
+
+            for (id, username) in [
+                (&seller_id, "confirm_idempotent_seller"),
+                (&buyer_id, "confirm_idempotent_buyer"),
+            ] {
+                sqlx::query(
+                    "INSERT INTO users (id, username, password_hash, role, status)
+                     VALUES ($1, $2, 'test-hash', 'user', 'active')",
+                )
+                .bind(id)
+                .bind(format!("{}_{}", username, &id[..8]))
+                .execute(&pool)
+                .await
+                .expect("insert order idempotency user");
+            }
+
+            sqlx::query(
+                "INSERT INTO inventory (
+                    id, title, category, brand, condition_score,
+                    suggested_price_cny, defects, description, owner_id, status
+                 ) VALUES ($1, 'Idempotent listing', 'other', 'Test', 8,
+                    10000, '[]', 'Test listing', $2, 'active')",
+            )
+            .bind(&listing_id)
+            .bind(&seller_id)
+            .execute(&pool)
+            .await
+            .expect("insert order idempotency listing");
+
+            sqlx::query(
+                "INSERT INTO orders (
+                    id, listing_id, buyer_id, seller_id, final_price, status
+                 ) VALUES ($1, $2, $3, $4, 9000, 'intent_pending')",
+            )
+            .bind(&order_id)
+            .bind(&listing_id)
+            .bind(&buyer_id)
+            .bind(&seller_id)
+            .execute(&pool)
+            .await
+            .expect("insert order idempotency order");
+
+            let service = OrderService::new(pool.clone());
+            let request_hash = "a".repeat(64);
+            assert!(service
+                .confirm_order_with_idempotency(
+                    &order_id,
+                    &seller_id,
+                    true,
+                    false,
+                    Some("confirm-attempt-1"),
+                    Some(&request_hash),
+                )
+                .await
+                .expect("first confirmation"));
+
+            assert!(service
+                .confirm_order_with_idempotency(
+                    &order_id,
+                    &seller_id,
+                    true,
+                    false,
+                    Some("confirm-attempt-1"),
+                    Some(&request_hash),
+                )
+                .await
+                .expect("replayed confirmation"));
+
+            let listing_status: String =
+                sqlx::query_scalar("SELECT status FROM inventory WHERE id = $1")
+                    .bind(&listing_id)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("listing status");
+            assert_eq!(listing_status, "sold");
+
+            let conflict = service
+                .confirm_order_with_idempotency(
+                    &order_id,
+                    &seller_id,
+                    false,
+                    false,
+                    Some("confirm-attempt-1"),
+                    Some(&"b".repeat(64)),
+                )
+                .await
+                .expect_err("changed request must conflict");
+            assert!(matches!(conflict, OrderError::IdempotencyConflict));
+        })
+        .await;
     }
 }

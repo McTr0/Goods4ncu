@@ -5,10 +5,10 @@
 //!
 //! Security: Credentials are short-lived (1 hour), scoped to PutObject only.
 
-use crate::api::auth::extract_user_id_from_token_with_fallback;
 use crate::api::error::ApiError;
+use crate::api::session::VerifiedTenant;
 use crate::api::AppState;
-use axum::{extract::State, http::HeaderMap, Json};
+use axum::{extract::State, Json};
 use base64::Engine;
 use hmac::{Hmac, Mac};
 use reqwest::Client;
@@ -18,17 +18,17 @@ use std::time::Duration;
 type HmacSha1 = Hmac<Sha1>;
 
 /// GET /api/upload/token — returns STS temporary credentials for OSS direct upload.
+///
+/// Requires a verified campus membership, not merely a valid token. These
+/// credentials grant object writes, so this is a write path and has to match
+/// the rule every other write path follows. Without the membership check a
+/// `pending` account — one that cannot publish a listing or contact anyone —
+/// could still obtain bucket credentials and use platform storage to host
+/// arbitrary content.
 pub async fn get_upload_token(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _tenant: VerifiedTenant,
 ) -> Result<Json<StsResponse>, ApiError> {
-    let _user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
-
     // Read OSS config from AppState (passed from AppConfig at startup).
     let role_arn = state
         .secrets

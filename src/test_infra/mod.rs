@@ -226,7 +226,7 @@ where
         "TRUNCATE TABLE \
             chat_messages, chat_conversation_events, chat_conversation_members, chat_blocks, \
             chat_conversations, hitl_requests, notifications, watchlist, orders, inventory, \
-            documents, refresh_tokens, users \
+            documents, refresh_tokens, outbox_events, users \
          RESTART IDENTITY CASCADE",
     )
     .execute(&pool)

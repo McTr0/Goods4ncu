@@ -42,13 +42,26 @@ pub async fn run_cli(args: &[String]) -> Result<bool> {
     }
 }
 
+/// Container health check probe.
+///
+/// Targets readiness rather than liveness: this drives the container's health
+/// status, which is what Compose `depends_on: service_healthy` and swarm
+/// routing consult, so a draining instance must report unhealthy and stop
+/// receiving traffic.
 async fn run_health_check() -> Result<()> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()?;
 
+    // Follow the configured port; a hardcoded 3000 silently reports every
+    // container on a custom port as unhealthy.
+    let port = env::var("SERVER_PORT")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "3000".to_string());
+
     let response = client
-        .get("http://127.0.0.1:3000/api/health")
+        .get(format!("http://127.0.0.1:{}/api/readyz", port))
         .send()
         .await?;
 

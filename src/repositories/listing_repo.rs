@@ -78,14 +78,14 @@ impl PostgresListingRepository {
         let inserted_id = sqlx::query_scalar::<_, String>(
             r#"
             INSERT INTO inventory (
-                id, new_id,
+                id, new_id, campus_id,
                 title, category, brand, direction, condition_score,
                 suggested_price_cny, defects, description, image_url,
                 owner_id, new_owner_id, status,
                 idempotency_key, idempotency_hash
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                    (SELECT new_id FROM users WHERE id = $12), 'active', $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                    (SELECT new_id FROM users WHERE id = $13), 'active', $14, $15)
             ON CONFLICT (owner_id, idempotency_key)
                 WHERE idempotency_key IS NOT NULL
                 DO NOTHING
@@ -94,6 +94,7 @@ impl PostgresListingRepository {
         )
         .bind(&listing_id)
         .bind(listing_uuid)
+        .bind(input.campus_id)
         .bind(&input.title)
         .bind(&input.category)
         .bind(&input.brand)
@@ -376,6 +377,7 @@ impl PostgresListingRepository {
 impl ListingRepository for PostgresListingRepository {
     async fn find_listings(
         &self,
+        campus_id: Uuid,
         category: Option<&str>,
         categories: Option<&str>,
         search: Option<&str>,
@@ -386,13 +388,16 @@ impl ListingRepository for PostgresListingRepository {
         limit: i64,
         offset: i64,
     ) -> Result<(Vec<Listing>, i64), ApiError> {
-        let mut query = String::from(
-            "SELECT id, title, category, brand, direction, condition_score, suggested_price_cny, \
-             defects, description, image_url, owner_id, status, created_at \
-             FROM inventory WHERE status = 'active'",
+        let mut query = format!(
+            "SELECT id, campus_id, title, category, brand, direction, condition_score, suggested_price_cny, \
+             defects, description, CASE WHEN images_moderation_status = 'approved' THEN image_url ELSE NULL END AS image_url, owner_id, status, created_at \
+             FROM inventory WHERE status = 'active' AND campus_id = '{}'",
+            campus_id
         );
-        let mut count_query =
-            String::from("SELECT COUNT(*) FROM inventory WHERE status = 'active'");
+        let mut count_query = format!(
+            "SELECT COUNT(*) FROM inventory WHERE status = 'active' AND campus_id = '{}'",
+            campus_id
+        );
 
         if let Some(direction) = direction {
             if direction != "all" {
@@ -498,8 +503,8 @@ impl ListingRepository for PostgresListingRepository {
 
     async fn find_by_id(&self, id: &str) -> Result<Option<Listing>, ApiError> {
         let row = sqlx::query_as::<_, Listing>(
-            "SELECT id, title, category, brand, direction, condition_score, suggested_price_cny, \
-             defects, description, image_url, owner_id, status, created_at \
+            "SELECT id, campus_id, title, category, brand, direction, condition_score, suggested_price_cny, \
+             defects, description, CASE WHEN images_moderation_status = 'approved' THEN image_url ELSE NULL END AS image_url, owner_id, status, created_at \
              FROM inventory WHERE id = $1",
         )
         .bind(id)
@@ -514,8 +519,10 @@ impl ListingRepository for PostgresListingRepository {
         id: &str,
     ) -> Result<Option<(Listing, Option<String>)>, ApiError> {
         let row = sqlx::query(
-            "SELECT i.id, i.title, i.category, i.brand, i.direction, i.condition_score, i.suggested_price_cny, \
-             i.defects, i.description, i.image_url, i.owner_id, i.status, i.created_at, \
+            "SELECT i.id, i.campus_id, i.title, i.category, i.brand, i.direction, i.condition_score, i.suggested_price_cny, \
+             i.defects, i.description, \
+             CASE WHEN i.images_moderation_status = 'approved' THEN i.image_url ELSE NULL END AS image_url, \
+             i.owner_id, i.status, i.created_at, \
              u.username as owner_username \
              FROM inventory i \
              LEFT JOIN users u ON i.owner_id = u.id \
@@ -530,6 +537,7 @@ impl ListingRepository for PostgresListingRepository {
             Some(r) => {
                 let listing = Listing {
                     id: r.get("id"),
+                    campus_id: r.get("campus_id"),
                     title: r.get("title"),
                     category: r.get("category"),
                     brand: r.get("brand"),
@@ -548,6 +556,15 @@ impl ListingRepository for PostgresListingRepository {
             }
             None => Ok(None),
         }
+    }
+
+    async fn find_by_id_with_owner_in_campus(
+        &self,
+        id: &str,
+        campus_id: Uuid,
+    ) -> Result<Option<(Listing, Option<String>)>, ApiError> {
+        let result = self.find_by_id_with_owner(id).await?;
+        Ok(result.filter(|(listing, _)| listing.campus_id == campus_id))
     }
 
     async fn create(&self, input: CreateListingInput) -> Result<String, ApiError> {
@@ -633,9 +650,11 @@ impl ListingRepository for PostgresListingRepository {
             .ok_or(ApiError::NotFound)?;
 
         let status: String = row.get("status");
-        if status != "sold" && status != "deleted" {
+        // 'fulfilled' is the wanted-side counterpart of 'sold': reopening a
+        // fulfilled wanted resumes matching without recreating the item.
+        if status != "sold" && status != "deleted" && status != "fulfilled" {
             return Err(ApiError::BadRequest(format!(
-                "无法重新上架，当前状态为'{}'，只能重新上架已售出或已删除的商品",
+                "无法重新上架，当前状态为'{}'，只能重新上架已售出、已删除或已完成的条目",
                 status
             )));
         }
@@ -821,6 +840,7 @@ mod tests {
             let repo = PostgresListingRepository::new(pool.clone());
             let listing_id = repo
                 .create(CreateListingInput {
+                    campus_id: Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap(),
                     title: "Desk".to_string(),
                     category: "other".to_string(),
                     brand: Some("Brand".to_string()),
@@ -864,6 +884,7 @@ mod tests {
 
             let repo = PostgresListingRepository::new(pool.clone());
             let input = CreateListingInput {
+                campus_id: Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap(),
                 title: "Desk".to_string(),
                 category: "other".to_string(),
                 brand: Some("Campus".to_string()),

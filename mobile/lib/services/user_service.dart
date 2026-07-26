@@ -61,13 +61,154 @@ class UserLookupMatch {
   }
 }
 
+class CampusMembership {
+  const CampusMembership({
+    required this.id,
+    required this.campusId,
+    required this.campusSlug,
+    required this.campusNameZh,
+    required this.campusNameEn,
+    required this.status,
+    required this.role,
+  });
+
+  final String id;
+  final String campusId;
+  final String campusSlug;
+  final String campusNameZh;
+  final String campusNameEn;
+  final String status;
+  final String role;
+
+  bool get isVerified => status == 'verified';
+
+  factory CampusMembership.fromJson(Map<String, dynamic> json) {
+    return CampusMembership(
+      id: json['id']?.toString() ?? '',
+      campusId: json['campus_id']?.toString() ?? '',
+      campusSlug: json['campus_slug']?.toString() ?? '',
+      campusNameZh: json['campus_name_zh']?.toString() ?? '',
+      campusNameEn: json['campus_name_en']?.toString() ?? '',
+      status: json['status']?.toString() ?? 'pending',
+      role: json['role']?.toString() ?? 'member',
+    );
+  }
+}
+
+class CampusMembershipState {
+  const CampusMembershipState({
+    required this.items,
+    required this.activeCampusId,
+  });
+
+  final List<CampusMembership> items;
+  final String? activeCampusId;
+}
+
 class UserService extends BaseService {
+  Future<Map<String, dynamic>> getAdminCapabilities() async {
+    final headers = await authHeaders();
+    final response = await get(
+      Uri.parse('$baseUrl/api/admin/capabilities'),
+      headers,
+    );
+    return handleResponse(response, (data) => data as Map<String, dynamic>);
+  }
+
   /// Get current user's profile.
   /// GET /api/user/profile
   Future<Map<String, dynamic>> getUserProfile() async {
     final headers = await authHeaders();
     final response = await get(Uri.parse('$baseUrl/api/user/profile'), headers);
     return handleResponse(response, (data) => data as Map<String, dynamic>);
+  }
+
+  Future<Map<String, dynamic>> getModerationCases({
+    String? status,
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final headers = await authHeaders();
+    final query = <String, String>{
+      'limit': '$limit',
+      'offset': '$offset',
+      if (status != null && status.isNotEmpty) 'status': status,
+    };
+    final uri = Uri.parse(
+      '$baseUrl/api/moderation/cases',
+    ).replace(queryParameters: query);
+    final response = await get(uri, headers);
+    return handleResponse(response, (data) => data as Map<String, dynamic>);
+  }
+
+  Future<Map<String, dynamic>> submitModerationAppeal(
+    String caseId,
+    String reason,
+  ) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/moderation/cases/$caseId/appeals'),
+      headers,
+      jsonEncode({'reason': reason}),
+    );
+    return handleResponse(response, (data) => data as Map<String, dynamic>);
+  }
+
+  /// Get the current user's campus qualification records.
+  /// GET /api/user/campus-memberships
+  Future<List<CampusMembership>> getCampusMemberships() async {
+    return (await getCampusMembershipState()).items;
+  }
+
+  Future<CampusMembershipState> getCampusMembershipState() async {
+    final headers = await authHeaders();
+    final response = await get(
+      Uri.parse('$baseUrl/api/user/campus-memberships'),
+      headers,
+    );
+    final data = handleResponse(
+      response,
+      (value) => value as Map<String, dynamic>,
+    );
+    final items = (data['items'] as List<dynamic>? ?? const [])
+        .map((item) => CampusMembership.fromJson(item as Map<String, dynamic>))
+        .toList();
+    return CampusMembershipState(
+      items: items,
+      activeCampusId: data['active_campus_id']?.toString(),
+    );
+  }
+
+  /// Request a short-lived code for the membership's campus email.
+  Future<void> requestCampusVerification(String membershipId) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse(
+        '$baseUrl/api/user/campus-memberships/$membershipId/verification/request',
+      ),
+      headers,
+      '{}',
+    );
+    handleResponse(response, (_) {});
+  }
+
+  /// Confirm the campus email code and return the activated membership.
+  Future<CampusMembership> confirmCampusVerification(
+    String membershipId,
+    String code,
+  ) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse(
+        '$baseUrl/api/user/campus-memberships/$membershipId/verification/confirm',
+      ),
+      headers,
+      jsonEncode({'code': code}),
+    );
+    return handleResponse(
+      response,
+      (data) => CampusMembership.fromJson(data as Map<String, dynamic>),
+    );
   }
 
   /// Update current user's profile.

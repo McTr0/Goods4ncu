@@ -9,6 +9,7 @@
 //! 2. Injects a system message into the conversation
 //! 3. Notifies the buyer: "卖家超时未回应，本次议价已自动取消"
 
+use crate::lifecycle::{tick_or_shutdown, ShutdownSignal};
 use crate::services::notification::NotificationBroadcast;
 use sqlx::{PgPool, Row};
 use std::time::Duration;
@@ -16,18 +17,24 @@ use tokio::time::interval;
 use uuid::Uuid;
 
 /// Run the HITL expiration worker.
-/// Spawns a background tokio task that scans and expires stale requests.
-pub async fn run(db_pool: PgPool, broadcast: NotificationBroadcast) {
+///
+/// Stops between scans on shutdown rather than being aborted, so an in-progress
+/// expiration transaction is never cut off partway through.
+pub async fn run(db_pool: PgPool, broadcast: NotificationBroadcast, shutdown: ShutdownSignal) {
     tracing::info!("HITL expiration worker started (interval: 10 min)");
     let mut ticker = interval(Duration::from_secs(10 * 60));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-    loop {
-        ticker.tick().await;
+    while tick_or_shutdown(&mut ticker, &shutdown)
+        .await
+        .should_continue()
+    {
         if let Err(e) = expire_pending(&db_pool, &broadcast).await {
             tracing::error!(%e, "HITL expiration scan failed");
         }
     }
+
+    tracing::info!("HITL expiration worker stopped");
 }
 
 /// Scan for and expire all pending hitl_requests past their expires_at.
@@ -49,7 +56,7 @@ async fn expire_pending(
         SET status = 'expired', resolved_at = NOW()
         FROM candidates
         WHERE h.id = candidates.id
-        RETURNING h.id, h.listing_id, h.buyer_id, h.seller_id
+        RETURNING h.id, h.campus_id, h.listing_id, h.buyer_id, h.seller_id
         "#,
     )
     .fetch_all(&mut *tx)
@@ -69,6 +76,7 @@ async fn expire_pending(
     let mut expired = Vec::with_capacity(rows.len());
     for row in &rows {
         let id: String = row.get("id");
+        let campus_id: Uuid = row.get("campus_id");
         let listing_id: String = row.get("listing_id");
         let buyer_id: String = row.get("buyer_id");
         let seller_id: String = row.get("seller_id");
@@ -90,20 +98,22 @@ async fn expire_pending(
         .execute(&mut *tx)
         .await?;
 
-        expired.push((id, listing_id, buyer_id, seller_id));
+        expired.push((id, campus_id, listing_id, buyer_id, seller_id));
     }
 
     tx.commit().await?;
 
-    for (_id, listing_id, buyer_id, seller_id) in &expired {
+    for (_id, campus_id, listing_id, buyer_id, seller_id) in &expired {
         // Notify buyer: seller didn't respond in time.
         let notification_id = Uuid::new_v4().to_string();
         let _ = sqlx::query(
-            r#"INSERT INTO notifications (id, user_id, event_type, title, body, related_listing_id)
-               VALUES ($1, $2, 'negotiation_expired', '议价已超时取消',
-                       '卖家超时未回应（48小时内未处理），本次议价已自动取消', $3)"#,
+            r#"INSERT INTO notifications (
+                   id, campus_id, user_id, event_type, title, body, related_listing_id
+               ) VALUES ($1, $2, $3, 'negotiation_expired', '议价已超时取消',
+                         '卖家超时未回应（48小时内未处理），本次议价已自动取消', $4)"#,
         )
         .bind(&notification_id)
+        .bind(campus_id)
         .bind(buyer_id)
         .bind(listing_id)
         .execute(db_pool)
@@ -122,11 +132,13 @@ async fn expire_pending(
         // Notify seller as well — they missed a negotiation request.
         let seller_notif_id = Uuid::new_v4().to_string();
         let _ = sqlx::query(
-            r#"INSERT INTO notifications (id, user_id, event_type, title, body, related_listing_id)
-               VALUES ($1, $2, 'negotiation_expired_seller', '议价超时未处理',
-                       '您有一笔议价请求超时未处理，已自动取消', $3)"#,
+            r#"INSERT INTO notifications (
+                   id, campus_id, user_id, event_type, title, body, related_listing_id
+               ) VALUES ($1, $2, $3, 'negotiation_expired_seller', '议价超时未处理',
+                         '您有一笔议价请求超时未处理，已自动取消', $4)"#,
         )
         .bind(&seller_notif_id)
+        .bind(campus_id)
         .bind(seller_id)
         .bind(listing_id)
         .execute(db_pool)

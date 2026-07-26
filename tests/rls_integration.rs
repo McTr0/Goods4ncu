@@ -1,0 +1,242 @@
+//! Row-Level Security enforcement (Phase 1 defense-in-depth).
+//!
+//! Proves the `app.campus_id` policies actually bite: with a tenant context
+//! armed via `SET LOCAL`, other campuses' rows are invisible to reads and
+//! unwritable — even for the table-owning role (FORCE) — while an unarmed
+//! session behaves exactly as before.
+
+use good4ncu::test_infra::with_test_pool;
+use uuid::Uuid;
+
+/// Provision a non-superuser role for RLS probing. Local test clusters often
+/// run as a superuser, and superusers bypass RLS entirely (FORCE covers table
+/// owners, not superusers) — production must never run the app as a
+/// superuser, and these tests exercise the same non-superuser condition.
+async fn ensure_probe_role(pool: &sqlx::PgPool) {
+    sqlx::query(
+        "DO $$ BEGIN
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'rls_probe') THEN
+                CREATE ROLE rls_probe NOLOGIN;
+            END IF;
+        END $$;",
+    )
+    .execute(pool)
+    .await
+    .expect("create probe role");
+    sqlx::query("GRANT USAGE ON SCHEMA public TO rls_probe")
+        .execute(pool)
+        .await
+        .expect("grant schema");
+    sqlx::query("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO rls_probe")
+        .execute(pool)
+        .await
+        .expect("grant tables");
+    sqlx::query("GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO rls_probe")
+        .execute(pool)
+        .await
+        .expect("grant sequences");
+}
+
+async fn arm(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, campus_id: Uuid) {
+    sqlx::query("SET LOCAL ROLE rls_probe")
+        .execute(&mut **tx)
+        .await
+        .expect("assume probe role");
+    sqlx::query(&format!("SET LOCAL app.campus_id = '{campus_id}'"))
+        .execute(&mut **tx)
+        .await
+        .expect("arm tenant context");
+}
+
+async fn seed_two_campus_listings(pool: &sqlx::PgPool) -> (Uuid, Uuid, String, String) {
+    let ncu_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+        .fetch_one(pool)
+        .await
+        .expect("ncu campus");
+    let other_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO campuses (id, slug, name_zh, name_en, email_domains)
+         VALUES ($1, $2, 'RLS 测试大学', 'RLS Test University', ARRAY['rls.test'])",
+    )
+    .bind(other_id)
+    .bind(format!("rls-{}", &other_id.to_string()[..8]))
+    .execute(pool)
+    .await
+    .expect("insert campus");
+
+    let owner_id = Uuid::new_v4().to_string();
+    sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')")
+        .bind(&owner_id)
+        .bind(format!("rls_owner_{}", Uuid::new_v4().simple()))
+        .execute(pool)
+        .await
+        .expect("insert user");
+
+    let ncu_listing = Uuid::new_v4().to_string();
+    let other_listing = Uuid::new_v4().to_string();
+    for (id, campus) in [(&ncu_listing, ncu_id), (&other_listing, other_id)] {
+        sqlx::query(
+            "INSERT INTO inventory (id, campus_id, title, category, brand, condition_score,
+                                    suggested_price_cny, defects, owner_id, status)
+             VALUES ($1, $2, 'RLS Item', 'misc', 'Brand', 8, 10000, '[]', $3, 'active')",
+        )
+        .bind(id)
+        .bind(campus)
+        .bind(&owner_id)
+        .execute(pool)
+        .await
+        .expect("insert listing");
+    }
+    (ncu_id, other_id, ncu_listing, other_listing)
+}
+
+#[tokio::test]
+async fn armed_tenant_context_hides_other_campus_rows() {
+    with_test_pool(|pool| async move {
+        let (ncu_id, _other_id, ncu_listing, other_listing) = seed_two_campus_listings(&pool).await;
+        ensure_probe_role(&pool).await;
+
+        // Unarmed: both rows visible (app-layer enforcement is primary).
+        let visible: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE id IN ($1, $2)")
+                .bind(&ncu_listing)
+                .bind(&other_listing)
+                .fetch_one(&pool)
+                .await
+                .expect("unarmed count");
+        assert_eq!(visible, 2, "without a tenant context nothing is filtered");
+
+        // Armed to NCU: the other campus's row is invisible even though this
+        // role owns the table (FORCE ROW LEVEL SECURITY).
+        let mut tx = pool.begin().await.expect("begin");
+        arm(&mut tx, ncu_id).await;
+        let visible: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE id IN ($1, $2)")
+                .bind(&ncu_listing)
+                .bind(&other_listing)
+                .fetch_one(&mut *tx)
+                .await
+                .expect("armed count");
+        assert_eq!(visible, 1, "armed context must hide the other campus");
+        let seen: String = sqlx::query_scalar("SELECT id FROM inventory WHERE id IN ($1, $2)")
+            .bind(&ncu_listing)
+            .bind(&other_listing)
+            .fetch_one(&mut *tx)
+            .await
+            .expect("armed row");
+        assert_eq!(seen, ncu_listing);
+        tx.rollback().await.expect("rollback");
+
+        // SET LOCAL scope ends with the transaction: visibility restored.
+        let visible: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE id IN ($1, $2)")
+                .bind(&ncu_listing)
+                .bind(&other_listing)
+                .fetch_one(&pool)
+                .await
+                .expect("post-tx count");
+        assert_eq!(visible, 2, "context must not leak past the transaction");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn armed_tenant_context_blocks_cross_campus_writes() {
+    with_test_pool(|pool| async move {
+        let (ncu_id, other_id, _ncu_listing, other_listing) = seed_two_campus_listings(&pool).await;
+        ensure_probe_role(&pool).await;
+        let owner_id: String = sqlx::query_scalar("SELECT owner_id FROM inventory WHERE id = $1")
+            .bind(&other_listing)
+            .fetch_one(&pool)
+            .await
+            .expect("owner");
+
+        let mut tx = pool.begin().await.expect("begin");
+        arm(&mut tx, ncu_id).await;
+
+        // INSERT tagged with another campus violates WITH CHECK.
+        let result = sqlx::query(
+            "INSERT INTO inventory (id, campus_id, title, category, brand, condition_score,
+                                    suggested_price_cny, defects, owner_id, status)
+             VALUES ($1, $2, 'Cross Write', 'misc', 'Brand', 8, 10000, '[]', $3, 'active')",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(other_id)
+        .bind(&owner_id)
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            result
+                .expect_err("cross-campus insert must fail")
+                .to_string()
+                .contains("row-level security"),
+            "failure must come from the RLS policy"
+        );
+        tx.rollback().await.expect("rollback");
+
+        // UPDATE cannot reach the other campus's row at all (0 rows matched).
+        let mut tx = pool.begin().await.expect("begin");
+        arm(&mut tx, ncu_id).await;
+        let updated = sqlx::query("UPDATE inventory SET title = 'Hijacked' WHERE id = $1")
+            .bind(&other_listing)
+            .execute(&mut *tx)
+            .await
+            .expect("update executes");
+        assert_eq!(
+            updated.rows_affected(),
+            0,
+            "an armed context must not be able to touch other-campus rows"
+        );
+        tx.rollback().await.expect("rollback");
+    })
+    .await;
+}
+
+/// The policies cover every tenant-scoped table, not just inventory.
+#[tokio::test]
+async fn rls_policies_exist_on_all_tenant_tables() {
+    with_test_pool(|pool| async move {
+        let expected = [
+            "inventory",
+            "orders",
+            "hitl_requests",
+            "wanted_responses",
+            "notifications",
+            "chat_conversations",
+            "chat_spaces",
+            "chat_secret_sessions",
+            "moderation_jobs",
+            "moderation_cases",
+            "moderation_appeals",
+            "agent_action_plans",
+            "admin_audit_logs",
+            "campus_memberships",
+            "refresh_tokens",
+        ];
+        for table in expected {
+            let (enabled, forced): (bool, bool) = sqlx::query_as(
+                "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = $1",
+            )
+            .bind(table)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| panic!("{table}: {e}"));
+            assert!(enabled, "{table} must have RLS enabled");
+            assert!(
+                forced,
+                "{table} must FORCE RLS so the owner role is covered"
+            );
+
+            let policy: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM pg_policies
+                 WHERE tablename = $1 AND policyname = 'tenant_isolation'",
+            )
+            .bind(table)
+            .fetch_one(&pool)
+            .await
+            .expect("policy count");
+            assert_eq!(policy, 1, "{table} must carry the tenant_isolation policy");
+        }
+    })
+    .await;
+}

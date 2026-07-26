@@ -508,6 +508,60 @@ class AppLocalizationsZh extends AppLocalizations {
   String get profileTab => '我的';
 
   @override
+  String get campusMembershipVerified => '校园身份已验证';
+
+  @override
+  String get campusMembershipPending => '校园身份待验证';
+
+  @override
+  String get campusMembershipSuspended => '校园资格已暂停';
+
+  @override
+  String get campusMembershipRevoked => '校园资格已撤销';
+
+  @override
+  String get campusEmail => '学校邮箱';
+
+  @override
+  String get campusEmailHint => '学号@email.ncu.edu.cn';
+
+  @override
+  String get campusEmailRequired => '注册需要填写学校邮箱';
+
+  @override
+  String get verifyCampusIdentity => '验证校园身份';
+
+  @override
+  String get campusVerificationSendHint => '验证码将发送到你当前设置的学校邮箱，5 分钟内有效。';
+
+  @override
+  String get sendVerificationCode => '发送验证码';
+
+  @override
+  String get verificationCodeSent => '验证码已发送，请查看学校邮箱';
+
+  @override
+  String get verificationCode => '6 位验证码';
+
+  @override
+  String get confirmVerification => '确认验证';
+
+  @override
+  String get campusVerificationSuccess => '校园身份验证成功';
+
+  @override
+  String get campusSwitchTitle => '切换当前校园';
+
+  @override
+  String get campusSwitchDescription => '浏览、发布与交流都会限定在所选校园。每台设备可以独立选择。';
+
+  @override
+  String get campusActive => '当前校园';
+
+  @override
+  String get campusSwitchSuccess => '已切换当前校园';
+
+  @override
   String get publishTab => '发布';
 
   @override
@@ -729,6 +783,64 @@ class AppLocalizationsZh extends AppLocalizations {
   String get adminNoListingsFound => '未找到商品';
 
   @override
+  String get adminSensitiveActionsLocked => '敏感操作已锁定';
+
+  @override
+  String get adminSensitiveActionsLockedSubtitle =>
+      '查看不受影响；封禁、下架、角色与审核处置需要重新验证密码。';
+
+  @override
+  String get adminUnlockActions => '验证并解锁';
+
+  @override
+  String get adminReauthenticateTitle => '验证管理员身份';
+
+  @override
+  String get adminReauthenticateHint => '解锁后 10 分钟内可执行敏感操作';
+
+  @override
+  String get adminTotpCodeLabel => '动态验证码（已启用时必填）';
+
+  @override
+  String get adminTotpCodeHint => '来自身份验证器 App 的 6 位数字';
+
+  @override
+  String get agentPlanPendingHeader => '待确认操作（小帮提出，需你确认后执行）';
+
+  @override
+  String get agentPlanConfirmAction => '确认执行';
+
+  @override
+  String get agentPlanExecuted => '操作已执行';
+
+  @override
+  String get agentPlanCancelled => '已取消该操作';
+
+  @override
+  String get fulfillWantedAction => '标记已完成';
+
+  @override
+  String get reopenWantedAction => '重新开启需求';
+
+  @override
+  String get wantedFulfilledHint => '该需求已完成，不再接收新的匹配和推荐';
+
+  @override
+  String get wantedFulfilledToast => '需求已标记完成';
+
+  @override
+  String get wantedReopenedToast => '需求已重新开启';
+
+  @override
+  String get agentPlanSecondConfirmTitle => '高风险操作，请再次确认';
+
+  @override
+  String get agentPlanSecondConfirmAction => '确认执行';
+
+  @override
+  String get adminReauthenticateSuccess => '管理员身份已验证，敏感操作已临时解锁';
+
+  @override
   String get adminLoginAs => '以该用户登录';
 
   @override
@@ -879,7 +991,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get emailChangeHint => '输入 @email.ncu.edu.cn 邮箱';
 
   @override
-  String get emailDomainError => '必须使用 @email.ncu.edu.cn 邮箱';
+  String get emailDomainError => '请输入有效的学校邮箱';
 
   @override
   String get emailChangeSuccess => '邮箱已更新';
@@ -2013,4 +2125,119 @@ class AppLocalizationsZh extends AppLocalizations {
   String negotiationStatusLine(String status) {
     return '议价已$status';
   }
+
+  @override
+  String get adminModerationTab => '审核';
+
+  @override
+  String get moderationCenter => '内容审核';
+
+  @override
+  String get moderationCenterSubtitle => '查看与你有关的审核决定并提交申诉';
+
+  @override
+  String get moderationNoCases => '目前没有与你有关的审核案件';
+
+  @override
+  String get moderationReadOnly => '你可以查看本校案件；处置操作仅限平台管理员。';
+
+  @override
+  String get moderationCase => '审核案件';
+
+  @override
+  String get moderationResource => '相关内容';
+
+  @override
+  String get moderationReason => '公开原因';
+
+  @override
+  String get moderationCreatedAt => '创建时间';
+
+  @override
+  String get moderationResolution => '处理结果';
+
+  @override
+  String get moderationInternalEvidence => '内部证据';
+
+  @override
+  String get moderationStartReview => '开始复核';
+
+  @override
+  String get moderationRestrict => '限制内容';
+
+  @override
+  String get moderationDismiss => '确认无违规';
+
+  @override
+  String get moderationRestore => '恢复内容';
+
+  @override
+  String get moderationActionNote => '内部处置说明';
+
+  @override
+  String get moderationPublicReason => '向用户显示的原因（可选）';
+
+  @override
+  String get moderationActionSuccess => '案件状态已更新';
+
+  @override
+  String get moderationStatusOpen => '待处理';
+
+  @override
+  String get moderationStatusReviewing => '复核中';
+
+  @override
+  String get moderationStatusActioned => '已采取措施';
+
+  @override
+  String get moderationStatusDismissed => '无违规';
+
+  @override
+  String get moderationStatusAppealed => '申诉中';
+
+  @override
+  String get moderationStatusResolved => '已结案';
+
+  @override
+  String get moderationSourceMachine => '自动审核';
+
+  @override
+  String get moderationSourceUserReport => '用户举报';
+
+  @override
+  String get moderationSourceManual => '人工创建';
+
+  @override
+  String get moderationAppeal => '提交申诉';
+
+  @override
+  String get moderationAppealHint =>
+      '请说明你认为判断有误的原因，以及审核人员需要重新核对的信息（10–2000 字）。';
+
+  @override
+  String get moderationAppealSubmitted => '申诉已提交，将由另一位审核人员复核';
+
+  @override
+  String get moderationPendingAppeal => '申诉等待复核';
+
+  @override
+  String get moderationCannotAppeal => '当前状态不能申诉';
+
+  @override
+  String get moderationFilterAll => '全部';
+
+  @override
+  String get moderationNoInternalDetails => '没有附加内部证据';
+
+  @override
+  String get listingImage => '商品图片';
+
+  @override
+  String get imageMessage => '聊天图片';
+
+  @override
+  String get avatar => '头像';
+
+  @override
+  String get warning => '警告';
 }

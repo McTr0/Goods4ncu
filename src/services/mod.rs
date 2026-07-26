@@ -3,18 +3,27 @@ use sqlx::PgPool;
 use tokio::sync::mpsc;
 
 pub mod admin;
+pub mod admin_mfa;
+pub mod agent_plan;
+pub mod campus;
 pub mod chat;
 pub mod chat_conversation;
 pub mod chat_expire;
 pub mod hitl_expire;
 pub mod moderation;
+pub mod moderation_case;
 pub mod moderation_worker;
 pub mod notification;
 pub mod order;
 pub mod order_worker;
+pub mod outbox;
 pub mod product;
 pub mod settlement;
+pub mod storage;
 pub mod token_denylist;
+pub mod totp;
+#[cfg(feature = "redis")]
+pub mod ws_fanout;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BusinessEvent {

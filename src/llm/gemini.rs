@@ -37,7 +37,7 @@ impl GeminiProvider {
         embedding_dim: usize,
         model: impl Into<String>,
     ) -> anyhow::Result<Self> {
-        let reqwest_client = reqwest::Client::builder().build()?;
+        let reqwest_client = crate::llm::llm_http_client()?;
 
         let client = gemini::Client::builder()
             .api_key(api_key)
@@ -146,6 +146,7 @@ impl super::LlmProvider for GeminiProvider {
         db_pool: &PgPool,
         _event_tx: mpsc::Sender<BusinessEvent>,
         current_user_id: Option<String>,
+        current_campus_id: Option<uuid::Uuid>,
     ) -> anyhow::Result<Box<dyn MarketplaceAgent>> {
         let (rag_store, embed_updater) = self.build_vector_store(db_pool);
 
@@ -153,6 +154,7 @@ impl super::LlmProvider for GeminiProvider {
             db_pool: db_pool.clone(),
             embed_updater,
             current_user_id,
+            current_campus_id,
             notification: crate::services::notification::NotificationService::new(db_pool.clone()),
         };
 
@@ -172,6 +174,13 @@ impl super::LlmProvider for GeminiProvider {
             .build();
 
         Ok(Box::new(GeminiMarketplaceAgent(agent)))
+    }
+
+    fn embed_updater(
+        self: Arc<Self>,
+        db_pool: &PgPool,
+    ) -> Arc<dyn crate::agents::tools::EmbedUpdater> {
+        self.build_vector_store(db_pool).1
     }
 
     async fn create_negotiate_agent(self: Arc<Self>) -> anyhow::Result<Box<dyn NegotiateAgent>> {
