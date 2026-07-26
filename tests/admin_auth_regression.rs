@@ -1,18 +1,18 @@
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
-use good4ncu::agents::router::IntentRouter;
-use good4ncu::api::auth::{
+use goods4ncu::agents::router::IntentRouter;
+use goods4ncu::api::auth::{
     generate_access_token, generate_access_token_for_campus,
     generate_access_token_for_campus_with_auth_time,
 };
-use good4ncu::api::error::ApiError;
-use good4ncu::api::{create_router, ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
-use good4ncu::repositories::{
+use goods4ncu::api::error::ApiError;
+use goods4ncu::api::{create_router, ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
+use goods4ncu::repositories::{
     AuthRepository, PostgresAuthRepository, PostgresChatRepository, PostgresListingRepository,
     PostgresOrderRepository, PostgresUserRepository,
 };
-use good4ncu::services::{self, notification::NotificationService};
-use good4ncu::test_infra::with_test_pool;
+use goods4ncu::services::{self, notification::NotificationService};
+use goods4ncu::test_infra::with_test_pool;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -47,16 +47,16 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
             db: pool.clone(),
             event_tx,
             rate_limit: {
-                let factory = good4ncu::middleware::rate_limit::RateLimiterFactory::new(100, 60);
-                good4ncu::middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
+                let factory = goods4ncu::middleware::rate_limit::RateLimiterFactory::new(100, 60);
+                goods4ncu::middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
             },
             notification: NotificationService::new(pool.clone()),
-            ws_connections: good4ncu::api::ws::new_ws_state(),
-            metrics: Arc::new(good4ncu::api::metrics::MetricsService::new()),
+            ws_connections: goods4ncu::api::ws::new_ws_state(),
+            metrics: Arc::new(goods4ncu::api::metrics::MetricsService::new()),
             order_service: services::order::OrderService::new(pool.clone()),
             admin_service,
             moderation: services::moderation::ModerationService::new(
-                &good4ncu::config::AppConfig {
+                &goods4ncu::config::AppConfig {
                     gemini_api_key: "test-gemini-key".to_string(),
                     minimax_api_key: None,
                     minimax_api_base_url: None,
@@ -105,11 +105,11 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
             token_denylist: services::token_denylist::TokenDenylist::new(),
             secret_chat_new_sessions_enabled: false,
             media_signer: None,
-            shutdown: good4ncu::lifecycle::ShutdownSignal::never(),
+            shutdown: goods4ncu::lifecycle::ShutdownSignal::never(),
         },
         agents: ApiAgents {
             llm_provider: Arc::new(
-                good4ncu::llm::gemini::GeminiProvider::new("test-key", 768)
+                goods4ncu::llm::gemini::GeminiProvider::new("test-key", 768)
                     .expect("gemini provider init"),
             ),
             router: IntentRouter::new(vec![]),
@@ -1247,7 +1247,8 @@ async fn appeal_requires_an_independent_reviewer_and_restores_resource() {
         .await
         .expect("insert actioned case");
 
-        let service = good4ncu::services::moderation_case::ModerationCaseService::new(pool.clone());
+        let service =
+            goods4ncu::services::moderation_case::ModerationCaseService::new(pool.clone());
         let appeal = service
             .submit_appeal(
                 case_id,
@@ -1262,7 +1263,7 @@ async fn appeal_requires_an_independent_reviewer_and_restores_resource() {
                 appeal.id,
                 campus_id,
                 &original_reviewer,
-                good4ncu::services::moderation_case::AppealDecision::Overturn,
+                goods4ncu::services::moderation_case::AppealDecision::Overturn,
                 "重新检查后恢复",
             )
             .await;
@@ -1273,7 +1274,7 @@ async fn appeal_requires_an_independent_reviewer_and_restores_resource() {
                 appeal.id,
                 campus_id,
                 &independent_reviewer,
-                good4ncu::services::moderation_case::AppealDecision::Overturn,
+                goods4ncu::services::moderation_case::AppealDecision::Overturn,
                 "独立复核确认内容合规，恢复展示",
             )
             .await
@@ -1395,7 +1396,7 @@ async fn admin_totp_mfa_gates_the_recent_authentication_step_up() {
 
         // Confirm possession with a valid code.
         let now = chrono::Utc::now().timestamp();
-        let code = good4ncu::services::totp::code_at(&secret, now).expect("code");
+        let code = goods4ncu::services::totp::code_at(&secret, now).expect("code");
         let response = app
             .clone()
             .oneshot(post_json(
@@ -1462,7 +1463,7 @@ async fn admin_totp_mfa_gates_the_recent_authentication_step_up() {
         for offset in [30i64, 60, 90] {
             let now = chrono::Utc::now().timestamp();
             let candidate =
-                good4ncu::services::totp::code_at(&secret, now + offset).expect("candidate code");
+                goods4ncu::services::totp::code_at(&secret, now + offset).expect("candidate code");
             let response = app
                 .clone()
                 .oneshot(post_json(
@@ -1738,7 +1739,7 @@ async fn second_campus_onboarding_journey_end_to_end() {
         //    stores it), then the verified member publishes in campus B.
         let challenge_id = uuid::Uuid::new_v4();
         let code = "654321";
-        let code_hash = good4ncu::services::campus::verification_code_hash(
+        let code_hash = goods4ncu::services::campus::verification_code_hash(
             "test_jwt_secret_at_least_32_characters_long",
             challenge_id,
             code,

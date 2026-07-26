@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:good4ncu_mobile/services/notification_filter_storage.dart';
+import 'package:goods4ncu_mobile/services/notification_filter_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeNotificationFilterPreferenceStore

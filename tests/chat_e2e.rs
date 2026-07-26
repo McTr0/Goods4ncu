@@ -11,7 +11,7 @@
 //! default so normal `cargo test` can run without starting the app server.
 
 use axum::http::{HeaderMap, StatusCode};
-use good4ncu::test_infra::db_safety;
+use goods4ncu::test_infra::db_safety;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;

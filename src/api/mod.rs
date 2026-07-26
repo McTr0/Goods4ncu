@@ -881,7 +881,7 @@ mod tests {
     #[test]
     fn rate_limit_key_falls_back_to_stable_header_fingerprint_without_peer_or_auth() {
         let mut headers = HeaderMap::new();
-        headers.insert("user-agent", HeaderValue::from_static("good4ncu-test"));
+        headers.insert("user-agent", HeaderValue::from_static("goods4ncu-test"));
         headers.insert("host", HeaderValue::from_static("example.test"));
         let secrets = ApiSecrets {
             jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),

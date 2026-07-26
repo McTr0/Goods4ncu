@@ -3,10 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:good4ncu_mobile/l10n/app_localizations.dart';
-import 'package:good4ncu_mobile/pages/admin_page.dart';
-import 'package:good4ncu_mobile/services/admin_impersonation_service.dart';
-import 'package:good4ncu_mobile/services/api_service.dart';
+import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
+import 'package:goods4ncu_mobile/pages/admin_page.dart';
+import 'package:goods4ncu_mobile/services/admin_impersonation_service.dart';
+import 'package:goods4ncu_mobile/services/api_service.dart';
 
 class _FakeApiService extends ApiService {
   _FakeApiService({required this.users});

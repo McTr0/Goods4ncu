@@ -1,11 +1,11 @@
 use async_trait::async_trait;
-use good4ncu::agents::tools::{
+use goods4ncu::agents::tools::{
     execute_create_listing, execute_delete_listing, execute_update_listing, CreateListingArgs,
     CreateListingTool, DeleteListingArgs, DeleteListingTool, EmbedUpdater, ToolContext, ToolError,
     UpdateListingArgs, UpdateListingTool,
 };
-use good4ncu::services::notification::NotificationService;
-use good4ncu::test_infra::with_test_pool;
+use goods4ncu::services::notification::NotificationService;
+use goods4ncu::test_infra::with_test_pool;
 use rig::tool::Tool;
 use sqlx::Row;
 use std::sync::Arc;

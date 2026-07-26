@@ -9,9 +9,9 @@
 
 #![cfg(feature = "redis")]
 
-use good4ncu::api::ws;
-use good4ncu::lifecycle::ShutdownController;
-use good4ncu::services::ws_fanout;
+use goods4ncu::api::ws;
+use goods4ncu::lifecycle::ShutdownController;
+use goods4ncu::services::ws_fanout;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -94,7 +94,7 @@ async fn two_instances_deliver_across_processes() {
     let Some(url) = redis_url() else { return };
 
     let spawn = |port: u16| {
-        std::process::Command::new(env!("CARGO_BIN_EXE_good4ncu"))
+        std::process::Command::new(env!("CARGO_BIN_EXE_goods4ncu"))
             .env("SERVER_PORT", port.to_string())
             .env("REDIS_URL", &url)
             .env("SHUTDOWN_DRAIN_SECS", "0")

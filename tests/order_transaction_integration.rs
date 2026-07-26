@@ -1,7 +1,7 @@
 //! Integration tests for critical order transaction boundaries.
 
-use good4ncu::services::order::{OrderError, OrderService};
-use good4ncu::test_infra::with_test_pool;
+use goods4ncu::services::order::{OrderError, OrderService};
+use goods4ncu::test_infra::with_test_pool;
 use sqlx::Row;
 use uuid::Uuid;
 

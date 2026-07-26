@@ -15,11 +15,11 @@
 
 | 数据库 | 用途 | 谁创建 | 是否含种子账号 |
 | --- | --- | --- | --- |
-| `good4ncu` | 日常开发库（`.env` 里的 `DATABASE_URL`） | 手工/`cargo run` | 是（开发便利，非生产模式无妨） |
-| `good4ncu_test` | 自动化测试库 | 测试基建 | 每个测试前 TRUNCATE，无稳定数据 |
+| `goods4ncu` | 日常开发库（`.env` 里的 `DATABASE_URL`） | 手工/`cargo run` | 是（开发便利，非生产模式无妨） |
+| `goods4ncu_test` | 自动化测试库 | 测试基建 | 每个测试前 TRUNCATE，无稳定数据 |
 | `goods4ncu_local` | 本机持久部署（生产模式，两校园演示） | `scripts/deploy_local.sh` | **否**，部署时已按生产要求移除 |
 
-## 二、开发库 `good4ncu` 的种子账号
+## 二、开发库 `goods4ncu` 的种子账号
 
 来自 `migrations/0005_seed_data.sql`。**密码统一为 `Test1234`。**
 
@@ -53,7 +53,7 @@
 
 `admin` 的 membership 是 `pending` 而非 `verified`：`admin promote` 只改全局角色，不代替校园认证。这是符合设计的——后台读写走 `AdminScope`，与校园成员资格是两条独立的授权链。
 
-⚠️ 这些账号只存在于**演示部署库** `goods4ncu_local`。开发库 `good4ncu` 用的是第二节的种子账号（`Test1234`）。两者互不相通——用错库的账号就会看到"用户名或密码错误"。
+⚠️ 这些账号只存在于**演示部署库** `goods4ncu_local`。开发库 `goods4ncu` 用的是第二节的种子账号（`Test1234`）。两者互不相通——用错库的账号就会看到"用户名或密码错误"。
 
 ### 校园
 

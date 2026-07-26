@@ -4,15 +4,15 @@ use argon2::{
 };
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
-use good4ncu::agents::router::IntentRouter;
-use good4ncu::api::auth::{generate_access_token, generate_access_token_for_campus};
-use good4ncu::api::{create_router, ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
-use good4ncu::repositories::{
+use goods4ncu::agents::router::IntentRouter;
+use goods4ncu::api::auth::{generate_access_token, generate_access_token_for_campus};
+use goods4ncu::api::{create_router, ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
+use goods4ncu::repositories::{
     PostgresAuthRepository, PostgresChatRepository, PostgresListingRepository,
     PostgresOrderRepository, PostgresUserRepository,
 };
-use good4ncu::services::{self, notification::NotificationService};
-use good4ncu::test_infra::with_test_pool;
+use goods4ncu::services::{self, notification::NotificationService};
+use goods4ncu::test_infra::with_test_pool;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
@@ -50,16 +50,16 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
             db: pool.clone(),
             event_tx,
             rate_limit: {
-                let factory = good4ncu::middleware::rate_limit::RateLimiterFactory::new(100, 60);
-                good4ncu::middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
+                let factory = goods4ncu::middleware::rate_limit::RateLimiterFactory::new(100, 60);
+                goods4ncu::middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
             },
             notification: NotificationService::new(pool.clone()),
-            ws_connections: good4ncu::api::ws::new_ws_state(),
-            metrics: Arc::new(good4ncu::api::metrics::MetricsService::new()),
+            ws_connections: goods4ncu::api::ws::new_ws_state(),
+            metrics: Arc::new(goods4ncu::api::metrics::MetricsService::new()),
             order_service: services::order::OrderService::new(pool.clone()),
             admin_service,
             moderation: services::moderation::ModerationService::new(
-                &good4ncu::config::AppConfig {
+                &goods4ncu::config::AppConfig {
                     gemini_api_key: "test-gemini-key".to_string(),
                     minimax_api_key: None,
                     minimax_api_base_url: None,
@@ -108,11 +108,11 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
             token_denylist: services::token_denylist::TokenDenylist::new(),
             secret_chat_new_sessions_enabled: false,
             media_signer: None,
-            shutdown: good4ncu::lifecycle::ShutdownSignal::never(),
+            shutdown: goods4ncu::lifecycle::ShutdownSignal::never(),
         },
         agents: ApiAgents {
             llm_provider: Arc::new(
-                good4ncu::llm::gemini::GeminiProvider::new("test-key", 768)
+                goods4ncu::llm::gemini::GeminiProvider::new("test-key", 768)
                     .expect("gemini provider init"),
             ),
             router: IntentRouter::new(vec![]),
@@ -2620,12 +2620,12 @@ async fn production_refuses_to_start_with_demo_seed_accounts() {
         .expect("seed admin");
 
         // Non-production: allowed.
-        good4ncu::db::assert_no_demo_seed_in_production(&pool, false)
+        goods4ncu::db::assert_no_demo_seed_in_production(&pool, false)
             .await
             .expect("non-production must tolerate seed accounts");
 
         // Production: refused, and the message names the account and the fix.
-        let error = good4ncu::db::assert_no_demo_seed_in_production(&pool, true)
+        let error = goods4ncu::db::assert_no_demo_seed_in_production(&pool, true)
             .await
             .expect_err("production must refuse a database with seed accounts");
         let message = error.to_string();
@@ -2643,7 +2643,7 @@ async fn production_refuses_to_start_with_demo_seed_accounts() {
             .execute(&pool)
             .await
             .expect("remove seed");
-        good4ncu::db::assert_no_demo_seed_in_production(&pool, true)
+        goods4ncu::db::assert_no_demo_seed_in_production(&pool, true)
             .await
             .expect("a cleaned database must start in production");
     })

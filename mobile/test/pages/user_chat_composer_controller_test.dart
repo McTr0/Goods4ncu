@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:good4ncu_mobile/models/models.dart';
-import 'package:good4ncu_mobile/pages/user_chat_composer_controller.dart';
-import 'package:good4ncu_mobile/providers/chat_notifier.dart';
-import 'package:good4ncu_mobile/services/chat_service.dart';
-import 'package:good4ncu_mobile/services/user_service.dart';
+import 'package:goods4ncu_mobile/models/models.dart';
+import 'package:goods4ncu_mobile/pages/user_chat_composer_controller.dart';
+import 'package:goods4ncu_mobile/providers/chat_notifier.dart';
+import 'package:goods4ncu_mobile/services/chat_service.dart';
+import 'package:goods4ncu_mobile/services/user_service.dart';
 
 Future<void> flushAsync() async {
   await Future<void>.delayed(Duration.zero);

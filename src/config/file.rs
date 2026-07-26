@@ -228,6 +228,8 @@ pub fn config_file_env() -> Option<String> {
 const DEFAULT_CONFIG_PATHS: [&str; 4] = [
     "./goods4ncu.toml",
     "./config/goods4ncu.toml",
+    // Legacy paths from before the good4ncu -> goods4ncu rename; kept so an
+    // existing checkout keeps working without moving its config file.
     "./good4ncu.toml",
     "./config/good4ncu.toml",
 ];

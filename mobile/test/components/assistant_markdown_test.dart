@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:good4ncu_mobile/components/assistant_markdown.dart';
+import 'package:goods4ncu_mobile/components/assistant_markdown.dart';
 
 void main() {
   test('sanitizer escapes html outside fenced code', () {

@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:good4ncu_mobile/pages/user_chat_media_sender.dart';
-import 'package:good4ncu_mobile/pages/user_chat_session_controller.dart';
-import 'package:good4ncu_mobile/services/ws_service.dart';
+import 'package:goods4ncu_mobile/pages/user_chat_media_sender.dart';
+import 'package:goods4ncu_mobile/pages/user_chat_session_controller.dart';
+import 'package:goods4ncu_mobile/services/ws_service.dart';
 
 class _FakeAudioRecorder implements UserChatAudioRecorder {
   _FakeAudioRecorder({this.hasRecorderPermission = true, this.stopResult});

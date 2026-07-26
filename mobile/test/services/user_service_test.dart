@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:good4ncu_mobile/services/user_service.dart';
+import 'package:goods4ncu_mobile/services/user_service.dart';
 
 void main() {
   group('UserLookupMatch', () {

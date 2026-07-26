@@ -72,8 +72,8 @@ curl -s http://127.0.0.1:3000/api/health
   > CONFIG_FILE 指定路径
   > ./goods4ncu.toml
   > ./config/goods4ncu.toml
-  > ./good4ncu.toml        # legacy fallback
-  > ./config/good4ncu.toml # legacy fallback
+  > ./goods4ncu.toml        # legacy fallback
+  > ./config/goods4ncu.toml # legacy fallback
   > 代码默认值
 ```
 

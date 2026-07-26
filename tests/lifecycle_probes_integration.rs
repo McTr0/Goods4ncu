@@ -7,15 +7,15 @@
 
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
-use good4ncu::agents::router::IntentRouter;
-use good4ncu::api::{create_router, ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
-use good4ncu::lifecycle::{ShutdownController, ShutdownSignal};
-use good4ncu::repositories::{
+use goods4ncu::agents::router::IntentRouter;
+use goods4ncu::api::{create_router, ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
+use goods4ncu::lifecycle::{ShutdownController, ShutdownSignal};
+use goods4ncu::repositories::{
     PostgresAuthRepository, PostgresChatRepository, PostgresListingRepository,
     PostgresOrderRepository, PostgresUserRepository,
 };
-use good4ncu::services::{self, notification::NotificationService};
-use good4ncu::test_infra::with_test_pool;
+use goods4ncu::services::{self, notification::NotificationService};
+use goods4ncu::test_infra::with_test_pool;
 use serde_json::Value;
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -40,16 +40,16 @@ fn build_state(pool: sqlx::PgPool, shutdown: ShutdownSignal) -> AppState {
             db: pool.clone(),
             event_tx,
             rate_limit: {
-                let factory = good4ncu::middleware::rate_limit::RateLimiterFactory::new(100, 60);
-                good4ncu::middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
+                let factory = goods4ncu::middleware::rate_limit::RateLimiterFactory::new(100, 60);
+                goods4ncu::middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
             },
             notification: NotificationService::new(pool.clone()),
-            ws_connections: good4ncu::api::ws::new_ws_state(),
-            metrics: Arc::new(good4ncu::api::metrics::MetricsService::new()),
+            ws_connections: goods4ncu::api::ws::new_ws_state(),
+            metrics: Arc::new(goods4ncu::api::metrics::MetricsService::new()),
             order_service: services::order::OrderService::new(pool.clone()),
             admin_service,
             moderation: services::moderation::ModerationService::new(
-                &good4ncu::config::AppConfig {
+                &goods4ncu::config::AppConfig {
                     gemini_api_key: "test-gemini-key".to_string(),
                     minimax_api_key: None,
                     minimax_api_base_url: None,
@@ -102,7 +102,7 @@ fn build_state(pool: sqlx::PgPool, shutdown: ShutdownSignal) -> AppState {
         },
         agents: ApiAgents {
             llm_provider: Arc::new(
-                good4ncu::llm::gemini::GeminiProvider::new("test-key", 768)
+                goods4ncu::llm::gemini::GeminiProvider::new("test-key", 768)
                     .expect("gemini provider init"),
             ),
             router: IntentRouter::new(vec![]),

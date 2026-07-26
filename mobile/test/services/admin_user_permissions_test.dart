@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:good4ncu_mobile/services/admin_user_permissions.dart';
+import 'package:goods4ncu_mobile/services/admin_user_permissions.dart';
 
 void main() {
   group('canAdminImpersonateUser', () {

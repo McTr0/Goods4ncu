@@ -1,7 +1,7 @@
 //! Database-level tenant constraints for core marketplace facts.
 
-use good4ncu::services::notification::{NewNotification, NotificationService};
-use good4ncu::test_infra::with_test_pool;
+use goods4ncu::services::notification::{NewNotification, NotificationService};
+use goods4ncu::test_infra::with_test_pool;
 use uuid::Uuid;
 
 #[tokio::test]

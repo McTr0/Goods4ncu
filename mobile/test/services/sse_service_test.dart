@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:good4ncu_mobile/services/sse_service.dart';
+import 'package:goods4ncu_mobile/services/sse_service.dart';
 import 'package:http/http.dart' as http;
 
 class _QueuedClient extends http.BaseClient {

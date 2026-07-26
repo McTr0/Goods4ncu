@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:good4ncu_mobile/l10n/app_localizations.dart';
-import 'package:good4ncu_mobile/models/models.dart';
-import 'package:good4ncu_mobile/pages/conversation_list_page.dart';
-import 'package:good4ncu_mobile/services/chat_service.dart';
-import 'package:good4ncu_mobile/services/user_service.dart';
-import 'package:good4ncu_mobile/theme/app_theme.dart';
+import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
+import 'package:goods4ncu_mobile/models/models.dart';
+import 'package:goods4ncu_mobile/pages/conversation_list_page.dart';
+import 'package:goods4ncu_mobile/services/chat_service.dart';
+import 'package:goods4ncu_mobile/services/user_service.dart';
+import 'package:goods4ncu_mobile/theme/app_theme.dart';
 
 class _FakeChatService extends ChatService {
   _FakeChatService({this.failConversations = false, List<ChatThread>? threads})

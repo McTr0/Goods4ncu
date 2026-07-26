@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:good4ncu_mobile/components/payment_qr_image.dart';
-import 'package:good4ncu_mobile/l10n/app_localizations.dart';
+import 'package:goods4ncu_mobile/components/payment_qr_image.dart';
+import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 
 Widget _buildTestApp(Widget child) {
   return MaterialApp(

@@ -2,11 +2,11 @@
 //! backoff, dead-letter, lease exclusivity and audited replay.
 
 use async_trait::async_trait;
-use good4ncu::services::notification::{NewNotification, NotificationService};
-use good4ncu::services::outbox::{
+use goods4ncu::services::notification::{NewNotification, NotificationService};
+use goods4ncu::services::outbox::{
     self, enqueue_in_tx, process_batch, replay_dead_lettered, OutboxDispatcher,
 };
-use good4ncu::test_infra::with_test_pool;
+use goods4ncu::test_infra::with_test_pool;
 use sqlx::Row;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;

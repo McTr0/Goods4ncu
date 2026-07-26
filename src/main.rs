@@ -20,7 +20,7 @@ use crate::llm::LlmProvider;
 
 fn default_env_filter() -> anyhow::Result<tracing_subscriber::EnvFilter> {
     let mut filter = tracing_subscriber::EnvFilter::from_default_env();
-    for directive in ["good4ncu=info", "hyper=warn", "tower=warn"] {
+    for directive in ["goods4ncu=info", "hyper=warn", "tower=warn"] {
         let parsed = directive
             .parse()
             .map_err(|e| anyhow::anyhow!("invalid tracing directive '{directive}': {e}"))?;

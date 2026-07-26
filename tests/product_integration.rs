@@ -1,7 +1,7 @@
 //! Integration tests for ProductService.
 //! Run with `--test-threads=1` for proper serial execution.
 
-use good4ncu::test_infra::with_test_pool;
+use goods4ncu::test_infra::with_test_pool;
 use sqlx::Row;
 
 #[tokio::test]

@@ -46,7 +46,7 @@ pub fn validate_test_database_url(database_url: &str) -> Result<(), String> {
 pub fn resolve_test_database_url() -> String {
     let database_url = std::env::var("TEST_DATABASE_URL")
         .or_else(|_| std::env::var("DATABASE_URL"))
-        .unwrap_or_else(|_| "postgres://mctr0@localhost/good4ncu_test".to_string());
+        .unwrap_or_else(|_| "postgres://mctr0@localhost/goods4ncu_test".to_string());
 
     validate_test_database_url(&database_url)
         .expect("Unsafe test database URL; refusing to run destructive cleanup");
@@ -61,12 +61,12 @@ mod tests {
     #[test]
     fn test_extract_db_name() {
         assert_eq!(
-            extract_db_name("postgres://user:pass@localhost:5432/good4ncu_test"),
-            Some("good4ncu_test".to_string())
+            extract_db_name("postgres://user:pass@localhost:5432/goods4ncu_test"),
+            Some("goods4ncu_test".to_string())
         );
         assert_eq!(
-            extract_db_name("postgres://localhost/good4ncu?sslmode=disable"),
-            Some("good4ncu".to_string())
+            extract_db_name("postgres://localhost/goods4ncu?sslmode=disable"),
+            Some("goods4ncu".to_string())
         );
     }
 
@@ -74,7 +74,7 @@ mod tests {
     fn test_with_database_name_preserves_query() {
         assert_eq!(
             with_database_name(
-                "postgres://user:pass@localhost:5432/good4ncu_test?sslmode=disable",
+                "postgres://user:pass@localhost:5432/goods4ncu_test?sslmode=disable",
                 "postgres"
             ),
             Some("postgres://user:pass@localhost:5432/postgres?sslmode=disable".to_string())
@@ -83,18 +83,18 @@ mod tests {
 
     #[test]
     fn test_safe_db_identifier() {
-        assert!(is_safe_db_identifier("good4ncu_test"));
+        assert!(is_safe_db_identifier("goods4ncu_test"));
         assert!(!is_safe_db_identifier(""));
-        assert!(!is_safe_db_identifier("good4ncu-test"));
-        assert!(!is_safe_db_identifier("good4ncu test"));
+        assert!(!is_safe_db_identifier("goods4ncu-test"));
+        assert!(!is_safe_db_identifier("goods4ncu test"));
     }
 
     #[test]
     fn test_validate_test_database_url_enforces_test_db_name() {
-        let ok = validate_test_database_url("postgres://localhost/good4ncu_test");
+        let ok = validate_test_database_url("postgres://localhost/goods4ncu_test");
         assert!(ok.is_ok());
 
-        let bad = validate_test_database_url("postgres://localhost/good4ncu");
+        let bad = validate_test_database_url("postgres://localhost/goods4ncu");
         assert!(bad.is_err());
     }
 }

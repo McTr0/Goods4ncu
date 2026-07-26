@@ -47,7 +47,7 @@ LABEL org.opencontainers.image.description="Agentic secondhand marketplace for C
 LABEL org.opencontainers.image.source="https://github.com/McTr0/Goods4ncu"
 
 # Copy the binary from builder
-COPY --from=builder /app/target/release/good4ncu /usr/local/bin/good4ncu
+COPY --from=builder /app/target/release/goods4ncu /usr/local/bin/goods4ncu
 
 USER nonroot:nonroot
 
@@ -64,7 +64,7 @@ ENV RUST_BACKTRACE=1
 # Health check — readiness, so a draining container is marked unhealthy and
 # stops receiving traffic before its listener closes.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ["/usr/local/bin/good4ncu", "--health-check"]
+    CMD ["/usr/local/bin/goods4ncu", "--health-check"]
 
 # The app drains on SIGTERM. Make it explicit so the signal is never swapped
 # for SIGKILL, which would truncate in-flight responses on every deploy.
@@ -74,4 +74,4 @@ STOPSIGNAL SIGTERM
 
 # Run the application. ENTRYPOINT exec form means the binary is PID 1 and
 # receives STOPSIGNAL directly, with no shell to swallow it.
-ENTRYPOINT ["/usr/local/bin/good4ncu"]
+ENTRYPOINT ["/usr/local/bin/goods4ncu"]

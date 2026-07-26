@@ -1,7 +1,7 @@
 //! Integration tests for staged UUID shadow-column migration.
 
-use good4ncu::db::assert_uuid_shadow_drift_zero;
-use good4ncu::test_infra::with_test_pool;
+use goods4ncu::db::assert_uuid_shadow_drift_zero;
+use goods4ncu::test_infra::with_test_pool;
 use sqlx::Row;
 use uuid::Uuid;
 

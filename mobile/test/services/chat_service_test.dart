@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:good4ncu_mobile/models/models.dart';
+import 'package:goods4ncu_mobile/models/models.dart';
 
 void main() {
   group('ChatService message model parsing', () {

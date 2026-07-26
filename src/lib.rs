@@ -1,4 +1,4 @@
-//! Library crate for good4ncu - exposes modules for integration testing.
+//! Library crate for goods4ncu - exposes modules for integration testing.
 //!
 //! This module re-exports the internal components needed for E2E testing.
 

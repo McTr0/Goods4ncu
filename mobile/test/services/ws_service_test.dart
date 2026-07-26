@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:good4ncu_mobile/services/ws_service.dart';
+import 'package:goods4ncu_mobile/services/ws_service.dart';
 
 void main() {
   group('WsNotification', () {

@@ -40,6 +40,8 @@ Thumbs.db
 
 # === TOML Config Files ===
 # Actual config (use config.toml.example as template)
+goods4ncu.toml
+config/goods4ncu.toml
 good4ncu.toml
 config/good4ncu.toml
 

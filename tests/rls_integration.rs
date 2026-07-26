@@ -5,7 +5,7 @@
 //! unwritable — even for the table-owning role (FORCE) — while an unarmed
 //! session behaves exactly as before.
 
-use good4ncu::test_infra::with_test_pool;
+use goods4ncu::test_infra::with_test_pool;
 use uuid::Uuid;
 
 /// Provision a non-superuser role for RLS probing. Local test clusters often

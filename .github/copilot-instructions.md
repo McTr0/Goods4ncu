@@ -62,7 +62,7 @@ flutter run
 
 ```bash
 # Build backend image
-docker build -t good4ncu:dev .
+docker build -t goods4ncu:dev .
 ```
 
 ## High-Level Architecture
@@ -216,8 +216,8 @@ Examples:
 **Priority order:**
 1. Environment variables (highest)
 2. `CONFIG_FILE` environment variable path
-3. `./good4ncu.toml`
-4. `./config/good4ncu.toml`
+3. `./goods4ncu.toml`
+4. `./config/goods4ncu.toml`
 
 **Required environment variables:**
 - `DATABASE_URL`: PostgreSQL connection string

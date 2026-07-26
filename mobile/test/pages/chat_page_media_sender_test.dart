@@ -2,8 +2,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:good4ncu_mobile/pages/chat_page_media_sender.dart';
-import 'package:good4ncu_mobile/services/upload_service.dart';
+import 'package:goods4ncu_mobile/pages/chat_page_media_sender.dart';
+import 'package:goods4ncu_mobile/services/upload_service.dart';
 import 'package:image_picker/image_picker.dart';
 
 class _FakeUploadService extends UploadService {

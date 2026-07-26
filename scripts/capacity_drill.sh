@@ -17,7 +17,7 @@ unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY 2>/dev/n
 export NO_PROXY='*' no_proxy='*'
 cd "$(dirname "$0")/.."
 
-BIN="target/debug/good4ncu"
+BIN="target/debug/goods4ncu"
 [ -x "$BIN" ] || { echo "[capacity] build first: cargo build" >&2; exit 2; }
 
 USERS="${1:-100000}"

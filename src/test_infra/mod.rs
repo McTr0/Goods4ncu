@@ -135,7 +135,7 @@ pub(crate) async fn ensure_test_schema_ready(database_url: &str) {
         .await
         .expect("Failed to connect to test database for migration");
 
-    sqlx::query("SELECT pg_advisory_lock(hashtext('good4ncu_test_schema_migrate')::bigint)")
+    sqlx::query("SELECT pg_advisory_lock(hashtext('goods4ncu_test_schema_migrate')::bigint)")
         .execute(&pool)
         .await
         .expect("Failed to acquire migration advisory lock");
@@ -180,7 +180,7 @@ pub(crate) async fn ensure_test_schema_ready(database_url: &str) {
         Err(e) => Err(e),
     };
 
-    sqlx::query("SELECT pg_advisory_unlock(hashtext('good4ncu_test_schema_migrate')::bigint)")
+    sqlx::query("SELECT pg_advisory_unlock(hashtext('goods4ncu_test_schema_migrate')::bigint)")
         .execute(&pool)
         .await
         .expect("Failed to release migration advisory lock");
@@ -242,9 +242,9 @@ mod tests {
 
     #[test]
     fn test_resolve_test_database_url_prefers_test_name() {
-        std::env::set_var("TEST_DATABASE_URL", "postgres://localhost/good4ncu_test");
+        std::env::set_var("TEST_DATABASE_URL", "postgres://localhost/goods4ncu_test");
         let resolved = db_safety::resolve_test_database_url();
-        assert!(resolved.contains("good4ncu_test"));
+        assert!(resolved.contains("goods4ncu_test"));
         std::env::remove_var("TEST_DATABASE_URL");
     }
 

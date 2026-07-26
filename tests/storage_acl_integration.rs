@@ -17,7 +17,7 @@
 //!   minio server <dir> --address 127.0.0.1:9100
 //!   mc mb g4n/media          # private by default
 
-use good4ncu::services::storage::PrivateBucket;
+use goods4ncu::services::storage::PrivateBucket;
 
 fn bucket_from_env() -> Option<PrivateBucket> {
     let endpoint = std::env::var("S3_TEST_ENDPOINT").ok()?;
@@ -156,7 +156,7 @@ async fn api_serves_approved_media_as_a_working_presigned_url() {
         eprintln!("skipping: set S3_TEST_* to run storage ACL tests");
         return;
     };
-    let signer = good4ncu::api::MediaSigner {
+    let signer = goods4ncu::api::MediaSigner {
         bucket: bucket.clone(),
         ttl_secs: 300,
     };

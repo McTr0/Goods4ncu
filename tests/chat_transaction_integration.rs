@@ -1,12 +1,12 @@
 //! Integration tests for the direct chat conversation state machine.
 
-use good4ncu::api::error::ApiError;
-use good4ncu::services::chat_conversation::{
+use goods4ncu::api::error::ApiError;
+use goods4ncu::services::chat_conversation::{
     ChatConversationService, ConversationDecision, ConversationMode, ConversationState,
     CreateConversationInput, SendConversationMessageInput, StructuredQuoteInput,
     StructuredQuoteKind,
 };
-use good4ncu::test_infra::with_test_pool;
+use goods4ncu::test_infra::with_test_pool;
 use sqlx::Row;
 use uuid::Uuid;
 

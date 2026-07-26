@@ -24,7 +24,7 @@ unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY 2>/dev/n
 export NO_PROXY='*' no_proxy='*'
 
 cd "$(dirname "$0")/.."
-BIN="target/debug/good4ncu"
+BIN="target/debug/goods4ncu"
 
 DEPLOY_HOME="${DEPLOY_HOME:-$HOME/.goods4ncu-deploy}"
 DB_NAME="${DB_NAME:-goods4ncu_local}"

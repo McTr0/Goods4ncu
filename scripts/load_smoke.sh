@@ -10,7 +10,7 @@
 #
 # The target instance must run with an elevated rate limit for the drill
 # (all traffic comes from one IP), e.g.:
-#   RATE_LIMIT_MAX_REQUESTS=100000 SERVER_PORT=3999 ./good4ncu
+#   RATE_LIMIT_MAX_REQUESTS=100000 SERVER_PORT=3999 ./goods4ncu
 #
 # Usage: BASE_URL=http://127.0.0.1:3999 ./scripts/load_smoke.sh [requests] [concurrency]
 

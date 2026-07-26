@@ -636,7 +636,7 @@ class _UserChatPageState extends State<UserChatPage> {
         conversationId: conversation.id,
         media: media,
         offerSdp:
-            'good4ncu-webrtc-offer-placeholder-${DateTime.now().millisecondsSinceEpoch}',
+            'goods4ncu-webrtc-offer-placeholder-${DateTime.now().millisecondsSinceEpoch}',
       );
       _showSnackBar(
         media == 'video' ? l.videoCallSignalSent : l.audioCallSignalSent,

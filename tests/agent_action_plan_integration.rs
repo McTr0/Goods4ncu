@@ -2,12 +2,12 @@
 //! authenticated confirmation executes, and the token never reaches the model.
 
 use async_trait::async_trait;
-use good4ncu::agents::tools::{
+use goods4ncu::agents::tools::{
     CreateListingArgs, CreateListingTool, EmbedUpdater, ToolContext, ToolError,
 };
-use good4ncu::services::agent_plan::{AgentPlanService, ConfirmOutcome};
-use good4ncu::services::notification::NotificationService;
-use good4ncu::test_infra::with_test_pool;
+use goods4ncu::services::agent_plan::{AgentPlanService, ConfirmOutcome};
+use goods4ncu::services::notification::NotificationService;
+use goods4ncu::test_infra::with_test_pool;
 use rig::tool::Tool;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -246,8 +246,8 @@ async fn confirmed_plan_still_fails_when_state_changed_since_proposal() {
         .expect("insert listing");
 
         let ctx = tool_ctx(pool.clone(), &buyer_id);
-        let tool = good4ncu::agents::tools::PurchaseItemIntentTool { ctx: ctx.clone() };
-        tool.call(good4ncu::agents::tools::PurchaseItemIntentArgs {
+        let tool = goods4ncu::agents::tools::PurchaseItemIntentTool { ctx: ctx.clone() };
+        tool.call(goods4ncu::agents::tools::PurchaseItemIntentArgs {
             listing_id: listing_id.clone(),
             offered_price: 10_000,
         })
@@ -311,8 +311,8 @@ async fn l3_plan_requires_two_confirmations_before_any_write() {
         .expect("insert listing");
 
         let ctx = tool_ctx(pool.clone(), &buyer_id);
-        let tool = good4ncu::agents::tools::PurchaseItemIntentTool { ctx: ctx.clone() };
-        tool.call(good4ncu::agents::tools::PurchaseItemIntentArgs {
+        let tool = goods4ncu::agents::tools::PurchaseItemIntentTool { ctx: ctx.clone() };
+        tool.call(goods4ncu::agents::tools::PurchaseItemIntentArgs {
             listing_id: listing_id.clone(),
             offered_price: 10_000,
         })

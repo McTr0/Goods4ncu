@@ -710,7 +710,7 @@ mod tests {
             vector_dim: 768,
             cors_origins: vec![],
             oss_endpoint: "https://oss-cn-beijing.aliyuncs.com".to_string(),
-            oss_bucket: "good4ncu".to_string(),
+            oss_bucket: "goods4ncu".to_string(),
             oss_role_arn: None,
             redis_url: None,
             rate_limit_max_requests: 100,
