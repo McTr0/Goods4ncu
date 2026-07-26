@@ -1513,3 +1513,87 @@ class PriceDiscoveryResult {
         outcome: json['outcome']?.toString(),
       );
 }
+
+/// One term of an arrangement.
+class AgreementTerm {
+  final String slot;
+
+  /// In whoever's words it came from. Not normalised: the card exists so both
+  /// people recognise their own arrangement in it.
+  final String value;
+  final int? valueCents;
+  final String proposedBy;
+  final List<String> agreedBy;
+
+  /// An extraction nobody has confirmed. Rendered as a suggestion, never as the
+  /// arrangement — a proposal that looks like a decision is the failure mode
+  /// this whole design guards against.
+  final bool isSuggestion;
+
+  const AgreementTerm({
+    required this.slot,
+    required this.value,
+    this.valueCents,
+    required this.proposedBy,
+    required this.agreedBy,
+    required this.isSuggestion,
+  });
+
+  factory AgreementTerm.fromJson(Map<String, dynamic> json) => AgreementTerm(
+    slot: json['slot']?.toString() ?? '',
+    value: json['value']?.toString() ?? '',
+    valueCents: (json['value_cents'] as num?)?.toInt(),
+    proposedBy: json['proposed_by']?.toString() ?? '',
+    agreedBy: (json['agreed_by'] as List<dynamic>? ?? [])
+        .map((e) => e.toString())
+        .toList(),
+    isSuggestion: json['is_suggestion'] == true,
+  );
+
+  bool settledBy(List<String> participants) =>
+      participants.every(agreedBy.contains);
+}
+
+/// The living state of an arrangement: what, how much, when, where.
+class Agreement {
+  final String id;
+  final String kind; // deal | meetup
+  final String status; // forming | settled | abandoned
+  final List<AgreementTerm> terms;
+  final List<String> participants;
+  final bool fullyAgreed;
+  final List<String> availableSlots;
+
+  const Agreement({
+    required this.id,
+    required this.kind,
+    required this.status,
+    required this.terms,
+    required this.participants,
+    required this.fullyAgreed,
+    required this.availableSlots,
+  });
+
+  factory Agreement.fromJson(Map<String, dynamic> json) {
+    final a = json['agreement'] as Map<String, dynamic>? ?? const {};
+    return Agreement(
+      id: a['id']?.toString() ?? '',
+      kind: a['kind']?.toString() ?? 'deal',
+      status: a['status']?.toString() ?? 'forming',
+      terms: (a['terms'] as List<dynamic>? ?? [])
+          .map((e) => AgreementTerm.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      participants: (a['participants'] as List<dynamic>? ?? [])
+          .map((e) => e.toString())
+          .toList(),
+      fullyAgreed: json['fully_agreed'] == true,
+      // Taken from the server so the client does not hardcode a list that
+      // drifts from what the card can actually hold.
+      availableSlots: (json['available_slots'] as List<dynamic>? ?? [])
+          .map((e) => e.toString())
+          .toList(),
+    );
+  }
+
+  bool get isSettled => status == 'settled';
+}

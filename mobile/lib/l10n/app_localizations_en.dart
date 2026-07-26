@@ -1000,6 +1000,57 @@ class AppLocalizationsEn extends AppLocalizations {
   String get priceDiscoveryInvalid => 'Enter a sensible price';
 
   @override
+  String get agreementCardTitle => 'What we agreed';
+
+  @override
+  String get agreementSlotItem => 'Item';
+
+  @override
+  String get agreementSlotPrice => 'Price';
+
+  @override
+  String get agreementSlotTime => 'When';
+
+  @override
+  String get agreementSlotPlace => 'Where';
+
+  @override
+  String get agreementSlotWho => 'Who';
+
+  @override
+  String get agreementSlotBring => 'Bring';
+
+  @override
+  String get agreementSlotConditions => 'Other terms';
+
+  @override
+  String get agreementSuggestion => 'Read from the chat — adopt it?';
+
+  @override
+  String get agreementAdopt => 'Adopt';
+
+  @override
+  String get agreementWaitingOther => 'Waiting for them';
+
+  @override
+  String get agreementAgreed => 'Both agreed';
+
+  @override
+  String get agreementNotSet => 'Not set';
+
+  @override
+  String get agreementSet => 'Set';
+
+  @override
+  String get agreementSettle => 'It\'s settled';
+
+  @override
+  String get agreementSettled => 'Settled';
+
+  @override
+  String get agreementStale => 'This changed — take a look';
+
+  @override
   String priceDiscoveryMatched(String price) {
     return 'Agreed at ¥$price';
   }

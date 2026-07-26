@@ -967,6 +967,57 @@ class AppLocalizationsZh extends AppLocalizations {
   String get priceDiscoveryInvalid => '请填一个合理的价格';
 
   @override
+  String get agreementCardTitle => '说好的事';
+
+  @override
+  String get agreementSlotItem => '东西';
+
+  @override
+  String get agreementSlotPrice => '价格';
+
+  @override
+  String get agreementSlotTime => '时间';
+
+  @override
+  String get agreementSlotPlace => '地点';
+
+  @override
+  String get agreementSlotWho => '几个人';
+
+  @override
+  String get agreementSlotBring => '要带什么';
+
+  @override
+  String get agreementSlotConditions => '其他约定';
+
+  @override
+  String get agreementSuggestion => '小帮从聊天里读到的，要采纳吗？';
+
+  @override
+  String get agreementAdopt => '就这样';
+
+  @override
+  String get agreementWaitingOther => '等对方确认';
+
+  @override
+  String get agreementAgreed => '双方都确认了';
+
+  @override
+  String get agreementNotSet => '还没说';
+
+  @override
+  String get agreementSet => '填写';
+
+  @override
+  String get agreementSettle => '就这么定了';
+
+  @override
+  String get agreementSettled => '已定下';
+
+  @override
+  String get agreementStale => '这一项已经变了，请看最新的内容';
+
+  @override
   String priceDiscoveryMatched(String price) {
     return '谈成了，成交价 ¥$price';
   }

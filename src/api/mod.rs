@@ -15,6 +15,7 @@ use axum::{
 };
 pub mod admin;
 pub mod agent_plans;
+pub mod agreements;
 pub mod auth;
 pub mod campuses;
 pub mod chat;
@@ -535,6 +536,14 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             "/api/price-discovery/{id}/limit",
             post(price_discovery::state_limit),
         )
+        .route("/api/agreements", post(agreements::ensure))
+        .route("/api/agreements/{id}", get(agreements::get_agreement))
+        .route(
+            "/api/agreements/{id}/terms",
+            axum::routing::put(agreements::set_term),
+        )
+        .route("/api/agreements/{id}/adopt", post(agreements::adopt))
+        .route("/api/agreements/{id}/settle", post(agreements::settle))
         .route("/api/intents/feed", get(intents::intent_feed))
         .route(
             "/api/intents/{id}/respond",

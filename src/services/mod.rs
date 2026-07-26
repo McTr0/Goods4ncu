@@ -6,6 +6,7 @@ pub mod admin;
 pub mod admin_mfa;
 pub mod agent_plan;
 pub mod aggregation;
+pub mod agreement;
 pub mod campus;
 pub mod chat;
 pub mod chat_conversation;

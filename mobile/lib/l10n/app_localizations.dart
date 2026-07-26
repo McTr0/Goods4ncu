@@ -1970,6 +1970,108 @@ abstract class AppLocalizations {
   /// **'Enter a sensible price'**
   String get priceDiscoveryInvalid;
 
+  /// No description provided for @agreementCardTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'What we agreed'**
+  String get agreementCardTitle;
+
+  /// No description provided for @agreementSlotItem.
+  ///
+  /// In en, this message translates to:
+  /// **'Item'**
+  String get agreementSlotItem;
+
+  /// No description provided for @agreementSlotPrice.
+  ///
+  /// In en, this message translates to:
+  /// **'Price'**
+  String get agreementSlotPrice;
+
+  /// No description provided for @agreementSlotTime.
+  ///
+  /// In en, this message translates to:
+  /// **'When'**
+  String get agreementSlotTime;
+
+  /// No description provided for @agreementSlotPlace.
+  ///
+  /// In en, this message translates to:
+  /// **'Where'**
+  String get agreementSlotPlace;
+
+  /// No description provided for @agreementSlotWho.
+  ///
+  /// In en, this message translates to:
+  /// **'Who'**
+  String get agreementSlotWho;
+
+  /// No description provided for @agreementSlotBring.
+  ///
+  /// In en, this message translates to:
+  /// **'Bring'**
+  String get agreementSlotBring;
+
+  /// No description provided for @agreementSlotConditions.
+  ///
+  /// In en, this message translates to:
+  /// **'Other terms'**
+  String get agreementSlotConditions;
+
+  /// No description provided for @agreementSuggestion.
+  ///
+  /// In en, this message translates to:
+  /// **'Read from the chat — adopt it?'**
+  String get agreementSuggestion;
+
+  /// No description provided for @agreementAdopt.
+  ///
+  /// In en, this message translates to:
+  /// **'Adopt'**
+  String get agreementAdopt;
+
+  /// No description provided for @agreementWaitingOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for them'**
+  String get agreementWaitingOther;
+
+  /// No description provided for @agreementAgreed.
+  ///
+  /// In en, this message translates to:
+  /// **'Both agreed'**
+  String get agreementAgreed;
+
+  /// No description provided for @agreementNotSet.
+  ///
+  /// In en, this message translates to:
+  /// **'Not set'**
+  String get agreementNotSet;
+
+  /// No description provided for @agreementSet.
+  ///
+  /// In en, this message translates to:
+  /// **'Set'**
+  String get agreementSet;
+
+  /// No description provided for @agreementSettle.
+  ///
+  /// In en, this message translates to:
+  /// **'It\'s settled'**
+  String get agreementSettle;
+
+  /// No description provided for @agreementSettled.
+  ///
+  /// In en, this message translates to:
+  /// **'Settled'**
+  String get agreementSettled;
+
+  /// No description provided for @agreementStale.
+  ///
+  /// In en, this message translates to:
+  /// **'This changed — take a look'**
+  String get agreementStale;
+
   /// The agreed price from private-limit matching
   ///
   /// In en, this message translates to:

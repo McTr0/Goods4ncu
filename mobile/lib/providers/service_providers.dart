@@ -1,6 +1,7 @@
 import 'package:provider/provider.dart';
 import 'package:provider/single_child_widget.dart';
 import '../services/intent_service.dart';
+import '../services/agreement_service.dart';
 import '../services/price_discovery_service.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
@@ -26,6 +27,7 @@ List<SingleChildWidget> get serviceProviders => [
   Provider<ChatService>(create: (_) => ChatService()),
   Provider<IntentService>(create: (_) => IntentService()),
   Provider<PriceDiscoveryService>(create: (_) => PriceDiscoveryService()),
+  Provider<AgreementService>(create: (_) => AgreementService()),
   Provider<AdminService>(create: (_) => AdminService()),
   Provider<RecommendationService>(create: (_) => RecommendationService()),
   Provider<UploadService>(create: (_) => UploadService()),
