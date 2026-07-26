@@ -460,6 +460,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get noProducts => 'No products available';
 
   @override
+  String get homeColdStartTitle => 'This place is just starting';
+
+  @override
+  String get homeColdStartBody =>
+      'Nobody has posted yet. Say what you\'re selling or looking for and others will see it — the first person to speak matters most.';
+
+  @override
+  String get homeColdStartAction => 'I\'ll go first';
+
+  @override
+  String get homeFilterEmpty =>
+      'Nothing matches this filter. Try another, or just say what you want.';
+
+  @override
   String get notFound => 'Not found';
 
   @override

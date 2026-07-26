@@ -8,6 +8,17 @@ import 'package:goods4ncu_mobile/services/recommendation_service.dart';
 import 'package:goods4ncu_mobile/theme/app_theme.dart';
 import 'package:provider/provider.dart';
 
+/// A campus where nobody has posted yet — day one, and the state every real
+/// launch starts in.
+class _EmptyRecommendationService extends RecommendationService {
+  @override
+  Future<List<Listing>> getRecommendationFeed({
+    int limit = 20,
+    int offset = 0,
+    String direction = 'all',
+  }) async => const [];
+}
+
 class _FakeRecommendationService extends RecommendationService {
   @override
   Future<List<Listing>> getRecommendationFeed({
@@ -32,6 +43,7 @@ class _FakeRecommendationService extends RecommendationService {
 Widget _buildApp({
   Locale locale = const Locale('zh'),
   ThemeMode themeMode = ThemeMode.light,
+  RecommendationService? recommendations,
 }) {
   final router = GoRouter(
     routes: [
@@ -46,11 +58,15 @@ Widget _buildApp({
         builder: (context, state) =>
             Text('listing ${state.pathParameters['id'] ?? ''}'),
       ),
+      GoRoute(
+        path: '/create',
+        builder: (context, state) => const Text('say something'),
+      ),
     ],
   );
 
   return Provider<RecommendationService>.value(
-    value: _FakeRecommendationService(),
+    value: recommendations ?? _FakeRecommendationService(),
     child: MaterialApp.router(
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
@@ -64,6 +80,41 @@ Widget _buildApp({
 }
 
 void main() {
+  testWidgets('day one invites the first voice instead of announcing emptiness', (
+    tester,
+  ) async {
+    // The most important screen a cold-start community has, and it used to say
+    // "暂无商品" — announcing the place is empty, offering nothing to do, and
+    // framing the product as a shop out of stock. The first thirty students
+    // decide from this screen whether to come back.
+    await tester.pumpWidget(
+      _buildApp(recommendations: _EmptyRecommendationService()),
+    );
+    await tester.pumpAndSettle();
+    final l = AppLocalizations.of(tester.element(find.byType(HomePage)))!;
+
+    expect(find.text(l.homeColdStartTitle), findsOneWidget);
+    expect(find.text(l.noProducts), findsNothing);
+    // And an actual way to speak: telling someone the first voice matters, then
+    // giving them nowhere to speak, says nothing at all.
+    expect(find.text(l.homeColdStartAction), findsOneWidget);
+  });
+
+  testWidgets('the invitation leads somewhere', (tester) async {
+    await tester.pumpWidget(
+      _buildApp(recommendations: _EmptyRecommendationService()),
+    );
+    await tester.pumpAndSettle();
+    final l = AppLocalizations.of(tester.element(find.byType(HomePage)))!;
+
+    // Below the fold on a test-sized screen.
+    await tester.ensureVisible(find.text(l.homeColdStartAction));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(l.homeColdStartAction));
+    await tester.pumpAndSettle();
+    expect(find.text('say something'), findsOneWidget);
+  });
+
   testWidgets('home page keeps the customer entry simple', (tester) async {
     await tester.pumpWidget(_buildApp());
     await tester.pumpAndSettle();

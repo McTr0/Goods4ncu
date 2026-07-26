@@ -170,6 +170,10 @@
   "connectionRejected": "已拒绝连接",
   "negotiationRejected": "议价已拒绝",
   "noProducts": "暂无商品",
+  "homeColdStartTitle": "这里刚开始",
+  "homeColdStartBody": "还没有人发东西。你说一句想出什么或想找什么，别人就能看到——第一个开口的人最重要。",
+  "homeColdStartAction": "我先说一句",
+  "homeFilterEmpty": "这个筛选下没有东西。换个条件，或者直接说说你想要什么。",
   "notFound": "未找到",
   "operationFailed": "操作失败: {error}",
   "@operationFailed": {

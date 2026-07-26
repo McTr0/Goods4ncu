@@ -170,6 +170,10 @@
   "connectionRejected": "Connection rejected",
   "negotiationRejected": "Negotiation rejected",
   "noProducts": "No products available",
+  "homeColdStartTitle": "This place is just starting",
+  "homeColdStartBody": "Nobody has posted yet. Say what you're selling or looking for and others will see it — the first person to speak matters most.",
+  "homeColdStartAction": "I'll go first",
+  "homeFilterEmpty": "Nothing matches this filter. Try another, or just say what you want.",
   "notFound": "Not found",
   "operationFailed": "Operation failed: {error}",
   "@operationFailed": {

@@ -950,6 +950,30 @@ abstract class AppLocalizations {
   /// **'No products available'**
   String get noProducts;
 
+  /// No description provided for @homeColdStartTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'This place is just starting'**
+  String get homeColdStartTitle;
+
+  /// No description provided for @homeColdStartBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Nobody has posted yet. Say what you\'re selling or looking for and others will see it — the first person to speak matters most.'**
+  String get homeColdStartBody;
+
+  /// No description provided for @homeColdStartAction.
+  ///
+  /// In en, this message translates to:
+  /// **'I\'ll go first'**
+  String get homeColdStartAction;
+
+  /// No description provided for @homeFilterEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing matches this filter. Try another, or just say what you want.'**
+  String get homeFilterEmpty;
+
   /// No description provided for @notFound.
   ///
   /// In en, this message translates to:

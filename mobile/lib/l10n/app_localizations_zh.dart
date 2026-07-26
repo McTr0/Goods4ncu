@@ -443,6 +443,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get noProducts => '暂无商品';
 
   @override
+  String get homeColdStartTitle => '这里刚开始';
+
+  @override
+  String get homeColdStartBody => '还没有人发东西。你说一句想出什么或想找什么，别人就能看到——第一个开口的人最重要。';
+
+  @override
+  String get homeColdStartAction => '我先说一句';
+
+  @override
+  String get homeFilterEmpty => '这个筛选下没有东西。换个条件，或者直接说说你想要什么。';
+
+  @override
   String get notFound => '未找到';
 
   @override

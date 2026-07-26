@@ -159,7 +159,14 @@ class _HomePageState extends State<HomePage> {
             ),
             SliverFillRemaining(
               hasScrollBody: false,
-              child: _HomeEmptyState(message: l.noProducts),
+              // Two different situations that used to share one dead-end
+              // message. On day one the place really is empty, and that is
+              // normal rather than a failure — saying "暂无商品" to the first
+              // thirty students frames a new community as a broken shop.
+              child: _HomeEmptyState(
+                isColdStart: _directionFilter == 'all',
+                onSaySomething: () => context.push('/create'),
+              ),
             ),
           ],
         ),
@@ -732,10 +739,27 @@ class _HomeLoadingState extends StatelessWidget {
   }
 }
 
+/// What a student sees when there is nothing to show.
+///
+/// This is the most important screen a cold-start community has, and it used to
+/// say "暂无商品" — announcing that the place is empty, offering nothing to do,
+/// and framing the product as a shop that has run out of stock. The first
+/// thirty students decide from this screen whether to come back.
+///
+/// Two situations, deliberately distinguished. On day one the grid is empty
+/// because nobody has posted, which is not a fault and has exactly one useful
+/// response: be the first to say something. A filter that matched nothing is a
+/// different problem and gets a different answer.
 class _HomeEmptyState extends StatelessWidget {
-  final String message;
+  /// True when nothing is being filtered, so the emptiness is the community's
+  /// rather than the query's.
+  final bool isColdStart;
+  final VoidCallback onSaySomething;
 
-  const _HomeEmptyState({required this.message});
+  const _HomeEmptyState({
+    required this.isColdStart,
+    required this.onSaySomething,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -764,21 +788,45 @@ class _HomeEmptyState extends StatelessWidget {
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  Icons.recommend_outlined,
+                  isColdStart
+                      ? Icons.waving_hand_outlined
+                      : Icons.search_off_outlined,
                   size: 38,
                   color: scheme.onSecondaryContainer,
                 ),
               ),
               const SizedBox(height: AppTheme.sp16),
+              if (isColdStart)
+                Text(
+                  AppLocalizations.of(context)!.homeColdStartTitle,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              if (isColdStart) const SizedBox(height: AppTheme.sp8),
               Text(
-                message,
+                isColdStart
+                    ? AppLocalizations.of(context)!.homeColdStartBody
+                    : AppLocalizations.of(context)!.homeFilterEmpty,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
+                  fontSize: isColdStart ? 14 : 16,
+                  fontWeight: isColdStart ? FontWeight.w400 : FontWeight.w700,
                   color: scheme.onSurfaceVariant,
                 ),
               ),
+              // Telling someone the first voice matters and then giving them
+              // nowhere to speak says nothing at all.
+              if (isColdStart) ...[
+                const SizedBox(height: AppTheme.sp16),
+                FilledButton(
+                  onPressed: onSaySomething,
+                  child: Text(
+                    AppLocalizations.of(context)!.homeColdStartAction,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
