@@ -20,6 +20,7 @@ pub mod campuses;
 pub mod chat;
 pub mod conversations;
 pub mod error;
+pub mod interruptions;
 pub mod listings;
 pub mod metrics;
 pub mod mfa;
@@ -499,6 +500,19 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         )
         .route("/api/actions/undoable", get(undo::list_undoable))
         .route("/api/actions/{id}/undo", post(undo::undo_action))
+        .route(
+            "/api/interruptions/preferences",
+            get(interruptions::get_preferences).put(interruptions::update_preferences),
+        )
+        .route("/api/interruptions/history", get(interruptions::history))
+        .route(
+            "/api/interruptions/{id}/accept",
+            post(interruptions::accept),
+        )
+        .route(
+            "/api/interruptions/{id}/dismiss",
+            post(interruptions::dismiss),
+        )
         .route("/api/auth/change-password", post(auth::change_password))
         .route("/api/auth/refresh", post(auth::refresh_token))
         .route("/api/auth/logout", post(auth::logout))

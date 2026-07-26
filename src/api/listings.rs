@@ -608,19 +608,58 @@ pub async fn respond_to_wanted(
         }
     })?;
 
+    // Discretionary: posting a wanted listing invites answers, but nothing
+    // stops one person recommending fifty different items to it, so the push
+    // is budgeted. Over budget the recommendation still lands in the inbox —
+    // it is the interruption that is rationed, not the message.
+    let reason = format!("你在找“{}”，有人推荐了“{}”", wanted.title, offer.title);
+    let decision = crate::services::interruption::InterruptionService::new(state.infra.db.clone())
+        .request(crate::services::interruption::InterruptionRequest {
+            campus_id: wanted.campus_id,
+            user_id: &wanted.owner_id,
+            channel: "in_app",
+            topic: crate::services::interruption::topics::WANTED_RESPONSE,
+            reason: &reason,
+            // A human deliberately matched an item to a stated need, which is
+            // about as relevant as unsolicited outreach gets.
+            expected_value: 0.8,
+        })
+        .await;
+
+    let decision = match decision {
+        Ok(decision) => {
+            if let crate::services::interruption::Decision::Withheld { reason, .. } = &decision {
+                tracing::debug!(
+                    ?reason, wanted_id = %wanted.id,
+                    "wanted response held back from push",
+                );
+            }
+            decision
+        }
+        Err(e) => {
+            // Budget bookkeeping must never cost the user their
+            // recommendation, and must never fail open into a spam vector.
+            tracing::warn!(%e, wanted_id = %wanted.id, "interruption budget check failed");
+            crate::services::interruption::Decision::Unavailable
+        }
+    };
+
     if let Err(e) = state
         .infra
         .notification
-        .create(NewNotification {
-            campus_id: wanted.campus_id,
-            user_id: &wanted.owner_id,
-            event_type: "wanted_response",
-            title: "有人给你的收物需求推荐了商品",
-            body: &format!("“{}”收到一个匹配推荐：{}", wanted.title, offer.title),
-            related_order_id: None,
-            related_listing_id: Some(&wanted.id),
-            related_conversation_id: None,
-        })
+        .create_budgeted(
+            &decision,
+            NewNotification {
+                campus_id: wanted.campus_id,
+                user_id: &wanted.owner_id,
+                event_type: crate::services::interruption::topics::WANTED_RESPONSE,
+                title: "有人给你的收物需求推荐了商品",
+                body: &format!("“{}”收到一个匹配推荐：{}", wanted.title, offer.title),
+                related_order_id: None,
+                related_listing_id: Some(&wanted.id),
+                related_conversation_id: None,
+            },
+        )
         .await
     {
         tracing::warn!(%e, wanted_id = %wanted.id, offer_id = %offer.id, "Failed to create wanted response notification");

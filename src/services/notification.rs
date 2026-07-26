@@ -18,6 +18,9 @@ pub struct Notification {
     pub related_conversation_id: Option<String>,
     pub is_read: bool,
     pub created_at: String,
+    /// Ledger entry behind this notification, for budgeted topics. The client
+    /// posts accept/dismiss against it when the user acts.
+    pub interruption_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -47,8 +50,57 @@ impl NotificationService {
         Self { db }
     }
 
-    /// Create a notification for a user.
+    /// Create a *directed* notification — one about something the user owns or
+    /// is party to, awaiting their answer. Always pushed.
+    ///
+    /// Discretionary outreach must not come through here. It is subject to the
+    /// interruption budget, and this is the door that would let a caller walk
+    /// around it, so budgeted topics are refused outright rather than trusted
+    /// not to appear. See [`create_budgeted`](Self::create_budgeted).
     pub async fn create(&self, notification: NewNotification<'_>) -> Result<String> {
+        if crate::services::interruption::is_budgeted_topic(notification.event_type) {
+            anyhow::bail!(
+                "'{}' is a budgeted topic and must be sent through \
+                 InterruptionService::request, which accounts for the user's \
+                 interruption budget",
+                notification.event_type
+            );
+        }
+        self.insert(notification, true, None).await
+    }
+
+    /// Create a budgeted notification according to the budget's verdict.
+    ///
+    /// Granted, it is pushed like any other. Withheld, it is still written to
+    /// the inbox but never pushed: the budget spends the user's *attention*,
+    /// not their messages, and silently dropping the notification would make
+    /// running out of budget look exactly like losing data.
+    ///
+    /// The [`Decision`] can only come from
+    /// [`InterruptionService::request`], because the grant inside it is not
+    /// constructible elsewhere.
+    pub async fn create_budgeted(
+        &self,
+        decision: &crate::services::interruption::Decision,
+        notification: NewNotification<'_>,
+    ) -> Result<String> {
+        if let crate::services::interruption::Decision::Granted(grant) = decision {
+            debug_assert_eq!(
+                grant.topic(),
+                notification.event_type,
+                "grant was issued for a different topic than the one being sent",
+            );
+        }
+        self.insert(notification, decision.may_push(), decision.ledger_id())
+            .await
+    }
+
+    async fn insert(
+        &self,
+        notification: NewNotification<'_>,
+        push: bool,
+        interruption_id: Option<Uuid>,
+    ) -> Result<String> {
         let id = Uuid::new_v4().to_string();
 
         // Notification row and its push event commit atomically: either both
@@ -59,8 +111,8 @@ impl NotificationService {
         sqlx::query(
             "INSERT INTO notifications (
                 id, campus_id, user_id, event_type, title, body, related_order_id,
-                related_listing_id, related_conversation_id
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid)",
+                related_listing_id, related_conversation_id, interruption_id
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid, $10)",
         )
         .bind(&id)
         .bind(notification.campus_id)
@@ -71,27 +123,30 @@ impl NotificationService {
         .bind(notification.related_order_id)
         .bind(notification.related_listing_id)
         .bind(notification.related_conversation_id)
+        .bind(interruption_id)
         .execute(&mut *tx)
         .await?;
 
-        let push_payload = serde_json::json!({
-            "user_id": notification.user_id,
-            "message": {
-                "id": id,
-                "event_type": notification.event_type,
-                "title": notification.title,
-                "body": notification.body,
-                "related_listing_id": notification.related_listing_id,
-                "related_conversation_id": notification.related_conversation_id,
-            },
-        });
-        crate::services::outbox::enqueue_in_tx(
-            &mut tx,
-            crate::services::outbox::TOPIC_NOTIFICATION_PUSH,
-            &push_payload,
-        )
-        .await
-        .map_err(|error| anyhow::anyhow!("enqueue notification push: {error}"))?;
+        if push {
+            let push_payload = serde_json::json!({
+                "user_id": notification.user_id,
+                "message": {
+                    "id": id,
+                    "event_type": notification.event_type,
+                    "title": notification.title,
+                    "body": notification.body,
+                    "related_listing_id": notification.related_listing_id,
+                    "related_conversation_id": notification.related_conversation_id,
+                },
+            });
+            crate::services::outbox::enqueue_in_tx(
+                &mut tx,
+                crate::services::outbox::TOPIC_NOTIFICATION_PUSH,
+                &push_payload,
+            )
+            .await
+            .map_err(|error| anyhow::anyhow!("enqueue notification push: {error}"))?;
+        }
         tx.commit().await?;
 
         Ok(id)
@@ -116,7 +171,8 @@ impl NotificationService {
 
         let rows = sqlx::query(
             r#"SELECT id, campus_id, user_id, event_type, title, body, related_order_id,
-                      related_listing_id, related_conversation_id, is_read, created_at
+                      related_listing_id, related_conversation_id, is_read, created_at,
+                      interruption_id
                FROM notifications
                WHERE user_id = $1 AND campus_id = $2
                ORDER BY created_at DESC
@@ -154,6 +210,7 @@ impl NotificationService {
                         .map(|value| value.to_string()),
                     is_read: row.get("is_read"),
                     created_at,
+                    interruption_id: row.try_get("interruption_id").ok().flatten(),
                 }
             })
             .collect();
@@ -181,7 +238,8 @@ impl NotificationService {
 
         let rows = sqlx::query(
             r#"SELECT id, campus_id, user_id, event_type, title, body, related_order_id,
-                      related_listing_id, related_conversation_id, is_read, created_at
+                      related_listing_id, related_conversation_id, is_read, created_at,
+                      interruption_id
                FROM notifications
                WHERE user_id = $1 AND campus_id = $2 AND is_read = FALSE
                ORDER BY created_at DESC
@@ -219,6 +277,7 @@ impl NotificationService {
                         .map(|value| value.to_string()),
                     is_read: row.get("is_read"),
                     created_at,
+                    interruption_id: row.try_get("interruption_id").ok().flatten(),
                 }
             })
             .collect();
