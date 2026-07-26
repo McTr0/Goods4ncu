@@ -20,6 +20,7 @@ pub mod campuses;
 pub mod chat;
 pub mod conversations;
 pub mod error;
+pub mod intents;
 pub mod interruptions;
 pub mod listings;
 pub mod metrics;
@@ -502,6 +503,21 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             "/api/agent/plans/{id}/cancel",
             post(agent_plans::cancel_plan),
         )
+        .route(
+            "/api/intents",
+            get(intents::list_intents).post(intents::create_intent),
+        )
+        .route(
+            "/api/intents/{id}",
+            axum::routing::delete(intents::withdraw_intent),
+        )
+        .route(
+            "/api/intents/draft-batch",
+            post(intents::create_draft_batch),
+        )
+        .route("/api/intents/{id}/confirm", post(intents::confirm_intent))
+        .route("/api/intents/{id}/fulfil", post(intents::fulfil_intent))
+        .route("/api/intents/{id}/matches", get(intents::intent_matches))
         .route("/api/actions/undoable", get(undo::list_undoable))
         .route("/api/actions/{id}/undo", post(undo::undo_action))
         .route(

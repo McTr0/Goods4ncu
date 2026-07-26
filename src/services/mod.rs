@@ -11,6 +11,7 @@ pub mod chat_conversation;
 pub mod chat_expire;
 pub mod community_health;
 pub mod hitl_expire;
+pub mod intent;
 pub mod interruption;
 pub mod moderation;
 pub mod moderation_case;

@@ -223,6 +223,12 @@ async fn main() -> Result<(), anyhow::Error> {
         shutdown.clone(),
     ));
 
+    // Intent expiry worker: retires intents whose moment has passed.
+    let intent_expiry_handle = tokio::spawn(services::intent::run_expiry_worker(
+        db_pool.clone(),
+        shutdown.clone(),
+    ));
+
     // Multi-replica realtime: when REDIS_URL is configured, WS broadcasts
     // route through Redis pub/sub so any replica can deliver to the sockets it
     // holds. Without it (or without the `redis` feature) delivery stays local.
@@ -411,6 +417,7 @@ async fn main() -> Result<(), anyhow::Error> {
             denylist_handle,
             outbox_worker_handle,
             undo_prune_handle,
+            intent_expiry_handle,
         );
         #[cfg(feature = "redis")]
         if let Some(handle) = ws_fanout_handle {
@@ -427,6 +434,7 @@ async fn main() -> Result<(), anyhow::Error> {
             ("denylist_cleanup", workers.5),
             ("outbox", workers.6),
             ("undo_prune", workers.7),
+            ("intent_expiry", workers.8),
         ] {
             if let Err(e) = result {
                 tracing::error!(worker = name, %e, "Worker task failed during shutdown");
