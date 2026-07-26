@@ -928,6 +928,50 @@ class AppLocalizationsZh extends AppLocalizations {
   String get intentRespondSent => '已发送，对方会在消息里看到';
 
   @override
+  String get priceDiscoveryTitle => '让小帮定价';
+
+  @override
+  String get priceDiscoveryStart => '让小帮定价';
+
+  @override
+  String get priceDiscoveryYourLimit => '你的底线（元）';
+
+  @override
+  String get priceDiscoveryBuyerHint => '你最多愿意付多少';
+
+  @override
+  String get priceDiscoverySellerHint => '你最少愿意收多少';
+
+  @override
+  String get priceDiscoverySubmit => '私下告诉小帮';
+
+  @override
+  String get priceDiscoveryWaiting => '已收到。等对方也说完就出结果——对方看不到你的数字。';
+
+  @override
+  String get priceDiscoveryNoDeal => '这次没谈拢。要不要直接聊聊？';
+
+  @override
+  String get priceDiscoveryAcceptInvite => '对方想用这个方式定价';
+
+  @override
+  String get priceDiscoveryAgree => '好，就这样';
+
+  @override
+  String get priceDiscoveryPreferHaggle => '我想直接谈';
+
+  @override
+  String get priceDiscoveryDeclined => '已改为直接沟通';
+
+  @override
+  String get priceDiscoveryInvalid => '请填一个合理的价格';
+
+  @override
+  String priceDiscoveryMatched(String price) {
+    return '谈成了，成交价 ¥$price';
+  }
+
+  @override
   String intentMatchCount(int count) {
     return '找到 $count 个可能合适的';
   }

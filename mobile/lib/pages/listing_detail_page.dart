@@ -8,6 +8,8 @@ import '../services/base_service.dart';
 import '../services/recommendation_service.dart';
 import '../services/order_service.dart';
 import '../services/chat_service.dart';
+import '../components/price_discovery_sheet.dart';
+import '../services/price_discovery_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
 import '../components/price_tag.dart';
@@ -147,6 +149,22 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         });
       }
     }
+  }
+
+  /// Open the private-limit price sheet for this listing.
+  Future<void> _handlePriceDiscovery() async {
+    final id = widget.listingId;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => PriceDiscoverySheet(
+        listingId: id,
+        // The viewer reached this from someone else's listing, so they are the
+        // buyer; the seller starts a session from the conversation instead.
+        viewerIsSeller: false,
+        service: context.read<PriceDiscoveryService>(),
+      ),
+    );
   }
 
   Future<void> _handleContactSeller(BuildContext context) async {
@@ -910,6 +928,19 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
                 : () => _handleContactSeller(context),
             icon: const Icon(Icons.chat_bubble_outline),
             label: Text(l.contactSeller),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        // Offered beside haggling rather than instead of it: both sides have to
+        // choose this mechanism, and someone who would rather talk keeps that.
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: (isSold || _isOperating) ? null : _handlePriceDiscovery,
+            icon: const Icon(Icons.balance_outlined),
+            label: Text(l.priceDiscoveryStart, softWrap: false),
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 14),
             ),

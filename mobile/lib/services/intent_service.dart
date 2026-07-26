@@ -110,13 +110,13 @@ class IntentService extends BaseService {
   /// Author identities are not included. Answering goes through
   /// [respondToIntent], where the server resolves who to open a conversation
   /// with — so this list cannot be read as a directory of who wants what.
-  Future<List<UserIntent>> campusFeed({IntentKind? kind, int limit = 30}) async {
+  Future<List<UserIntent>> campusFeed({
+    IntentKind? kind,
+    int limit = 30,
+  }) async {
     final headers = await authHeaders();
     final uri = Uri.parse('$baseUrl/api/intents/feed').replace(
-      queryParameters: {
-        if (kind != null) 'kind': kind.wire,
-        'limit': '$limit',
-      },
+      queryParameters: {if (kind != null) 'kind': kind.wire, 'limit': '$limit'},
     );
     final response = await get(uri, headers);
     final data = handleResponse(response, (d) => d as Map<String, dynamic>);
@@ -134,10 +134,7 @@ class IntentService extends BaseService {
     final response = await post(
       Uri.parse('$baseUrl/api/intents/$intentId/respond'),
       headers,
-      jsonEncode({
-        'content': content,
-        'client_request_id': _uuid.v4(),
-      }),
+      jsonEncode({'content': content, 'client_request_id': _uuid.v4()}),
     );
     final data = handleResponse(response, (d) => d as Map<String, dynamic>);
     return data['conversation_id']?.toString() ?? '';

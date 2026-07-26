@@ -232,12 +232,11 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
         Expanded(
           child: ElevatedButton(
             onPressed: () => _doAction(
-              () =>
-                  _orderService.confirmOrder(
-                    order.id,
-                    autoDelist: _autoDelist,
-                    idempotencyKey: _confirmIdempotencyKey,
-                  ),
+              () => _orderService.confirmOrder(
+                order.id,
+                autoDelist: _autoDelist,
+                idempotencyKey: _confirmIdempotencyKey,
+              ),
             ),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.primary,

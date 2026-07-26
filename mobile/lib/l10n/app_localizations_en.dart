@@ -959,6 +959,52 @@ class AppLocalizationsEn extends AppLocalizations {
   String get intentRespondSent => 'Sent — they\'ll see it in their messages';
 
   @override
+  String get priceDiscoveryTitle => 'Let the assistant settle it';
+
+  @override
+  String get priceDiscoveryStart => 'Settle by private limits';
+
+  @override
+  String get priceDiscoveryYourLimit => 'Your limit (CNY)';
+
+  @override
+  String get priceDiscoveryBuyerHint => 'The most you\'d pay';
+
+  @override
+  String get priceDiscoverySellerHint => 'The least you\'d accept';
+
+  @override
+  String get priceDiscoverySubmit => 'Tell the assistant privately';
+
+  @override
+  String get priceDiscoveryWaiting =>
+      'Got it. The result comes once they\'ve answered too — they cannot see your number.';
+
+  @override
+  String get priceDiscoveryNoDeal =>
+      'It didn\'t work out this time. Want to just talk instead?';
+
+  @override
+  String get priceDiscoveryAcceptInvite => 'They\'d like to settle it this way';
+
+  @override
+  String get priceDiscoveryAgree => 'Alright';
+
+  @override
+  String get priceDiscoveryPreferHaggle => 'I\'d rather talk';
+
+  @override
+  String get priceDiscoveryDeclined => 'Switched to talking it over';
+
+  @override
+  String get priceDiscoveryInvalid => 'Enter a sensible price';
+
+  @override
+  String priceDiscoveryMatched(String price) {
+    return 'Agreed at ¥$price';
+  }
+
+  @override
   String intentMatchCount(int count) {
     return '$count possible match(es)';
   }

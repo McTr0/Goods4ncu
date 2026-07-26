@@ -1892,6 +1892,90 @@ abstract class AppLocalizations {
   /// **'Sent — they\'ll see it in their messages'**
   String get intentRespondSent;
 
+  /// No description provided for @priceDiscoveryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Let the assistant settle it'**
+  String get priceDiscoveryTitle;
+
+  /// No description provided for @priceDiscoveryStart.
+  ///
+  /// In en, this message translates to:
+  /// **'Settle by private limits'**
+  String get priceDiscoveryStart;
+
+  /// No description provided for @priceDiscoveryYourLimit.
+  ///
+  /// In en, this message translates to:
+  /// **'Your limit (CNY)'**
+  String get priceDiscoveryYourLimit;
+
+  /// No description provided for @priceDiscoveryBuyerHint.
+  ///
+  /// In en, this message translates to:
+  /// **'The most you\'d pay'**
+  String get priceDiscoveryBuyerHint;
+
+  /// No description provided for @priceDiscoverySellerHint.
+  ///
+  /// In en, this message translates to:
+  /// **'The least you\'d accept'**
+  String get priceDiscoverySellerHint;
+
+  /// No description provided for @priceDiscoverySubmit.
+  ///
+  /// In en, this message translates to:
+  /// **'Tell the assistant privately'**
+  String get priceDiscoverySubmit;
+
+  /// No description provided for @priceDiscoveryWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Got it. The result comes once they\'ve answered too — they cannot see your number.'**
+  String get priceDiscoveryWaiting;
+
+  /// No description provided for @priceDiscoveryNoDeal.
+  ///
+  /// In en, this message translates to:
+  /// **'It didn\'t work out this time. Want to just talk instead?'**
+  String get priceDiscoveryNoDeal;
+
+  /// No description provided for @priceDiscoveryAcceptInvite.
+  ///
+  /// In en, this message translates to:
+  /// **'They\'d like to settle it this way'**
+  String get priceDiscoveryAcceptInvite;
+
+  /// No description provided for @priceDiscoveryAgree.
+  ///
+  /// In en, this message translates to:
+  /// **'Alright'**
+  String get priceDiscoveryAgree;
+
+  /// No description provided for @priceDiscoveryPreferHaggle.
+  ///
+  /// In en, this message translates to:
+  /// **'I\'d rather talk'**
+  String get priceDiscoveryPreferHaggle;
+
+  /// No description provided for @priceDiscoveryDeclined.
+  ///
+  /// In en, this message translates to:
+  /// **'Switched to talking it over'**
+  String get priceDiscoveryDeclined;
+
+  /// No description provided for @priceDiscoveryInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a sensible price'**
+  String get priceDiscoveryInvalid;
+
+  /// The agreed price from private-limit matching
+  ///
+  /// In en, this message translates to:
+  /// **'Agreed at ¥{price}'**
+  String priceDiscoveryMatched(String price);
+
   /// How many candidate matches an intent has
   ///
   /// In en, this message translates to:

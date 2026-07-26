@@ -1445,3 +1445,71 @@ class IntentCreated {
     specificity: (json['specificity'] as num?)?.toDouble() ?? 0,
   );
 }
+
+/// A private-limit price negotiation.
+///
+/// Note what this class cannot hold: the other side's limit, or how far apart
+/// the two were. The server never sends either, and there is deliberately
+/// nowhere here to put them — a field would be an invitation.
+class PriceDiscoverySession {
+  final String id;
+  final String status; // proposed | open | matched | no_deal | declined
+  /// The agreed price, present only on a match. This is the agreement, not
+  /// either party's position.
+  final int? matchedCents;
+
+  /// Whether *you* have stated your limit. Never whether they have: knowing
+  /// someone is still deciding is itself a small advantage.
+  final bool youHaveStated;
+
+  const PriceDiscoverySession({
+    required this.id,
+    required this.status,
+    this.matchedCents,
+    required this.youHaveStated,
+  });
+
+  factory PriceDiscoverySession.fromJson(Map<String, dynamic> json) =>
+      PriceDiscoverySession(
+        id: json['id']?.toString() ?? '',
+        status: json['status']?.toString() ?? 'proposed',
+        matchedCents: (json['matched_cents'] as num?)?.toInt(),
+        youHaveStated: json['you_have_stated'] == true,
+      );
+
+  bool get isProposed => status == 'proposed';
+  bool get isOpen => status == 'open';
+  bool get isMatched => status == 'matched';
+  bool get isNoDeal => status == 'no_deal';
+  bool get isDeclined => status == 'declined';
+}
+
+/// A session plus the rule that produced it.
+///
+/// The rule travels with every response so the interface can always show it. A
+/// pricing black box is worse than haggling — at least haggling is legible.
+class PriceDiscoveryResult {
+  final PriceDiscoverySession? session;
+  final String rule;
+  final String? sessionId;
+  final String? outcome;
+
+  const PriceDiscoveryResult({
+    this.session,
+    required this.rule,
+    this.sessionId,
+    this.outcome,
+  });
+
+  factory PriceDiscoveryResult.fromJson(Map<String, dynamic> json) =>
+      PriceDiscoveryResult(
+        session: json['session'] is Map<String, dynamic>
+            ? PriceDiscoverySession.fromJson(
+                json['session'] as Map<String, dynamic>,
+              )
+            : null,
+        rule: json['rule']?.toString() ?? '',
+        sessionId: json['session_id']?.toString(),
+        outcome: json['outcome']?.toString(),
+      );
+}
