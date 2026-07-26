@@ -24,6 +24,7 @@ pub mod order_worker;
 pub mod outbox;
 pub mod price_discovery;
 pub mod product;
+pub mod reputation;
 pub mod settlement;
 pub mod storage;
 pub mod token_denylist;

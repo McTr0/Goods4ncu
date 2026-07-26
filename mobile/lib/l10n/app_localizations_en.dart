@@ -1051,6 +1051,35 @@ class AppLocalizationsEn extends AppLocalizations {
   String get agreementStale => 'This changed — take a look';
 
   @override
+  String get handoffPromptTitle => 'How did it go?';
+
+  @override
+  String get handoffHappened => 'We met and it worked out';
+
+  @override
+  String get handoffMissed => 'It didn\'t happen';
+
+  @override
+  String get handoffOnTime => 'They were on time';
+
+  @override
+  String get handoffLate => 'They were late';
+
+  @override
+  String get handoffThanks => 'Thanks — noted';
+
+  @override
+  String get handoffOnce => 'Asked once, and it cannot be changed later';
+
+  @override
+  String get reputationNewcomer => 'New here — no record yet';
+
+  @override
+  String reputationSummary(int completed, int onTime) {
+    return 'Completed $completed, on time $onTime';
+  }
+
+  @override
   String priceDiscoveryMatched(String price) {
     return 'Agreed at ¥$price';
   }

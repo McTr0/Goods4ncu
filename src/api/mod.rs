@@ -32,6 +32,7 @@ pub mod notifications;
 pub mod orders;
 pub mod price_discovery;
 pub mod recommendations;
+pub mod reputation;
 pub mod request_context;
 pub mod session;
 pub mod stats;
@@ -536,6 +537,9 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             "/api/price-discovery/{id}/limit",
             post(price_discovery::state_limit),
         )
+        .route("/api/handoffs/pending", get(reputation::pending))
+        .route("/api/handoffs/{id}/confirm", post(reputation::confirm))
+        .route("/api/users/{id}/reputation", get(reputation::of_user))
         .route("/api/agreements", post(agreements::ensure))
         .route("/api/agreements/{id}", get(agreements::get_agreement))
         .route(

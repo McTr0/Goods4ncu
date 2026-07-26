@@ -2072,6 +2072,60 @@ abstract class AppLocalizations {
   /// **'This changed — take a look'**
   String get agreementStale;
 
+  /// No description provided for @handoffPromptTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'How did it go?'**
+  String get handoffPromptTitle;
+
+  /// No description provided for @handoffHappened.
+  ///
+  /// In en, this message translates to:
+  /// **'We met and it worked out'**
+  String get handoffHappened;
+
+  /// No description provided for @handoffMissed.
+  ///
+  /// In en, this message translates to:
+  /// **'It didn\'t happen'**
+  String get handoffMissed;
+
+  /// No description provided for @handoffOnTime.
+  ///
+  /// In en, this message translates to:
+  /// **'They were on time'**
+  String get handoffOnTime;
+
+  /// No description provided for @handoffLate.
+  ///
+  /// In en, this message translates to:
+  /// **'They were late'**
+  String get handoffLate;
+
+  /// No description provided for @handoffThanks.
+  ///
+  /// In en, this message translates to:
+  /// **'Thanks — noted'**
+  String get handoffThanks;
+
+  /// No description provided for @handoffOnce.
+  ///
+  /// In en, this message translates to:
+  /// **'Asked once, and it cannot be changed later'**
+  String get handoffOnce;
+
+  /// No description provided for @reputationNewcomer.
+  ///
+  /// In en, this message translates to:
+  /// **'New here — no record yet'**
+  String get reputationNewcomer;
+
+  /// Someone's record, stated as facts rather than a score
+  ///
+  /// In en, this message translates to:
+  /// **'Completed {completed}, on time {onTime}'**
+  String reputationSummary(int completed, int onTime);
+
   /// The agreed price from private-limit matching
   ///
   /// In en, this message translates to:

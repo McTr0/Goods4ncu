@@ -1018,6 +1018,35 @@ class AppLocalizationsZh extends AppLocalizations {
   String get agreementStale => '这一项已经变了，请看最新的内容';
 
   @override
+  String get handoffPromptTitle => '这次约定后来怎么样？';
+
+  @override
+  String get handoffHappened => '见到了，事情办成了';
+
+  @override
+  String get handoffMissed => '没见到';
+
+  @override
+  String get handoffOnTime => '对方准时';
+
+  @override
+  String get handoffLate => '对方迟到了';
+
+  @override
+  String get handoffThanks => '谢谢，已记下';
+
+  @override
+  String get handoffOnce => '只问一次，之后不能改';
+
+  @override
+  String get reputationNewcomer => '新同学，还没有记录';
+
+  @override
+  String reputationSummary(int completed, int onTime) {
+    return '完成 $completed 次约定，准时 $onTime 次';
+  }
+
+  @override
   String priceDiscoveryMatched(String price) {
     return '谈成了，成交价 ¥$price';
   }

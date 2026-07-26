@@ -1597,3 +1597,40 @@ class Agreement {
 
   bool get isSettled => status == 'settled';
 }
+
+/// What is known about someone, in facts.
+///
+/// No score. "Completed 12, on time 11" is a sentence a person can check
+/// against their own memory; a rating out of five can only be resented, and on
+/// a campus where everyone meets again, it is either all fives or a fight.
+class Reputation {
+  final int completed;
+  final int onTime;
+  final int missed;
+
+  /// Whether there is enough here to mean anything. A newcomer is unmeasured,
+  /// not untrusted, and the interface has to say which.
+  final bool hasTrackRecord;
+
+  /// Exposed so ranking is explainable rather than a hidden score.
+  final double matchingWeight;
+
+  const Reputation({
+    required this.completed,
+    required this.onTime,
+    required this.missed,
+    required this.hasTrackRecord,
+    required this.matchingWeight,
+  });
+
+  factory Reputation.fromJson(Map<String, dynamic> json) {
+    final r = json['reputation'] as Map<String, dynamic>? ?? const {};
+    return Reputation(
+      completed: (r['completed'] as num?)?.toInt() ?? 0,
+      onTime: (r['on_time'] as num?)?.toInt() ?? 0,
+      missed: (r['missed'] as num?)?.toInt() ?? 0,
+      hasTrackRecord: r['has_track_record'] == true,
+      matchingWeight: (json['matching_weight'] as num?)?.toDouble() ?? 0.5,
+    );
+  }
+}
