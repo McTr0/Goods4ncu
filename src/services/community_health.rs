@@ -146,21 +146,45 @@ impl CommunityHealthService {
     ) -> Result<(IntentHealth, AgreementHealth)> {
         let row = sqlx::query(
             r#"
+            -- Everything someone said they wanted, whichever object carries it.
+            --
+            -- Counting only `inventory` was wrong once intents became the
+            -- record: a seeking intent has no listing projection, so the number
+            -- would have reported nobody answering anything however well intents
+            -- were answered — blind to the mechanism it exists to watch.
+            --
+            -- An intent that *was* projected into a listing is counted once, as
+            -- the intent, so the same wish is not two posts.
             WITH posted AS (
                 SELECT id, created_at
                 FROM inventory
                 WHERE campus_id = $1
                   AND created_at >= NOW() - make_interval(days => $2::int)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM intents i WHERE i.projected_listing_id = inventory.id
+                  )
+                UNION ALL
+                SELECT id::text, created_at
+                FROM intents
+                WHERE campus_id = $1
+                  AND visibility = 'campus'
+                  AND created_at >= NOW() - make_interval(days => $2::int)
+                  -- Drafts were never shown to anyone, so nobody had the chance
+                  -- to answer them; counting them would blame the community for
+                  -- an author's unconfirmed guess.
+                  AND status <> 'draft'
             ),
-            -- Any of the three ways someone can answer a post. A conversation
-            -- opened about it, an item offered against a wanted post, or a
-            -- price proposed — all are "somebody engaged".
+            -- Every way somebody can engage with what was said. A conversation
+            -- about a listing, an item offered against a wanted post, a price
+            -- proposed, or a direct answer to an intent.
             responses AS (
                 SELECT listing_id, created_at FROM chat_conversations WHERE campus_id = $1
                 UNION ALL
                 SELECT wanted_listing_id, created_at FROM wanted_responses WHERE campus_id = $1
                 UNION ALL
                 SELECT listing_id, created_at FROM hitl_requests WHERE campus_id = $1
+                UNION ALL
+                SELECT intent_id::text, created_at FROM intent_responses WHERE campus_id = $1
             ),
             first_answer AS (
                 SELECT p.id,

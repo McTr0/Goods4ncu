@@ -517,6 +517,11 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             post(intents::create_draft_batch),
         )
         .route("/api/intents/decompose", post(intents::decompose_intent))
+        .route("/api/intents/feed", get(intents::intent_feed))
+        .route(
+            "/api/intents/{id}/respond",
+            post(intents::respond_to_intent),
+        )
         .route("/api/intents/{id}/confirm", post(intents::confirm_intent))
         .route("/api/intents/{id}/fulfil", post(intents::fulfil_intent))
         .route("/api/intents/{id}/matches", get(intents::intent_matches))

@@ -97,6 +97,76 @@ pub async fn create_conversation(
     Ok(Json(result))
 }
 
+/// Open a mail-mode conversation in answer to an intent.
+///
+/// Shares the validation and side effects of [`create_conversation`]: campus
+/// membership on both sides, text moderation, the recipient's notification, and
+/// the realtime broadcast. Duplicating any of those here would mean an
+/// intent-answer that skipped moderation or arrived silently.
+///
+/// Mail mode rather than realtime, because answering someone's standing request
+/// is not the same as asking to talk right now — it should wait in their inbox
+/// instead of demanding immediate attention.
+#[allow(clippy::too_many_arguments)]
+pub async fn open_conversation_for_intent(
+    state: &AppState,
+    initiator_id: &str,
+    recipient_id: &str,
+    campus_id: uuid::Uuid,
+    client_request_id: uuid::Uuid,
+    subject: &str,
+    content: &str,
+) -> Result<String, ApiError> {
+    // Re-checked rather than trusted: the caller resolved the author from an
+    // intent row, which says nothing about whether these two share a campus
+    // *now*.
+    let tenant = CampusService::new(state.infra.db.clone())
+        .require_shared_verified_campus(initiator_id, recipient_id)
+        .await?;
+    if tenant.campus_id != campus_id {
+        return Err(ApiError::CampusScopeMismatch);
+    }
+    moderate_text(state, content)?;
+    moderate_text(state, subject)?;
+
+    let result = ChatConversationService::new(state.infra.db.clone())
+        .create_conversation(CreateConversationInput {
+            client_request_id,
+            campus_id: tenant.campus_id,
+            initiator_id: initiator_id.to_string(),
+            recipient_id: recipient_id.to_string(),
+            listing_id: None,
+            mode: crate::services::chat_conversation::ConversationMode::Mail,
+            subject: Some(subject.to_string()),
+            content: content.to_string(),
+        })
+        .await?;
+
+    if result.created {
+        if let Err(error) = state
+            .infra
+            .notification
+            .create(NewNotification {
+                campus_id: tenant.campus_id,
+                user_id: &result.conversation.recipient_id,
+                event_type: "conversation_created",
+                title: "有人回应了你想找的东西",
+                body: subject,
+                related_order_id: None,
+                related_listing_id: None,
+                related_conversation_id: Some(&result.conversation.id),
+                related_space_id: None,
+            })
+            .await
+        {
+            tracing::warn!(%error, "failed to persist intent response notification");
+        }
+    }
+
+    broadcast_conversation("conversation_created", &result.conversation);
+    Ok(result.conversation.id.clone())
+}
+
 pub async fn list_conversations(
     State(state): State<AppState>,
     headers: HeaderMap,

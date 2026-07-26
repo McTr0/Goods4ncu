@@ -320,6 +320,127 @@ pub async fn decompose_intent(
     }
 }
 
+#[derive(Deserialize)]
+pub struct FeedQuery {
+    /// Narrow to one kind; omit for everything, newest first.
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// GET /api/intents/feed — what everyone on this campus is currently after.
+///
+/// Without this you have to post something before you can see anything: a new
+/// student opens the app, has said nothing yet, and finds an empty room. That is
+/// the unanswered-post problem from the other side — the demand exists and
+/// nobody can see it in order to answer it.
+///
+/// Author identities are not included. Answering is an action the server
+/// performs (see [`respond_to_intent`]), so this surface cannot be scraped into
+/// a directory of who wants what.
+pub async fn intent_feed(
+    State(state): State<AppState>,
+    tenant: VerifiedTenant,
+    Query(query): Query<FeedQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if let Some(kind) = query.kind.as_deref() {
+        if !kinds::ALL.contains(&kind) {
+            return Err(ApiError::BadRequest(format!("未知的意图类型：{}", kind)));
+        }
+    }
+    let items = IntentService::new(state.infra.db.clone())
+        .campus_feed(
+            tenant.campus_id,
+            &tenant.session.user_id,
+            query.kind.as_deref(),
+            query.limit.unwrap_or(30),
+        )
+        .await
+        .map_err(ApiError::Internal)?;
+    Ok(Json(serde_json::json!({ "items": items })))
+}
+
+#[derive(Deserialize)]
+pub struct RespondRequest {
+    /// What to say. This is the whole point — a match with no way to reply is a
+    /// dead end.
+    pub content: String,
+    /// Client-supplied so a retried tap cannot open two conversations.
+    pub client_request_id: Uuid,
+}
+
+/// POST /api/intents/{id}/respond — answer someone.
+///
+/// The step that was missing. Matching surfaced candidates and offered nothing
+/// to do about them, so "posts answered" could only ever be zero: the loop from
+/// *someone wants something* to *someone replied* had no last link.
+///
+/// The author is resolved here rather than returned to the client, which keeps
+/// user ids off the matching surface. Campus membership is re-checked for both
+/// sides, so this cannot be used to message across campuses.
+pub async fn respond_to_intent(
+    State(state): State<AppState>,
+    tenant: VerifiedTenant,
+    Path(intent_id): Path<Uuid>,
+    Json(payload): Json<RespondRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let content = payload.content.trim();
+    if content.is_empty() {
+        return Err(ApiError::BadRequest("说点什么再发送".to_string()));
+    }
+    if content.chars().count() > 1000 {
+        return Err(ApiError::BadRequest("消息请控制在 1000 字以内".to_string()));
+    }
+
+    let service = IntentService::new(state.infra.db.clone());
+    let (author_id, raw_input) = service
+        .answerable_author(tenant.campus_id, intent_id)
+        .await
+        .map_err(ApiError::Internal)?
+        // Withdrawn, fulfilled, expired, private or another campus's — one
+        // answer for all of them, so this cannot probe what exists.
+        .ok_or(ApiError::NotFound)?;
+
+    if author_id == tenant.session.user_id {
+        return Err(ApiError::BadRequest("不能回应自己的意图".to_string()));
+    }
+
+    // The subject carries the author's own words, so they can tell at a glance
+    // which of their intents this is about.
+    let subject: String = raw_input.chars().take(60).collect();
+    let conversation = crate::api::user_chat::open_conversation_for_intent(
+        &state,
+        &tenant.session.user_id,
+        &author_id,
+        tenant.campus_id,
+        payload.client_request_id,
+        &subject,
+        content,
+    )
+    .await?;
+
+    // Recorded so the health metrics can see it. Without this the dashboard
+    // counts only listings and reports nobody answered anything.
+    if let Err(error) = service
+        .record_response(
+            tenant.campus_id,
+            intent_id,
+            &tenant.session.user_id,
+            conversation.parse().ok(),
+        )
+        .await
+    {
+        // The answer reached the author; losing the bookkeeping degrades a
+        // metric rather than the exchange, so it must not fail the request.
+        tracing::warn!(%error, %intent_id, "failed to record intent response");
+    }
+
+    Ok(Json(serde_json::json!({
+        "conversation_id": conversation,
+    })))
+}
+
 /// GET /api/intents — the caller's own intents, drafts included.
 pub async fn list_intents(
     State(state): State<AppState>,

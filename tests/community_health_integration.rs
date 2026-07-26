@@ -508,3 +508,161 @@ async fn the_window_bounds_what_is_measured() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn an_answered_intent_counts_as_an_answered_post() {
+    // The gap this closes. `answer_rate` counted rows in `inventory` and looked
+    // for conversations joined on listing_id — correct while a listing was the
+    // only way to say you wanted something. A seeking intent has no listing
+    // projection, and answering one opens a conversation with no listing
+    // attached, so the dashboard reported "0% answered" no matter how well
+    // intents were actually answered. Blind to the mechanism it exists to watch.
+    with_test_pool(|pool| async move {
+        use goods4ncu::services::intent::{kinds, slots::Slots, status, IntentService, NewIntent};
+
+        let campus_id = ncu(&pool).await;
+        let asker = member(&pool, campus_id, "asker", 30).await;
+        let answerer = member(&pool, campus_id, "answerer", 30).await;
+        let intents = IntentService::new(pool.clone());
+
+        let answered = intents
+            .create(NewIntent {
+                campus_id,
+                author_id: &asker,
+                kind: kinds::GOODS_SEEK,
+                raw_input: "想收个二手显示器",
+                slots: Slots::default(),
+                confidence: 1.0,
+                status: status::ACTIVE,
+                visibility: "campus",
+                valid_until: None,
+            })
+            .await
+            .expect("create answered");
+        let _ignored = intents
+            .create(NewIntent {
+                campus_id,
+                author_id: &asker,
+                kind: kinds::HELP,
+                raw_input: "有人会修自行车吗",
+                slots: Slots::default(),
+                confidence: 1.0,
+                status: status::ACTIVE,
+                visibility: "campus",
+                valid_until: None,
+            })
+            .await
+            .expect("create ignored");
+
+        intents
+            .record_response(campus_id, answered, &answerer, None)
+            .await
+            .expect("record response");
+
+        let health = CommunityHealthService::new(pool.clone())
+            .measure(campus_id, 30)
+            .await
+            .expect("measure");
+
+        assert_eq!(health.intent.posted, 2, "intents are posts");
+        assert_eq!(health.intent.answered, 1);
+        assert!((health.intent.answer_rate - 0.5).abs() < 1e-9);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_draft_is_not_counted_against_the_community() {
+    // Nobody was shown it, so nobody had the chance to answer. Counting drafts
+    // would blame the community for an author's unconfirmed guess — and a photo
+    // read as six items would tank the number on its own.
+    with_test_pool(|pool| async move {
+        use goods4ncu::services::intent::{kinds, slots::Slots, IntentService};
+
+        let campus_id = ncu(&pool).await;
+        let author = member(&pool, campus_id, "author", 30).await;
+
+        IntentService::new(pool.clone())
+            .create_draft_batch(
+                campus_id,
+                &author,
+                "（一张宿舍照片）",
+                kinds::GOODS_OFFER,
+                vec![
+                    (
+                        Slots {
+                            subject: Some("台灯".into()),
+                            ..Default::default()
+                        },
+                        0.8,
+                    ),
+                    (
+                        Slots {
+                            subject: Some("小冰箱".into()),
+                            ..Default::default()
+                        },
+                        0.8,
+                    ),
+                ],
+            )
+            .await
+            .expect("drafts");
+
+        let health = CommunityHealthService::new(pool.clone())
+            .measure(campus_id, 30)
+            .await
+            .expect("measure");
+        assert_eq!(health.intent.posted, 0, "drafts are not posts");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_projected_intent_is_one_post_not_two() {
+    // A goods offer with a price exists as both an intent and a listing. Counting
+    // both would halve the apparent answer rate for exactly the intents that are
+    // easiest to answer.
+    with_test_pool(|pool| async move {
+        use goods4ncu::services::intent::{
+            kinds, slots::PriceSlot, slots::Slots, status, IntentService, NewIntent,
+        };
+
+        let campus_id = ncu(&pool).await;
+        let seller = member(&pool, campus_id, "seller", 30).await;
+        let service = IntentService::new(pool.clone());
+
+        let id = service
+            .create(NewIntent {
+                campus_id,
+                author_id: &seller,
+                kind: kinds::GOODS_OFFER,
+                raw_input: "台灯 30 块",
+                slots: Slots {
+                    subject: Some("台灯".into()),
+                    price: Some(PriceSlot::Exact { cents: 3_000 }),
+                    ..Default::default()
+                },
+                confidence: 1.0,
+                status: status::ACTIVE,
+                visibility: "campus",
+                valid_until: None,
+            })
+            .await
+            .expect("create");
+        assert!(
+            service
+                .project_to_listing(id)
+                .await
+                .expect("project")
+                .is_some(),
+            "a priced offer is mirrored into the grid",
+        );
+
+        let health = CommunityHealthService::new(pool.clone())
+            .measure(campus_id, 30)
+            .await
+            .expect("measure");
+        assert_eq!(health.intent.posted, 1, "the same wish is not two posts");
+    })
+    .await;
+}

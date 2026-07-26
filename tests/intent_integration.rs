@@ -781,3 +781,175 @@ async fn fulfilled_is_kept_distinct_from_withdrawn() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn the_campus_feed_is_visible_without_posting_anything_first() {
+    // Without this, you have to say something before you can see anything: a
+    // new student opens the app, has posted nothing, and finds an empty room.
+    // That is the unanswered-post problem from the other side — the demand
+    // exists and nobody can see it in order to answer it.
+    with_test_pool(|pool| async move {
+        let campus_id = campus(&pool).await;
+        let asker = member(&pool, campus_id, "asker").await;
+        let newcomer = member(&pool, campus_id, "newcomer").await;
+        let service = IntentService::new(pool.clone());
+
+        for (kind, raw) in [
+            (kinds::GOODS_SEEK, "想收个二手显示器"),
+            (kinds::COMPANION, "找个羽毛球搭子"),
+            (kinds::HELP, "有人会修自行车吗"),
+        ] {
+            service
+                .create(stated(campus_id, &asker, kind, raw, Slots::default()))
+                .await
+                .expect("create");
+        }
+
+        // The newcomer has said nothing, and still sees everything.
+        let feed = service
+            .campus_feed(campus_id, &newcomer, None, 30)
+            .await
+            .expect("feed");
+        assert_eq!(feed.len(), 3, "every kind is interleaved, newest first");
+
+        // Filtering works, and nobody sees their own intents echoed back.
+        let only_help = service
+            .campus_feed(campus_id, &asker, Some(kinds::HELP), 30)
+            .await
+            .expect("filtered feed");
+        assert!(
+            only_help.is_empty(),
+            "the author's own intents are not news to them",
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn the_feed_never_carries_an_author_identity() {
+    // Answering is a server-side action precisely so this surface cannot be
+    // scraped into a directory of who wants what. If author ids ever appear in
+    // the serialised form, that protection is gone.
+    with_test_pool(|pool| async move {
+        let campus_id = campus(&pool).await;
+        let asker = member(&pool, campus_id, "asker").await;
+        let viewer = member(&pool, campus_id, "viewer").await;
+        let service = IntentService::new(pool.clone());
+
+        service
+            .create(stated(
+                campus_id,
+                &asker,
+                kinds::GOODS_SEEK,
+                "想收个显示器",
+                Slots::default(),
+            ))
+            .await
+            .expect("create");
+
+        let feed = service
+            .campus_feed(campus_id, &viewer, None, 30)
+            .await
+            .expect("feed");
+        let json = serde_json::to_string(&feed).expect("serialise");
+        assert!(
+            !json.contains(&asker),
+            "the author id must not reach the client: {json}",
+        );
+        // It is still available internally, which is how responding works.
+        assert_eq!(feed[0].author_id.as_deref(), Some(asker.as_str()));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn only_a_live_visible_intent_can_be_answered() {
+    // One answer for every reason an intent is unanswerable — withdrawn,
+    // fulfilled, expired, private, another campus's — so this cannot be used to
+    // probe what exists.
+    with_test_pool(|pool| async move {
+        let campus_id = campus(&pool).await;
+        let asker = member(&pool, campus_id, "asker").await;
+        let service = IntentService::new(pool.clone());
+
+        let live = service
+            .create(stated(
+                campus_id,
+                &asker,
+                kinds::GOODS_SEEK,
+                "想收个显示器",
+                Slots::default(),
+            ))
+            .await
+            .expect("create");
+        assert!(service
+            .answerable_author(campus_id, live)
+            .await
+            .expect("live")
+            .is_some());
+
+        // Withdrawn.
+        let withdrawn = service
+            .create(stated(
+                campus_id,
+                &asker,
+                kinds::HELP,
+                "算了",
+                Slots::default(),
+            ))
+            .await
+            .expect("create");
+        service.withdraw(&asker, withdrawn).await.expect("withdraw");
+        assert!(service
+            .answerable_author(campus_id, withdrawn)
+            .await
+            .expect("withdrawn")
+            .is_none());
+
+        // Fulfilled.
+        let done = service
+            .create(stated(
+                campus_id,
+                &asker,
+                kinds::HELP,
+                "修好了",
+                Slots::default(),
+            ))
+            .await
+            .expect("create");
+        service.fulfil(&asker, done).await.expect("fulfil");
+        assert!(service
+            .answerable_author(campus_id, done)
+            .await
+            .expect("fulfilled")
+            .is_none());
+
+        // Private.
+        let private = service
+            .create(NewIntent {
+                visibility: "private",
+                ..stated(
+                    campus_id,
+                    &asker,
+                    kinds::GOODS_SEEK,
+                    "先不公开",
+                    Slots::default(),
+                )
+            })
+            .await
+            .expect("create");
+        assert!(service
+            .answerable_author(campus_id, private)
+            .await
+            .expect("private")
+            .is_none());
+
+        // Unknown.
+        assert!(service
+            .answerable_author(campus_id, Uuid::new_v4())
+            .await
+            .expect("unknown")
+            .is_none());
+    })
+    .await;
+}

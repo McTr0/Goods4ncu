@@ -245,7 +245,7 @@ where
             chat_conversations, hitl_requests, notifications, watchlist, orders, inventory, \
             reversible_actions, interruption_ledger, interruption_preferences, \
             space_formation_sources, space_formation_pairs, chat_space_members, chat_spaces, \
-            intents, \
+            intent_responses, intents, \
             documents, refresh_tokens, outbox_events, users \
          RESTART IDENTITY CASCADE",
     )

@@ -9,7 +9,8 @@ mod telegram;
 pub use connection::{
     acknowledge_conversation, archive_conversation, block_user, close_conversation,
     create_conversation, get_conversation, get_thread, list_blocks, list_conversations,
-    list_threads, respond_conversation, set_read_preference, unblock_user,
+    list_threads, open_conversation_for_intent, respond_conversation, set_read_preference,
+    unblock_user,
 };
 pub use message::{
     delete_message_reaction, edit_message, get_conversation_messages, hide_message,

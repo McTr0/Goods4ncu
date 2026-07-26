@@ -364,6 +364,98 @@ impl IntentService {
         Ok(updated.rows_affected() > 0)
     }
 
+    /// The campus intent stream: what everyone is currently after.
+    ///
+    /// Distinct from [`pool`], which serves matching against one of the
+    /// caller's own intents. This one exists because otherwise **you have to
+    /// post something before you can see anything** — a new student opens the
+    /// app, has said nothing yet, and finds an empty room. That is the
+    /// unanswered-post problem from the other side: the demand is there and
+    /// nobody can see it to answer it.
+    ///
+    /// `kind` filters when given; `None` returns every kind interleaved by
+    /// recency, which is what a browsing student actually wants.
+    pub async fn campus_feed(
+        &self,
+        campus_id: Uuid,
+        viewer_id: &str,
+        kind: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<Intent>> {
+        let rows = sqlx::query(
+            "SELECT id, kind, raw_input, slots, confidence, status, visibility,
+                    valid_until, projected_listing_id, created_at, author_id
+             FROM intents
+             WHERE campus_id = $1
+               AND status = 'active'
+               AND visibility = 'campus'
+               AND author_id <> $2
+               AND (valid_until IS NULL OR valid_until > NOW())
+               AND ($3::text IS NULL OR kind = $3)
+             ORDER BY created_at DESC
+             LIMIT $4",
+        )
+        .bind(campus_id)
+        .bind(viewer_id)
+        .bind(kind)
+        .bind(limit.clamp(1, 100))
+        .fetch_all(&self.db)
+        .await?;
+        rows.into_iter().map(row_to_intent).collect()
+    }
+
+    /// Who wrote an intent, if it is live and visible on this campus.
+    ///
+    /// Only ever used server-side to open a conversation. The author id is
+    /// deliberately not serialised on [`Intent`], so answering someone is an
+    /// action the server performs rather than a user id the client is handed —
+    /// otherwise the matching surface becomes a directory to scrape.
+    pub async fn answerable_author(
+        &self,
+        campus_id: Uuid,
+        intent_id: Uuid,
+    ) -> Result<Option<(String, String)>> {
+        let row = sqlx::query(
+            "SELECT author_id, raw_input FROM intents
+             WHERE id = $1
+               AND campus_id = $2
+               AND status = 'active'
+               AND visibility = 'campus'
+               AND (valid_until IS NULL OR valid_until > NOW())",
+        )
+        .bind(intent_id)
+        .bind(campus_id)
+        .fetch_optional(&self.db)
+        .await?;
+        Ok(row.map(|row| (row.get("author_id"), row.get("raw_input"))))
+    }
+
+    /// Record that someone answered an intent.
+    ///
+    /// `ON CONFLICT DO NOTHING`, because a second message from the same person
+    /// is the same answer continuing. Counting it again would inflate the answer
+    /// rate exactly where a thin community most needs the truth.
+    pub async fn record_response(
+        &self,
+        campus_id: Uuid,
+        intent_id: Uuid,
+        responder_id: &str,
+        conversation_id: Option<Uuid>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO intent_responses (campus_id, intent_id, responder_id, conversation_id)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (intent_id, responder_id) DO NOTHING",
+        )
+        .bind(campus_id)
+        .bind(intent_id)
+        .bind(responder_id)
+        .bind(conversation_id)
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
     /// Retire intents whose moment has passed. Returns how many.
     pub async fn expire_due(&self) -> Result<u64> {
         let updated = sqlx::query(
