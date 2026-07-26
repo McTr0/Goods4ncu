@@ -859,6 +859,89 @@ class AppLocalizationsEn extends AppLocalizations {
   String get undoFailed => 'Undo failed, please try again';
 
   @override
+  String get intentPageTitle => 'What I want';
+
+  @override
+  String get intentComposerPrompt =>
+      'Say it however you like — no form. Selling, looking for something, looking for someone, asking a favour, or planning something.';
+
+  @override
+  String get intentComposerHint =>
+      'e.g. Clearing out my dorm, will take whatever for the mini fridge / Looking for someone to play badminton with';
+
+  @override
+  String get intentKindGoodsOffer => 'Selling';
+
+  @override
+  String get intentKindGoodsSeek => 'Looking for';
+
+  @override
+  String get intentKindCompanion => 'Looking for company';
+
+  @override
+  String get intentKindHelp => 'Asking a favour';
+
+  @override
+  String get intentKindActivity => 'Planning something';
+
+  @override
+  String get intentPriceWhatever => 'Whatever you\'ll give me';
+
+  @override
+  String get intentPriceFree => 'Giving it away';
+
+  @override
+  String get intentPriceFlexible => 'Price open';
+
+  @override
+  String get intentTimeFlexible => 'Any time';
+
+  @override
+  String get intentSubmit => 'Post it';
+
+  @override
+  String get intentSaving => 'Saving…';
+
+  @override
+  String get intentSaved => 'Noted — you\'ll hear if something fits';
+
+  @override
+  String get intentSavedNotListed =>
+      'Noted. Without a price it won\'t appear in the browse grid, but it will still be matched';
+
+  @override
+  String get intentMineHeader => 'What I\'ve said';
+
+  @override
+  String get intentMineEmpty => 'Nothing yet. One sentence above is enough.';
+
+  @override
+  String get intentDraftBadge => 'Awaiting your confirmation';
+
+  @override
+  String get intentConfirmDraft => 'Confirm';
+
+  @override
+  String get intentNoMatchesYet => 'Nothing fits yet';
+
+  @override
+  String get intentFulfilAction => 'Sorted';
+
+  @override
+  String get intentWithdrawAction => 'Never mind';
+
+  @override
+  String get intentFulfilled => 'Marked as sorted';
+
+  @override
+  String get intentWithdrawn => 'Withdrawn';
+
+  @override
+  String intentMatchCount(int count) {
+    return '$count possible match(es)';
+  }
+
+  @override
   String get agentPlanExecuted => 'Action executed';
 
   @override

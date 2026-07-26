@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../pages/home_page.dart';
 import '../pages/listing_detail_page.dart';
 import '../pages/create_listing_page.dart';
+import '../pages/intent_page.dart';
 import '../pages/my_listings_page.dart';
 import '../pages/profile_page.dart';
 import '../pages/chat_page.dart';
@@ -197,7 +198,16 @@ final GoRouter appRouter = GoRouter(
               const NoTransitionPage(child: ConversationListPage()),
         ),
         GoRoute(
+          // The bottom-nav "publish" tab opens the intent composer, not the
+          // listing form. The form is the threshold most demand on a campus
+          // never gets over; it stays reachable at /create/listing for anyone
+          // who wants to fill one in.
           path: '/create',
+          pageBuilder: (context, state) =>
+              const NoTransitionPage(child: IntentPage()),
+        ),
+        GoRoute(
+          path: '/create/listing',
           pageBuilder: (context, state) =>
               const NoTransitionPage(child: CreateListingPage()),
         ),

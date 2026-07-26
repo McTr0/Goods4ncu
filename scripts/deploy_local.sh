@@ -107,9 +107,28 @@ psql -d "$DB_NAME" -qtA -v ON_ERROR_STOP=1 -f scripts/remove_demo_seed.sql >/dev
 say "  ✓ demo seed accounts removed (production requirement)"
 
 say "starting persistent Redis and MinIO"
+# `--save ''` disables RDB snapshots. Nothing here needs to survive a restart:
+# Redis holds rate-limit counters and WebSocket fan-out, both of which rebuild
+# themselves. Leaving snapshots on is actively harmful, because Redis defaults to
+# `stop-writes-on-bgsave-error yes` — one failed save and it rejects every write,
+# which took the whole deployment down with 429s on every request.
 redis-server --port "$REDIS_PORT" --daemonize yes \
-    --dir "$DEPLOY_HOME/redis" --dbfilename dump.rdb >/dev/null
-redis-cli -p "$REDIS_PORT" ping >/dev/null || fail "redis did not start"
+    --dir "$DEPLOY_HOME/redis" --save '' >/dev/null 2>&1 || true
+
+# PING is not the check that matters. An instance left over from an earlier run
+# answers PING happily while refusing writes, and the new correctly-configured
+# server cannot start because the port is taken — so "redis is up" was true and
+# useless. Probe an actual write, and repair a reachable-but-read-only instance
+# in place rather than failing.
+redis-cli -p "$REDIS_PORT" ping >/dev/null 2>&1 || fail "redis did not start"
+if ! redis-cli -p "$REDIS_PORT" set goods4ncu:deploy:probe 1 >/dev/null 2>&1; then
+    say "  redis was refusing writes; disabling snapshots on the running instance"
+    redis-cli -p "$REDIS_PORT" config set save '' >/dev/null 2>&1 || true
+    redis-cli -p "$REDIS_PORT" config set stop-writes-on-bgsave-error no >/dev/null 2>&1 || true
+    redis-cli -p "$REDIS_PORT" set goods4ncu:deploy:probe 1 >/dev/null 2>&1 \
+        || fail "redis cannot accept writes; rate limiting and realtime would fail closed"
+fi
+redis-cli -p "$REDIS_PORT" del goods4ncu:deploy:probe >/dev/null 2>&1 || true
 
 if ! curl -sf -o /dev/null "http://127.0.0.1:$S3_PORT/minio/health/live"; then
     MINIO_ROOT_USER=goods4ncu MINIO_ROOT_PASSWORD="$APP_PASSWORD" \

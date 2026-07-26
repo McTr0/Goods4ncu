@@ -831,6 +831,87 @@ class AppLocalizationsZh extends AppLocalizations {
   String get undoFailed => '撤销失败，请重试';
 
   @override
+  String get intentPageTitle => '我想…';
+
+  @override
+  String get intentComposerPrompt =>
+      '用自己的话说就行，不用填表。想出东西、想收东西、想找人、想找人帮忙、想约活动都可以。';
+
+  @override
+  String get intentComposerHint => '比如：宿舍要清空了，小冰箱能卖多少卖多少 / 想找人一起打羽毛球';
+
+  @override
+  String get intentKindGoodsOffer => '想出东西';
+
+  @override
+  String get intentKindGoodsSeek => '想收东西';
+
+  @override
+  String get intentKindCompanion => '想找人一起';
+
+  @override
+  String get intentKindHelp => '想找人帮忙';
+
+  @override
+  String get intentKindActivity => '想约活动';
+
+  @override
+  String get intentPriceWhatever => '能卖多少卖多少';
+
+  @override
+  String get intentPriceFree => '免费送';
+
+  @override
+  String get intentPriceFlexible => '价格可谈';
+
+  @override
+  String get intentTimeFlexible => '时间都行';
+
+  @override
+  String get intentSubmit => '说出来';
+
+  @override
+  String get intentSaving => '正在保存…';
+
+  @override
+  String get intentSaved => '已记下，有合适的会告诉你';
+
+  @override
+  String get intentSavedNotListed => '已记下。没写价格，所以不会出现在商品栅格里，但一样会撮合';
+
+  @override
+  String get intentMineHeader => '我说过的';
+
+  @override
+  String get intentMineEmpty => '还没说过什么。上面写一句就行。';
+
+  @override
+  String get intentDraftBadge => '待你确认';
+
+  @override
+  String get intentConfirmDraft => '确认';
+
+  @override
+  String get intentNoMatchesYet => '暂时还没有合适的';
+
+  @override
+  String get intentFulfilAction => '已经解决了';
+
+  @override
+  String get intentWithdrawAction => '算了';
+
+  @override
+  String get intentFulfilled => '已标记为解决';
+
+  @override
+  String get intentWithdrawn => '已撤回';
+
+  @override
+  String intentMatchCount(int count) {
+    return '找到 $count 个可能合适的';
+  }
+
+  @override
   String get agentPlanExecuted => '操作已执行';
 
   @override

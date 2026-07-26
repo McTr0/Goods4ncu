@@ -1700,6 +1700,162 @@ abstract class AppLocalizations {
   /// **'Undo failed, please try again'**
   String get undoFailed;
 
+  /// No description provided for @intentPageTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'What I want'**
+  String get intentPageTitle;
+
+  /// No description provided for @intentComposerPrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Say it however you like — no form. Selling, looking for something, looking for someone, asking a favour, or planning something.'**
+  String get intentComposerPrompt;
+
+  /// No description provided for @intentComposerHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. Clearing out my dorm, will take whatever for the mini fridge / Looking for someone to play badminton with'**
+  String get intentComposerHint;
+
+  /// No description provided for @intentKindGoodsOffer.
+  ///
+  /// In en, this message translates to:
+  /// **'Selling'**
+  String get intentKindGoodsOffer;
+
+  /// No description provided for @intentKindGoodsSeek.
+  ///
+  /// In en, this message translates to:
+  /// **'Looking for'**
+  String get intentKindGoodsSeek;
+
+  /// No description provided for @intentKindCompanion.
+  ///
+  /// In en, this message translates to:
+  /// **'Looking for company'**
+  String get intentKindCompanion;
+
+  /// No description provided for @intentKindHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Asking a favour'**
+  String get intentKindHelp;
+
+  /// No description provided for @intentKindActivity.
+  ///
+  /// In en, this message translates to:
+  /// **'Planning something'**
+  String get intentKindActivity;
+
+  /// No description provided for @intentPriceWhatever.
+  ///
+  /// In en, this message translates to:
+  /// **'Whatever you\'ll give me'**
+  String get intentPriceWhatever;
+
+  /// No description provided for @intentPriceFree.
+  ///
+  /// In en, this message translates to:
+  /// **'Giving it away'**
+  String get intentPriceFree;
+
+  /// No description provided for @intentPriceFlexible.
+  ///
+  /// In en, this message translates to:
+  /// **'Price open'**
+  String get intentPriceFlexible;
+
+  /// No description provided for @intentTimeFlexible.
+  ///
+  /// In en, this message translates to:
+  /// **'Any time'**
+  String get intentTimeFlexible;
+
+  /// No description provided for @intentSubmit.
+  ///
+  /// In en, this message translates to:
+  /// **'Post it'**
+  String get intentSubmit;
+
+  /// No description provided for @intentSaving.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving…'**
+  String get intentSaving;
+
+  /// No description provided for @intentSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Noted — you\'ll hear if something fits'**
+  String get intentSaved;
+
+  /// No description provided for @intentSavedNotListed.
+  ///
+  /// In en, this message translates to:
+  /// **'Noted. Without a price it won\'t appear in the browse grid, but it will still be matched'**
+  String get intentSavedNotListed;
+
+  /// No description provided for @intentMineHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'What I\'ve said'**
+  String get intentMineHeader;
+
+  /// No description provided for @intentMineEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing yet. One sentence above is enough.'**
+  String get intentMineEmpty;
+
+  /// No description provided for @intentDraftBadge.
+  ///
+  /// In en, this message translates to:
+  /// **'Awaiting your confirmation'**
+  String get intentDraftBadge;
+
+  /// No description provided for @intentConfirmDraft.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm'**
+  String get intentConfirmDraft;
+
+  /// No description provided for @intentNoMatchesYet.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing fits yet'**
+  String get intentNoMatchesYet;
+
+  /// No description provided for @intentFulfilAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Sorted'**
+  String get intentFulfilAction;
+
+  /// No description provided for @intentWithdrawAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Never mind'**
+  String get intentWithdrawAction;
+
+  /// No description provided for @intentFulfilled.
+  ///
+  /// In en, this message translates to:
+  /// **'Marked as sorted'**
+  String get intentFulfilled;
+
+  /// No description provided for @intentWithdrawn.
+  ///
+  /// In en, this message translates to:
+  /// **'Withdrawn'**
+  String get intentWithdrawn;
+
+  /// How many candidate matches an intent has
+  ///
+  /// In en, this message translates to:
+  /// **'{count} possible match(es)'**
+  String intentMatchCount(int count);
+
   /// No description provided for @agentPlanExecuted.
   ///
   /// In en, this message translates to:

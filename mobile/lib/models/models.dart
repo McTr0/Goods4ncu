@@ -1259,3 +1259,189 @@ class OrderDetail {
   bool get canConfirm => canConfirmDeal;
   bool get canCancel => canCancelDeal;
 }
+
+/// What someone wants, before it has been forced into a form.
+///
+/// The five kinds share one model on purpose: a thing to sell, a partner to
+/// find and a favour to ask are the same object, and giving each its own screen
+/// is what makes people file their own life under the wrong menu.
+enum IntentKind {
+  goodsOffer('goods_offer'),
+  goodsSeek('goods_seek'),
+  companion('companion'),
+  help('help'),
+  activity('activity');
+
+  const IntentKind(this.wire);
+  final String wire;
+
+  static IntentKind? fromWire(String? value) {
+    for (final kind in IntentKind.values) {
+      if (kind.wire == value) return kind;
+    }
+    return null;
+  }
+
+  /// Whether this kind has a price worth asking about. Nobody prices a
+  /// badminton partner.
+  bool get hasPrice => this == goodsOffer || this == goodsSeek;
+}
+
+/// A price the author may have declined to pin down.
+///
+/// `whatever` is a complete answer, not a blank. Someone clearing a dorm room
+/// says "能卖多少卖多少" and means exactly that; making them type a number would
+/// put a figure on the listing that they never chose.
+class PriceSlot {
+  final String kind; // exact | range | free | whatever
+  final int? cents;
+  final int? maxCents;
+  final String? hint;
+
+  const PriceSlot({required this.kind, this.cents, this.maxCents, this.hint});
+
+  static const whatever = PriceSlot(kind: 'whatever');
+  static const free = PriceSlot(kind: 'free');
+  factory PriceSlot.exact(int cents) => PriceSlot(kind: 'exact', cents: cents);
+  factory PriceSlot.upTo(int cents) =>
+      PriceSlot(kind: 'range', maxCents: cents);
+
+  factory PriceSlot.fromJson(Map<String, dynamic> json) => PriceSlot(
+    kind: json['kind']?.toString() ?? 'whatever',
+    cents: (json['cents'] as num?)?.toInt(),
+    maxCents: (json['max_cents'] as num?)?.toInt(),
+    hint: json['hint']?.toString(),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'kind': kind,
+    if (cents != null) 'cents': cents,
+    if (maxCents != null) 'max_cents': maxCents,
+    if (hint != null && hint!.isNotEmpty) 'hint': hint,
+  };
+}
+
+/// A time the author may have left open.
+class TimeSlot {
+  final String kind; // exact | window | flexible
+  final DateTime? at;
+  final String? hint;
+
+  const TimeSlot({required this.kind, this.at, this.hint});
+
+  static TimeSlot flexible([String? hint]) =>
+      TimeSlot(kind: 'flexible', hint: hint);
+
+  factory TimeSlot.fromJson(Map<String, dynamic> json) => TimeSlot(
+    kind: json['kind']?.toString() ?? 'flexible',
+    at: DateTime.tryParse(json['at']?.toString() ?? ''),
+    hint: json['hint']?.toString(),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'kind': kind,
+    if (at != null) 'at': at!.toUtc().toIso8601String(),
+    if (hint != null && hint!.isNotEmpty) 'hint': hint,
+  };
+}
+
+/// The structured reading of an intent. Every field may be absent — a partial
+/// intent is a real one.
+class IntentSlots {
+  final String? subject;
+  final String? category;
+  final PriceSlot? price;
+  final TimeSlot? time;
+  final String? place;
+
+  const IntentSlots({
+    this.subject,
+    this.category,
+    this.price,
+    this.time,
+    this.place,
+  });
+
+  factory IntentSlots.fromJson(Map<String, dynamic> json) => IntentSlots(
+    subject: json['subject']?.toString(),
+    category: json['category']?.toString(),
+    price: json['price'] is Map<String, dynamic>
+        ? PriceSlot.fromJson(json['price'] as Map<String, dynamic>)
+        : null,
+    time: json['time'] is Map<String, dynamic>
+        ? TimeSlot.fromJson(json['time'] as Map<String, dynamic>)
+        : null,
+    place: json['place']?.toString(),
+  );
+
+  Map<String, dynamic> toJson() => {
+    if (subject != null && subject!.isNotEmpty) 'subject': subject,
+    if (category != null && category!.isNotEmpty) 'category': category,
+    if (price != null) 'price': price!.toJson(),
+    if (time != null) 'time': time!.toJson(),
+    if (place != null && place!.isNotEmpty) 'place': place,
+  };
+}
+
+class UserIntent {
+  final String id;
+  final IntentKind kind;
+  final String rawInput;
+  final IntentSlots slots;
+  final String status;
+  final DateTime? validUntil;
+  final String? projectedListingId;
+
+  const UserIntent({
+    required this.id,
+    required this.kind,
+    required this.rawInput,
+    required this.slots,
+    required this.status,
+    this.validUntil,
+    this.projectedListingId,
+  });
+
+  factory UserIntent.fromJson(Map<String, dynamic> json) => UserIntent(
+    id: json['id']?.toString() ?? '',
+    kind:
+        IntentKind.fromWire(json['kind']?.toString()) ?? IntentKind.goodsOffer,
+    rawInput: json['raw_input']?.toString() ?? '',
+    slots: json['slots'] is Map<String, dynamic>
+        ? IntentSlots.fromJson(json['slots'] as Map<String, dynamic>)
+        : const IntentSlots(),
+    status: json['status']?.toString() ?? 'active',
+    validUntil: DateTime.tryParse(json['valid_until']?.toString() ?? ''),
+    projectedListingId: json['projected_listing_id']?.toString(),
+  );
+
+  /// Inferred rather than stated, so it is waiting on the author before anyone
+  /// else can see it.
+  bool get isDraft => status == 'draft';
+}
+
+/// Result of recording an intent.
+class IntentCreated {
+  final String id;
+
+  /// Present only when the intent could also be shown honestly as a listing.
+  /// Absent for unpriced ones — the grid needs a price and inventing one would
+  /// misrepresent the owner.
+  final String? projectedListingId;
+
+  /// 0..1 of how much was pinned down. Used to decide whether one follow-up
+  /// question is worth asking, never to reject the intent.
+  final double specificity;
+
+  const IntentCreated({
+    required this.id,
+    this.projectedListingId,
+    required this.specificity,
+  });
+
+  factory IntentCreated.fromJson(Map<String, dynamic> json) => IntentCreated(
+    id: json['id']?.toString() ?? '',
+    projectedListingId: json['projected_listing_id']?.toString(),
+    specificity: (json['specificity'] as num?)?.toDouble() ?? 0,
+  );
+}

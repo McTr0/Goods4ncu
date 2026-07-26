@@ -104,6 +104,67 @@ impl RateLimiter for LocalRateLimiter {
 
 #[cfg(test)]
 mod tests {
+    // -----------------------------------------------------------------------
+    // Failure direction
+    //
+    // This wrapper used to return `false` when the limiter errored, which
+    // sounds cautious and is not: Redis stopped accepting writes after a failed
+    // snapshot, every check errored, and every request in the deployment got a
+    // 429. The component whose job is keeping the service usable under load took
+    // it down completely.
+    // -----------------------------------------------------------------------
+
+    struct BrokenLimiter;
+
+    #[async_trait::async_trait]
+    impl RateLimiter for BrokenLimiter {
+        async fn check_rate_limit(
+            &self,
+            _ip: &str,
+        ) -> crate::middleware::rate_limit::RateLimitResult<bool> {
+            Err(
+                crate::middleware::rate_limit::RateLimitError::Serialization(
+                    serde_json::from_str::<i32>("not json").unwrap_err(),
+                ),
+            )
+        }
+        async fn reset(&self, _ip: &str) -> crate::middleware::rate_limit::RateLimitResult<()> {
+            Ok(())
+        }
+    }
+
+    struct AlwaysLimited;
+
+    #[async_trait::async_trait]
+    impl RateLimiter for AlwaysLimited {
+        async fn check_rate_limit(
+            &self,
+            _ip: &str,
+        ) -> crate::middleware::rate_limit::RateLimitResult<bool> {
+            Ok(false)
+        }
+        async fn reset(&self, _ip: &str) -> crate::middleware::rate_limit::RateLimitResult<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_limiter_allows_traffic_rather_than_denying_everyone() {
+        let handle = RateLimitStateHandle::new(BrokenLimiter);
+        assert!(
+            handle.check_rate_limit("1.2.3.4").await,
+            "a broken rate limiter must not become a total outage",
+        );
+    }
+
+    #[tokio::test]
+    async fn a_working_limiter_that_says_no_is_still_obeyed() {
+        // Failing open must not become never enforcing: a definite Ok(false) is
+        // a decision, not an error, and has to be respected.
+        let handle = RateLimitStateHandle::new(AlwaysLimited);
+        assert!(!handle.check_rate_limit("1.2.3.4").await);
+    }
+
     use super::*;
 
     #[tokio::test]
@@ -166,8 +227,39 @@ impl RateLimitStateHandle {
         Self(Arc::new(limiter))
     }
 
+    /// Whether this caller may proceed.
+    ///
+    /// **Fails open**, and the direction is deliberate. A rate limiter exists to
+    /// blunt abuse; when it is unavailable the cost of allowing traffic is a
+    /// window of reduced protection, while the cost of denying it is that nobody
+    /// can use the product at all. Turning a dependency wobble into a total
+    /// outage is a much worse failure than the one being mitigated.
+    ///
+    /// This was `unwrap_or(false)`. Redis lost the ability to write its snapshot,
+    /// so it rejected every write command, so every rate-limit check errored,
+    /// so **every request in the deployment returned 429** — a full outage caused
+    /// by the component whose only job is to keep the service available under
+    /// load.
+    ///
+    /// Note this is the opposite choice from the interruption budget, which fails
+    /// closed. The asymmetry is not inconsistency: there, failing closed means
+    /// "do not push a notification", which harms nobody; here it means "serve
+    /// nobody".
+    ///
+    /// The error is logged at WARN rather than swallowed, because silently
+    /// unprotected is its own kind of bad.
     pub async fn check_rate_limit(&self, ip: &str) -> bool {
-        self.0.check_rate_limit(ip).await.unwrap_or(false)
+        match self.0.check_rate_limit(ip).await {
+            Ok(allowed) => allowed,
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "rate limiter unavailable — allowing the request; abuse \
+                     protection is degraded until it recovers",
+                );
+                true
+            }
+        }
     }
 }
 
