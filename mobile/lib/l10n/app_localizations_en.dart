@@ -937,6 +937,28 @@ class AppLocalizationsEn extends AppLocalizations {
   String get intentWithdrawn => 'Withdrawn';
 
   @override
+  String get intentFeedHeader => 'What people are looking for';
+
+  @override
+  String get intentFeedEmpty =>
+      'Nobody is looking for anything yet. Say something first so others can see it.';
+
+  @override
+  String get intentRespondAction => 'I can help';
+
+  @override
+  String get intentRespondTitle => 'Reply';
+
+  @override
+  String get intentRespondHint => 'Say what you have, or how you can help';
+
+  @override
+  String get intentRespondSend => 'Send';
+
+  @override
+  String get intentRespondSent => 'Sent — they\'ll see it in their messages';
+
+  @override
   String intentMatchCount(int count) {
     return '$count possible match(es)';
   }

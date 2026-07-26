@@ -907,6 +907,27 @@ class AppLocalizationsZh extends AppLocalizations {
   String get intentWithdrawn => '已撤回';
 
   @override
+  String get intentFeedHeader => '大家在找什么';
+
+  @override
+  String get intentFeedEmpty => '现在还没有人在找东西。你可以先说一句，让别人看到。';
+
+  @override
+  String get intentRespondAction => '我能帮';
+
+  @override
+  String get intentRespondTitle => '回应';
+
+  @override
+  String get intentRespondHint => '说说你有什么、或者你能怎么帮';
+
+  @override
+  String get intentRespondSend => '发送';
+
+  @override
+  String get intentRespondSent => '已发送，对方会在消息里看到';
+
+  @override
   String intentMatchCount(int count) {
     return '找到 $count 个可能合适的';
   }

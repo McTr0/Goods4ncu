@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:uuid/uuid.dart';
+
 import '../models/models.dart';
 import 'base_service.dart';
 
@@ -10,6 +12,8 @@ import 'base_service.dart';
 /// out is an answer rather than an omission. A client that starts demanding them
 /// has rebuilt the listing form this layer exists to replace.
 class IntentService extends BaseService {
+  static const _uuid = Uuid();
+
   /// POST /api/intents
   Future<IntentCreated> createIntent({
     required IntentKind kind,
@@ -96,6 +100,47 @@ class IntentService extends BaseService {
       headers,
     );
     handleResponse(response, (_) {});
+  }
+
+  /// GET /api/intents/feed — what everyone on this campus is currently after.
+  ///
+  /// Visible without having posted anything, which is the point: otherwise a new
+  /// student opens the app, has said nothing, and finds an empty room.
+  ///
+  /// Author identities are not included. Answering goes through
+  /// [respondToIntent], where the server resolves who to open a conversation
+  /// with — so this list cannot be read as a directory of who wants what.
+  Future<List<UserIntent>> campusFeed({IntentKind? kind, int limit = 30}) async {
+    final headers = await authHeaders();
+    final uri = Uri.parse('$baseUrl/api/intents/feed').replace(
+      queryParameters: {
+        if (kind != null) 'kind': kind.wire,
+        'limit': '$limit',
+      },
+    );
+    final response = await get(uri, headers);
+    final data = handleResponse(response, (d) => d as Map<String, dynamic>);
+    return (data['items'] as List<dynamic>? ?? [])
+        .map((e) => UserIntent.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// POST /api/intents/{id}/respond — answer someone, opening a conversation.
+  ///
+  /// Returns the conversation id. `clientRequestId` is supplied so a retried tap
+  /// cannot open two conversations for one answer.
+  Future<String> respondToIntent(String intentId, String content) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/intents/$intentId/respond'),
+      headers,
+      jsonEncode({
+        'content': content,
+        'client_request_id': _uuid.v4(),
+      }),
+    );
+    final data = handleResponse(response, (d) => d as Map<String, dynamic>);
+    return data['conversation_id']?.toString() ?? '';
   }
 
   /// GET /api/spaces/{id}/why — why the caller is in a space.

@@ -1850,6 +1850,48 @@ abstract class AppLocalizations {
   /// **'Withdrawn'**
   String get intentWithdrawn;
 
+  /// No description provided for @intentFeedHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'What people are looking for'**
+  String get intentFeedHeader;
+
+  /// No description provided for @intentFeedEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Nobody is looking for anything yet. Say something first so others can see it.'**
+  String get intentFeedEmpty;
+
+  /// No description provided for @intentRespondAction.
+  ///
+  /// In en, this message translates to:
+  /// **'I can help'**
+  String get intentRespondAction;
+
+  /// No description provided for @intentRespondTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reply'**
+  String get intentRespondTitle;
+
+  /// No description provided for @intentRespondHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Say what you have, or how you can help'**
+  String get intentRespondHint;
+
+  /// No description provided for @intentRespondSend.
+  ///
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get intentRespondSend;
+
+  /// No description provided for @intentRespondSent.
+  ///
+  /// In en, this message translates to:
+  /// **'Sent — they\'ll see it in their messages'**
+  String get intentRespondSent;
+
   /// How many candidate matches an intent has
   ///
   /// In en, this message translates to:

@@ -8,10 +8,16 @@ import 'package:goods4ncu_mobile/services/intent_service.dart';
 /// Records what the page actually sent, which is the only way to check that it
 /// did not quietly invent a price nobody typed.
 class _FakeIntentService extends IntentService {
-  _FakeIntentService({this.mine = const [], this.projectedListingId});
+  _FakeIntentService({
+    this.mine = const [],
+    this.feed = const [],
+    this.projectedListingId,
+  });
 
   List<UserIntent> mine;
+  List<UserIntent> feed;
   final String? projectedListingId;
+  final List<(String, String)> responses = [];
 
   IntentKind? sentKind;
   String? sentRawInput;
@@ -21,6 +27,18 @@ class _FakeIntentService extends IntentService {
 
   @override
   Future<List<UserIntent>> myIntents() async => mine;
+
+  @override
+  Future<List<UserIntent>> campusFeed({
+    IntentKind? kind,
+    int limit = 30,
+  }) async => feed;
+
+  @override
+  Future<String> respondToIntent(String intentId, String content) async {
+    responses.add((intentId, content));
+    return 'conversation-1';
+  }
 
   @override
   Future<List<UserIntent>> matchesFor(String intentId) async => const [];
@@ -71,10 +89,7 @@ void main() {
     await tester.pumpWidget(_app(IntentPage(intentService: service)));
     await tester.pumpAndSettle();
 
-    await tester.enterText(
-      find.byType(TextField),
-      '宿舍要清空了，小冰箱能卖多少卖多少',
-    );
+    await tester.enterText(find.byType(TextField), '宿舍要清空了，小冰箱能卖多少卖多少');
     await tester.tap(find.text(_l(tester).intentSubmit));
     await tester.pumpAndSettle();
 
@@ -87,7 +102,9 @@ void main() {
     expect(service.sentSlots?.toJson(), isEmpty);
   });
 
-  testWidgets('"whatever you\'ll give me" is sent as an answer', (tester) async {
+  testWidgets('"whatever you\'ll give me" is sent as an answer', (
+    tester,
+  ) async {
     final service = _FakeIntentService();
     await tester.pumpWidget(_app(IntentPage(intentService: service)));
     await tester.pumpAndSettle();
@@ -175,6 +192,10 @@ void main() {
     final l = _l(tester);
 
     expect(find.text('有人会修自行车吗'), findsOneWidget);
+    // The feed sits above the caller's own intents, so the action may be below
+    // the fold on a test-sized screen.
+    await tester.ensureVisible(find.text(l.intentFulfilAction));
+    await tester.pumpAndSettle();
     await tester.tap(find.text(l.intentFulfilAction));
     await tester.pumpAndSettle();
     expect(service.fulfilled, ['intent-9']);
@@ -201,6 +222,8 @@ void main() {
     await tester.pumpAndSettle();
     final l = _l(tester);
 
+    await tester.ensureVisible(find.text(l.intentDraftBadge));
+    await tester.pumpAndSettle();
     expect(find.text(l.intentDraftBadge), findsOneWidget);
     expect(find.text(l.intentConfirmDraft), findsOneWidget);
     expect(find.text(l.intentFulfilAction), findsNothing);
@@ -228,7 +251,104 @@ void main() {
     await tester.pumpWidget(_app(IntentPage(intentService: service)));
     await tester.pumpAndSettle();
 
+    await tester.ensureVisible(find.text('能卖就行'));
+    await tester.pumpAndSettle();
     expect(find.text('宿舍要清空了，小冰箱能卖多少卖多少'), findsOneWidget);
     expect(find.text('能卖就行'), findsOneWidget);
+  });
+
+  testWidgets('someone who has posted nothing still finds things to answer', (
+    tester,
+  ) async {
+    // The other half of the unanswered-post problem. Without the feed a new
+    // student opens the app, has said nothing, and finds an empty room — while
+    // the demand is sitting right there unanswered.
+    final service = _FakeIntentService(
+      feed: [
+        UserIntent(
+          id: 'intent-feed-1',
+          kind: IntentKind.goodsSeek,
+          rawInput: '想收个二手显示器，24 寸以内',
+          slots: const IntentSlots(),
+          status: 'active',
+        ),
+      ],
+    );
+    await tester.pumpWidget(_app(IntentPage(intentService: service)));
+    await tester.pumpAndSettle();
+    final l = _l(tester);
+
+    expect(find.text(l.intentFeedHeader), findsOneWidget);
+    expect(find.text('想收个二手显示器，24 寸以内'), findsOneWidget);
+    // And there is something to do about it. A list with no action is the dead
+    // end this replaces.
+    expect(find.text(l.intentRespondAction), findsOneWidget);
+    // Their own list is empty, which is exactly the case that used to show
+    // nothing at all.
+    expect(find.text(l.intentMineEmpty), findsOneWidget);
+  });
+
+  testWidgets('answering someone sends what was typed', (tester) async {
+    final service = _FakeIntentService(
+      feed: [
+        UserIntent(
+          id: 'intent-feed-2',
+          kind: IntentKind.help,
+          rawInput: '有人会修自行车吗',
+          slots: const IntentSlots(),
+          status: 'active',
+        ),
+      ],
+    );
+    await tester.pumpWidget(_app(IntentPage(intentService: service)));
+    await tester.pumpAndSettle();
+    final l = _l(tester);
+
+    await tester.tap(find.text(l.intentRespondAction));
+    await tester.pumpAndSettle();
+    // The dialog shows their words, so the responder can see what they are
+    // answering.
+    expect(find.text('有人会修自行车吗'), findsWidgets);
+
+    await tester.enterText(find.byType(TextField).last, '我会，明天下午有空');
+    await tester.tap(find.text(l.intentRespondSend));
+    await tester.pumpAndSettle();
+
+    expect(service.responses, [('intent-feed-2', '我会，明天下午有空')]);
+    expect(find.text(l.intentRespondSent), findsOneWidget);
+  });
+
+  testWidgets('an empty reply is not sent', (tester) async {
+    // Opening a conversation with nothing in it wastes both people's time.
+    final service = _FakeIntentService(
+      feed: [
+        UserIntent(
+          id: 'intent-feed-3',
+          kind: IntentKind.companion,
+          rawInput: '找个羽毛球搭子',
+          slots: const IntentSlots(),
+          status: 'active',
+        ),
+      ],
+    );
+    await tester.pumpWidget(_app(IntentPage(intentService: service)));
+    await tester.pumpAndSettle();
+    final l = _l(tester);
+
+    await tester.tap(find.text(l.intentRespondAction));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(l.intentRespondSend));
+    await tester.pumpAndSettle();
+
+    expect(service.responses, isEmpty);
+  });
+
+  testWidgets('an empty feed says why rather than showing nothing', (
+    tester,
+  ) async {
+    final service = _FakeIntentService();
+    await tester.pumpWidget(_app(IntentPage(intentService: service)));
+    await tester.pumpAndSettle();
+    expect(find.text(_l(tester).intentFeedEmpty), findsOneWidget);
   });
 }

@@ -39,6 +39,7 @@ class _IntentPageState extends State<IntentPage> {
   bool _submitting = false;
 
   List<UserIntent> _mine = [];
+  List<UserIntent> _feed = [];
   final Map<String, List<UserIntent>> _matches = {};
   bool _loading = true;
 
@@ -56,6 +57,13 @@ class _IntentPageState extends State<IntentPage> {
   }
 
   Future<void> _load() async {
+    // The feed loads separately from the caller's own intents so a failure in
+    // one does not blank the other. It is also the part a brand-new user has
+    // anything to look at, so it must not depend on them having posted.
+    try {
+      final feed = await _service.campusFeed();
+      if (mounted) setState(() => _feed = feed);
+    } catch (_) {}
     try {
       final mine = await _service.myIntents();
       if (!mounted) return;
@@ -132,6 +140,29 @@ class _IntentPageState extends State<IntentPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(worked ? l.intentFulfilled : l.intentWithdrawn)),
       );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.operationFailed(e.toString()))));
+    }
+  }
+
+  Future<void> _respond(UserIntent intent) async {
+    final l = AppLocalizations.of(context)!;
+    final content = await showDialog<String>(
+      context: context,
+      builder: (_) => _RespondDialog(intent: intent),
+    );
+    if (content == null || content.isEmpty || !mounted) return;
+
+    try {
+      await _service.respondToIntent(intent.id, content);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.intentRespondSent)));
       await _load();
     } catch (e) {
       if (!mounted) return;
@@ -224,6 +255,66 @@ class _IntentPageState extends State<IntentPage> {
               onPressed: _submitting ? null : _submit,
               child: Text(_submitting ? l.intentSaving : l.intentSubmit),
             ),
+            const Divider(height: 32),
+            // Placed above the caller's own intents on purpose: someone who has
+            // just arrived and posted nothing should still find something they
+            // can answer, which is the other half of the unanswered-post
+            // problem.
+            Text(
+              l.intentFeedHeader,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            if (_feed.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Text(
+                  l.intentFeedEmpty,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF9CA3AF),
+                  ),
+                ),
+              )
+            else
+              ..._feed.map(
+                (intent) => Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _kindLabel(l, intent.kind),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF6B7280),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                intent.rawInput,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton.tonal(
+                          onPressed: () => _respond(intent),
+                          child: Text(l.intentRespondAction),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             const Divider(height: 32),
             Text(
               l.intentMineHeader,
@@ -381,6 +472,77 @@ class _IntentCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The reply composer.
+///
+/// A widget rather than an inline `showDialog` body so it owns its
+/// `TextEditingController` and disposes it in its own `dispose()`. Disposing it
+/// straight after `showDialog` returns throws — the dialog's dismissal animation
+/// is still running and rebuilds the field against a dead controller, which
+/// happened on every send and every cancel.
+class _RespondDialog extends StatefulWidget {
+  const _RespondDialog({required this.intent});
+
+  final UserIntent intent;
+
+  @override
+  State<_RespondDialog> createState() => _RespondDialogState();
+}
+
+class _RespondDialogState extends State<_RespondDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    return AlertDialog(
+      title: Text(l.intentRespondTitle),
+      // Scrollable: an AlertDialog's content is not, and on a short screen with
+      // the keyboard up this column does not fit.
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Their own words, so the responder can see exactly what they are
+            // answering rather than a normalised summary.
+            Text(
+              widget.intent.rawInput,
+              style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              maxLines: 3,
+              minLines: 2,
+              decoration: InputDecoration(
+                hintText: l.intentRespondHint,
+                border: const OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(l.cancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: Text(l.intentRespondSend),
+        ),
+      ],
     );
   }
 }
