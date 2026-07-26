@@ -40,15 +40,20 @@
 
 ## 三、持久部署 `goods4ncu_local` 的账号
 
-由 `scripts/deploy_local.sh` 创建，密码写在脚本里（可用 `MEMBER_PASSWORD` 等环境变量覆盖前需先改脚本）。
+由 `scripts/deploy_local.sh` 通过**公开注册接口**创建（不是种入迁移行），因此不受生产种子守卫影响。密码故意不同于仓库公开的 `Test1234`。
 
 | 用户名 | 密码 | 角色 | 校园 | 用途 |
 | --- | --- | --- | --- | --- |
-| `deploy_ncu_member` | `Member-pass-1` | user | `ncu` / verified | 南昌大学已认证成员；可发布、联系、成交 |
-| `deploy_demo-campus_member` | `Member-pass-1` | user | `demo-campus` / verified | 第二校园成员；与上者对比即可看到跨校园隔离 |
-| `deploy_admin` | `Deploy-admin-pass-1` | admin | `ncu` / pending | 平台管理员；敏感写操作需先 `POST /api/auth/reauth` 做密码 step-up |
+| `admin` | `Local-admin-1` | admin | `ncu` / pending | 平台管理员；敏感写操作需先 `POST /api/auth/reauth` 做密码 step-up |
+| `seller1` | `Local-test-1` | user | `ncu` / verified | 卖家视角，持有演示商品 |
+| `buyer1` | `Local-test-1` | user | `ncu` / verified | 买家视角 |
+| `campus2_member` | `Local-test-1` | user | `demo-campus` / verified | 第二校园成员；与 `seller1` 对比即可看到跨校园隔离 |
 
-`deploy_admin` 的 membership 是 `pending` 而非 `verified`：`admin promote` 只改全局角色，不代替校园认证。这是符合设计的——后台读写走 `AdminScope`，与校园成员资格是两条独立的授权链。
+可用环境变量覆盖：`ADMIN_USER` / `ADMIN_PASS` / `MEMBER_PASS`。部署脚本结束时会打印当前实际凭据，不必翻文档。
+
+`admin` 的 membership 是 `pending` 而非 `verified`：`admin promote` 只改全局角色，不代替校园认证。这是符合设计的——后台读写走 `AdminScope`，与校园成员资格是两条独立的授权链。
+
+⚠️ 这些账号只存在于**演示部署库** `goods4ncu_local`。开发库 `good4ncu` 用的是第二节的种子账号（`Test1234`）。两者互不相通——用错库的账号就会看到"用户名或密码错误"。
 
 ### 校园
 

@@ -193,8 +193,13 @@ jq_get() { python3 -c "import sys,json;print(json.load(sys.stdin).get('$1',''))"
 
 # --- Instantiate the platform admin ------------------------------------------
 say "instantiating platform admin"
-ADMIN_USER="deploy_admin"
-ADMIN_PASS="Deploy-admin-pass-1"
+# Familiar account names so the deployment is usable without consulting docs.
+# Created through the public API, so they are ordinary rows — the production
+# guard keys on migration 0005's fixed UUIDs and is unaffected. Passwords
+# deliberately differ from the repo-published 'Test1234'.
+ADMIN_USER="${ADMIN_USER:-admin}"
+ADMIN_PASS="${ADMIN_PASS:-Local-admin-1}"
+MEMBER_PASS="${MEMBER_PASS:-Local-test-1}"
 curl -s -X POST "$API/api/auth/register" -H 'Content-Type: application/json' \
     -d "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASS\"}" >/dev/null 2>&1 || true
 DATABASE_URL="postgres://$APP_ROLE:$APP_PASSWORD@127.0.0.1:5432/$DB_NAME" \
@@ -240,11 +245,11 @@ register_member() {
     local username="$1" email="$2"
     local body
     body=$(curl -s -X POST "$API/api/auth/register" -H 'Content-Type: application/json' \
-        -d "{\"username\":\"$username\",\"email\":\"$email\",\"password\":\"Member-pass-1\"}")
+        -d "{\"username\":\"$username\",\"email\":\"$email\",\"password\":\"$MEMBER_PASS\"}")
     local token; token=$(printf '%s' "$body" | jq_get token)
     if [ -z "$token" ]; then
         token=$(curl -s -X POST "$API/api/auth/login" -H 'Content-Type: application/json' \
-            -d "{\"username\":\"$username\",\"password\":\"Member-pass-1\"}" | jq_get token)
+            -d "{\"username\":\"$username\",\"password\":\"$MEMBER_PASS\"}" | jq_get token)
     fi
     [ -n "$token" ] || fail "registration/login failed for $username"
     # Verify the campus membership: request the OTP, read the delivered code
@@ -256,11 +261,13 @@ register_member() {
 }
 
 say "registering and verifying one member per campus"
-NCU_TOKEN=$(register_member "deploy_ncu_member" "20260101@email.ncu.edu.cn")
-JX_TOKEN=$(register_member "deploy_${CAMPUS_SLUG}_member" "20260202@$CAMPUS_DOMAIN")
-ncu_campus=$(psql -d "$DB_NAME" -qtA -c "SELECT c.slug FROM campus_memberships m JOIN campuses c ON c.id=m.campus_id JOIN users u ON u.id=m.user_id WHERE u.username='deploy_ncu_member';" | tr -d ' ')
-jx_campus=$(psql -d "$DB_NAME" -qtA -c "SELECT c.slug FROM campus_memberships m JOIN campuses c ON c.id=m.campus_id JOIN users u ON u.id=m.user_id WHERE u.username='deploy_${CAMPUS_SLUG}_member';" | tr -d ' ')
-[ "$ncu_campus" = "ncu" ] || fail "NCU member landed in campus '$ncu_campus'"
+SELLER_TOKEN=$(register_member "seller1" "20260101@email.ncu.edu.cn")
+BUYER_TOKEN=$(register_member "buyer1" "20260103@email.ncu.edu.cn")
+NCU_TOKEN="$SELLER_TOKEN"
+JX_TOKEN=$(register_member "campus2_member" "20260202@$CAMPUS_DOMAIN")
+ncu_campus=$(psql -d "$DB_NAME" -qtA -c "SELECT c.slug FROM campus_memberships m JOIN campuses c ON c.id=m.campus_id JOIN users u ON u.id=m.user_id WHERE u.username='seller1';" | tr -d ' ')
+jx_campus=$(psql -d "$DB_NAME" -qtA -c "SELECT c.slug FROM campus_memberships m JOIN campuses c ON c.id=m.campus_id JOIN users u ON u.id=m.user_id WHERE u.username='campus2_member';" | tr -d ' ')
+[ "$ncu_campus" = "ncu" ] || fail "seller1 landed in campus '$ncu_campus'"
 [ "$jx_campus" = "$CAMPUS_SLUG" ] || fail "second-campus member landed in campus '$jx_campus'"
 say "  ✓ members routed by email domain: ncu -> ncu, $CAMPUS_DOMAIN -> $CAMPUS_SLUG"
 
@@ -352,6 +359,9 @@ cat <<EOF
 [deploy]   redis      : 127.0.0.1:$REDIS_PORT
 [deploy]   object store: http://127.0.0.1:$S3_PORT (media-ncu, media-$CAMPUS_SLUG)
 [deploy]   campuses   : ncu (default) + $CAMPUS_SLUG (activated via admin API)
-[deploy]   members    : deploy_ncu_member, deploy_${CAMPUS_SLUG}_member (verified)
+[deploy]   accounts   : $ADMIN_USER / $ADMIN_PASS  (platform admin)
+[deploy]                seller1 / $MEMBER_PASS  (ncu, verified)
+[deploy]                buyer1  / $MEMBER_PASS  (ncu, verified)
+[deploy]                campus2_member / $MEMBER_PASS  ($CAMPUS_SLUG — isolation demo)
 [deploy]   stop/destroy: ./scripts/deploy_local.sh --stop | --destroy
 EOF
