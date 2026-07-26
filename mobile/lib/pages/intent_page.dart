@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../l10n/app_localizations.dart';
@@ -37,6 +40,12 @@ class _IntentPageState extends State<IntentPage> {
   PriceSlot? _price;
   bool _flexibleTime = false;
   bool _submitting = false;
+
+  /// null until the first attempt tells us whether this deployment has vision.
+  /// An affordance that always fails is worse than no affordance.
+  bool _photoAvailable = true;
+  bool _readingPhoto = false;
+  final _picker = ImagePicker();
 
   List<UserIntent> _mine = [];
   List<UserIntent> _feed = [];
@@ -82,6 +91,63 @@ class _IntentPageState extends State<IntentPage> {
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// One photo of a dorm room, read as a list of things.
+  ///
+  /// Graduation is twenty items and twenty forms, so none of it gets posted.
+  /// Everything the model reads lands as a draft for the author to confirm or
+  /// delete — a wrong reading costs a few taps, not a wrong listing.
+  Future<void> _fromPhoto() async {
+    final l = AppLocalizations.of(context)!;
+    final picked = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 70,
+      maxWidth: 1600,
+    );
+    if (picked == null || !mounted) return;
+
+    setState(() => _readingPhoto = true);
+    try {
+      final bytes = await picked.readAsBytes();
+      final ids = await _service.decomposePhoto(
+        imageBase64: base64Encode(bytes),
+        mime: picked.mimeType ?? 'image/jpeg',
+        // Whatever they typed travels with it, so a failed reading still
+        // records their words instead of losing them.
+        rawInput: _controller.text.trim().isEmpty
+            ? null
+            : _controller.text.trim(),
+      );
+      if (!mounted) return;
+
+      if (ids == null) {
+        // No vision provider here. Hide the button rather than letting them
+        // press something that cannot work.
+        setState(() {
+          _photoAvailable = false;
+          _readingPhoto = false;
+        });
+        return;
+      }
+
+      _controller.clear();
+      setState(() => _readingPhoto = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            ids.length > 1 ? l.intentPhotoSplit : l.intentPhotoNothing,
+          ),
+        ),
+      );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _readingPhoto = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.operationFailed(e.toString()))));
     }
   }
 
@@ -251,9 +317,35 @@ class _IntentPageState extends State<IntentPage> {
                 onSelected: (on) => setState(() => _flexibleTime = on),
               ),
             const SizedBox(height: 12),
-            FilledButton(
-              onPressed: _submitting ? null : _submit,
-              child: Text(_submitting ? l.intentSaving : l.intentSubmit),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton(
+                    onPressed: (_submitting || _readingPhoto) ? null : _submit,
+                    child: Text(_submitting ? l.intentSaving : l.intentSubmit),
+                  ),
+                ),
+                // Only for things being sold, and only where the deployment can
+                // actually read a photo.
+                if (_photoAvailable && _kind == IntentKind.goodsOffer) ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: (_submitting || _readingPhoto)
+                          ? null
+                          : _fromPhoto,
+                      icon: const Icon(Icons.photo_camera_outlined, size: 18),
+                      label: Text(
+                        _readingPhoto
+                            ? l.intentPhotoWorking
+                            : l.intentPhotoAction,
+                        softWrap: false,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
             const Divider(height: 32),
             // Placed above the caller's own intents on purpose: someone who has

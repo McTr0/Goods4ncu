@@ -871,6 +871,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get intentSubmit => '说出来';
 
   @override
+  String get intentPhotoAction => '拍一张，一次全发';
+
+  @override
+  String get intentPhotoWorking => '正在看这张照片…';
+
+  @override
+  String get intentPhotoSplit => '识别出几件，确认一下哪些要发';
+
+  @override
+  String get intentPhotoNothing => '这张照片没认出东西，已按你写的记下';
+
+  @override
   String get intentSaving => '正在保存…';
 
   @override

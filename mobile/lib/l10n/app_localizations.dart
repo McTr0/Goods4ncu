@@ -1778,6 +1778,30 @@ abstract class AppLocalizations {
   /// **'Post it'**
   String get intentSubmit;
 
+  /// No description provided for @intentPhotoAction.
+  ///
+  /// In en, this message translates to:
+  /// **'One photo, everything at once'**
+  String get intentPhotoAction;
+
+  /// No description provided for @intentPhotoWorking.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading the photo…'**
+  String get intentPhotoWorking;
+
+  /// No description provided for @intentPhotoSplit.
+  ///
+  /// In en, this message translates to:
+  /// **'Found a few — confirm which to post'**
+  String get intentPhotoSplit;
+
+  /// No description provided for @intentPhotoNothing.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing recognised — saved what you wrote'**
+  String get intentPhotoNothing;
+
   /// No description provided for @intentSaving.
   ///
   /// In en, this message translates to:

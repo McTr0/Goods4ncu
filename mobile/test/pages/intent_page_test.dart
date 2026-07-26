@@ -34,6 +34,20 @@ class _FakeIntentService extends IntentService {
     int limit = 30,
   }) async => feed;
 
+  /// null means "this deployment has no vision provider".
+  List<String>? photoIds;
+  int photoCalls = 0;
+
+  @override
+  Future<List<String>?> decomposePhoto({
+    required String imageBase64,
+    required String mime,
+    String? rawInput,
+  }) async {
+    photoCalls++;
+    return photoIds;
+  }
+
   @override
   Future<String> respondToIntent(String intentId, String content) async {
     responses.add((intentId, content));
@@ -350,5 +364,35 @@ void main() {
     await tester.pumpWidget(_app(IntentPage(intentService: service)));
     await tester.pumpAndSettle();
     expect(find.text(_l(tester).intentFeedEmpty), findsOneWidget);
+  });
+
+  testWidgets('the photo affordance is offered only for things being sold', (
+    tester,
+  ) async {
+    // Photographing a badminton partner is not a thing.
+    final service = _FakeIntentService();
+    await tester.pumpWidget(_app(IntentPage(intentService: service)));
+    await tester.pumpAndSettle();
+    final l = _l(tester);
+
+    expect(find.text(l.intentPhotoAction), findsOneWidget);
+    await tester.tap(find.text(l.intentKindCompanion));
+    await tester.pumpAndSettle();
+    expect(find.text(l.intentPhotoAction), findsNothing);
+  });
+
+  testWidgets('the composer still works with no photo taken', (tester) async {
+    // The photo path is an addition, never a precondition. Someone who just
+    // types a sentence must not be made to do anything else.
+    final service = _FakeIntentService();
+    await tester.pumpWidget(_app(IntentPage(intentService: service)));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), '宿舍小台灯');
+    await tester.tap(find.text(_l(tester).intentSubmit));
+    await tester.pumpAndSettle();
+
+    expect(service.sentRawInput, '宿舍小台灯');
+    expect(service.photoCalls, 0);
   });
 }

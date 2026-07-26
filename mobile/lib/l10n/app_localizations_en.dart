@@ -900,6 +900,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get intentSubmit => 'Post it';
 
   @override
+  String get intentPhotoAction => 'One photo, everything at once';
+
+  @override
+  String get intentPhotoWorking => 'Reading the photo…';
+
+  @override
+  String get intentPhotoSplit => 'Found a few — confirm which to post';
+
+  @override
+  String get intentPhotoNothing => 'Nothing recognised — saved what you wrote';
+
+  @override
   String get intentSaving => 'Saving…';
 
   @override

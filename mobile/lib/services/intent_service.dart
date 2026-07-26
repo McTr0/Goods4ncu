@@ -140,6 +140,33 @@ class IntentService extends BaseService {
     return data['conversation_id']?.toString() ?? '';
   }
 
+  /// POST /api/intents/decompose-photo — read a photo of a room as a list.
+  ///
+  /// Returns null when the deployment has no vision provider (HTTP 501). That is
+  /// a capability this install lacks rather than a fault, so the caller hides
+  /// the affordance instead of showing an error or retrying.
+  Future<List<String>?> decomposePhoto({
+    required String imageBase64,
+    required String mime,
+    String? rawInput,
+  }) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/intents/decompose-photo'),
+      headers,
+      jsonEncode({
+        'image_base64': imageBase64,
+        'mime': mime,
+        'raw_input': ?rawInput,
+      }),
+    );
+    if (response.statusCode == 501) return null;
+    final data = handleResponse(response, (d) => d as Map<String, dynamic>);
+    return (data['ids'] as List<dynamic>? ?? [])
+        .map((e) => e.toString())
+        .toList();
+  }
+
   /// GET /api/spaces/{id}/why — why the caller is in a space.
   ///
   /// Returns null when there is no answer to give: a hand-made group, or one
