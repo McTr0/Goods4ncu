@@ -20,6 +20,21 @@
 [server]
 host = "0.0.0.0"
 port = 3000
+# Seconds to keep serving after SIGTERM while /api/readyz already reports 503,
+# giving the load balancer time to deregister this instance.
+shutdown_drain_secs = 5
+# Seconds to wait for in-flight requests and workers after the listener closes.
+# Keep shutdown_drain_secs + shutdown_timeout_secs below the orchestrator's
+# termination grace period, or the process is SIGKILLed mid-drain.
+shutdown_timeout_secs = 25
+
+# -----------------------------------------------------------------------
+# Chat features
+# -----------------------------------------------------------------------
+[chat]
+# Secret Chat is deprecated; new sessions are refused (403) unless this is
+# explicitly set to true for a migration window. History stays readable.
+secret_new_sessions_enabled = false
 
 # -----------------------------------------------------------------------
 # LLM

@@ -38,7 +38,7 @@ Content-Type: application/json
 
 `trace_id` 与响应 `X-Request-ID` 相同，可用于关联日志。客户端应逐步使用 `code` 判断类别、使用 `message` 展示，并继续兼容旧 `error`。目标 `/api/v1` 会在版本边界内切换为嵌套 error envelope。
 
-当前稳定代码包括业务层的 `bad_request`、`unauthorized`、`authentication_failed`、`forbidden`、`not_found`、`conflict`、`rate_limited`、`content_violation` 和 `internal_error`，以及 Axum 在进入 handler 前返回的 `validation_failed`、`method_not_allowed`、`payload_too_large`、`unsupported_media_type`。`/api/*` 的框架拒绝也使用上述 JSON 结构；静态 `/uploads/*` 不会被错误中间件改写。
+当前稳定代码包括业务层的 `bad_request`、`unauthorized`、`authentication_failed`、`recent_authentication_required`、`recent_authentication_failed`、`forbidden`、`not_found`、`conflict`、`rate_limited`、`content_violation` 和 `internal_error`，以及 Axum 在进入 handler 前返回的 `validation_failed`、`method_not_allowed`、`payload_too_large`、`unsupported_media_type`。`/api/*` 的框架拒绝也使用上述 JSON 结构；静态 `/uploads/*` 不会被错误中间件改写。
 
 ## Auth
 
@@ -54,7 +54,7 @@ Content-Type: application/json
 }
 ```
 
-返回 access token、refresh token、user id、username 和消息。重复用户名返回 conflict，非法邮箱或弱密码返回 bad request。
+返回 access token、refresh token、user id、username、`active_campus_id` 和消息。access token 会携带当前设备会话的校园；新注册用户可以处于该校园的 pending 状态，但受保护写操作仍要求 verified。重复用户名返回 conflict，非法邮箱或弱密码返回 bad request。
 
 ### POST `/api/auth/login`
 
@@ -69,9 +69,43 @@ Content-Type: application/json
 
 返回结构与 register 类似。
 
+登录和注册签发的 access token 带 `auth_time`，表示用户刚刚完成密码认证。这个字段只用于敏感操作 step-up，不替代 token 的 `exp`、JTI 撤销和数据库角色复核。
+
+### POST `/api/auth/reauth`
+
+[已实现] 需要有效 access token。重新验证当前账号密码，成功后只替换 access token，不旋转 refresh token；新 token 的近期认证窗口为 10 分钟。
+
+```json
+{
+  "password": "current-password",
+  "totp_code": "123456"
+}
+```
+
+`totp_code` 仅在账号已确认 TOTP MFA 时必需（当前只有平台管理员可注册）。响应：
+
+```json
+{
+  "token": "new-access-token",
+  "recent_auth_expires_at": "2026-07-18T05:30:00Z"
+}
+```
+
+密码错误返回 `recent_authentication_failed`，客户端不得因此清除整个登录会话。账号已启用 MFA 但未提供验证码时返回 `mfa_required`；验证码错误或已被使用返回 `recent_authentication_failed`。refresh 和切换活动校园签发的 access token 不保留 `auth_time`，因此会重新锁定敏感操作。
+
+### 平台管理员 TOTP MFA
+
+[已实现] 三个接口都要求平台管理员角色（数据库复核）加 10 分钟近期认证：
+
+- `GET /api/auth/mfa/totp` 返回 `{ "enrolled": bool, "confirmed": bool }`。
+- `POST /api/auth/mfa/totp/setup` 生成待确认密钥，返回 `secret_base32` 和 `otpauth_uri`（RFC 6238，SHA1/6 位/30 秒）。已确认的因子返回 `409`——活跃因子不可自助更换，防止被劫持会话轮换 MFA。
+- `POST /api/auth/mfa/totp/confirm` 提交 `{ "code": "123456" }` 证明持有验证器后激活强制。未确认的注册不会被强制，避免扫码失误把管理员锁死。
+
+确认后，密码 step-up 必须同时提供动态验证码；验证接受 ±1 个时间步的时钟偏差，且每个时间步只能使用一次（数据库水位线防重放，并发提交同一验证码只有一个成功）。
+
 ### POST `/api/auth/refresh`
 
-旋转 refresh token。成功时旧 refresh token 被撤销，并返回新 access token 与新 refresh token。
+旋转 refresh token。成功时旧 refresh token 被撤销，并返回新 access token、新 refresh token 与 `active_campus_id`；校园上下文沿用原 refresh session，不会重新猜测第一条 membership。
 
 ```json
 {
@@ -111,6 +145,48 @@ Content-Type: application/json
 ```
 
 ## Users
+
+### GET `/api/campuses`
+
+[已实现] 无需登录。返回当前启用的校园 seed，包括 `id`、`slug`、中英文名称和允许的邮箱域名。这个接口只用于注册前展示，不代表调用者已经拥有该校园资格。
+
+### GET `/api/user/campus-memberships`
+
+[已实现] 需要登录。返回当前用户的校园资格和当前设备 token 中的 `active_campus_id`。成员状态为 `pending | verified | suspended | revoked`；新注册会话可以把 pending 校园作为浏览/验证上下文，但发布、联系和成交仍只接受 verified。
+
+### POST `/api/user/active-campus`
+
+[已实现] 需要 access token，并提交当前设备的 refresh token。目标校园必须是当前用户已认证且仍启用的 membership。服务端会撤销旧 refresh、签发绑定目标校园的新 token 对并撤销当前 access JTI；客户端成功后必须替换两枚 token 并重连 WebSocket。
+
+```json
+{
+  "campus_id": "campus-uuid",
+  "refresh_token": "current-device-refresh-token"
+}
+```
+
+响应字段为 `token`、`refresh_token` 和 `active_campus_id`。refresh token 属于其他用户、已过期、已撤销或被重放时统一 unauthorized；不能用请求体覆盖任意校园。
+
+### POST `/api/user/campus-memberships/{id}/verification/request`
+
+[已实现] 需要登录，且 `{id}` 必须属于当前用户。向用户资料中的校园邮箱发送 6 位验证码；只接受该 Campus 配置的邮箱域名。验证码 5 分钟失效，60 秒后才能重发，每个 membership 每小时最多请求 5 次。响应不返回验证码：
+
+```json
+{
+  "expires_at": "2026-07-12T12:05:00Z",
+  "resend_after_seconds": 60
+}
+```
+
+开发环境未配置投递 webhook 时只把验证码写入后端本地日志。生产环境必须配置 `CAMPUS_VERIFICATION_DELIVERY_URL` 和 `CAMPUS_VERIFICATION_DELIVERY_TOKEN`，否则应用拒绝启动。
+
+### POST `/api/user/campus-memberships/{id}/verification/confirm`
+
+[已实现] 需要登录。提交 `{ "code": "123456" }`；最多允许 5 次错误尝试。成功后 membership 变为 `verified`，`verification_method` 为 `campus_email_otp`。服务端只保存验证码 HMAC，不保存明文。更换资料邮箱会把已认证 membership 重置为 `pending`，需要重新验证。
+
+发布 offer/wanted、响应 wanted、创建联系人会话、创建/加入群组或频道、创建 Secret Chat 和创建成交意向均要求 verified membership；小帮发布、购买意向和议价工具执行同一门禁。未认证调用返回 HTTP 403 和稳定错误码 `campus_verification_required`。浏览、收藏、读取历史等低风险能力不受影响。
+
+[已实现] 涉及另一用户或 listing 的写操作还必须处于同一校园，否则返回 HTTP 403 和 `campus_scope_mismatch`。客户端不能在业务请求体覆盖 `campus_id`：发布、成交、直聊、空间、Secret Chat、用户发现和 Agent 工具都从 access token 的活动校园派生并复核 membership。登录用户的商品列表、详情、wanted 匹配、空间、推荐、公开用户页面和通知按活动校园读取；游客仍使用首校园 NCU。后台与审核使用下文单独描述的管理作用域。
 
 ### GET `/api/user/profile`
 
@@ -547,13 +623,33 @@ Group 成员按角色发言；Channel 只有 owner/admin 发言，成员可读�
 
 任一通话成员结束 signaling，会产生 `call_ended` 事件。
 
-### POST `/api/chat/secret-sessions` [实验中][待弃用]
+### POST `/api/chat/secret-sessions` [待弃用]
 
-创建服务器不可读的客户端密文会话。该能力不进入生产承诺，不应有新功能依赖。
+[已实现] 默认返回 `403 forbidden`：Secret Chat 与服务器可治理通信目标冲突，新会话创建已停止。仅在迁移窗口内由 `SECRET_CHAT_NEW_SESSIONS_ENABLED=true` 临时恢复。移动端不再提供创建入口。
 
-### GET/POST `/api/chat/secret-sessions/{id}/messages` [实验中][待弃用]
+### GET/POST `/api/chat/secret-sessions/{id}/messages` [待弃用]
 
-读写密文、nonce、公钥指纹和过期时间。服务器不接收明文。生产迁移方向见[信任与安全](trust-safety.md)。
+读写密文、nonce、公钥指纹和过期时间。服务器不接收明文。历史会话保持可读可写以兼容存量数据；生产迁移方向见[信任与安全](trust-safety.md)。
+
+## Wanted 生命周期与响应动作
+
+[已实现] Phase 2 信息流闭环接口：
+
+- `POST /api/listings/{id}/fulfill` — 所有者把收物需求标记为 `fulfilled`；非所有者 403，offer 400，非 active 409。完成后 feed/匹配/新响应全部停止，历史 Thread/Response/成交保留，pending 响应者收到 `wanted_fulfilled` 通知。`POST /api/listings/{id}/relist` 可重新开启（同样适用于 sold/deleted）。
+- `GET /api/wanted-responses?role=requester|responder&status=` — 按角色列出自己的推荐（含两侧标题）。
+- `POST /api/wanted-responses/{id}/accept|dismiss`（requester）与 `/withdraw`（responder）— 仅能从 `pending` 转移，单赢并发；他人的响应统一 404，重复动作 409；对方收到 `wanted_response_accepted|dismissed|withdrawn` 通知。
+
+推荐接口每个条目携带 `rank_reason`（用户可读）与 `source`（`recency|category_affinity|vector_similarity`），响应携带 `ranking_version`。
+
+## Agent ActionPlan
+
+[已实现] 小帮的写动作（发布、修改、下架、成交意向、还价）不再直接执行：工具调用产生 pending 计划，用户在应用内确认后才执行。confirmation token 只通过以下认证接口返回，不出现在聊天文本中。
+
+- `GET /api/agent/plans` — 当前用户 pending 且未过期的计划（含 `confirmation_token`、`risk_level`、`summary`、`expires_at`）。
+- `POST /api/agent/plans/{id}/confirm` — body `{ "confirmation_token": "..." }`。L2 计划直接执行并返回 `{ "status": "executed", "result": "..." }`；L3 计划第一次确认返回 `{ "status": "needs_second_confirmation" }`，第二次确认才执行。重复确认幂等返回同一结果。过期/已取消返回 `409`；错误 token、他人计划或不存在统一 `404`（不泄露归属）。执行失败返回 `409` 并保留计划为 `failed`。
+- `POST /api/agent/plans/{id}/cancel` — 取消 pending 计划。
+
+执行体在确认时重新校验校园资格、所有权、商品状态和价格区间；提出计划后世界状态变化（例如商品已售出）时，确认不会产生业务写入。
 
 ## AI Chat
 
@@ -628,6 +724,7 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 ### POST `/api/orders/{id}/confirm`
 
 需要登录且必须是 seller。确认线下成交，状态从 `intent_pending` 进入 `confirmed`。请求体可选 `auto_delist`，默认 `true`；开启时会在同一事务中把商品下架为 `sold`。
+建议携带 `Idempotency-Key` 请求头。相同卖家对同一 key 和相同确认参数的重试会返回同样的确认结果，不会重复下架；同一 key 改变 `auto_delist` 等确认参数会返回 `409 conflict`。
 
 ```json
 {
@@ -715,27 +812,36 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 
 ### GET `/api/notifications`
 
-需要登录。默认只返回未读通知；传 `include_read=true` 返回历史。支持 `limit`、`offset`。返回 `items`、`total`、`unread_count`。
+需要登录。默认只返回当前设备活动校园中的未读通知；传 `include_read=true` 返回该校园历史。支持 `limit`、`offset`。返回 `items`、`total`、`unread_count`，每个 item 包含服务端确定的 `campus_id`。
 
 ### POST `/api/notifications/{id}/read`
 
-需要登录。标记单条通知已读，返回 `{ "ok": true }`。
+需要登录。只有通知同时属于当前用户和活动校园时才能标记已读，返回 `{ "ok": true }`；另一校园的通知按不存在处理。
 
 ### POST `/api/notifications/read-all`
 
-需要登录。标记全部未读通知为已读，返回 `marked_count`。
+需要登录。只标记活动校园中的全部未读通知，返回 `marked_count`。
 
 ## Admin
 
-管理员接口需要管理员角色。关键路径包括：
+[已实现] 后台读取具有校园作用域。全局 `users.role=admin` 是平台管理员；`campus_memberships.role=operator|admin` 且 membership 为 verified 的用户可以读取自己当前校园的后台数据，但不能执行平台级写操作。服务端会复核数据库中的账号状态与角色，不只信任 JWT claim。
+
+所有后台 GET 响应都返回实际使用的 `campus_id`。默认使用 access token 的活动校园。只有平台管理员可以通过 `?campus_id=<uuid>&reason=<非空理由>` 查看另一所启用校园；缺少理由返回 bad request，成功的跨校园读取会写入该校园的 `admin_audit_logs`。校园运营传入另一校园 ID 返回 scope mismatch。
+
+关键路径包括：
 
 | 方法和路径 | 行为 |
 | --- | --- |
 | `GET /api/admin/stats` | 平台管理统计。 |
-| `GET /api/admin/users` | 用户列表。 |
+| `GET /api/admin/capabilities` | 返回当前校园的后台读取、复核、跨校园和近期认证状态；校园运营可读但不能处置。 |
+| `GET /api/admin/users` | 用户列表；支持 `q` 按用户名或用户 ID 字面量包含检索，以及 `limit`、`offset` 分页。 |
 | `GET /api/admin/listings` | 商品列表。 |
 | `GET /api/admin/orders` | 线下成交记录列表。 |
 | `GET /api/admin/audit-logs` | 管理员审计日志。 |
+| `GET /api/admin/moderation/jobs` | 按校园与可选 `status` 查看异步媒体审核任务。 |
+| `GET /api/admin/moderation/cases` | 按校园和可选 `status` 查看案件队列；包含内部证据，仅限后台角色。 |
+| `POST /api/admin/moderation/cases/{id}/review` | 平台管理员开始复核、限制内容、驳回案件或恢复内容；写入案件事件和审计。 |
+| `POST /api/admin/moderation/appeals/{id}/review` | 由非原决定人员独立复核申诉，支持维持或改判。 |
 | `POST /api/admin/users/{id}/ban` | 封禁用户。 |
 | `POST /api/admin/users/{id}/unban` | 解封用户。 |
 | `POST /api/admin/listings/{id}/takedown` | 下架商品。 |
@@ -744,18 +850,34 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 | `POST /api/admin/users/{id}/role` | 修改用户角色。 |
 | `POST /api/admin/orders/{id}/status` | 管理员按允许状态处理成交记录。 |
 
-改管理员接口时要同时检查审计日志和普通用户路径的影响。
+POST 写接口仍只允许平台管理员，并且 access token 必须带 10 分钟内的 `auth_time`；过期或旧 token 返回 HTTP 403 与 `recent_authentication_required`。`ban/unban/role/impersonate` 的目标用户、takedown 的 listing 和成交状态操作的 order 必须属于所选校园，否则按不存在处理。跨校园写操作同样必须提供 `campus_id` 与 `reason`，审计记录保存目标校园和该理由。代登录 token 绑定目标校园，不能借此获得另一个校园的上下文。
+
+`GET /api/admin/capabilities` 的附加字段为 `recent_authentication_required`、`recent_authentication_valid` 和 `recent_authentication_expires_at`。Flutter 后台据此锁定处置按钮并展示密码验证入口，但服务端校验仍是最终边界。
+
+平台管理员校园管理：`POST /api/admin/campuses` 创建校园（slug/中英文名/邮箱域名，默认 `inactive` 暗启动），`POST /api/admin/campuses/{id}/activate|deactivate` 切换状态；三者均要求平台管理员近期认证并写审计。注册与改邮箱按邮箱域名路由到对应活动校园的 pending membership；不属于任何活动校园的域名被拒绝。
+
+改管理员接口时要同时检查审计日志和普通用户路径的影响。近期密码认证与平台管理员 TOTP MFA 已实现；案件通知 SLA 和统一 `/api/v1` 版本前缀仍未实现。未版本化的案件/申诉接口已在当前 router 中实现。
 
 ## Upload、Recommendations、Health 和 Metrics
 
-`GET /api/upload/token` 返回 OSS 直传临时凭证，要求 OSS 相关配置存在。
+`GET /api/upload/token` 返回 OSS 直传临时凭证，要求 OSS 相关配置存在。凭证授予对象写权限，因此按写接口处理：调用方必须是当前活动校园的 verified 成员，`pending` 成员返回 `403 campus_verification_required`，游客返回 `401`。
 
 推荐路径：
 
-- `GET /api/recommendations/similar?listing_id=...` 用 pgvector 余弦距离返回相似 active 商品；无 embedding 时回退到最新 active 列表。
-- `GET /api/recommendations/feed?direction=offer|wanted|all` 对匿名用户按 `created_at` 返回最新 active 内容。若请求带有效 Bearer token，则按收藏与买家成交意向的分类亲和度排序，排除自己的内容和已收藏内容。
+- `GET /api/recommendations/similar?listing_id=...` 用 pgvector 余弦距离返回同校园相似 active 商品；无 embedding 时回退到同校园最新 active 列表。
+- `GET /api/recommendations/feed?direction=offer|wanted|all` 对匿名用户在 NCU 公开校园内按 `created_at` 返回最新 active 内容。若请求带有效 Bearer token，则切换到设备活动校园，按收藏与买家成交意向的分类亲和度排序，排除自己的内容和已收藏内容。
 
-`GET /api/health` 返回健康状态，常用于启动检查。`GET /api/stats` 返回公开平台统计。`GET /api/metrics` 暴露 Prometheus 文本格式指标，包括请求、限流、聊天、LLM、WebSocket 和订单相关指标。
+公开用户搜索、`GET /api/users/{id}` 和 `GET /api/users/{id}/listings` 采用相同规则：游客使用 NCU 公开校园，有效登录态使用设备活动校园。目标用户没有该校园 verified membership 时不返回其主页或在售内容。
+
+健康探针（均无需认证，且不受限流）：
+
+- `GET /api/livez` 返回 `{"status":"alive"}`，只表示进程存活，不查数据库。用作 liveness probe。
+- `GET /api/readyz` 就绪时返回 `{"status":"ready"}`；进程排空中或数据库不可达时返回 `503` 和 `code=service_unavailable`。用作 readiness probe 和负载均衡摘流依据。
+- `GET /api/health` 是 `readyz` 的旧客户端兼容别名，就绪时返回纯文本 `OK`，排空中同样返回 `503`。
+
+探针语义和停机顺序见[运行、配置与排错](operations.md#健康探针与优雅停机)。
+
+`GET /api/stats` 返回公开平台统计。`GET /api/metrics` 暴露 Prometheus 文本格式指标，包括请求、限流、聊天、LLM、WebSocket 和订单相关指标。
 
 ## 目标生产契约 [目标态]
 
@@ -778,7 +900,7 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 
 `code` 是客户端稳定判断依据，`message` 可本地化，`details` 只包含安全的字段级信息。不得返回 SQL、provider 原始错误、屏蔽关系或审核规则。
 
-发布、联系、消息、wanted response、Agent confirm 和成交写接口接受 `Idempotency-Key`。同一用户、路径和 key 的重复请求返回首次结果；相同 key 配不同 body 返回冲突。
+发布和成交确认已实现 `Idempotency-Key`。聊天创建/消息发送使用请求体中的客户端 UUID 幂等；wanted response、其他关键写接口和 Agent confirm 的统一幂等契约仍属于目标态。同一资源、key 和请求内容的重试应返回首次结果；相同 key 配不同 body 必须冲突。
 
 列表统一使用：
 
@@ -801,7 +923,7 @@ GET  /api/v1/memberships/{id}
 POST /api/v1/memberships/{id}/refresh
 ```
 
-普通业务请求从 token/session 获取 active campus；不能仅依赖 body 中的 `campus_id`。verification 响应不泄露其他账号或 membership 是否存在。
+以上仍是目标版本化契约。当前未版本化接口包括 `/api/campuses`、`/api/user/campus-memberships`、`/api/user/active-campus` 及 verification 子路径。[已实现] 新 access/refresh session 已携带活动校园，核心业务请求不依赖 body 中的 `campus_id`；后台读取、审核任务、管理员审计和敏感操作近期密码认证也已落地。[已实现] 平台管理员 TOTP MFA 已落地。[目标态] `/api/v1` 和校园资格续期仍未完成。verification 响应不得泄露其他账号或 membership 是否存在。
 
 ### Intent Feed 与解释
 
@@ -842,6 +964,17 @@ Confirm 时服务端重新验证 tenant、membership、owner、资源版本、�
 
 ### Moderation 与申诉
 
+[已实现] 当前版本提供以下未版本化接口：
+
+```text
+GET  /api/moderation/cases
+GET  /api/moderation/cases/{id}
+POST /api/moderation/cases/{id}/appeals
+GET  /api/moderation/appeals/{id}
+```
+
+用户接口只返回本人当前活动校园的案件安全摘要；申诉每个案件只能提交一次。后台案件接口见上方 Admin 表格，平台管理员处置会同步资源审核状态、案件事件和 `admin_audit_logs`。
+
 ```text
 GET  /api/v1/moderation/cases/{id}
 POST /api/v1/moderation/cases/{id}/appeals
@@ -854,7 +987,7 @@ GET  /api/v1/moderation/appeals/{id}
 
 当前 `/api/chat/secret-sessions*` 进入弃用后：
 
-1. 首先禁止生产新建并从默认 UI 移除。
+1. [已实现] 禁止生产新建（默认 403，仅迁移开关可恢复）并从默认 UI 移除。
 2. 在兼容窗口保留授权用户的只读历史能力。
 3. 发布弃用 metrics、客户端版本门槛和截止时间。
 4. 最终移除发送和创建路由，不把服务器不可读 E2EE 迁入 `/api/v1`。

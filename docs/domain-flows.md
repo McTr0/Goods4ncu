@@ -17,10 +17,15 @@
 
 ```text
 login/register
-  -> issue access + refresh
+  -> select verified-first membership (pending allowed for a new registration)
+  -> issue access(campus claim) + refresh(campus row)
 refresh(old)
   -> revoke old refresh
+  -> preserve active campus
   -> issue new access + refresh
+switch campus(access + refresh + verified membership)
+  -> revoke old refresh and current access JTI
+  -> issue token pair bound to selected campus
 replay old refresh
   -> revoke all refresh tokens for user
 logout
@@ -31,17 +36,28 @@ logout
 
 ### 校园资格
 
-[目标态] 注册账号不自动获得发布和联系权限：
+[已实现] `Campus`、`CampusMembership`、南昌大学 seed、本人资格查询和学校邮箱 OTP 验证已经落地。历史账号使用 `legacy_backfill` 保持兼容；新注册账号只获得 `pending`，填写学校邮箱不等于完成邮箱所有权验证。
 
 ```text
 registered
-  -> submit campus verification
   -> membership pending
+  -> request OTP to profile school email
+  -> confirm within 5 minutes
   -> verified -> publish/contact/join spaces
-  -> suspended | expired -> read-only public access
+  -> suspended | revoked -> read-only access
 ```
 
-邮箱域名、派生学号和发现设置当前已存在，但 `CampusMembership` 尚未落地。客户端隐藏按钮不是权限控制，后端必须在写接口检查 active membership 和 campus scope。
+验证码明文不会进入数据库；服务端保存基于 JWT secret 和 challenge ID 的 HMAC，单次 challenge 最多尝试 5 次。重发冷却为 60 秒，每小时最多请求 5 次。开发环境可把验证码写入本地后端日志，生产环境必须配置受 bearer token 保护的投递 webhook。
+
+[已实现] 发布 offer/wanted、响应 wanted、创建联系人会话、创建或加入群组/频道、创建 Secret Chat、创建成交意向，以及小帮的发布/购买意向/议价工具，都在后端 service/handler 边界检查 verified membership。浏览、收藏和读取历史保持可用。用户更换邮箱后，已认证资格会重置为 `pending`。
+
+[已实现] `inventory`、`orders`、`hitl_requests`、`wanted_responses`、`chat_conversations`、`chat_spaces`、`chat_secret_sessions` 和 `notifications` 已写入不可空 `campus_id`。游客的公开商品、推荐和用户页面限制在 NCU；登录用户的这些读取跟随设备活动校园。联系、空间成员、Secret Chat、wanted response、成交与 Agent 写工具要求双方拥有同一 Campus 的 verified membership。订单、议价、wanted response 和商品上下文聊天还通过复合外键阻止跨校园资源拼接。
+
+[已实现] `0031_active_campus_sessions.sql` 把 refresh session 绑定到校园，access JWT 携带可选 campus claim。个人页在拥有多个 verified membership 时可切换当前校园；每台设备独立选择，刷新保持选择，受保护操作会再次查询 membership 状态。登录用户的商品浏览/详情、wanted 匹配、推荐、公开用户页、个人发布、用户发现、通知、直聊、空间和 Agent 工具使用该上下文；游客仍由服务端选择 NCU 首校园。
+
+[已实现] `moderation_jobs` 和 `admin_audit_logs` 也已写入不可空校园归属。校园 operator/admin 可以读取自己当前校园的统计、用户、listing、成交记录、审计和媒体审核队列；平台管理员跨校园读取或写入必须显式提交理由，读取和写入都会留下目标校园审计。
+
+[目标态] `0029` 中 NCU 数据库默认值仍是兼容旧 SQL 的过渡护栏，第二校园启用前必须移除。当前普通用户 handler 已按活动校园过滤，但后续仍应收敛为统一 extractor，避免每个 handler 自行解析；管理员 MFA 和 RLS 仍未完成。近期密码认证与统一审核 case 已实现。
 
 ## Offer / Wanted 生命周期
 
@@ -258,7 +274,7 @@ confirmed -> cancelled
 
 创建 intent 不改变 listing。卖家确认后可以选择自动把 offer 标为 sold。旧 pending 兼容为 intent_pending，旧 paid/shipped/completed 兼容为 confirmed；新业务不再产生支付或物流状态。
 
-成交确认事务包含 DealRecord 状态和可选 listing 下架。通知失败不应回滚已确认事实，但当前 best-effort 通知仍有丢失风险，生产目标使用 transactional outbox。
+成交确认事务包含 DealRecord 状态和可选 listing 下架。确认接口支持卖家范围内的 `Idempotency-Key`，网络超时后的相同请求不会重复下架；同 key 改变确认参数会安全失败。通知失败不应回滚已确认事实，但当前 best-effort 通知仍有丢失风险，生产目标使用 transactional outbox。
 
 普通用户主页不保留“我的订单”主入口；历史记录仍可从通知、相关会话或明确的成交记录入口访问。管理后台使用“成交记录”而不是“订单”。
 
@@ -280,7 +296,7 @@ countered
 
 ## 审核、举报与申诉
 
-当前文本在持久化或调用 LLM 前同步审核，图片进入异步 `moderation_jobs`。本地可配置关键词用于学校或运营策略。
+当前文本在持久化或调用 LLM 前同步审核，图片进入异步 `moderation_jobs`。任务从 listing、conversation 或用户当前校园继承 `campus_id`，Worker 可使用 `processing` 作为领取中的状态。校园运营通过 `/api/admin/moderation/jobs` 只能查看本校园队列。本地可配置关键词用于学校或运营策略。
 
 [目标态] 流程为：
 
@@ -300,14 +316,20 @@ sync text screening
 
 通知先写数据库，再尝试 WebSocket 推送。WebSocket 成功不等于已读，推送失败也不等于通知丢失。
 
+[已实现] 每条通知保存 `campus_id`。通知列表、未读计数、单条已读和全部已读同时匹配当前用户与设备活动校园；切换校园不会暴露或修改另一校园的通知。历史通知优先按关联订单、商品或会话回填校园，无法关联时才按用户 membership 回填。
+
 生产目标使用 outbox 可靠产生通知和 fan-out。客户端重连后按游标拉取缺失通知，不能依赖 socket 保存历史。
 
 通知按紧急度分级：安全和待确认动作优先，普通推荐和活动聚合，typing 不持久化。
 
 ## 管理和审计
 
-当前管理员可以查看统计、用户、listing、成交记录和审计日志，执行封禁、解封、角色修改、token 撤销、下架和成交状态操作。
+当前校园 operator/admin 可以查看自己当前校园的统计、用户、listing、成交记录、审计日志和媒体审核队列。平台管理员执行封禁、解封、角色修改、token 撤销、下架和成交状态操作；校园运营不能执行这些全局账号或业务事实写操作。
 
 管理动作必须同时验证受影响普通路径：封禁后登录/refresh/WebSocket 失败，下架后 Feed/收藏/匹配不可见，撤销 token 后接口拒绝。
 
-[目标态] 校园运营只能管理本 campus；平台管理员跨校园操作需要强认证、理由和审计。人工解密、收款码处理和高风险审核不能成为普通后台列表中的无门槛按钮。
+[已实现] 校园运营读取限定本 campus；平台管理员跨校园读取/操作需要理由并写审计。目标用户或资源不属于所选校园时按不存在处理，避免枚举另一校园数据。
+
+[已实现] 平台管理员敏感写操作要求近期密码认证；Flutter 后台在认证过期后隐藏处置能力并提供密码解锁，服务端返回稳定的 `recent_authentication_required`。校园运营继续只读。
+
+[目标态] 平台管理员和校园运营仍需要 MFA；校园运营的细粒度处置权限应建立在 ModerationCase 上，而不是放开当前全局封禁和角色接口。人工解密、收款码处理和高风险审核不能成为普通后台列表中的无门槛按钮。

@@ -3,9 +3,9 @@
 | 项目 | 内容 |
 | --- | --- |
 | 适用读者 | 产品经理、后端工程师、数据工程师、测试工程师和需要理解状态机的移动端工程师 |
-| 当前状态 | `inventory`、wanted responses、聊天、成交记录和审核表已实现；校园租户、统一意图模型和审核申诉属于目标态 |
+| 当前状态 | 核心业务、通知、审核任务和管理审计校园归属已实现；统一意图模型、审核 case/申诉、MFA 与 RLS 属于目标态 |
 | 事实来源 | `migrations/`、repository 查询、service 状态转换和 API JSON 模型 |
-| 最后核对范围 | 迁移 `0001` 至 `0026`，商品、聊天、成交、通知、审核和 Agent 相关代码 |
+| 最后核对范围 | 迁移 `0001` 至 `0033`，商品、聊天、成交、通知、审核、管理和 Agent 相关代码 |
 
 这篇文档定义平台中“什么是事实、事实如何变化、哪些对象可以互相引用”。API 字段见 [API 参考](api-reference.md)，用户流程见 [业务流程](domain-flows.md)。
 
@@ -55,7 +55,7 @@ flowchart LR
 user_id
 campus_id
 status: pending | verified | suspended | expired
-role: member | moderator | operator
+role: member | operator | admin
 verified_method
 verified_at
 expires_at
@@ -63,7 +63,7 @@ expires_at
 
 用户可以拥有多个 membership，但每次请求必须有明确的 active campus context。跨校园读取默认禁止；管理员跨租户访问必须带审计原因。
 
-[已实现] 当前 `users.email`、派生 `student_id` 和发现设置承担一部分校园身份能力，但还没有独立 campus/membership 模型。
+[已实现] `campuses`、`campus_memberships`、学校邮箱 OTP、核心/通知/审核/审计 tenant 字段和设备级 active campus session 已落地。membership 当前状态是 `pending | verified | suspended | revoked`；access claim 与 refresh session 保存同一 campus，切换时轮换 token，业务执行时再次验证 membership。推荐、公开用户页面和通知读取使用该校园。后台读权限使用 membership 的 `operator|admin`，平台写权限仍由全局用户角色控制。[目标态] membership 到期/定期刷新、全请求统一 tenant extractor、管理员 MFA/近期认证和关键表 RLS 仍未完成。
 
 ### IntentItem
 
@@ -72,7 +72,7 @@ expires_at
 | 字段 | 含义 | 当前映射 |
 | --- | --- | --- |
 | `id` | 意图稳定标识 | `inventory.id` |
-| `campus_id` | 所属校园 | [目标态] |
+| `campus_id` | 所属校园 | [已实现] `inventory.campus_id`，由服务端 tenant context 写入 |
 | `owner_id` | 声明意图的人 | `inventory.owner_id` |
 | `kind` | 信息类型，V1 固定为 `goods` | [目标态]，当前由 listing 语义隐含 |
 | `direction` | `offer` 或 `wanted` | `inventory.direction` |
@@ -103,6 +103,8 @@ expires_at
 ```
 
 [已实现] 当前 `/api/listings/{wanted_id}/matches` 实时查询 active offer，并按分类、预算、成色、关键词/向量和新鲜度匹配。
+
+[已实现] wanted 与 offer 必须属于同一 `campus_id`；`wanted_responses` 同时保存 tenant，并用复合外键约束两侧 listing。
 
 [目标态] Match 可以被短期缓存或物化以支持解释和评估，但必须允许重算；模型版本和原因代码要可追踪。不得保存敏感用户画像作为公开原因。
 
@@ -162,7 +164,7 @@ rejected -> appealed -> approved | upheld
 
 Case 保存资源引用、策略版本、机器判断、人类操作、理由类别和时间线。原始敏感内容只在授权范围内访问，普通用户只看到可行动的结果和申诉入口。
 
-[已实现] `moderation_jobs`、资源审核状态、文本同步规则、消息举报和管理员审计已覆盖部分能力，但还没有统一 case 与 appeal 模型。
+[已实现] `moderation_jobs`、资源审核状态、文本同步规则、消息举报和管理员审计已覆盖部分能力。审核任务与审计事件都有明确 `campus_id`；跨校园后台访问还保存 `scope_reason`。当前仍没有统一 case 与 appeal 模型。
 
 ### AgentRun 与 AgentActionPlan
 
@@ -248,7 +250,7 @@ wanted(active) + offer(active)
 2. repository 查询默认要求 tenant context，不提供无范围的普通用户查询。
 3. 用户之间跨校园联系默认返回不可联系，不泄露对方 membership。
 4. 外键和复合唯一约束防止把 A 校园的 response 关联到 B 校园的 intent。
-5. 管理员跨校园操作必须使用平台角色、强认证、理由和审计事件。
+5. 管理员跨校园操作必须使用平台角色、理由和审计事件；强认证仍是上线前目标。
 6. 向量和全文检索必须先限定 campus，再计算相似度。
 
 ## ID 与兼容策略

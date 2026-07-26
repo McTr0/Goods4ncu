@@ -51,7 +51,7 @@ WebSocket 用于低延迟提示，不是业务事实来源。事件包括 conver
 | 目录 | 当前职责 | 修改原则 |
 | --- | --- | --- |
 | `src/api/` | Axum 路由、请求/响应模型、认证提取和协议适配 | handler 保持薄，不嵌入跨表业务事务 |
-| `src/services/` | 成交、通知、审核、token、后台 worker 和状态转换 | service 是权限和事务的最终边界 |
+| `src/services/` | 成交、通知、审核、ModerationCase、token、后台 worker 和状态转换 | service 是权限和事务的最终边界 |
 | `src/repositories/` | 用户、listing、chat、auth 等 SQL 封装 | 统一 ID/tenant/status 过滤，不让 handler 拼 SQL |
 | `src/agents/` | IntentRouter、市场工具、议价和 Agent 模型 | 工具调用 service，不信任模型提供的身份 |
 | `src/llm/` | Gemini、MiniMax、OpenAI-compatible provider | 隔离 provider 差异、超时和流式实现 |
@@ -60,6 +60,10 @@ WebSocket 用于低延迟提示，不是业务事实来源。事件包括 conver
 | `migrations/` | 向前数据库 schema 和数据迁移 | 已合并迁移不修改，新迁移兼容已有数据 |
 
 `AppState` 当前按 secrets、infrastructure 和 agents 分组，并保留具体 repository。它仍是共享应用状态，不等于领域模块已经完全解耦。
+
+### 审核案件的当前链路
+
+`ModerationCaseService` 是机器拒绝、聊天举报、人工处置和申诉的事务边界。图片 Worker 在完成拒绝时同时更新 `moderation_jobs`、资源审核状态和案件；聊天举报在写入 `chat_message_reports` 的同一事务中创建案件。用户 API 只通过 service 查询本人安全摘要，后台 API 先解析校园管理员作用域，再允许平台管理员处置并写入 `admin_audit_logs`。审核队列的校园过滤不能只放在 Flutter 或 handler 查询参数里。
 
 ## 请求如何穿过各层
 
@@ -75,7 +79,7 @@ POST /api/listings
   -> 返回 listing JSON
 ```
 
-目标多校园设计要求 `TenantContext`，但当前路径还没有完整 campus/membership 边界。修改当前代码时，不要因为目标文档有 campus_id 就伪造当前字段。
+当前已建立 `Campus`/`CampusMembership`、核心资源、通知、审核任务和管理审计的 `campus_id`、同校园写门禁和设备级 active campus session。新 access JWT 带可选 `campus_id`，refresh token 记录同一校园；登录、注册、刷新和切换都会保持二者一致。`CampusService` 在每次受保护操作重新验证 membership，不能只相信 claim。旧 token 缺少 claim 时才回退到首个可用 membership。推荐、公开用户页和通知已跟随活动校园；后台使用独立 `AdminScope` 复核数据库角色，校园运营可读本校，平台管理员跨校园必须给理由并审计。平台管理员写操作还要求 access token 的 `auth_time` 在 10 分钟内；refresh、切换校园和旧 token 会自动回到锁定状态。普通 handler 已收敛为统一 session extractor（`src/api/session.rs`：`Session` 要求有效 token，`VerifiedTenant` 额外要求 verified membership，`OptionalSession` 服务游客可用路径且无效 token 拒绝而非静默降级）。平台管理员已支持 TOTP MFA（确认后 reauth 强制第二因子）；校园运营 MFA 和关键表 RLS 尚未落地，因此不要把当前过渡实现描述成完整多租户。
 
 ## 事务边界
 
@@ -99,9 +103,9 @@ direction=offer  -> price 是出售价，condition 是当前成色
 direction=wanted -> price 是预算上限，condition 是最低可接受成色
 ```
 
-`documents` 保存商品/需求的检索文本和 embedding。相似推荐使用 pgvector 距离；首页 Feed 对登录用户结合收藏和买家成交意向的分类亲和度，再按新鲜度排序。
+`documents` 保存商品/需求的检索文本和 embedding。相似推荐使用 pgvector 距离；首页 Feed 对登录用户结合收藏和买家成交意向的分类亲和度，再按新鲜度排序。游客在 NCU 公开校园内检索，登录用户先从 token 解析活动校园，再在该校园内完成召回和排序。
 
-wanted matches 使用分类、预算、成色和 active 状态等条件，并排除自己的 offer。完整的 campus 过滤、解释字段、用户反馈和多样性控制仍属于目标态。
+wanted matches 使用活动 campus、分类、预算、成色和 active 状态等条件，并排除自己的 offer。设备级 active campus session 已实现；稳定解释字段、用户反馈和多样性控制仍属于目标态。
 
 更完整的对象定义见[信息模型](information-model.md)，目标推荐原则见[产品设计](product-design.md)。
 
@@ -159,8 +163,8 @@ wanted matches 使用分类、预算、成色和 active 状态等条件，并排
 | `chat_*` | 直聊、线程基础、群组/频道、通话、反应、举报和 Secret Chat 原型 |
 | `watchlist` | 收藏关系 |
 | `notifications` | 持久通知事实 |
-| `moderation_jobs` | 异步媒体审核任务 |
-| `admin_audit_logs` | 管理员关键操作审计 |
+| `moderation_jobs` | 带 campus_id 的异步媒体审核任务；状态含 pending/processing/approved/rejected/failed |
+| `admin_audit_logs` | 带 campus_id 和跨校园 scope_reason 的管理员关键操作审计 |
 
 完整关系和目标对象见[信息模型](information-model.md)。
 
@@ -168,7 +172,7 @@ wanted matches 使用分类、预算、成色和 active 状态等条件，并排
 
 | 风险 | 当前表现 | 目标方向 |
 | --- | --- | --- |
-| 单校园假设 | 用户和内容没有完整 tenant context | CampusMembership、campus_id、约束和 RLS |
+| 过渡期首校园默认值 | `0029` 为兼容旧 SQL 保留 NCU default；session、通知、后台和审核已显式带校园 | 第二校园前移除 DB default，把普通 handler 收敛到统一 TenantContext，并评估关键表 RLS |
 | 进程内事件 | 崩溃可能丢失异步动作 | transactional outbox |
 | 单实例 WebSocket | 多副本无法直接 fan-out | Redis pub/sub + HTTP 补偿 |
 | 媒体兼容路径 | URL-first 与 Base64、静态 uploads 并存 | 私有隔离对象存储和 CDN |

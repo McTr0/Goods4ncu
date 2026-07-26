@@ -7,6 +7,8 @@
 | 事实来源 | 当前代码、迁移、设计文档、测试现状和生产架构差距 |
 | 最后核对范围 | 生产安全、offer/wanted、推荐、Agent、多租户、事件、实时通信和灾备 |
 
+就绪状态的权威汇总（逐门槛证据与部署侧待办清单）见[生产就绪评估报告](production-readiness.md)。
+
 这份路线图以“可以安全交付给真实校园用户”为目标，不按功能数量排序。每个阶段都要先满足前置条件和退出门槛，再扩大下一个风险面。
 
 ## 当前基线
@@ -22,14 +24,15 @@
 - 多 LLM provider、RAG、市场工具和回复助手。
 - 线下成交意向、卖家确认和可选自动下架。
 - 同步文本审核、异步媒体审核任务和收款码公开控制。
+- ModerationCase、案件事件、用户申诉和平台管理员复核闭环。
 - Dockerfile、演示 Compose、Prometheus metrics 和结构化日志。
 
 当前能力还不是生产就绪。主要差距：
 
-- 没有完整 CampusMembership 和租户隔离。
-- Agent 写工具没有统一 ActionPlan 确认协议。
-- 进程内事件和 WebSocket 状态不支持可靠多副本。
-- 媒体隔离、审核公开门槛、缩略图和 Base64 退出不完整。
+- CampusMembership、核心资源校园作用域、后台审核队列、跨校园理由审计和统一 session extractor 已落地。15 张租户表已启用 FORCE RLS（`0042`，`app.campus_id` 事务级 GUC 触发，未设置时放行以保持应用层为主边界），隔离与写拒绝有集成测试；应用侧全请求 GUC 注入（fail-closed）与多副本租户验证仍属 Phase 4。
+- Agent 写工具已接入统一 ActionPlan 确认协议（模型只能提出、用户确认才执行，L3 需二次确认）；资源版本快照仍待补。
+- WebSocket 跨副本投递已具备（Redis fan-out，双实例端到端验证）；typing/call signaling 多副本化与压测仍待做。outbox 基础与通知推送已持久化，其余事件消费者仍在进程内。
+- 媒体隔离、审核公开门槛、缩略图和 Base64 退出不完整；案件事实层已具备，但对象存储隔离仍需生产化。
 - API 缺少统一版本和 cursor；[已实现] 未版本化接口已有兼容旧客户端的稳定错误字段、服务端 request ID，以及 listing 发布幂等，其他写接口仍需收敛。
 - 推荐解释、反馈、评估和公平性指标不足。
 - Secret Chat 与服务器可治理通信目标冲突。
@@ -67,15 +70,19 @@
 
 ### 身份与授权
 
-- 新增 Campus 与 CampusMembership，南昌大学作为首个 tenant seed/config。
-- 游客可浏览，注册用户可收藏，verified membership 才能发布、联系、加入空间和参与成交。
-- 校园运营与平台管理员分离，管理员启用 MFA/近期认证目标。
-- 所有普通查询和写入引入 TenantContext，跨校园默认拒绝。
+- [已实现] 新增 Campus 与 CampusMembership，南昌大学作为首个 tenant seed；历史账号兼容回填，新注册 membership 为 pending。
+- [已实现] 学校邮箱 OTP 所有权验证、限流与生产投递配置；更换邮箱后资格回到 pending。
+- [已实现] 关键写接口和 Agent 写工具检查 verified membership；游客可浏览，注册用户可收藏。对象存储 STS 凭证（`GET /api/upload/token`）按写接口收敛，`pending` 成员不再能获取 bucket 写权限。
+- [已实现] 核心资源采用 `campus_id`，普通市场读取限制到首校园；跨校园联系、空间成员、需求响应和成交被 service 与复合外键拒绝。
+- [部分完成] 设备级 active campus session 已通过 JWT claim、refresh token 绑定和 token 轮换实现；平台管理员敏感写操作的 10 分钟密码 step-up 已实现。平台管理员 TOTP MFA 已实现：`POST /api/auth/mfa/totp/setup|confirm` 完成注册（需 admin 角色 + 10 分钟近期认证），确认后 `POST /api/auth/reauth` 除密码外强制要求单次有效动态验证码（RFC 6238，±1 步时钟容差，步进级防重放），已确认因子不可自助更换。资格定期刷新和校园运营 MFA 仍是目标态。
+- [已实现] 校园 `operator/admin` 与平台管理员读写边界已分离：校园角色只读本校后台，平台管理员执行敏感写入；跨校园读取和写入需要理由并审计。
+- [已实现] 登录用户的核心市场、推荐、公开用户页、通知、直聊、空间和 Agent 路径已使用 active campus session；游客仍使用 NCU public default。后台统计/列表、审核任务和审计已按校园过滤。普通用户 handler 已收敛为统一 extractor（`src/api/session.rs` 的 `Session`/`OptionalSession`/`VerifiedTenant`），零散的手写 token 解析已移除；仅 auth 生命周期、admin scope、审核 scope 等 5 个单点 helper 保留，均委托同一解码函数。
 
 ### API 与数据
 
 - [已实现] 当前 `/api/*` 响应提供 `X-Request-ID`，业务错误和框架拒绝提供稳定 `code/message/trace_id`，同时保留旧 `error` 字符串。
 - [已实现] `POST /api/listings` 支持 `Idempotency-Key`，同用户同 key 同内容只创建一次，不同内容返回冲突。
+- [已实现] `POST /api/orders/{id}/confirm` 支持卖家范围内的 `Idempotency-Key`；重复确认不会重复下架，同 key 改变确认参数会安全冲突。
 - [目标态] 定义 `/api/v1` 嵌套错误对象和 cursor pagination，并把幂等扩展到联系、成交和 Agent confirm 等其余关键写接口。
 - 兼容未版本化接口，记录使用量并制定弃用窗口。
 - 继续收敛 TEXT/UUID shadow columns：repository 优先 UUID、旧数据兼容、divergence 为零。
@@ -83,26 +90,30 @@
 
 ### 媒体与审核
 
-- 新上传默认进入私有对象存储隔离区。
+- [已实现] 媒体审核任务继承资源 campus，后台队列按校园和状态读取；Worker 的 processing 状态已纳入数据库约束。
+- [已实现] 媒体隔离已覆盖 API 与对象存储两层。API 层（`0041`）：提交审核与资源置 `pending` 同事务；商品图与头像在所有公开读取路径按 `approved` 门槛输出，pending/rejected/failed 返回 null，所有者仍可见自己的待审图。存储层（`src/services/storage.rs`）：bucket 私有，服务端按 SigV4 生成短期 presigned URL，仅对 approved 媒体下发；`MEDIA_PRIVATE_BUCKET=true` 启用。已对真实 S3 实现（MinIO）验证：匿名直连 403、未上传 key 亦拒绝、presigned 可取、签名篡改与过期均被拒（`tests/storage_acl_integration.rs`，并纳入生产演练 check 2b）。
 - 校验文件头、MIME、尺寸和解码，审核通过后生成公开 URL 和缩略图。
 - Base64 fallback 加指标和 feature flag，不再作为新客户端主路径。
-- 建立 ModerationCase 最小模型，先统一机器决定、人工处理和举报关联。
+- [已实现] `0034_moderation_cases.sql` 建立案件、状态事件和一次性申诉；机器拒绝和聊天举报自动关联，用户可查看安全摘要，平台管理员可审计处置。
 
 ### 运维
 
-- staging/production 配置和密钥完全隔离。
-- 建立备份、PITR、恢复演练、密钥轮换和依赖/镜像扫描。
+- [已实现] 全链路超时边界：HTTP 层 60s 响应超时（504），LLM provider 客户端连接 10s/读 60s 超时，审核与 STS 外呼有各自超时。挂起的 provider 连接不再无限占用请求，熔断器能收到失败信号。
+- [已实现] 进程响应 SIGTERM 并按序排空：readiness 先摘流量，监听器后关闭，在途请求自然结束，Worker 在迭代之间退出而不是被 abort。`/api/livez` 与 `/api/readyz` 分离，liveness 不依赖数据库，避免数据库故障触发全副本重启。排空与超时窗口可配置，Docker/Compose 宽限期已对齐。
+- [部分完成] staging/production 密钥隔离已有工程强制：`docs/.env.staging.example` 与 `docs/.env.production.example` 模板分离，生产模式启动时拒绝含开发标记（test/example/changeme 等）或低熵的 JWT_SECRET（单元测试覆盖）。真实环境的三套独立数据库/Redis/存储/密钥仍需在部署平台落实。
+- [部分完成] 依赖漏洞扫描已落地：`cargo audit` 进入 CI 强制门槛，已修复 aws-lc-sys、rustls-webpki、crossbeam-epoch、protobuf 等 9 个 RUSTSEC 公告，唯一无修复版本的 RUSTSEC-2023-0071（rsa/Marvin）在 `.cargo/audit.toml` 记录了不可达性论证（本服务仅用 HS256）。PITR 恢复演练已可执行且通过（`scripts/backup_pitr_drill.sh`：真实 base backup + WAL 归档 + recovery_target_time，验证灾难行被排除，本机 ~12s）；生产化仍需在真实备份存储上按季度执行并记录 RPO/RTO。镜像扫描和密钥轮换演练仍待建立。
 - 定义核心 SLO dashboard、告警 owner 和事故 runbook。
 - 数据库 migration 在空库和升级库都验证。
 
 ### 退出门槛
 
-- 未认证用户从后端无法发布和联系，不能只靠隐藏 UI。
-- 租户隔离集成测试证明 A 校园无法读取/关联 B 校园数据。
+- [已实现] 未认证用户从后端无法发布、联系、响应需求、加入空间或创建成交意向，不只依赖隐藏 UI。
+- [部分完成] 集成测试已证明 NCU 公开市场无法读取 B 校园 listing、跨校园用户不能创建直聊、子业务事实不能关联另一校园 listing；active session 测试覆盖 token claim、refresh 绑定、切换轮换和旧 access 撤销；推荐、公开主页、通知、校园后台、审核队列和案件/申诉的双校园隔离也有回归覆盖。近期认证测试证明旧/刷新 token 不能执行后台敏感写入。统一 extractor 已落地（`src/api/session.rs`，迁移由全量回归套件验证）。平台管理员 TOTP MFA 已落地并有注册/强制/防重放回归覆盖（`tests/admin_auth_regression.rs`）。RLS 策略已安装并在非超级用户角色下验证隔离与写拒绝（`tests/rls_integration.rs`）；生产应用角色绝不可为 superuser（superuser 完全绕过 RLS）。尚需补充浏览器多运营角色验收矩阵。
 - 重复写请求不会创建重复 listing、conversation、message 或 DealRecord。
-- 未审核媒体不会公开原始对象，审核失败和 provider 故障有安全降级。
-- 恢复演练达到 RPO 15 分钟、RTO 2 小时目标或记录批准的差距。
+- [部分完成] API 层已保证未审核媒体不通过任何公开接口返回（回归覆盖 pending/rejected/approved 三态与所有者例外）；对象存储直链的私有化仍需 bucket ACL。审核失败和 provider 故障有安全降级（failed 状态同样不公开）。
+- [部分完成] PITR 恢复流程已脚本化并本地演练通过（含验收断言）；对生产级数据量与真实备份存储的 RPO 15 分钟 / RTO 2 小时验证仍需生产环境执行。
 - 普通 API、Feed、消息和 Agent 指标可观察并有告警。
+- [已实现] SIGTERM 后 readiness 立即失败、liveness 保持通过、在途请求不被截断、Worker 不在事务中途退出；`tests/lifecycle_probes_integration.rs` 覆盖探针状态机。滚动发布的多副本验证仍属 Phase 4。
 
 ## Phase 2：可信智能信息流
 
@@ -112,16 +123,16 @@
 
 ### 信息生命周期
 
-- 明确 `IntentItem kind=goods`，完成 wanted fulfilled/reopen 状态和相应 API/UI。
-- Response 支持 accepted/dismissed/withdrawn 用户动作和通知。
-- wanted 完成后停止新匹配，已有 Thread、Response 和 DealRecord 保留。
+- [已实现] wanted fulfilled/reopen：`POST /api/listings/{id}/fulfill` 由所有者把收物需求置为 `fulfilled`（条件状态转移，`0040` 同时为 `inventory.status` 建立 CHECK 并归一化旧 `takedown` 值）；`relist` 可重新开启。移动端详情页提供“标记已完成/重新开启”。
+- [已实现] Response 用户动作：requester 可 accept/dismiss，responder 可 withdraw（`/api/wanted-responses/{id}/*`），全部从 `pending` 单赢转移并通知对方；`GET /api/wanted-responses?role=` 按角色列出。
+- [已实现] wanted 完成后停止新匹配（feed/匹配/响应均按 `active` 过滤），已有 Thread、Response 和 DealRecord 保留并有回归覆盖；pending 响应者会收到完成通知。
 - 品牌“不限”改为结构化空值/偏好，不把展示词当数据事实。
 
 ### 召回与排序
 
 - 两阶段推荐：硬约束/召回，再排序/多样性。
 - 所有检索先过滤 campus、status、direction 和 visibility。
-- 返回稳定 `rank_reason`、`match_summary`、排序版本和来源类型。
+- [部分完成] Feed/相似接口每项返回 `rank_reason`（用户可读原因，亲和命中会点名分类）与 `source`（`recency|category_affinity|vector_similarity`），响应携带 `ranking_version`（当前 `2026.07-affinity-v1`）；移动端卡片展示原因。`match_summary` 与反馈入口仍待补。
 - 增加隐藏、减少此类、清除个性化信号和非个性化排序入口。
 - 防止重复条目、单一类别垄断和自己内容反复出现。
 
@@ -134,7 +145,7 @@
 
 ### 退出门槛
 
-- wanted/offer 的创建、匹配、响应、沟通、完成和重新开启端到端通过。
+- [部分完成] wanted/offer 的创建、匹配、响应（含 accept/dismiss/withdraw）、完成和重新开启已有后端端到端回归；浏览器全旅程验收仍待做。
 - 硬约束违反率为零；没有 embedding 时关键词和条件 fallback 可用。
 - 每条个性化推荐有用户可理解原因和反馈入口。
 - 新排序在质量、信任和公平 guardrail 上不劣于基线。
@@ -148,10 +159,9 @@
 
 ### ActionPlan
 
-- 为 L2/L3 动作新增 AgentActionPlan 和短期 confirmation token。
-- 发布、更新、联系和推荐使用一次确认；报价、议价接受、成交确认和隐私公开使用二次确认。
-- 计划保存输入快照、资源版本、风险文案版本、过期时间和幂等键。
-- 执行时重新校验 membership、tenant、owner、状态和价格。
+- [已实现] `0038_agent_action_plans.sql` + `AgentPlanService`：五个写工具（create/update/delete listing、purchase、negotiate）不再直接执行，而是生成 pending 计划（输入快照、L2/L3 风险级、10 分钟过期、单次 confirmation token）。token 只经认证的 `/api/agent/plans` 返回，绝不进入模型可见文本——prompt 注入无法确认模型自己提出的计划。
+- [已实现] 确认时通过条件状态转移（pending→executing）保证并发确认只执行一次；重复确认幂等返回原结果；执行体重新校验 membership、owner、商品状态和价格区间，世界状态变化后的确认安全失败。移动端小帮页内提供待确认操作卡片（确认/取消）。
+- [已实现] L3 二次确认：purchase/negotiate 计划第一次确认仅置为 confirmed_once 并返回 `needs_second_confirmation`，第二次确认才执行；两步都是条件状态转移，并发无法跳步。移动端弹出高风险二次确认对话框。[目标态] 资源版本快照比对和风险文案版本化。
 
 ### 工具收敛
 
@@ -162,15 +172,15 @@
 
 ### 安全与质量
 
-- 建立 prompt injection、间接注入、跨用户/跨校园、虚假承诺和参数污染测试集。
+- [部分完成] 工具层滥用测试集已落地（`tests/agent_injection_regression.rs`）：跨校园购买/议价、参数污染（空/超长标题、越界成色、非正/天价价格、越界出价）、自买自卖、未认证用户提案全部被拒并有零副作用断言；确认 token 与模型文本隔离、跨用户确认拒绝在计划测试中覆盖。execute 体已补齐与 HTTP 相同的输入校验，工具路径不再是校验旁路。针对真实 LLM 的间接注入与虚假承诺评估仍需线上评测集。
 - AgentRun 记录路由、检索、工具、provider、版本、延迟和结果类别，敏感正文脱敏。
 - 无 LLM 时搜索、表单、聊天和成交记录仍可用。
 - Agent 变更采用 feature flag 和 canary，越权执行有立即 kill switch。
 
 ### 退出门槛
 
-- 所有 L2/L3 工具都经过确认或在生产禁用。
-- 重复 confirm 只产生一次业务结果，过期/版本冲突安全失败。
+- [已实现] 所有 L2/L3 写工具经过 ActionPlan 确认；无确认不执行有回归覆盖（`tests/agent_action_plan_integration.rs`）。
+- [已实现] 重复 confirm 只产生一次业务结果（幂等返回原结果），过期/取消/跨用户/错误 token 安全失败，确认后状态变化（如商品已售出）不产生业务写入；L3 单次确认不产生任何写入有回归覆盖。
 - 越权、跨校园和未确认执行测试为零容忍。
 - 离线评估覆盖中文口语、错别字、歧义、无结果、provider 和工具故障。
 - Agent 首 token p95 小于 3 秒，失败时用户输入和手工路径保留。
@@ -183,33 +193,33 @@
 
 ### 持久事件
 
-- 业务事务同时写 transactional outbox。
-- 通知、embedding、审核、搜索投影和 WebSocket fan-out 迁入幂等 worker。
-- Worker 支持 lease、指数退避、dead-letter、lag metrics 和受审计重放。
-- 进程内 mpsc 只保留为优化，不作为唯一事件通道。
+- [部分完成] transactional outbox 基础设施已落地（`0037_outbox_events.sql` + `src/services/outbox.rs`）：业务事务内 `enqueue_in_tx`，worker 支持 lease（`FOR UPDATE SKIP LOCKED` + 到期回收）、指数退避、dead-letter 和 `replay_dead_lettered`；原子入队、至少一次投递、租约互斥和重放均有集成测试（`tests/outbox_integration.rs`）。
+- [部分完成] 通知推送已迁入 outbox：`NotificationService::create` 与通知行同事务入队 `notification.push`，由 worker 投递 WS，进程崩溃不再丢推送。embedding、审核投影和其余 fan-out 仍待迁移；多副本时 WS 投递还需 Redis pub/sub 把消息路由到持有连接的实例。
+- [目标态] lag metrics 告警与 dead-letter 的管理端受审计重放接口。
+- 进程内 mpsc 只保留为演示/优化路径，不再承载通知投递。
 
 ### 多副本实时通信
 
-- Redis 用于分布式限流、WebSocket pub/sub、typing 和短期 call signaling。
-- 消息和通知先持久化，socket 只做实时投递。
+- [部分完成] Redis WebSocket pub/sub fan-out 已实现（`redis` feature 默认开启，设置 `REDIS_URL` 即激活）：所有 `broadcast_to_user` 经 Redis 频道路由，每个副本向自己持有的 socket 投递恰好一次；发布失败降级为本地投递。分布式限流在设置 `REDIS_URL` 时启用（Redis 故障降级为单机限流而不是拒绝启动）。跨进程投递已用双实例端到端测试验证：两个真实服务进程共享 Redis+Postgres，A 实例上的真实 WebSocket 客户端收到来自 A 进程之外发布的消息（`tests/ws_fanout_integration.rs`，需 `REDIS_TEST_URL`/`FANOUT_E2E`）。typing 与 call signaling 的多副本化仍待做。
+- 消息和通知先持久化，socket 只做实时投递（outbox 已保证通知推送持久）。
 - 断线和跨实例丢事件通过 HTTP cursor 补偿。
 - TURN、权限、弱网和 signaling 多副本完成后，通话才从实验进入稳定。
 
 ### 校园运营
 
-- 校园级邮箱域名、分类、审核策略、运营角色和开关可配置。
+- [部分完成] 校园级邮箱域名已可配置并驱动注册路由：`POST /api/admin/campuses` 由平台管理员创建校园（默认 inactive、审计），`activate/deactivate` 独立审计切换；注册与改邮箱按域名匹配活动校园并落入对应 pending membership，NCU 硬编码已移除。校园级分类/审核策略/运营角色配置仍待做。
 - 校园运营只能访问本 tenant，跨校园由平台管理员处理并审计。
-- 建立新校园 onboarding、数据检查、策略批准、灰度和退出手册。
+- [部分完成] 新校园 onboarding 全旅程已可执行并有端到端回归（`tests/admin_auth_regression.rs::second_campus_onboarding_journey_end_to_end`）：创建（暗启动）→ 激活 → 校园邮箱注册 → OTP 认证 → 本校发布 → NCU 公开面零泄露 → 停用即关闭写入。同一流程已在本机**持久部署**上实跑并可幂等复验（`scripts/deploy_local.sh`：两个已实例化校园、各自私有 bucket、跨校园隔离经 HTTP API 验证）。数据检查/策略批准/退出手册仍属运营文档。
 
 ### 容量与灾备
 
-- 以 10 万注册、1 万日活、数千 socket、数百峰值 RPS 压测。
+- [部分完成] 容量验证已在 10 万注册量级执行：`scripts/capacity_drill.sh` 以 set-based SQL 播种 10 万用户+资格、6 万双校园商品、10 万通知、3 万收藏（18 秒），对该数据量启动真实服务并跑 SLO 冒烟——列表 p95 57ms（SLO 300ms）、Feed p95 15ms（SLO 500ms）全部通过，证明查询路径与索引在目标注册规模下成立。数百 RPS 持续压测与真实用户行为分布仍需生产硬件。
 - 验证数据库连接、锁、向量查询、outbox lag、Redis 和对象存储容量。
-- 多副本滚动发布、数据库升级、Redis 故障、provider 故障和区域恢复演练。
+- [部分完成] 多副本滚动发布已本机演练通过（`scripts/production_rehearsal.sh`：双生产模式副本、滚动重启零失败、空库引导、SLO 冒烟、PITR，一次通过；并借此发现并修复了双副本并发建 pgvector 扩展的引导竞态）。数据库升级、Redis 故障注入、provider 故障与区域恢复演练仍待生产环境执行。
 
 ### 退出门槛
 
-- 第二校园完成接入，租户隔离测试和运营权限审计通过。
+- [部分完成] 第二校园接入路径已实现并端到端验证（创建/激活/注册路由/认证/发布/隔离/停用，全程审计）。基础设施级租户隔离也已用真实服务验证：两套独立 Postgres 集群互不可见、每校园独立 bucket + 受限 IAM 凭据（跨租户读与跨租户 presign 均被拒、匿名 403），见 `scripts/tenant_isolation_drill.sh`。真实第二校园的生产接入与其运营验收仍需实际执行。
 - 任一 API replica 下线不丢持久消息、通知或 outbox event。
 - 在线消息持久化后投递 p95 小于 1 秒，断线补偿无重复用户可见消息。
 - 月度 99.9% SLO 有 dashboard、错误预算和处理流程。
@@ -233,10 +243,10 @@
 | TEXT/UUID 并存 | Phase 1 | 新写 UUID、旧数据兼容、核心 join 和 divergence 检查通过 |
 | Base64 fallback | Phase 1 | 新客户端零使用、指标验证后再迁移/删除 |
 | user_chat 大模块 | Phase 0–3 | 行为测试后按消息、媒体、状态和空间拆分 |
-| Secret Chat | Phase 1 | 停止宣传/新建，历史兼容和迁移说明完成 |
-| 进程内事件 | Phase 4 | 关键消费者全部由 outbox 驱动 |
-| 单实例 WebSocket | Phase 4 | Redis fan-out 和断线补偿通过压测 |
-| Agent 直接写工具 | Phase 3 | 所有 L2/L3 使用 ActionPlan 或生产禁用 |
+| Secret Chat | Phase 1 | [已实现] 新建默认 403（`SECRET_CHAT_NEW_SESSIONS_ENABLED` 仅迁移窗口可开），移动端入口已移除，历史会话可读有回归覆盖 |
+| 进程内事件 | Phase 4 | [部分完成] outbox 基础设施与通知推送已迁移并有回归覆盖；embedding/搜索投影等其余消费者仍待迁移 |
+| 单实例 WebSocket | Phase 4 | [部分完成] Redis fan-out 已实现并通过双实例端到端测试；断线补偿依赖既有 HTTP 拉取，压测仍待做 |
+| Agent 直接写工具 | Phase 3 | [已实现] 五个 L2/L3 写工具全部经 ActionPlan 确认执行，工具级与计划级回归覆盖 |
 
 ## 路线图维护规则
 

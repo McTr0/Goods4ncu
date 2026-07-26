@@ -19,6 +19,8 @@
 | `TEST_DATABASE_URL` | 测试需要 | 数据库测试连接串，必须指向安全测试库。 |
 | `JWT_SECRET` | 是 | JWT 签名密钥，至少 32 字符。 |
 | `JWT_SECRET_OLD` | 可选 | JWT 密钥轮换期间用于兼容旧 token。 |
+| `CAMPUS_VERIFICATION_DELIVERY_URL` | 生产必需 | 校园邮箱验证码投递 webhook；开发省略时验证码只写本地后端日志。 |
+| `CAMPUS_VERIFICATION_DELIVERY_TOKEN` | 生产必需 | 调用验证码投递 webhook 的 bearer token。 |
 | `GEMINI_API_KEY` | 条件必需 | `gemini` provider 必需；其它 chat provider 当前也需要它做 embedding/RAG。 |
 | `MINIMAX_API_KEY` | 条件必需 | 使用 MiniMax provider 时需要。 |
 | `MINIMAX_API_BASE_URL` | 可选 | MiniMax 自定义 base URL。 |
@@ -30,10 +32,13 @@
 | `CORS_ORIGINS` | 生产必需 | 逗号分隔允许来源；生产环境不允许空配置或 `*`。 |
 | `APP_ENV`、`ENVIRONMENT`、`RUST_ENV` | 可选 | 任一值为 `production` 或 `prod` 时启用生产 CORS 防护。 |
 | `SERVER_HOST`、`SERVER_PORT` | 可选 | 覆盖后端监听地址和端口。 |
-| `REDIS_URL` | 可选 | 分布式限流后端；不设置时使用本地限流。 |
+| `SHUTDOWN_DRAIN_SECS` | 可选 | 收到 SIGTERM 后继续接受流量的排空秒数，默认 5，期间 `/api/readyz` 已返回 503。 |
+| `SHUTDOWN_TIMEOUT_SECS` | 可选 | 关闭监听后等待在途请求和 Worker 的秒数，默认 25。 |
+| `REDIS_URL` | 可选 | 设置后启用分布式限流与 WebSocket 跨副本 fan-out；未设置时单机限流、本地投递。Redis 故障时限流降级单机、fan-out 降级本地，不影响启动。 |
 | `RATE_LIMIT_MAX_REQUESTS` | 可选 | 每窗口最大请求数。 |
 | `RATE_LIMIT_WINDOW_SECS` | 可选 | 限流窗口秒数。 |
 | `BLOCKED_KEYWORDS` | 可选 | 逗号分隔本地策略关键词。内置规则已覆盖违禁交易、低俗成人、博彩、诈骗、暴力风险、骚扰、隐私泄露、联系方式和外链。 |
+| `SECRET_CHAT_NEW_SESSIONS_ENABLED` | 可选 | Secret Chat 已弃用；默认 `false`，新建会话返回 403。仅迁移窗口可临时置 `true`，历史会话始终可读。 |
 | `MODERATION_IMAGE_ENABLED` | 可选 | 是否启用图片审核。 |
 | `MODERATION_IMAGE_API_URL` | 图片审核需要 | 图片审核 API URL。 |
 | `MODERATION_IMAGE_API_KEY` | 图片审核需要 | 图片审核 API key。 |
@@ -41,7 +46,9 @@
 | `OSS_ROLE_ARN`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET` | 上传需要 | 获取 OSS STS 临时凭证需要的配置。 |
 | `CONFIG_FILE` | 可选 | 指定 TOML 配置文件路径。 |
 
-如果启动时报缺失变量，优先检查 `.env` 是否被加载、变量名是否拼写正确、shell 当前目录是否是项目根目录。
+如果启动时报缺失变量，优先检查 `.env` 是否被加载、变量名是否拼写正确、shell 当前目录是否是项目根目录。生产模式（`APP_ENV=production`）还会拒绝含开发标记或低熵的 `JWT_SECRET`；staging/production 模板见 [.env.staging.example](.env.staging.example) 与 [.env.production.example](.env.production.example)。
+
+验证码投递 webhook 接收 `to`、`template=campus_email_verification`、`code` 和 `expires_in_seconds`。生产模式下 URL 或 token 任一缺失都会 fail fast；投递返回非 2xx 时 challenge 标记为 `failed`，接口不会假装发送成功。日志和第三方投递系统都应把验证码按短期敏感凭据处理，不进入长期检索、分析或告警正文。
 
 ## Docker Compose 本地栈
 
@@ -106,6 +113,118 @@ CORS_ORIGINS=https://your-app.example.com
 
 多个来源用逗号分隔。不要在生产使用 `*`。
 
+## 依赖漏洞扫描
+
+[已实现] CI 的 `audit` job 对 `Cargo.lock` 运行 `cargo audit`，任何未在 `.cargo/audit.toml` 中显式论证的公告都会使构建失败。规则：
+
+- ignore 条目必须写清不可达性论证，不接受“暂时忽略”。当前唯一条目是 RUSTSEC-2023-0071（`rsa` crate 的 Marvin 时序侧信道）：`jsonwebtoken` 只以 HS256 HMAC 使用（`from_secret` + `Validation::default()`），RSA 路径不可达。若未来引入非对称 JWT 签名，必须先删除该条目。
+- unmaintained/unsound 类公告保持为 warning 可见，不加入 ignore，有修复版本时跟进升级。
+- 升级依赖后本地先跑 `cargo audit` 与全量测试再提交；`prometheus` 已关闭默认 protobuf feature（只用文本格式），不要在升级时恢复默认 features。
+
+## 健康探针与优雅停机
+
+[已实现] 后端区分存活与就绪，并在 SIGTERM 后按顺序排空。
+
+| 接口 | 用途 | 检查内容 | 排空期间 |
+| --- | --- | --- | --- |
+| `GET /api/livez` | liveness | 只确认进程在运行，不查数据库 | 仍返回 200 |
+| `GET /api/readyz` | readiness | 排空状态 + 数据库连通性 | 返回 503 `service_unavailable` |
+| `GET /api/health` | 旧客户端兼容别名 | 与 `readyz` 相同 | 返回 503 |
+
+liveness 故意不查数据库。如果 liveness 依赖数据库，一次数据库故障会让编排器同时重启所有副本，删掉恢复所需的容量，把局部故障放大成全局故障。依赖健康属于 readiness：它摘流量但不杀进程。
+
+三个探针都在限流白名单里。编排器的探针频率远高于普通客户端，被限流会把健康实例误报为故障并触发重启循环。
+
+停机顺序（SIGTERM 与 SIGINT 走同一条路径）：
+
+```text
+1. 收到信号 → 置为 draining，/api/readyz 立即返回 503
+2. 等待 SHUTDOWN_DRAIN_SECS（默认 5s）→ 负载均衡器摘除本实例
+   期间监听端口仍然接受并完成请求，/api/livez 保持 200
+3. 关闭监听 → 等待在途请求自然结束
+4. Worker 在两次扫描之间退出，不会中断进行中的事务
+5. 关闭数据库连接池 → 进程退出
+   整个 3–5 步受 SHUTDOWN_TIMEOUT_SECS（默认 25s）约束
+```
+
+编排器的终止宽限期必须大于 `SHUTDOWN_DRAIN_SECS + SHUTDOWN_TIMEOUT_SECS`（默认 30s），否则进程会在排空中途被 SIGKILL，优雅停机等于没做。Compose 默认宽限期只有 10s，仓库里的 `docker-compose.yml` 已显式设置 `stop_grace_period: 40s`；Kubernetes 对应 `terminationGracePeriodSeconds: 40`。
+
+Worker 不再被 `abort()`。HITL 过期、订单、媒体审核、token 清理和会话过期都在两次迭代之间检查停机标志，因此不会出现事务提交到一半被切断，也不会有媒体审核任务卡在 `processing`。
+
+验证方式：
+
+```bash
+SERVER_PORT=3999 SHUTDOWN_DRAIN_SECS=3 cargo run &
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3999/api/readyz   # 200
+kill -TERM <pid>
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3999/api/livez    # 200，排空中仍存活
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3999/api/readyz   # 503，已摘流量
+```
+
+回归覆盖在 `tests/lifecycle_probes_integration.rs` 和 `src/lifecycle.rs` 单元测试。
+
+## 生产演练（一键）
+
+[已实现] `scripts/production_rehearsal.sh` 在本机以一次通过验证生产拓扑的关键运维性质：
+
+1. 生产模式守卫真实生效（开发级 JWT_SECRET 被拒启动；CORS 与验证码投递 webhook 必须配置）。
+2. 双副本对空库完成生产模式引导（迁移、pgvector 扩展带 advisory lock 串行化——该演练发现并修复了双副本并发 `CREATE EXTENSION` 的真实竞态）。
+3. Redis 分布式限流与 WS fan-out 激活确认。
+4. SLO 负载冒烟（`scripts/load_smoke.sh`，普通 API p95<300ms、Feed<500ms）。
+5. 滚动重启：B 副本排空并回归期间，A 副本承载负载零失败请求。
+6. PITR 恢复演练（`scripts/backup_pitr_drill.sh`）。
+7. 双副本按序排空。
+
+全部资源（演练库、独立 Redis、mock webhook）为一次性并自动清理。生产部署把同一清单跑在真实基础设施上即可作为发布验收。
+
+## 容量与端口注意事项
+
+[已实现] `scripts/capacity_drill.sh` 在一次性数据库播种 10 万注册规模（用户/资格/双校园商品/通知/收藏），对真实服务执行 SLO 冒烟；本机通过（列表 p95 57ms、Feed 15ms）。索引回归应在提交涉及核心查询的迁移后重跑本演练。
+
+本机演练排错经验（已写入脚本防护）：桌面应用可能占用 127.0.0.1 高位端口（实测 QQ 占用 4301——服务绑 0.0.0.0 成功但回环流量被更精确的绑定截走）；HTTP(S) 代理环境变量会把回环请求送进代理并以 502/000 假装应用故障。所有演练脚本已强制 NO_PROXY 并预检端口。
+
+## 数据库角色与 pgvector（上线前必读）
+
+[已实现] 应用角色**必须不是 superuser**：superuser 会完全绕过 RLS，租户策略（`0042`）会静默失效——应用看起来正常，隔离却是关的。但创建扩展需要 superuser，因此扩展由管理员一次性安装，应用永不需要该权限：
+
+```bash
+DB_NAME=goods4ncu APP_PASSWORD=<secret> ./scripts/provision_app_role.sh
+```
+
+该脚本幂等，创建 NOSUPERUSER 应用角色与其拥有的数据库、安装 pgvector，并**校验**这两条不变量后才返回。若扩展缺失且角色无权创建，应用启动会给出可直接执行的修复命令而不是含糊的权限错误。
+
+本机验证记录：以 superuser 运行时 RLS 无效（armed context 仍可见全部行）；换为 NOSUPERUSER 角色后同一查询可见 0 行，且应用正常启动与服务。生产演练 check 2c 每次都会复验这一点。
+
+## 本机持久部署（两校园实例）
+
+[已实现] `scripts/deploy_local.sh` 在本机拉起一个**常驻**部署，而非一次性演练：状态持久化在 `~/.goods4ncu-deploy`（密钥一次生成后复用），使用 NOSUPERUSER 数据库角色、常驻 Redis、常驻 MinIO 并为每个校园建立私有 bucket 与受限凭据，启动两个生产模式副本；随后通过 admin API 创建并激活第二校园、按邮箱域注册并认证两校成员、各自发布商品，并**通过 HTTP API** 验证跨校园隔离（成员只见本校、公开面不泄露、校园凭据不能写他校 bucket）。
+
+```bash
+./scripts/deploy_local.sh            # 启动/复验（幂等）
+./scripts/deploy_local.sh --stop     # 停进程，保留数据
+./scripts/deploy_local.sh --destroy  # 连数据一起清除
+```
+
+上线时把数据库/Redis/对象存储端点换成生产实例即为同一套流程；该脚本的校园创建与成员认证段可直接作为新校园接入手册。
+
+## 多租户隔离演练
+
+[已实现] `scripts/tenant_isolation_drill.sh` 用真实服务验证生产的隔离模型，而不是共享单实例：两套**独立** PostgreSQL 集群（各自数据目录/端口）代表 staging 与 production，MinIO 中每校园独立 bucket 并配受限 IAM 凭据。断言：跨集群不可见、应用只写自己的集群、校园凭据可读本校 bucket、不可读他校 bucket、以他校对象签发 presign 被拒、两个 bucket 均拒绝匿名读。
+
+上线时把端点与凭据换成生产实例重跑该脚本即为隔离验收。两条纪律不变：应用角色非 superuser（否则绕过 RLS）；每校园/每环境使用各自的 bucket 与受限凭据，不共享根凭据。
+
+## Transactional Outbox
+
+[已实现] `outbox_events` 表承载“业务事务内入队、worker 异步投递”的持久事件。当前唯一 topic 是 `notification.push`：通知行和推送事件同事务提交，outbox worker（500ms 轮询）投递 WebSocket，因此进程崩溃不会丢已提交通知的推送。
+
+排错要点：
+
+- 投递语义是至少一次；消费者必须幂等（通知按 id 去重，重复投递无害）。
+- `attempts/last_error/available_at` 显示重试与退避（2^n 秒，封顶 5 分钟，默认 8 次）。
+- 超限进入 `dead_lettered_at`，worker 不再认领；修复根因后用 `services::outbox::replay_dead_lettered`（或等价 SQL 置空 `dead_lettered_at` 并重置 `attempts`）受控重放。
+- `locked_by/locked_until` 是 60 秒租约；worker 崩溃后租约到期事件自动可被重新认领。堆积排查先看最老未处理事件的 `available_at` 和 `last_error`。
+- 多副本注意：WS 投递只到达当前实例持有的连接；接入第二副本前必须先落地 Redis pub/sub 路由（Phase 4）。
+
 ## Metrics 和结构化日志
 
 `GET /api/metrics` 暴露 Prometheus 文本格式指标。当前指标覆盖请求计数和延迟、限流拒绝、聊天消息、媒体消息、LLM 调用和错误、WebSocket dropped/pruned、订单创建和状态变化等行为。指标名称以 `src/api/metrics.rs` 中 `MetricsService` 为准。
@@ -116,19 +235,26 @@ CORS_ORIGINS=https://your-app.example.com
 
 匿名限流默认使用 TCP peer IP；服务必须通过 `into_make_service_with_connect_info` 启动才能向中间件提供可信地址。代理部署时仍以网关层限流和可信代理配置为主，不要直接信任客户端提交的 `X-Forwarded-For`。
 
+[已实现] 请求与外呼超时边界：
+
+- HTTP 层有 60 秒全局响应超时，超时返回 `504`（不是 408，避免客户端盲目重试可能已提交的写入）。该超时只约束“产生响应”的时间，不约束响应体：SSE 流式聊天和 WebSocket 会话先返回响应再持续输出，不受影响。
+- 所有 LLM provider 的 HTTP 客户端统一经 `llm_http_client()` 构建：连接超时 10 秒、单次读超时 60 秒。`reqwest` 默认没有任何超时；没有这层边界时，provider 挂起会无限占住用户请求，且熔断器永远收不到失败信号。用整请求超时是错的——带工具的长流式补全会被误杀，读超时只杀停滞的流。
+- 图片审核外呼 8 秒超时，STS 换取凭证 10 秒超时。
+
 ## 数据库表地图
 
 | 表 | 排错时常看什么 |
 | --- | --- |
 | `users` | 用户 status、role、email、password_hash 是否正常。 |
-| `refresh_tokens` | refresh token 是否过期、revoked_at 是否被设置。 |
+| `refresh_tokens` | refresh token 是否过期、revoked_at 是否被设置、campus_id 是否与 access claim 和用户 membership 一致。 |
 | `revoked_access_tokens` | logout 或管理员撤销后的 JTI 是否存在。 |
-| `inventory` | 商品 status、owner_id、价格、分类、更新时间；重复发布时检查 `idempotency_key/idempotency_hash`。 |
+| `campuses` / `campus_memberships` | Campus status、用户资格、verification_method、verified_at；pending/suspended 不能执行受保护写操作。 |
+| `inventory` | 商品 campus_id、status、owner_id、价格、分类、更新时间；重复发布时检查 `idempotency_key/idempotency_hash`。 |
 | `documents` | RAG 文档是否存在，embedding 是否非空，维度是否匹配。 |
-| `wanted_responses` | wanted/offer/responder/requester 是否一致，pending 是否重复。 |
-| `orders` | 状态、buyer/seller、listing、金额和时间戳。 |
-| `hitl_requests` | pending/countered/expired 状态、counter_price、expires_at。 |
-| `chat_conversations` | mode、state、initiator/recipient、listing、subject、过期时间、close_reason。 |
+| `wanted_responses` | campus_id 与 wanted/offer 是否一致，responder/requester 是否同校园，pending 是否重复。 |
+| `orders` | campus_id、状态、buyer/seller、listing、金额和时间戳。 |
+| `hitl_requests` | campus_id、pending/countered/expired 状态、counter_price、expires_at。 |
+| `chat_conversations` | campus_id、mode、state、initiator/recipient、listing、subject、过期时间、close_reason。 |
 | `chat_conversation_members` | 每个成员的 unread_count、last_read_message_id、archived_at。 |
 | `chat_conversation_events` | 握手、ACK、关闭、过期等状态事件时间线。 |
 | `chat_blocks` | blocker/blocked 屏蔽关系。 |
@@ -136,11 +262,18 @@ CORS_ORIGINS=https://your-app.example.com
 | `chat_spaces` 及成员/消息表 | group/channel、owner、成员角色、发言权限和更新时间。 |
 | `chat_secret_sessions` 及消息表 | [实验中][待弃用] 密文、参与者、过期时间和兼容读取。 |
 | `watchlist` | 用户和商品关系，是否收藏自己的商品。 |
-| `notifications` | unread、event_type、related_order/listing、是否已推送但未读。 |
-| `admin_audit_logs` | 管理员操作是否有审计记录。 |
-| `moderation_jobs` | 图片审核任务是否 pending、failed 或 completed。 |
+| `notifications` | `campus_id`、unread、event_type、related_order/listing、是否已推送但未读。 |
+| `admin_audit_logs` | campus_id、管理员操作、target、scope_reason；跨校园读取和写入是否都有审计。 |
+| `moderation_jobs` | campus_id、资源归属，以及 pending、processing、approved、rejected、failed 状态。 |
+| `moderation_cases` | campus_id、subject、来源、状态、公开原因、resolution 和 pending appeal；普通用户接口不得返回 internal_details。 |
+| `moderation_case_events` | 案件创建、复核、处置、恢复和申诉状态转换的时间线。 |
+| `moderation_appeals` | 每个案件每个当事人一次申诉、独立复核者、决定和公开说明。 |
 
-[目标态] 新增 `campuses`、`campus_memberships`、`moderation_cases`、`agent_runs`、`agent_action_plans` 和 `outbox_events` 后，应同步更新本表与对应 runbook。
+[已实现] `0029_core_tenant_scope.sql` 给核心市场与通信事实增加 `campus_id` 和关联约束，`0031_active_campus_sessions.sql` 给 refresh session 增加活动校园并回填旧会话，`0032_notification_tenant_scope.sql` 给通知建立校园归属，`0033_admin_moderation_tenant_scope.sql` 给管理审计和媒体审核任务建立校园归属并修正 Worker 的 `processing` 状态约束。当前 NCU default 仅为单校园兼容；第二校园接入前仍必须移除数据库默认值、完成空库/升级库隔离演练并评估 RLS。
+
+[已实现] `0030_normalize_money_bigint.sql` 修复历史升级库可能遗留的 `INT4` 金额列，将商品价格、成交价和议价金额统一为 `BIGINT`。若空库测试正常但现有环境列表接口出现金额 decode 错误，先检查 migration 是否已经执行到 0030，不要在应用层把金额退回 32 位。
+
+[已实现] `0034_moderation_cases.sql` 新增 `moderation_cases`、`moderation_case_events`、`moderation_appeals`，并把媒体拒绝任务和聊天举报回填为案件。`0037_outbox_events.sql` 已新增 `outbox_events`（见 Transactional Outbox 一节）；`agent_runs` 和 `agent_action_plans` 仍是目标态。
 
 ## 内容审核策略
 
@@ -148,7 +281,7 @@ CORS_ORIGINS=https://your-app.example.com
 
 本地政策词、校内临时专项词或法务要求的词不要写死进源码，优先通过 `BLOCKED_KEYWORDS` 或 `[moderation].blocked_keywords` 配置。返回给用户的错误只说明类别，不暴露具体命中词，避免教用户绕过。
 
-图片审核仍是异步任务：业务接口保存媒体 URL 后写入 `moderation_jobs`，后台 Worker 调外部图片审核 API 并回写资源状态。生产环境应配置 `MODERATION_IMAGE_API_URL` 和 `MODERATION_IMAGE_API_KEY`，否则只能完成文本审核。
+图片审核仍是异步任务：业务接口保存媒体 URL 后写入 `moderation_jobs`，并从 listing、conversation 或用户 session 继承校园，客户端不能提交校园。后台 Worker 调外部图片审核 API 并回写资源状态；拒绝结果与资源状态、ModerationCase 在同一事务中提交。生产环境应配置 `MODERATION_IMAGE_API_URL` 和 `MODERATION_IMAGE_API_KEY`，否则只能完成文本审核。校园运营可以在 `GET /api/admin/moderation/jobs?status=pending` 和 `GET /api/admin/moderation/cases?status=open` 查看本校积压；平台管理员跨校排查或处置必须同时提交 `campus_id` 和 `reason`。
 
 ## 常见排错
 
@@ -164,11 +297,11 @@ CORS_ORIGINS=https://your-app.example.com
 
 ### Refresh 失败
 
-refresh token 是一次性旋转。失败常见原因：客户端重复使用旧 refresh token，token 已过期，logout 已撤销，用户被封禁，或者数据库中 token hash 不匹配。如果怀疑 replay，检查该用户是否所有 refresh token 都被撤销。
+refresh token 是一次性旋转。失败常见原因：客户端重复使用旧 refresh token，token 已过期，logout 已撤销，用户被封禁，数据库中 token hash 不匹配，或 token 绑定的校园 membership 已被暂停/撤销。切换校园还要求目标 membership 为 verified，并会撤销当前 access JTI。如果怀疑 replay，检查该用户是否所有 refresh token 都被撤销，再核对 `refresh_tokens.campus_id`。
 
 ### WebSocket 连不上
 
-WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token 是否有效、JTI 是否被撤销、用户是否被封禁。连接建立后如果收不到通知，先确认 `notifications` 表是否已有记录，再看 WebSocket 在线连接和 dropped/pruned 指标。
+WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token 是否有效、JTI 是否被撤销、用户是否被封禁。连接建立后如果收不到通知，先确认 `notifications` 表是否已有记录且 `campus_id` 等于当前 session，再看 WebSocket 在线连接和 dropped/pruned 指标。切换校园后客户端必须用新 token 重连，HTTP 补拉只返回新校园通知。
 
 ### 聊天消息异常
 
@@ -181,6 +314,12 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 ### 语义搜索或推荐异常
 
 检查 `documents` 表是否有对应商品文档，embedding 是否非空，`VECTOR_DIM` 是否与 schema 一致，商品是否 active，LLM/embedding provider key 是否可用，pgvector 索引是否存在。语义搜索问题通常横跨 provider、文档写入和 SQL 过滤三层。
+
+### 审核案件异常
+
+先确认当前校园，再检查 `moderation_jobs` 的 `campus_id/status/retry_count` 和 `moderation_cases` 的 `status/source_type/source_ref_id`。图片 provider 超时进入重试或 failed，不应自动创建违规案件；只有 rejected 会创建 `source_type=machine` 的 actioned 案件。聊天举报应同时存在 `chat_message_reports.case_id` 和对应的 `source_type=user_report` 案件。
+
+如果案件已经处置但资源仍不可见，检查 `moderation_case_events` 的最后事件、资源的 `images_moderation_status`/`moderation_status`/`avatar_moderation_status`，以及管理员审计中的 `campus_id` 和 `scope_reason`。申诉只能由案件当事人提交一次，复核必须由不同于原决定者的管理员完成；不要通过数据库直接改状态绕过事件和审计。
 
 ### 订单状态不对
 
@@ -201,7 +340,8 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 - development、staging、production 使用不同数据库、Redis、对象存储、provider key 和 JWT/KMS 密钥。
 - 密钥由部署平台 secret manager 注入，不写入镜像、TOML、日志或备份说明。
 - 生产 `CORS_ORIGINS`、public base URL、WebSocket URL 和 callback URL 使用 HTTPS/WSS 正式域名。
-- 管理员和校园运营启用 MFA/近期认证策略。
+- 校园验证码投递 URL 与 bearer token 已配置，投递失败有指标/告警，日志不会长期保留验证码。
+- [已实现] 平台管理员敏感写入使用 10 分钟密码近期认证，且已确认 TOTP MFA 的管理员在 step-up 时强制第二因子（注册接口见 API 参考）。生产上线前应为全部平台管理员完成 TOTP 注册；校园运营 MFA 仍是目标态。
 - Seed 测试账号和本地测试图片不进入生产数据库。
 
 ### 数据库和 migration
@@ -238,7 +378,14 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 
 错误预算耗尽时暂停扩大风险的新功能，优先处理可靠性、安全和容量。维护窗口和 provider 故障不能无限排除在 SLO 外。
 
-## 备份与恢复 Runbook [目标态]
+## 备份与恢复 Runbook [部分完成]
+
+[已实现] `scripts/backup_pitr_drill.sh` 在一次性本地集群上完整演练恢复路径：initdb（开启 WAL 归档）→ `pg_basebackup` → 记录 T1 → 写入“灾难”行 → 以 `recovery_target_time = T1` 恢复 → 断言好状态存在、灾难行被排除。脚本幂等、自清理、以退出码表示演练结果，可直接进 CI 或 cron。生产化差异：归档目标换为对象存储、备份调度化、按季度对生产快照演练并记录实际 RPO/RTO。
+
+另注意：15 张租户表已启用 FORCE RLS（`0042`）。策略在 `app.campus_id` GUC 未设置时放行（应用层为主边界），事务内 `SET LOCAL app.campus_id = '<uuid>'` 即可武装隔离。两条纪律：生产应用角色绝不可是 superuser（superuser 完全绕过 RLS）；备份/迁移以未武装会话运行即可看到全量数据。
+
+### 原 Runbook 目标（生产化仍需执行）
+
 
 ### 备份
 
@@ -269,7 +416,7 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 
 ## 审核积压 Runbook [目标态]
 
-1. 检查 `moderation_jobs`/ModerationCase 的 oldest pending、重试和 last_error。
+1. 先确认活动校园，再检查该 `campus_id` 下 `moderation_jobs`/ModerationCase 的 oldest pending、processing 卡住时长、重试和 last_error。
 2. 判断是 provider、网络、格式、配额还是 worker lease 问题。
 3. 保持媒体 pending 和私有隔离，不因积压自动公开。
 4. 可安全重试的任务使用指数退避；不可解码内容直接进入拒绝/人工队列。
