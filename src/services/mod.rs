@@ -24,6 +24,7 @@ pub mod storage;
 pub mod token_denylist;
 pub mod totp;
 pub mod undo;
+pub mod vector;
 #[cfg(feature = "redis")]
 pub mod ws_fanout;
 

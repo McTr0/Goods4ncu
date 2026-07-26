@@ -14,7 +14,7 @@ use rig::embeddings::EmbeddingsBuilder;
 use rig::providers::gemini;
 use rig::providers::openai;
 use rig::streaming::{StreamedAssistantContent, StreamingCompletion};
-use rig_postgres::PostgresVectorStore;
+use rig_postgres::{PgVectorDistanceFunction, PostgresVectorStore};
 use sqlx::{PgConnection, PgPool};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -77,8 +77,17 @@ impl OpenAiCompatibleProvider {
             gemini::EMBEDDING_001,
             self.embedding_dim,
         );
-        let rag_store =
-            PostgresVectorStore::with_defaults(embedding_model.clone(), db_pool.clone());
+        // Retrieval reads through `documents_vector`, a UUID-typed view over
+        // `documents`. rig-postgres decodes result ids as `Uuid` while our
+        // `documents.id` is TEXT (it mirrors `inventory.id`), so pointing the
+        // store at the base table fails to decode as soon as a single row
+        // exists. See migration 0046.
+        let rag_store = PostgresVectorStore::new(
+            embedding_model.clone(),
+            db_pool.clone(),
+            Some(crate::services::vector::DOCUMENTS_VECTOR_VIEW.to_string()),
+            PgVectorDistanceFunction::Cosine,
+        );
 
         let embedding_client_for_updater = self.embedding_client.clone();
         let dim_for_updater = self.embedding_dim;

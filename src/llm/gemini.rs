@@ -14,7 +14,7 @@ use rig::completion::{Message, Prompt};
 use rig::embeddings::EmbeddingsBuilder;
 use rig::providers::gemini;
 use rig::streaming::{StreamedAssistantContent, StreamingCompletion};
-use rig_postgres::PostgresVectorStore;
+use rig_postgres::{PgVectorDistanceFunction, PostgresVectorStore};
 use sqlx::{PgConnection, PgPool};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -67,8 +67,17 @@ impl GeminiProvider {
         );
         // RAG store: owned by dynamic_context (consumed at agent build time).
         // This store handles context retrieval (top_n queries).
-        let rag_store =
-            PostgresVectorStore::with_defaults(embedding_model.clone(), db_pool.clone());
+        // Retrieval reads through `documents_vector`, a UUID-typed view over
+        // `documents`. rig-postgres decodes result ids as `Uuid` while our
+        // `documents.id` is TEXT (it mirrors `inventory.id`), so pointing the
+        // store at the base table fails to decode as soon as a single row
+        // exists. See migration 0046.
+        let rag_store = PostgresVectorStore::new(
+            embedding_model.clone(),
+            db_pool.clone(),
+            Some(crate::services::vector::DOCUMENTS_VECTOR_VIEW.to_string()),
+            PgVectorDistanceFunction::Cosine,
+        );
 
         // embed_updater: for atomic re-embedding within a transaction (UpdateListingTool).
         let client_for_updater = self.client.clone();

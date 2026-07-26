@@ -100,6 +100,59 @@ async fn propose_action_plan<A: serde::Serialize>(
     ))
 }
 
+/// Money on the model-facing boundary, in yuan.
+///
+/// Internally every price is an integer count of cents, which is the only sane
+/// representation for money and matches what the database stores. The tool
+/// schema, though, has to speak the units a person speaks — a user says "30
+/// 块" and the model passes 30. Naming a field `suggested_price_cny` and then
+/// meaning cents produced listings priced at exactly one hundredth of what was
+/// asked, every single time, and no amount of "in cents" in a description
+/// reliably stops a model doing the natural thing.
+///
+/// So the unit lives in the field *name* the model sees (`..._yuan`) and the
+/// conversion happens here, at the edge.
+///
+/// Both directions are implemented deliberately. L3 arguments are serialised
+/// into `agent_action_plans` and read back at confirmation time; a
+/// deserialize-only conversion would multiply by a hundred on every round
+/// trip, reintroducing the same bug one step further along.
+mod yuan {
+    use crate::utils::{cents_to_yuan, yuan_to_cents};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(cents: &i64, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_f64(cents_to_yuan(*cents))
+    }
+
+    /// `yuan_to_cents` rounds to the nearest cent, which matters: a model may
+    /// well emit 19.99, or arithmetic that lands on 0.30000000000000004.
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<i64, D::Error> {
+        Ok(yuan_to_cents(f64::deserialize(deserializer)?))
+    }
+
+    pub mod option {
+        use crate::utils::{cents_to_yuan, yuan_to_cents};
+        use serde::{Deserialize, Deserializer, Serializer};
+
+        pub fn serialize<S: Serializer>(
+            cents: &Option<i64>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            match cents {
+                Some(cents) => serializer.serialize_f64(cents_to_yuan(*cents)),
+                None => serializer.serialize_none(),
+            }
+        }
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Option<i64>, D::Error> {
+            Ok(Option::<f64>::deserialize(deserializer)?.map(yuan_to_cents))
+        }
+    }
+}
+
 async fn resolve_read_campus(ctx: &ToolContext) -> Result<uuid::Uuid, ToolError> {
     let service = CampusService::new(ctx.db_pool.clone());
     match ctx.current_user_id.as_deref() {
@@ -123,6 +176,8 @@ pub struct CreateListingArgs {
     pub category: String,
     pub brand: String,
     pub condition_score: u8,
+    /// Cents internally; the model sends `price_yuan`.
+    #[serde(rename = "price_yuan", with = "yuan")]
     pub suggested_price_cny: i64,
     pub defects: Vec<String>,
     pub original_description: String,
@@ -150,11 +205,11 @@ impl Tool for CreateListingTool {
                     "category": { "type": "string", "description": "Item category" },
                     "brand": { "type": "string", "description": "Item brand" },
                     "condition_score": { "type": "integer", "description": "Condition from 1 to 10" },
-                    "suggested_price_cny": { "type": "number", "description": "Price in CNY" },
+                    "price_yuan": { "type": "number", "description": "价格，单位：元（例如 30 表示 30 元，可带小数）" },
                     "defects": { "type": "array", "items": { "type": "string" }, "description": "Any defects" },
                     "original_description": { "type": "string", "description": "User's original description" }
                 },
-                "required": ["title", "category", "brand", "condition_score", "suggested_price_cny", "defects", "original_description"]
+                "required": ["title", "category", "brand", "condition_score", "price_yuan", "defects", "original_description"]
             }),
         }
     }
@@ -338,6 +393,8 @@ pub async fn execute_create_listing(
 pub struct SearchInventoryArgs {
     pub keyword: Option<String>,
     pub category: Option<String>,
+    /// Cents internally; the model sends `max_price_yuan`.
+    #[serde(rename = "max_price_yuan", with = "yuan::option", default)]
     pub max_price: Option<i64>,
     pub min_condition: Option<u8>,
 }
@@ -363,7 +420,7 @@ impl Tool for SearchInventoryTool {
                 "properties": {
                     "keyword": { "type": "string", "description": "Search keyword to match against title or description" },
                     "category": { "type": "string", "description": "Filter by category" },
-                    "max_price": { "type": "number", "description": "Maximum price in CNY" },
+                    "max_price_yuan": { "type": "number", "description": "价格上限，单位：元" },
                     "min_condition": { "type": "integer", "description": "Minimum condition score (1-10)" }
                 },
                 "required": []
@@ -564,6 +621,8 @@ struct FullListingRow {
 #[derive(Serialize, Deserialize)]
 pub struct UpdateListingArgs {
     pub listing_id: String,
+    /// Cents internally; the model sends `new_price_yuan`.
+    #[serde(rename = "new_price_yuan", with = "yuan::option", default)]
     pub new_price: Option<i64>,
     pub new_title: Option<String>,
     pub new_description: Option<String>,
@@ -589,7 +648,7 @@ impl Tool for UpdateListingTool {
                 "type": "object",
                 "properties": {
                     "listing_id": { "type": "string", "description": "The listing ID to update" },
-                    "new_price": { "type": "number", "description": "New price in CNY" },
+                    "new_price_yuan": { "type": "number", "description": "新价格，单位：元" },
                     "new_title": { "type": "string", "description": "New title" },
                     "new_description": { "type": "string", "description": "New description" }
                 },
@@ -865,6 +924,8 @@ pub async fn execute_delete_listing(
 #[derive(Serialize, Deserialize)]
 pub struct PurchaseItemIntentArgs {
     pub listing_id: String,
+    /// Cents internally; the model sends `offered_price_yuan`.
+    #[serde(rename = "offered_price_yuan", with = "yuan")]
     pub offered_price: i64,
 }
 
@@ -888,9 +949,9 @@ impl Tool for PurchaseItemIntentTool {
                 "type": "object",
                 "properties": {
                     "listing_id": { "type": "string", "description": "The listing ID for the deal intent" },
-                    "offered_price": { "type": "number", "description": "The proposed offline deal price in CNY" }
+                    "offered_price_yuan": { "type": "number", "description": "线下面交出价，单位：元" }
                 },
-                "required": ["listing_id", "offered_price"]
+                "required": ["listing_id", "offered_price_yuan"]
             }),
         }
     }
@@ -1009,6 +1070,8 @@ pub struct NegotiateItemArgs {
     /// The listing the buyer wants to negotiate on
     pub listing_id: String,
     /// The buyer's proposed price (in CNY cents)
+    /// Cents internally; the model sends `offered_price_yuan`.
+    #[serde(rename = "offered_price_yuan", with = "yuan")]
     pub offered_price: i64,
     /// Short reason for the offer (e.g., "lightly used", "market price dropped")
     pub reason: String,
@@ -1033,10 +1096,10 @@ impl Tool for NegotiateItemTool {
                 "type": "object",
                 "properties": {
                     "listing_id": { "type": "string", "description": "The listing ID to negotiate on" },
-                    "offered_price": { "type": "number", "description": "The offered price in CNY cents" },
+                    "offered_price_yuan": { "type": "number", "description": "出价，单位：元" },
                     "reason": { "type": "string", "description": "Short reason for the offer" }
                 },
-                "required": ["listing_id", "offered_price", "reason"]
+                "required": ["listing_id", "offered_price_yuan", "reason"]
             }),
         }
     }
@@ -1352,7 +1415,7 @@ mod tests {
             "category": "electronics",
             "brand": "Apple",
             "condition_score": 8,
-            "suggested_price_cny": 500000,
+            "price_yuan": 5000,
             "defects": ["Minor scratch"],
             "original_description": "Barely used"
         }"#;
@@ -1373,12 +1436,179 @@ mod tests {
             "category": "books",
             "brand": "Publisher",
             "condition_score": 7,
-            "suggested_price_cny": 5000,
+            "price_yuan": 50,
             "defects": [],
             "original_description": "Like new"
         }"#;
         let args: CreateListingArgs = serde_json::from_str(json).unwrap();
         assert!(args.defects.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Money units on the model-facing boundary
+    //
+    // The tool schema used to name a field `suggested_price_cny`, describe it
+    // as "Price in CNY", and then treat the number as cents. A user asking for
+    // 30 元 got a listing priced at ¥0.30 — every time, silently, because the
+    // model did the natural thing. These pin both halves of the fix: the model
+    // speaks yuan, and the value survives a round trip through storage.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn model_supplied_yuan_becomes_cents() {
+        let json = r#"{
+            "title": "宿舍小台灯",
+            "category": "home",
+            "brand": "无",
+            "condition_score": 9,
+            "price_yuan": 30,
+            "defects": [],
+            "original_description": "九成新"
+        }"#;
+        let args: CreateListingArgs = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            args.suggested_price_cny, 3000,
+            "30 元 must be 3000 cents, not 30",
+        );
+    }
+
+    #[test]
+    fn fractional_yuan_rounds_to_the_nearest_cent() {
+        for (yuan, cents) in [(19.99, 1999_i64), (0.1, 10), (12.345, 1235), (0.005, 1)] {
+            let json = format!(
+                r#"{{"title":"t","category":"c","brand":"b","condition_score":9,
+                     "price_yuan":{yuan},"defects":[],"original_description":"d"}}"#
+            );
+            let args: CreateListingArgs = serde_json::from_str(&json).unwrap();
+            assert_eq!(args.suggested_price_cny, cents, "{yuan} 元");
+        }
+    }
+
+    #[test]
+    fn price_survives_the_action_plan_round_trip() {
+        // L3 arguments are serialised into agent_action_plans and read back at
+        // confirmation. A deserialize-only conversion would multiply by a
+        // hundred on the way back, moving the bug rather than fixing it.
+        let original = PurchaseItemIntentArgs {
+            listing_id: "listing-1".to_string(),
+            offered_price: 28_050, // ¥280.50
+        };
+        let stored = serde_json::to_value(&original).unwrap();
+        assert_eq!(
+            stored["offered_price_yuan"], 280.5,
+            "stored form must be yuan, matching what the model sent",
+        );
+
+        let restored: PurchaseItemIntentArgs = serde_json::from_value(stored).unwrap();
+        assert_eq!(restored.offered_price, original.offered_price);
+    }
+
+    #[test]
+    fn optional_prices_round_trip_and_stay_absent_when_unset() {
+        let json = r#"{"listing_id":"l1","new_price_yuan":45.5}"#;
+        let args: UpdateListingArgs = serde_json::from_str(json).unwrap();
+        assert_eq!(args.new_price, Some(4550));
+
+        let restored: UpdateListingArgs =
+            serde_json::from_value(serde_json::to_value(&args).unwrap()).unwrap();
+        assert_eq!(restored.new_price, Some(4550));
+
+        let absent: SearchInventoryArgs = serde_json::from_str(r#"{"keyword":"x"}"#).unwrap();
+        assert_eq!(absent.max_price, None);
+    }
+
+    /// Every tool's live parameter schema, paired with its name.
+    ///
+    /// Built from the real `Tool::definition` outputs so the assertions below
+    /// cannot drift from what is actually sent to the provider.
+    async fn all_tool_schemas(ctx: &ToolContext) -> Vec<(String, serde_json::Value)> {
+        macro_rules! defs {
+            ($($tool:ident),+ $(,)?) => {
+                vec![$({
+                    let d = $tool { ctx: ctx.clone() }.definition(String::new()).await;
+                    (d.name, d.parameters)
+                }),+]
+            };
+        }
+        defs!(
+            CreateListingTool,
+            SearchInventoryTool,
+            GetListingDetailsTool,
+            UpdateListingTool,
+            DeleteListingTool,
+            PurchaseItemIntentTool,
+            NegotiateItemTool,
+            GetMyListingsTool,
+        )
+    }
+
+    fn stub_ctx() -> ToolContext {
+        struct NoopEmbed;
+        #[async_trait(?Send)]
+        impl EmbedUpdater for NoopEmbed {
+            async fn embed_and_update(
+                &self,
+                _content: String,
+                _listing_id: String,
+                _conn: &mut PgConnection,
+            ) -> Result<(), ToolError> {
+                Ok(())
+            }
+        }
+        // Definitions are pure — they never touch the pool — so a lazily
+        // connected pool is enough and keeps this a unit test.
+        let pool = PgPool::connect_lazy("postgres://unused/unused").expect("lazy pool");
+        ToolContext {
+            db_pool: pool.clone(),
+            embed_updater: Arc::new(NoopEmbed),
+            current_user_id: None,
+            current_campus_id: None,
+            notification: crate::services::notification::NotificationService::new(pool),
+        }
+    }
+
+    #[tokio::test]
+    async fn every_required_parameter_is_declared_in_properties() {
+        // Gemini rejects the whole tool list with a 400 when `required` names a
+        // property that does not exist, so one stale entry disables the
+        // assistant entirely. Renaming a parameter and missing one `required`
+        // list did exactly that, and nothing caught it until a live request.
+        let ctx = stub_ctx();
+        for (name, schema) in all_tool_schemas(&ctx).await {
+            let properties = schema["properties"]
+                .as_object()
+                .unwrap_or_else(|| panic!("{name}: parameters must have properties"));
+            let required = schema["required"].as_array().unwrap_or_else(|| {
+                panic!("{name}: parameters must declare a required list, even if empty")
+            });
+            for entry in required {
+                let field = entry.as_str().expect("required entries are strings");
+                assert!(
+                    properties.contains_key(field),
+                    "{name}: required parameter '{field}' is not in properties",
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn every_money_parameter_names_its_unit() {
+        // The original defect was a name that did not say what it meant:
+        // `suggested_price_cny` described as "Price in CNY" but read as cents.
+        // Any parameter that looks like money must carry its unit in the name
+        // the model sees.
+        let ctx = stub_ctx();
+        for (name, schema) in all_tool_schemas(&ctx).await {
+            for field in schema["properties"].as_object().unwrap().keys() {
+                if field.contains("price") {
+                    assert!(
+                        field.ends_with("_yuan"),
+                        "{name}: money parameter '{field}' must name its unit \
+                         (e.g. '{field}_yuan'), or a model will guess wrong",
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -1397,7 +1627,7 @@ mod tests {
         let json = r#"{
             "keyword": "laptop",
             "category": "electronics",
-            "max_price": 500000,
+            "max_price_yuan": 5000,
             "min_condition": 7
         }"#;
         let args: SearchInventoryArgs = serde_json::from_str(json).unwrap();
@@ -1427,7 +1657,7 @@ mod tests {
     #[test]
     fn test_update_listing_args_partial() {
         // Only new_price provided
-        let json = r#"{"listing_id": "listing-456", "new_price": 450000}"#;
+        let json = r#"{"listing_id": "listing-456", "new_price_yuan": 4500}"#;
         let args: UpdateListingArgs = serde_json::from_str(json).unwrap();
         assert_eq!(args.listing_id, "listing-456");
         assert_eq!(args.new_price, Some(450000));
@@ -1439,7 +1669,7 @@ mod tests {
     fn test_update_listing_args_all_fields() {
         let json = r#"{
             "listing_id": "listing-789",
-            "new_price": 400000,
+            "new_price_yuan": 4000,
             "new_title": "Updated Title",
             "new_description": "New description"
         }"#;
@@ -1459,7 +1689,7 @@ mod tests {
 
     #[test]
     fn test_purchase_item_intent_args() {
-        let json = r#"{"listing_id": "listing-buy-1", "offered_price": 450000}"#;
+        let json = r#"{"listing_id": "listing-buy-1", "offered_price_yuan": 4500}"#;
         let args: PurchaseItemIntentArgs = serde_json::from_str(json).unwrap();
         assert_eq!(args.listing_id, "listing-buy-1");
         assert_eq!(args.offered_price, 450000);
