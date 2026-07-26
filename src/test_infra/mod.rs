@@ -205,6 +205,23 @@ async fn create_test_pool() -> PgPool {
         .expect("Failed to connect to test database")
 }
 
+/// A pool with several connections onto the same test database.
+///
+/// [`with_test_pool`] deliberately caps at one connection so ordinary tests
+/// serialise, but that also makes any "concurrent" test inside it a fiction:
+/// tasks queue on the single connection instead of contending in Postgres, and
+/// a test of row-lock behaviour would pass without ever taking a lock. Tests
+/// that assert on contention take this pool instead, alongside the single
+/// connection one.
+pub async fn concurrent_test_pool(max_connections: u32) -> PgPool {
+    PgPoolOptions::new()
+        .max_connections(max_connections)
+        .acquire_timeout(std::time::Duration::from_secs(5))
+        .connect(&db_safety::resolve_test_database_url())
+        .await
+        .expect("Failed to connect concurrent test pool")
+}
+
 /// Runs `test_body` with a fresh pool. The pool has `max_connections = 1`
 /// so all operations serialize on a single connection.
 /// After `test_body` completes, the pool is dropped and all connections returned.
@@ -226,6 +243,7 @@ where
         "TRUNCATE TABLE \
             chat_messages, chat_conversation_events, chat_conversation_members, chat_blocks, \
             chat_conversations, hitl_requests, notifications, watchlist, orders, inventory, \
+            reversible_actions, \
             documents, refresh_tokens, outbox_events, users \
          RESTART IDENTITY CASCADE",
     )
@@ -320,5 +338,25 @@ mod tests {
 
         t1.await.unwrap();
         t2.await.unwrap();
+    }
+
+    /// Guards the guard. Tests that assert on lock contention take their
+    /// connections from [`concurrent_test_pool`]; if it silently served a
+    /// single connection the way [`with_test_pool`] does, those tests would go
+    /// back to queueing instead of contending and would pass without
+    /// exercising anything. Holding two connections at once proves it does not.
+    #[tokio::test]
+    async fn concurrent_test_pool_hands_out_simultaneous_connections() {
+        // Borrow with_test_pool only to guarantee the schema is ready.
+        with_test_pool(|_ready| async move {
+            let pool = concurrent_test_pool(2).await;
+            let first = pool.acquire().await.expect("first connection");
+            let second = pool
+                .acquire()
+                .await
+                .expect("second connection while the first is still held");
+            drop((first, second));
+        })
+        .await;
     }
 }

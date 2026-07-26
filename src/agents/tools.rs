@@ -165,17 +165,82 @@ impl Tool for CreateListingTool {
             args.title,
             cents_to_yuan(args.suggested_price_cny)
         );
-        propose_action_plan(&self.ctx, Self::NAME, "L2", &args, summary).await
+        // L2: execute now, stay undoable. Publishing is recoverable — the
+        // listing can be retracted while nobody has acted on it — so charging
+        // a confirmation dialog for every publish costs more than it saves.
+        // L3 (money, identity) still confirms up front in `propose_action_plan`.
+        execute_l2_create_listing(&self.ctx, args, summary).await
     }
 }
 
-/// Validated execution body for `create_listing` — invoked only from a
-/// user-confirmed [`AgentActionPlan`](crate::services::agent_plan), never
-/// directly from the model.
+/// Publish immediately and register the result as undoable.
+///
+/// A failure to register the undo affordance does not fail the publish: the
+/// listing is live and the user was told so. Losing the undo button is a
+/// degraded experience; rolling back a successful publish because bookkeeping
+/// failed would be a worse surprise.
+async fn execute_l2_create_listing(
+    ctx: &ToolContext,
+    args: CreateListingArgs,
+    summary: String,
+) -> Result<String, ToolError> {
+    let user_id = ctx
+        .current_user_id
+        .clone()
+        .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
+
+    let created = execute_create_listing(ctx, args).await?;
+
+    let registration = crate::services::undo::UndoService::new(ctx.db_pool.clone())
+        .register(
+            created.campus_id,
+            &user_id,
+            crate::services::undo::kinds::LISTING_CREATE,
+            "inventory",
+            &created.listing_id,
+            &summary,
+            // Guard: retract only while the listing still sits exactly where
+            // publishing left it.
+            serde_json::json!({ "status": "active" }),
+            serde_json::json!({ "existed": false }),
+        )
+        .await;
+
+    match registration {
+        Ok(_) => Ok(format!(
+            "{}。如果不是你想要的，{} 分钟内可以撤销。",
+            created.message,
+            crate::services::undo::UNDO_WINDOW_MINUTES
+        )),
+        Err(error) => {
+            tracing::warn!(
+                listing_id = %created.listing_id,
+                error = %error,
+                "listing published but undo registration failed",
+            );
+            Ok(created.message)
+        }
+    }
+}
+
+/// A published listing, with the identifiers the caller needs to make the
+/// action undoable.
+#[derive(Debug)]
+pub struct CreatedListing {
+    pub listing_id: String,
+    pub campus_id: uuid::Uuid,
+    pub message: String,
+}
+
+/// Validated execution body for `create_listing`.
+///
+/// Reached both from the L2 immediate path above and from a previously
+/// confirmed [`AgentActionPlan`](crate::services::agent_plan), so plans
+/// created before the L2 switch still execute correctly.
 pub async fn execute_create_listing(
     ctx: &ToolContext,
     args: CreateListingArgs,
-) -> Result<String, ToolError> {
+) -> Result<CreatedListing, ToolError> {
     {
         let owner = ctx
             .current_user_id
@@ -251,13 +316,17 @@ pub async fn execute_create_listing(
         .await
         .map_err(|e| ToolError(format!("Spawn error: {}", e)))??;
 
-        Ok(format!(
-            "Successfully created listing '{}' (ID: {}, Price: {} CNY, Owner: {})",
-            args.title,
+        Ok(CreatedListing {
+            message: format!(
+                "Successfully created listing '{}' (ID: {}, Price: {} CNY, Owner: {})",
+                args.title,
+                listing_id,
+                cents_to_yuan(args.suggested_price_cny),
+                owner
+            ),
             listing_id,
-            cents_to_yuan(args.suggested_price_cny),
-            owner
-        ))
+            campus_id,
+        })
     }
 }
 
@@ -1541,7 +1610,8 @@ mod tests {
             )
             .await
             .expect("create listing");
-            assert!(result.contains("Shadow Tool Listing"));
+            assert!(result.message.contains("Shadow Tool Listing"));
+            assert!(!result.listing_id.is_empty());
 
             let row = sqlx::query(
                 "SELECT id, new_id, owner_id, new_owner_id, suggested_price_cny FROM inventory WHERE title = $1",

@@ -66,24 +66,89 @@ fn create_args(title: &str) -> CreateListingArgs {
     }
 }
 
+async fn seed_listing(pool: &sqlx::PgPool, seller_id: &str) -> String {
+    let listing_id = format!("plan-listing-{}", Uuid::new_v4().simple());
+    sqlx::query(
+        "INSERT INTO inventory (id, title, category, brand, condition_score,
+                                suggested_price_cny, defects, owner_id, status)
+         VALUES ($1, 'Plan Target', 'misc', 'Brand', 8, 10000, '[]', $2, 'active')",
+    )
+    .bind(&listing_id)
+    .bind(seller_id)
+    .execute(pool)
+    .await
+    .expect("insert listing");
+    listing_id
+}
+
+fn purchase_args(listing_id: &str) -> goods4ncu::agents::tools::PurchaseItemIntentArgs {
+    goods4ncu::agents::tools::PurchaseItemIntentArgs {
+        listing_id: listing_id.to_string(),
+        offered_price: 10_000,
+    }
+}
+
 #[tokio::test]
-async fn write_tool_call_proposes_a_plan_instead_of_executing() {
+async fn l2_write_executes_immediately_and_creates_no_plan() {
+    // Publishing is recoverable, so it no longer waits behind a confirmation
+    // dialog — it happens and stays undoable (see tests/undo_integration.rs).
+    // This locks that in: an L2 write must not leave a pending plan behind.
     with_test_pool(|pool| async move {
-        let user_id = format!("plan-proposer-{}", Uuid::new_v4().simple());
+        let user_id = format!("plan-l2-{}", Uuid::new_v4().simple());
         seed_verified_user(&pool, &user_id).await;
-        let title = format!("Plan Gated {}", Uuid::new_v4().simple());
+        let title = format!("L2 Immediate {}", Uuid::new_v4().simple());
 
         let tool = CreateListingTool {
             ctx: tool_ctx(pool.clone(), &user_id),
         };
         let reply = tool.call(create_args(&title)).await.expect("tool call");
 
-        // The model gets a proposal notice — never the confirmation token.
+        let listings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE title = $1")
+            .bind(&title)
+            .fetch_one(&pool)
+            .await
+            .expect("count listings");
+        assert_eq!(listings, 1, "an L2 write must execute at once");
+
+        let plans: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM agent_action_plans WHERE user_id = $1")
+                .bind(&user_id)
+                .fetch_one(&pool)
+                .await
+                .expect("count plans");
+        assert_eq!(plans, 0, "an L2 write must not queue a confirmation");
+
+        // The user is told the action is recoverable.
+        assert!(reply.contains("撤销"), "reply: {reply}");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn l3_tool_call_proposes_a_plan_instead_of_executing() {
+    // Money and identity keep the up-front confirmation, and the token that
+    // unlocks it never reaches model-visible text — so a prompt-injected model
+    // cannot confirm the proposal it just made.
+    with_test_pool(|pool| async move {
+        let buyer_id = format!("plan-proposer-{}", Uuid::new_v4().simple());
+        let seller_id = format!("plan-proposer-seller-{}", Uuid::new_v4().simple());
+        seed_verified_user(&pool, &buyer_id).await;
+        seed_verified_user(&pool, &seller_id).await;
+        let listing_id = seed_listing(&pool, &seller_id).await;
+
+        let tool = goods4ncu::agents::tools::PurchaseItemIntentTool {
+            ctx: tool_ctx(pool.clone(), &buyer_id),
+        };
+        let reply = tool
+            .call(purchase_args(&listing_id))
+            .await
+            .expect("tool call");
+
         assert!(reply.contains("待确认操作"), "reply: {reply}");
         let token: String = sqlx::query_scalar(
             "SELECT confirmation_token FROM agent_action_plans WHERE user_id = $1",
         )
-        .bind(&user_id)
+        .bind(&buyer_id)
         .fetch_one(&pool)
         .await
         .expect("plan row exists");
@@ -93,40 +158,41 @@ async fn write_tool_call_proposes_a_plan_instead_of_executing() {
         );
 
         // Nothing was executed.
-        let listings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE title = $1")
-            .bind(&title)
+        let orders: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orders WHERE listing_id = $1")
+            .bind(&listing_id)
             .fetch_one(&pool)
             .await
-            .expect("count listings");
-        assert_eq!(
-            listings, 0,
-            "the tool must not execute without confirmation"
-        );
+            .expect("count orders");
+        assert_eq!(orders, 0, "the tool must not execute without confirmation");
     })
     .await;
 }
 
 #[tokio::test]
-async fn confirm_executes_once_and_is_idempotent() {
+async fn confirm_rejects_wrong_token_and_other_users() {
     with_test_pool(|pool| async move {
-        let user_id = format!("plan-confirmer-{}", Uuid::new_v4().simple());
-        seed_verified_user(&pool, &user_id).await;
-        let title = format!("Plan Confirmed {}", Uuid::new_v4().simple());
-        let ctx = tool_ctx(pool.clone(), &user_id);
+        let buyer_id = format!("plan-confirmer-{}", Uuid::new_v4().simple());
+        let seller_id = format!("plan-confirmer-seller-{}", Uuid::new_v4().simple());
+        seed_verified_user(&pool, &buyer_id).await;
+        seed_verified_user(&pool, &seller_id).await;
+        let listing_id = seed_listing(&pool, &seller_id).await;
+        let ctx = tool_ctx(pool.clone(), &buyer_id);
 
-        let tool = CreateListingTool { ctx: ctx.clone() };
-        tool.call(create_args(&title)).await.expect("propose");
+        let tool = goods4ncu::agents::tools::PurchaseItemIntentTool { ctx: ctx.clone() };
+        tool.call(purchase_args(&listing_id))
+            .await
+            .expect("propose");
 
         let service = AgentPlanService::new(pool.clone());
-        let plans = service.list_pending(&user_id).await.expect("list");
+        let plans = service.list_pending(&buyer_id).await.expect("list");
         assert_eq!(plans.len(), 1);
         let plan = &plans[0];
-        assert_eq!(plan.action, "create_listing");
-        assert_eq!(plan.risk_level, "L2");
+        assert_eq!(plan.action, "purchase_item");
+        assert_eq!(plan.risk_level, "L3");
 
         // Wrong token: indistinguishable from a missing plan.
         let outcome = service
-            .confirm(&ctx, &user_id, plan.id, "wrong-token")
+            .confirm(&ctx, &buyer_id, plan.id, "wrong-token")
             .await
             .expect("confirm wrong token");
         assert!(matches!(outcome, ConfirmOutcome::NotFound));
@@ -140,34 +206,13 @@ async fn confirm_executes_once_and_is_idempotent() {
             .expect("cross-user confirm");
         assert!(matches!(outcome, ConfirmOutcome::NotFound));
 
-        // The rightful owner with the token executes the action.
-        let outcome = service
-            .confirm(&ctx, &user_id, plan.id, &plan.confirmation_token)
-            .await
-            .expect("confirm");
-        let ConfirmOutcome::Executed(result) = outcome else {
-            panic!("expected Executed, got {outcome:?}");
-        };
-        assert!(result.contains("Successfully created listing"));
-        let listings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE title = $1")
-            .bind(&title)
+        // Neither rejected attempt executed anything.
+        let orders: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orders WHERE listing_id = $1")
+            .bind(&listing_id)
             .fetch_one(&pool)
             .await
-            .expect("count");
-        assert_eq!(listings, 1);
-
-        // Re-confirm: same answer, no second listing.
-        let outcome = service
-            .confirm(&ctx, &user_id, plan.id, &plan.confirmation_token)
-            .await
-            .expect("re-confirm");
-        assert!(matches!(outcome, ConfirmOutcome::AlreadyExecuted(_)));
-        let listings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE title = $1")
-            .bind(&title)
-            .fetch_one(&pool)
-            .await
-            .expect("count again");
-        assert_eq!(listings, 1, "idempotent confirm must not execute twice");
+            .expect("count orders");
+        assert_eq!(orders, 0);
     })
     .await;
 }
@@ -175,16 +220,20 @@ async fn confirm_executes_once_and_is_idempotent() {
 #[tokio::test]
 async fn expired_and_cancelled_plans_cannot_execute() {
     with_test_pool(|pool| async move {
-        let user_id = format!("plan-expiry-{}", Uuid::new_v4().simple());
-        seed_verified_user(&pool, &user_id).await;
-        let ctx = tool_ctx(pool.clone(), &user_id);
+        let buyer_id = format!("plan-expiry-{}", Uuid::new_v4().simple());
+        let seller_id = format!("plan-expiry-seller-{}", Uuid::new_v4().simple());
+        seed_verified_user(&pool, &buyer_id).await;
+        seed_verified_user(&pool, &seller_id).await;
+        let ctx = tool_ctx(pool.clone(), &buyer_id);
         let service = AgentPlanService::new(pool.clone());
+        let tool = goods4ncu::agents::tools::PurchaseItemIntentTool { ctx: ctx.clone() };
 
         // Expired plan.
-        let title_a = format!("Plan Expired {}", Uuid::new_v4().simple());
-        let tool = CreateListingTool { ctx: ctx.clone() };
-        tool.call(create_args(&title_a)).await.expect("propose a");
-        let plan = &service.list_pending(&user_id).await.expect("list")[0];
+        let listing_a = seed_listing(&pool, &seller_id).await;
+        tool.call(purchase_args(&listing_a))
+            .await
+            .expect("propose a");
+        let plan = &service.list_pending(&buyer_id).await.expect("list")[0];
         let (plan_a, token_a) = (plan.id, plan.confirmation_token.clone());
         sqlx::query(
             "UPDATE agent_action_plans SET expires_at = NOW() - interval '1 second' WHERE id = $1",
@@ -194,30 +243,33 @@ async fn expired_and_cancelled_plans_cannot_execute() {
         .await
         .expect("expire");
         let outcome = service
-            .confirm(&ctx, &user_id, plan_a, &token_a)
+            .confirm(&ctx, &buyer_id, plan_a, &token_a)
             .await
             .expect("confirm expired");
         assert!(matches!(outcome, ConfirmOutcome::Expired));
 
         // Cancelled plan.
-        let title_b = format!("Plan Cancelled {}", Uuid::new_v4().simple());
-        tool.call(create_args(&title_b)).await.expect("propose b");
-        let plan = &service.list_pending(&user_id).await.expect("list b")[0];
+        let listing_b = seed_listing(&pool, &seller_id).await;
+        tool.call(purchase_args(&listing_b))
+            .await
+            .expect("propose b");
+        let plan = &service.list_pending(&buyer_id).await.expect("list b")[0];
         let (plan_b, token_b) = (plan.id, plan.confirmation_token.clone());
-        assert!(service.cancel(&user_id, plan_b).await.expect("cancel"));
+        assert!(service.cancel(&buyer_id, plan_b).await.expect("cancel"));
         let outcome = service
-            .confirm(&ctx, &user_id, plan_b, &token_b)
+            .confirm(&ctx, &buyer_id, plan_b, &token_b)
             .await
             .expect("confirm cancelled");
         assert!(matches!(outcome, ConfirmOutcome::NotConfirmable(_)));
 
         // Neither executed anything.
-        for title in [&title_a, &title_b] {
-            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE title = $1")
-                .bind(title)
-                .fetch_one(&pool)
-                .await
-                .expect("count");
+        for listing_id in [&listing_a, &listing_b] {
+            let count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM orders WHERE listing_id = $1")
+                    .bind(listing_id)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("count");
             assert_eq!(count, 0);
         }
     })

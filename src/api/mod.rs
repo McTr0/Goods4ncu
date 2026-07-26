@@ -31,6 +31,7 @@ pub mod recommendations;
 pub mod request_context;
 pub mod session;
 pub mod stats;
+pub mod undo;
 pub mod upload;
 pub mod user;
 pub mod user_chat;
@@ -496,6 +497,8 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             "/api/agent/plans/{id}/cancel",
             post(agent_plans::cancel_plan),
         )
+        .route("/api/actions/undoable", get(undo::list_undoable))
+        .route("/api/actions/{id}/undo", post(undo::undo_action))
         .route("/api/auth/change-password", post(auth::change_password))
         .route("/api/auth/refresh", post(auth::refresh_token))
         .route("/api/auth/logout", post(auth::logout))

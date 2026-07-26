@@ -261,7 +261,11 @@ async fn execute_action(
         serde_json::from_value(args).map_err(|e| ToolError(format!("计划参数已失效: {}", e)))
     }
     match action {
-        "create_listing" => execute_create_listing(ctx, parse(args)?).await,
+        // Still routed so plans created before create_listing became an
+        // immediate (undoable) L2 action can finish executing.
+        "create_listing" => execute_create_listing(ctx, parse(args)?)
+            .await
+            .map(|created| created.message),
         "update_listing" => execute_update_listing(ctx, parse(args)?).await,
         "delete_listing" => execute_delete_listing(ctx, parse(args)?).await,
         "purchase_item" => execute_purchase_item(ctx, parse(args)?).await,

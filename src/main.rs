@@ -217,6 +217,12 @@ async fn main() -> Result<(), anyhow::Error> {
         shutdown.clone(),
     ));
 
+    // Undo retention worker: prunes reversible_actions past their retention.
+    let undo_prune_handle = tokio::spawn(services::undo::run_prune_worker(
+        db_pool.clone(),
+        shutdown.clone(),
+    ));
+
     // Multi-replica realtime: when REDIS_URL is configured, WS broadcasts
     // route through Redis pub/sub so any replica can deliver to the sockets it
     // holds. Without it (or without the `redis` feature) delivery stays local.
@@ -404,6 +410,7 @@ async fn main() -> Result<(), anyhow::Error> {
             chat_expiry_handle,
             denylist_handle,
             outbox_worker_handle,
+            undo_prune_handle,
         );
         #[cfg(feature = "redis")]
         if let Some(handle) = ws_fanout_handle {
@@ -419,6 +426,7 @@ async fn main() -> Result<(), anyhow::Error> {
             ("chat_expiry", workers.4),
             ("denylist_cleanup", workers.5),
             ("outbox", workers.6),
+            ("undo_prune", workers.7),
         ] {
             if let Err(e) = result {
                 tracing::error!(worker = name, %e, "Worker task failed during shutdown");
