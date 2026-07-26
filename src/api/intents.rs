@@ -441,6 +441,114 @@ pub async fn respond_to_intent(
     })))
 }
 
+#[derive(Deserialize)]
+pub struct DecomposePhotoRequest {
+    /// Base64 image data, no data-URL prefix.
+    pub image_base64: String,
+    pub mime: String,
+    /// Anything the author typed alongside it. Kept as the raw input, so a
+    /// failed reading still records what they said rather than losing it.
+    #[serde(default)]
+    pub raw_input: Option<String>,
+}
+
+/// POST /api/intents/decompose-photo — read a photo of a room as a list.
+///
+/// Graduation is the largest supply event of the year and the listing form is
+/// at its worst exactly then: twenty items, twenty forms, so none of it is
+/// posted. One photo is the whole inventory in a gesture.
+///
+/// Absent rather than broken when no vision provider is configured: a campus
+/// without a vision budget still gets everything else. And a failed reading
+/// records one intent from whatever the author typed, so it never costs them
+/// their post.
+pub async fn decompose_photo(
+    State(state): State<AppState>,
+    tenant: VerifiedTenant,
+    Json(payload): Json<DecomposePhotoRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    use crate::services::intent::decompose::Decomposition;
+    use crate::services::intent::vision;
+
+    let key = &state.secrets.gemini_api_key;
+    if !vision::is_available(key) {
+        // 501 rather than 500: this is a capability the deployment does not
+        // have, not a fault. The client hides the affordance instead of
+        // retrying.
+        return Err(ApiError::NotImplemented(
+            "这个部署没有开启照片识别".to_string(),
+        ));
+    }
+
+    let raw_input = payload
+        .raw_input
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("（一张照片）");
+
+    let decomposition =
+        match vision::decompose_photo(key, &payload.image_base64, &payload.mime).await {
+            Ok(decomposition) => decomposition,
+            Err(error) => {
+                // The photo is not logged, and neither is the provider's body — an
+                // error response can echo the request, and the request is somebody's
+                // room.
+                tracing::warn!(%error, "photo decomposition failed");
+                Decomposition::Single
+            }
+        };
+
+    let service = IntentService::new(state.infra.db.clone());
+    match decomposition {
+        Decomposition::Single => {
+            // Nothing readable. Record what they typed rather than dropping it.
+            let id = service
+                .create(NewIntent {
+                    campus_id: tenant.campus_id,
+                    author_id: &tenant.session.user_id,
+                    kind: kinds::GOODS_OFFER,
+                    raw_input,
+                    slots: Slots::default(),
+                    confidence: 1.0,
+                    status: status::ACTIVE,
+                    visibility: "campus",
+                    valid_until: None,
+                })
+                .await
+                .map_err(ApiError::Internal)?;
+            Ok(Json(serde_json::json!({
+                "split": false,
+                "ids": [id],
+                "status": status::ACTIVE,
+            })))
+        }
+        Decomposition::Several(items) => {
+            // Everything read from a photo is a draft — including a single
+            // item, unlike the text path, because the author typed nothing for
+            // it to be a reading *of*.
+            let ids = service
+                .create_draft_batch(
+                    tenant.campus_id,
+                    &tenant.session.user_id,
+                    raw_input,
+                    kinds::GOODS_OFFER,
+                    items
+                        .into_iter()
+                        .map(|item| (item.slots, item.confidence))
+                        .collect(),
+                )
+                .await
+                .map_err(ApiError::Internal)?;
+            Ok(Json(serde_json::json!({
+                "split": true,
+                "ids": ids,
+                "status": status::DRAFT,
+            })))
+        }
+    }
+}
+
 /// GET /api/intents — the caller's own intents, drafts included.
 pub async fn list_intents(
     State(state): State<AppState>,

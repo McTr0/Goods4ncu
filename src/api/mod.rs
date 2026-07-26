@@ -520,6 +520,10 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             post(intents::create_draft_batch),
         )
         .route("/api/intents/decompose", post(intents::decompose_intent))
+        .route(
+            "/api/intents/decompose-photo",
+            post(intents::decompose_photo),
+        )
         .route("/api/price-discovery", post(price_discovery::propose))
         .route(
             "/api/price-discovery/{id}",

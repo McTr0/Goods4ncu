@@ -16,6 +16,7 @@
 
 pub mod decompose;
 pub mod slots;
+pub mod vision;
 
 use anyhow::Result;
 use slots::Slots;

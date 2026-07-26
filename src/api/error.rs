@@ -53,6 +53,14 @@ pub enum ApiError {
     #[error("冲突: {0}")]
     Conflict(String),
 
+    /// A capability this deployment does not have, as opposed to a fault.
+    ///
+    /// Distinct from [`ApiError::ServiceUnavailable`], which means "try again".
+    /// This one means "do not try again, and hide the affordance" — an optional
+    /// integration such as photo recognition that was never configured.
+    #[error("未启用: {0}")]
+    NotImplemented(String),
+
     #[error("请求过于频繁，请稍后再试")]
     RateLimitExceeded,
 
@@ -127,6 +135,9 @@ impl IntoResponse for ApiError {
                 "该操作仅限同一校园的已认证用户".to_string(),
             ),
             ApiError::Conflict(m) => (StatusCode::CONFLICT, "conflict", format!("冲突: {}", m)),
+            ApiError::NotImplemented(m) => {
+                (StatusCode::NOT_IMPLEMENTED, "not_enabled", m.to_string())
+            }
             ApiError::RateLimitExceeded => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "rate_limited",
@@ -181,6 +192,7 @@ mod tests {
             ApiError::CampusVerificationRequired => "需要先完成校园身份验证".to_string(),
             ApiError::CampusScopeMismatch => "该操作仅限同一校园的已认证用户".to_string(),
             ApiError::Conflict(ref m) => format!("冲突: {}", m),
+            ApiError::NotImplemented(ref m) => m.clone(),
             ApiError::RateLimitExceeded => "请求过于频繁，请稍后再试".to_string(),
             ApiError::ContentViolation(ref m) => format!("内容包含违规信息: {}", m),
             ApiError::ServiceUnavailable(_) => "服务暂时不可用".to_string(),
