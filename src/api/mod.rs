@@ -29,6 +29,7 @@ pub mod moderation_cases;
 pub mod negotiate;
 pub mod notifications;
 pub mod orders;
+pub mod price_discovery;
 pub mod recommendations;
 pub mod request_context;
 pub mod session;
@@ -517,6 +518,23 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             post(intents::create_draft_batch),
         )
         .route("/api/intents/decompose", post(intents::decompose_intent))
+        .route("/api/price-discovery", post(price_discovery::propose))
+        .route(
+            "/api/price-discovery/{id}",
+            get(price_discovery::get_session),
+        )
+        .route(
+            "/api/price-discovery/{id}/accept",
+            post(price_discovery::accept),
+        )
+        .route(
+            "/api/price-discovery/{id}/decline",
+            post(price_discovery::decline),
+        )
+        .route(
+            "/api/price-discovery/{id}/limit",
+            post(price_discovery::state_limit),
+        )
         .route("/api/intents/feed", get(intents::intent_feed))
         .route(
             "/api/intents/{id}/respond",
