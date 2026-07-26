@@ -922,6 +922,62 @@ class AgentPlanConfirmResult {
   bool get executed => status == 'executed';
 }
 
+/// An action the assistant already carried out that can still be reverted.
+///
+/// The counterpart to [AgentPlan]: plans are writes waiting on the user, these
+/// are writes that happened. Low-risk actions no longer queue behind a
+/// confirmation dialog — they run at once and stay recoverable for a few
+/// minutes, so the common case costs nothing and the rare wrong one is still
+/// fixable.
+class UndoableAction {
+  final String id;
+  final String actionKind;
+  final String summary;
+  final DateTime? undoDeadline;
+
+  UndoableAction({
+    required this.id,
+    required this.actionKind,
+    required this.summary,
+    this.undoDeadline,
+  });
+
+  factory UndoableAction.fromJson(Map<String, dynamic> json) => UndoableAction(
+    id: json['id']?.toString() ?? '',
+    actionKind: json['action_kind']?.toString() ?? '',
+    summary: json['summary']?.toString() ?? '',
+    undoDeadline: DateTime.tryParse(json['undo_deadline']?.toString() ?? ''),
+  );
+
+  /// Time left in the window, or null when the deadline is unknown.
+  Duration? remaining() {
+    final deadline = undoDeadline;
+    if (deadline == null) return null;
+    final left = deadline.difference(DateTime.now().toUtc());
+    return left.isNegative ? Duration.zero : left;
+  }
+
+  bool get expired => remaining() == Duration.zero;
+}
+
+/// Outcome of an undo attempt.
+///
+/// [conflict] is deliberately distinct from a plain failure: it means the
+/// action was not reverted *because the world moved on* — the item sold, or
+/// someone edited it — and reverting would have overwritten that. The user
+/// needs to be told what happened, not shown a generic error.
+class UndoResult {
+  final bool undone;
+  final bool conflict;
+  final String message;
+
+  UndoResult({
+    required this.undone,
+    required this.conflict,
+    required this.message,
+  });
+}
+
 class HitlRequest {
   final String id;
   final String listingId;

@@ -839,6 +839,26 @@ class AppLocalizationsEn extends AppLocalizations {
   String get agentPlanConfirmAction => 'Confirm';
 
   @override
+  String get undoDoneHeader => 'Done — you can still undo';
+
+  @override
+  String get undoAction => 'Undo';
+
+  @override
+  String undoRemainingSeconds(int seconds) {
+    return '${seconds}s left';
+  }
+
+  @override
+  String get undoSucceeded => 'Undone';
+
+  @override
+  String get undoConflict => 'Could not undo';
+
+  @override
+  String get undoFailed => 'Undo failed, please try again';
+
+  @override
   String get agentPlanExecuted => 'Action executed';
 
   @override

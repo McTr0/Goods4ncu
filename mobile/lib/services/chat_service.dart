@@ -52,6 +52,50 @@ class ChatService extends BaseService {
     handleResponse(response, (_) {});
   }
 
+  /// GET /api/actions/undoable — writes the assistant already made that can
+  /// still be reverted.
+  ///
+  /// Distinct from [getAgentPlans]: those are waiting on the user, these have
+  /// happened. Low-risk actions run immediately and stay recoverable, so the
+  /// common case is not taxed with a confirmation dialog.
+  Future<List<UndoableAction>> getUndoableActions() async {
+    final headers = await authHeaders();
+    final response = await get(
+      Uri.parse('$baseUrl/api/actions/undoable'),
+      headers,
+    );
+    final data = handleResponse(response, (d) => d as Map<String, dynamic>);
+    final items = data['items'] as List<dynamic>? ?? [];
+    return items
+        .map((e) => UndoableAction.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// POST /api/actions/{id}/undo — revert an action inside its window.
+  ///
+  /// A 409 here is usually not an error the user caused: it means the target
+  /// changed after the action, so reverting would have overwritten that change.
+  /// It is surfaced as [UndoResult.conflict] with the server's explanation
+  /// rather than thrown, because the user needs to read what happened.
+  Future<UndoResult> undoAction(String id) async {
+    final headers = await authHeaders();
+    try {
+      final response = await post(
+        Uri.parse('$baseUrl/api/actions/$id/undo'),
+        headers,
+        jsonEncode({}),
+      );
+      final data = handleResponse(response, (d) => d as Map<String, dynamic>);
+      return UndoResult(
+        undone: true,
+        conflict: false,
+        message: data['result']?.toString() ?? '',
+      );
+    } on ConflictException catch (e) {
+      return UndoResult(undone: false, conflict: true, message: e.message);
+    }
+  }
+
   Future<AssistantConversationHistory> getAssistantHistory({
     int limit = 50,
     int offset = 0,

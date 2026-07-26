@@ -811,6 +811,26 @@ class AppLocalizationsZh extends AppLocalizations {
   String get agentPlanConfirmAction => '确认执行';
 
   @override
+  String get undoDoneHeader => '已完成，还可以撤销';
+
+  @override
+  String get undoAction => '撤销';
+
+  @override
+  String undoRemainingSeconds(int seconds) {
+    return '还剩 $seconds 秒';
+  }
+
+  @override
+  String get undoSucceeded => '已撤销';
+
+  @override
+  String get undoConflict => '无法撤销';
+
+  @override
+  String get undoFailed => '撤销失败，请重试';
+
+  @override
   String get agentPlanExecuted => '操作已执行';
 
   @override

@@ -265,6 +265,11 @@ class ApiService extends BaseService {
 
   Future<void> cancelAgentPlan(String id) => _chatService.cancelAgentPlan(id);
 
+  Future<List<UndoableAction>> getUndoableActions() =>
+      _chatService.getUndoableActions();
+
+  Future<UndoResult> undoAction(String id) => _chatService.undoAction(id);
+
   Future<Map<String, dynamic>> respondNegotiation(
     String id, {
     required String action,

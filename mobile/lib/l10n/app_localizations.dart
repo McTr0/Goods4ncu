@@ -1664,6 +1664,42 @@ abstract class AppLocalizations {
   /// **'Confirm'**
   String get agentPlanConfirmAction;
 
+  /// No description provided for @undoDoneHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'Done — you can still undo'**
+  String get undoDoneHeader;
+
+  /// No description provided for @undoAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get undoAction;
+
+  /// Countdown on the undo affordance
+  ///
+  /// In en, this message translates to:
+  /// **'{seconds}s left'**
+  String undoRemainingSeconds(int seconds);
+
+  /// No description provided for @undoSucceeded.
+  ///
+  /// In en, this message translates to:
+  /// **'Undone'**
+  String get undoSucceeded;
+
+  /// No description provided for @undoConflict.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not undo'**
+  String get undoConflict;
+
+  /// No description provided for @undoFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo failed, please try again'**
+  String get undoFailed;
+
   /// No description provided for @agentPlanExecuted.
   ///
   /// In en, this message translates to:

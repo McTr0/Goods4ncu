@@ -488,6 +488,10 @@ class _ChatPageState extends State<ChatPage> {
   // Active HITL requests shown as cards in the chat.
   List<HitlRequest> _hitlRequests = [];
   List<AgentPlan> _agentPlans = [];
+  // Actions the assistant already performed that are still reversible. Kept
+  // separate from _agentPlans: those await the user, these have happened.
+  List<UndoableAction> _undoableActions = [];
+  Timer? _undoTicker;
 
   StreamSubscription? _wsSubscription;
 
@@ -557,6 +561,7 @@ class _ChatPageState extends State<ChatPage> {
       });
       await _loadNegotiations();
       await _loadAgentPlans();
+      await _loadUndoableActions();
     } catch (_) {}
   }
 
@@ -578,6 +583,65 @@ class _ChatPageState extends State<ChatPage> {
       if (!mounted) return;
       setState(() => _agentPlans = plans);
     } catch (_) {}
+  }
+
+  Future<void> _loadUndoableActions() async {
+    try {
+      final actions = await _apiService.getUndoableActions();
+      if (!mounted) return;
+      setState(() {
+        _undoableActions = actions.where((a) => !a.expired).toList();
+      });
+      _syncUndoTicker();
+    } catch (_) {}
+  }
+
+  /// Drives the countdown, and only while something is actually undoable — a
+  /// permanent one-second timer would repaint the whole chat forever.
+  void _syncUndoTicker() {
+    if (_undoableActions.isEmpty) {
+      _undoTicker?.cancel();
+      _undoTicker = null;
+      return;
+    }
+    _undoTicker ??= Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      final live = _undoableActions.where((a) => !a.expired).toList();
+      setState(() => _undoableActions = live);
+      if (live.isEmpty) _syncUndoTicker();
+    });
+  }
+
+  Future<void> _undo(UndoableAction action) async {
+    final l = AppLocalizations.of(context)!;
+    // Drop it from the strip immediately: leaving a button the user already
+    // pressed invites a second press, and the answer will be the same anyway.
+    setState(
+      () => _undoableActions = _undoableActions
+          .where((a) => a.id != action.id)
+          .toList(),
+    );
+    try {
+      final result = await _apiService.undoAction(action.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.message.isEmpty
+                ? (result.undone ? l.undoSucceeded : l.undoConflict)
+                : result.message,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.undoFailed)));
+    }
+    await _loadUndoableActions();
   }
 
   Future<void> _confirmAgentPlan(AgentPlan plan) async {
@@ -687,6 +751,7 @@ class _ChatPageState extends State<ChatPage> {
     if (_ownsSseService) _sseService.dispose();
     _wsSubscription?.cancel();
     _recordingTimer?.cancel();
+    _undoTicker?.cancel();
     super.dispose();
   }
 
@@ -861,6 +926,9 @@ class _ChatPageState extends State<ChatPage> {
       // created a HITL request or proposed an action awaiting confirmation).
       await _loadNegotiations();
       await _loadAgentPlans();
+      // The turn may have carried out a reversible write, so surface the undo
+      // affordance right after the reply that caused it.
+      await _loadUndoableActions();
       widget.onConversationUpdated?.call();
     } on ChatPageMediaUploadException catch (e) {
       if (!mounted) return;
@@ -961,6 +1029,63 @@ class _ChatPageState extends State<ChatPage> {
                     ),
                   ),
                 ),
+              ],
+            ),
+          ),
+        // Writes that already happened and are still reversible. Visually
+        // quieter than the pending-confirmation block above: nothing is being
+        // asked of the user, the action is simply still recoverable.
+        if (_undoableActions.isNotEmpty)
+          Container(
+            color: const Color(0xFFF4F6F4),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l.undoDoneHeader,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF5F6B5F),
+                  ),
+                ),
+                ..._undoableActions.map((action) {
+                  final remaining = action.remaining();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.check_circle_outline,
+                          size: 16,
+                          color: Color(0xFF5F6B5F),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            action.summary,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                        if (remaining != null)
+                          Text(
+                            l.undoRemainingSeconds(remaining.inSeconds),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF8A968A),
+                            ),
+                          ),
+                        TextButton(
+                          onPressed: () => _undo(action),
+                          child: Text(l.undoAction),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
               ],
             ),
           ),
