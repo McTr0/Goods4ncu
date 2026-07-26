@@ -85,6 +85,7 @@ pub async fn create_conversation(
                 related_order_id: None,
                 related_listing_id: result.conversation.listing_id.as_deref(),
                 related_conversation_id: Some(&result.conversation.id),
+                related_space_id: None,
             })
             .await
         {

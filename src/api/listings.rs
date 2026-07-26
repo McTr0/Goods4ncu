@@ -658,6 +658,7 @@ pub async fn respond_to_wanted(
                 related_order_id: None,
                 related_listing_id: Some(&wanted.id),
                 related_conversation_id: None,
+                related_space_id: None,
             },
         )
         .await
@@ -736,6 +737,7 @@ pub async fn fulfill_wanted(
                 related_order_id: None,
                 related_listing_id: Some(&id),
                 related_conversation_id: None,
+                related_space_id: None,
             })
             .await
         {

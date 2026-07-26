@@ -122,6 +122,7 @@ async fn a_budgeted_topic_cannot_take_the_unbudgeted_door() {
                 related_order_id: None,
                 related_listing_id: None,
                 related_conversation_id: None,
+                related_space_id: None,
             })
             .await
             .expect_err("budgeted topics must be refused on the unbudgeted path");
@@ -149,6 +150,7 @@ async fn a_budgeted_topic_cannot_take_the_unbudgeted_door() {
                 related_order_id: None,
                 related_listing_id: None,
                 related_conversation_id: None,
+                related_space_id: None,
             })
             .await
             .expect("directed notifications are never budgeted");
@@ -207,6 +209,7 @@ async fn over_budget_silences_the_push_but_keeps_the_message() {
                     related_order_id: None,
                     related_listing_id: None,
                     related_conversation_id: None,
+                    related_space_id: None,
                 },
             )
             .await

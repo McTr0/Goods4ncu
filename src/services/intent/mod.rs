@@ -58,6 +58,12 @@ pub struct Intent {
     pub valid_until: Option<chrono::DateTime<chrono::Utc>>,
     pub projected_listing_id: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Who wrote it. Never serialised: the matches endpoint returns other
+    /// people's intents, and handing their user id to every caller makes
+    /// contact details a scraping target. Aggregation needs it internally;
+    /// starting a conversation from a match is a server-side action.
+    #[serde(skip)]
+    pub author_id: Option<String>,
 }
 
 /// What to record. `slots` may be entirely empty: an intent is allowed to be
@@ -186,7 +192,7 @@ impl IntentService {
     pub async fn get(&self, author_id: &str, intent_id: Uuid) -> Result<Option<Intent>> {
         let row = sqlx::query(
             "SELECT id, kind, raw_input, slots, confidence, status, visibility,
-                    valid_until, projected_listing_id, created_at
+                    valid_until, projected_listing_id, created_at, author_id
              FROM intents WHERE id = $1 AND author_id = $2",
         )
         .bind(intent_id)
@@ -201,7 +207,7 @@ impl IntentService {
     pub async fn list_mine(&self, author_id: &str, limit: i64) -> Result<Vec<Intent>> {
         let rows = sqlx::query(
             "SELECT id, kind, raw_input, slots, confidence, status, visibility,
-                    valid_until, projected_listing_id, created_at
+                    valid_until, projected_listing_id, created_at, author_id
              FROM intents
              WHERE author_id = $1 AND status IN ('draft', 'active')
              ORDER BY created_at DESC
@@ -228,7 +234,7 @@ impl IntentService {
     ) -> Result<Vec<Intent>> {
         let rows = sqlx::query(
             "SELECT id, kind, raw_input, slots, confidence, status, visibility,
-                    valid_until, projected_listing_id, created_at
+                    valid_until, projected_listing_id, created_at, author_id
              FROM intents
              WHERE campus_id = $1
                AND kind = $2
@@ -386,6 +392,7 @@ fn row_to_intent(row: sqlx::postgres::PgRow) -> Result<Intent> {
         valid_until: row.get("valid_until"),
         projected_listing_id: row.get("projected_listing_id"),
         created_at: row.get("created_at"),
+        author_id: row.try_get("author_id").ok(),
     })
 }
 

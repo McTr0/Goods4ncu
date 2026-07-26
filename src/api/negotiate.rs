@@ -331,6 +331,7 @@ pub async fn respond_negotiation(
             related_order_id: Some(&id),
             related_listing_id: Some(&listing_id),
             related_conversation_id: None,
+            related_space_id: None,
         })
         .await;
 
@@ -448,6 +449,7 @@ pub async fn accept_counter_negotiation(
             related_order_id: Some(&id),
             related_listing_id: Some(&listing_id),
             related_conversation_id: None,
+            related_space_id: None,
         })
         .await;
 
@@ -541,6 +543,7 @@ pub async fn reject_counter_negotiation(
             related_order_id: Some(&id),
             related_listing_id: Some(&listing_id),
             related_conversation_id: None,
+            related_space_id: None,
         })
         .await;
 

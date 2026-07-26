@@ -264,6 +264,69 @@ pub struct CategoryCount {
     pub count: i64,
 }
 
+/// POST /api/admin/spaces/form — run space formation now for one campus.
+///
+/// The worker sweeps hourly, which is right for steady state and wrong at the
+/// start: while the pool is thin an operator wants to see whether the intents
+/// that exist are enough to put anyone together, without waiting out the clock.
+///
+/// Returns the refusals as well as the spaces. A run that keeps declining for
+/// `too_familiar` is the campus fragmenting into cliques, and that is the
+/// number worth watching — it does not show up anywhere else.
+pub async fn form_spaces_now(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<AdminScopeQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let scope = require_admin_scope(
+        &state,
+        &headers,
+        query.campus_id,
+        query.reason.as_deref(),
+        false,
+    )
+    .await?;
+
+    let service = crate::services::aggregation::AggregationService::new(state.infra.db.clone());
+    // Archive first, so a room whose job is done is not counted as company for
+    // the formation decisions in this same run.
+    let archived = service.archive_spent().await.map_err(ApiError::Internal)?;
+
+    let mut formed = Vec::new();
+    let mut declined = Vec::new();
+    for kind in [
+        crate::services::intent::kinds::COMPANION,
+        crate::services::intent::kinds::ACTIVITY,
+        crate::services::intent::kinds::HELP,
+    ] {
+        let (spaces, refusals) = service
+            .form_spaces(scope.campus_id, kind)
+            .await
+            .map_err(ApiError::Internal)?;
+        for space in spaces {
+            formed.push(serde_json::json!({
+                "space_id": space.space_id,
+                "kind": kind,
+                "name": space.name,
+                "members": space.members.len(),
+                "reason": space.formation_reason,
+            }));
+        }
+        for refusal in refusals {
+            declined.push(serde_json::json!({
+                "kind": kind,
+                "reason": format!("{:?}", refusal),
+            }));
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "archived": archived,
+        "formed": formed,
+        "declined": declined,
+    })))
+}
+
 /// GET /api/admin/community-health — outcome metrics for the selected campus.
 ///
 /// Kept apart from [`get_admin_stats`] on purpose. That endpoint reports how

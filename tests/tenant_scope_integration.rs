@@ -57,6 +57,7 @@ async fn notification_reads_and_read_state_are_campus_scoped() {
                 related_order_id: None,
                 related_listing_id: None,
                 related_conversation_id: None,
+                related_space_id: None,
             })
             .await
             .unwrap();
@@ -70,6 +71,7 @@ async fn notification_reads_and_read_state_are_campus_scoped() {
                 related_order_id: None,
                 related_listing_id: None,
                 related_conversation_id: None,
+                related_space_id: None,
             })
             .await
             .unwrap();

@@ -21,6 +21,7 @@ pub struct Notification {
     /// Ledger entry behind this notification, for budgeted topics. The client
     /// posts accept/dismiss against it when the user acts.
     pub interruption_id: Option<Uuid>,
+    pub related_space_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -33,6 +34,11 @@ pub struct NewNotification<'a> {
     pub related_order_id: Option<&'a str>,
     pub related_listing_id: Option<&'a str>,
     pub related_conversation_id: Option<&'a str>,
+    /// A space this notification is about. Kept separate from
+    /// `related_conversation_id`, which is constrained to `chat_conversations`
+    /// — putting a space id there fails the foreign key and loses the
+    /// notification entirely.
+    pub related_space_id: Option<&'a str>,
 }
 
 /// Callback for real-time push. Still used by workers (HITL expiry) that
@@ -111,8 +117,9 @@ impl NotificationService {
         sqlx::query(
             "INSERT INTO notifications (
                 id, campus_id, user_id, event_type, title, body, related_order_id,
-                related_listing_id, related_conversation_id, interruption_id
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid, $10)",
+                related_listing_id, related_conversation_id, interruption_id,
+                related_space_id
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid, $10, $11::uuid)",
         )
         .bind(&id)
         .bind(notification.campus_id)
@@ -124,6 +131,7 @@ impl NotificationService {
         .bind(notification.related_listing_id)
         .bind(notification.related_conversation_id)
         .bind(interruption_id)
+        .bind(notification.related_space_id)
         .execute(&mut *tx)
         .await?;
 
@@ -172,7 +180,7 @@ impl NotificationService {
         let rows = sqlx::query(
             r#"SELECT id, campus_id, user_id, event_type, title, body, related_order_id,
                       related_listing_id, related_conversation_id, is_read, created_at,
-                      interruption_id
+                      interruption_id, related_space_id
                FROM notifications
                WHERE user_id = $1 AND campus_id = $2
                ORDER BY created_at DESC
@@ -211,6 +219,7 @@ impl NotificationService {
                     is_read: row.get("is_read"),
                     created_at,
                     interruption_id: row.try_get("interruption_id").ok().flatten(),
+                    related_space_id: row.try_get("related_space_id").ok().flatten(),
                 }
             })
             .collect();
@@ -239,7 +248,7 @@ impl NotificationService {
         let rows = sqlx::query(
             r#"SELECT id, campus_id, user_id, event_type, title, body, related_order_id,
                       related_listing_id, related_conversation_id, is_read, created_at,
-                      interruption_id
+                      interruption_id, related_space_id
                FROM notifications
                WHERE user_id = $1 AND campus_id = $2 AND is_read = FALSE
                ORDER BY created_at DESC
@@ -278,6 +287,7 @@ impl NotificationService {
                     is_read: row.get("is_read"),
                     created_at,
                     interruption_id: row.try_get("interruption_id").ok().flatten(),
+                    related_space_id: row.try_get("related_space_id").ok().flatten(),
                 }
             })
             .collect();

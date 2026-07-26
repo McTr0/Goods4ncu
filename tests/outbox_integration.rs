@@ -269,6 +269,7 @@ async fn notification_create_enqueues_push_atomically() {
                 related_order_id: None,
                 related_listing_id: None,
                 related_conversation_id: None,
+                related_space_id: None,
             })
             .await
             .expect("create notification");

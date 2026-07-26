@@ -1216,6 +1216,7 @@ pub async fn execute_negotiate_item(
                 related_order_id: Some(&hitl_id),
                 related_listing_id: Some(&args.listing_id),
                 related_conversation_id: None,
+                related_space_id: None,
             })
             .await;
 
