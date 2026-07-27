@@ -217,6 +217,21 @@ class _NotificationsPageState extends State<NotificationsPage> {
     await _markAsRead(item, silent: true);
     if (!mounted) return;
 
+    // Ordered by what the notice is actually about. A conversation and a space
+    // come first because those are the notices that say a person engaged with
+    // you, and a dead tap on one of those is worse than not sending it.
+    final conversation = item.relatedConversationId;
+    if (conversation != null && conversation.isNotEmpty) {
+      context.push('/user-chat/$conversation');
+      return;
+    }
+
+    final space = item.relatedSpaceId;
+    if (space != null && space.isNotEmpty) {
+      context.push('/spaces/$space');
+      return;
+    }
+
     if (item.relatedListingId != null && item.relatedListingId!.isNotEmpty) {
       context.push('/listing/${item.relatedListingId}');
       return;

@@ -175,6 +175,14 @@ class AppNotification {
   final String body;
   final String? relatedOrderId;
   final String? relatedListingId;
+
+  /// Someone answered you. Carried so tapping the notification opens the
+  /// conversation rather than doing nothing — the notice that says a person
+  /// engaged with you is the last one that should be a dead end.
+  final String? relatedConversationId;
+
+  /// A space formed around something you asked for.
+  final String? relatedSpaceId;
   final bool isRead;
   final String createdAt;
 
@@ -185,6 +193,8 @@ class AppNotification {
     required this.body,
     this.relatedOrderId,
     this.relatedListingId,
+    this.relatedConversationId,
+    this.relatedSpaceId,
     required this.isRead,
     required this.createdAt,
   });
@@ -197,6 +207,8 @@ class AppNotification {
       body: json['body'] ?? '',
       relatedOrderId: json['related_order_id']?.toString(),
       relatedListingId: json['related_listing_id']?.toString(),
+      relatedConversationId: json['related_conversation_id']?.toString(),
+      relatedSpaceId: json['related_space_id']?.toString(),
       isRead: json['is_read'] ?? false,
       createdAt: json['created_at'] ?? '',
     );
@@ -209,6 +221,8 @@ class AppNotification {
     String? body,
     String? relatedOrderId,
     String? relatedListingId,
+    String? relatedConversationId,
+    String? relatedSpaceId,
     bool? isRead,
     String? createdAt,
   }) {
@@ -219,6 +233,9 @@ class AppNotification {
       body: body ?? this.body,
       relatedOrderId: relatedOrderId ?? this.relatedOrderId,
       relatedListingId: relatedListingId ?? this.relatedListingId,
+      relatedConversationId:
+          relatedConversationId ?? this.relatedConversationId,
+      relatedSpaceId: relatedSpaceId ?? this.relatedSpaceId,
       isRead: isRead ?? this.isRead,
       createdAt: createdAt ?? this.createdAt,
     );
