@@ -9,6 +9,8 @@ import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
 import '../services/user_service.dart';
+import '../components/handoff_prompt.dart';
+import '../services/reputation_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
 import '../utils/platform_utils.dart';
@@ -19,11 +21,15 @@ class UserHomePage extends StatefulWidget {
     required this.userId,
     this.userService,
     this.chatService,
+    this.reputationService,
   });
 
   final String userId;
   final UserService? userService;
   final ChatService? chatService;
+
+  /// Injectable for tests, like the services above it.
+  final ReputationService? reputationService;
 
   @override
   State<UserHomePage> createState() => _UserHomePageState();
@@ -35,6 +41,9 @@ class _UserHomePageState extends State<UserHomePage> {
   Map<String, dynamic>? _profile;
   List<Listing> _listings = const [];
   bool _loading = true;
+  Reputation? _reputation;
+  late final ReputationService _reputationService =
+      widget.reputationService ?? context.read<ReputationService>();
   String? _error;
 
   @override
@@ -64,6 +73,12 @@ class _UserHomePageState extends State<UserHomePage> {
             .toList();
         _loading = false;
       });
+      // Fetched separately and allowed to fail: a profile that will not open
+      // because a reputation lookup failed is worse than a profile without one.
+      try {
+        final reputation = await _reputationService.of(widget.userId);
+        if (mounted) setState(() => _reputation = reputation);
+      } catch (_) {}
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -152,6 +167,17 @@ class _UserHomePageState extends State<UserHomePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _ProfileHeader(profile: _profile!, onContact: _contactUser),
+              // Right where someone decides whether to deal with this person.
+              // A record kept and never shown is bookkeeping, not trust.
+              if (_reputation != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppTheme.sp8),
+                  child: ReputationLine(
+                    completed: _reputation!.completed,
+                    onTime: _reputation!.onTime,
+                    hasTrackRecord: _reputation!.hasTrackRecord,
+                  ),
+                ),
               const SizedBox(height: AppTheme.sp16),
               _PaymentQrSection(profile: _profile!),
               const SizedBox(height: AppTheme.sp24),
