@@ -4,6 +4,8 @@ use rand::RngExt;
 use serde::Serialize;
 use sha2::Sha256;
 use sqlx::{FromRow, PgPool, Row};
+use std::sync::OnceLock;
+use std::time::Duration;
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
@@ -389,7 +391,15 @@ impl CampusService {
         }
 
         let recent = sqlx::query(
-            "SELECT COUNT(*)::BIGINT AS hourly_count, MAX(requested_at) AS last_requested_at
+            // The hourly ceiling counts every attempt; the resend cooldown only
+            // counts attempts that actually reached the student. Making someone
+            // wait out a cooldown for a mail the gateway never delivered turns a
+            // flaky mailer into "I cannot register at all" — and it is the one
+            // step every single student has to get through.
+            "SELECT COUNT(*)::BIGINT AS hourly_count,
+                    MAX(requested_at) FILTER (
+                        WHERE delivery_status IS DISTINCT FROM 'failed'
+                    ) AS last_requested_at
              FROM campus_verification_challenges
              WHERE membership_id = $1
                AND requested_at > NOW() - INTERVAL '1 hour'",
@@ -587,6 +597,26 @@ fn verification_code_matches(
     Ok(mac.verify_slice(&expected).is_ok())
 }
 
+/// Well under the 60s router-wide timeout, and deliberately so. If delivery
+/// outlasts that layer the whole handler is cancelled mid-flight, which drops
+/// the `delivery_status = 'failed'` write — the failure disappears from the one
+/// record operations would look at. Better to give up early, record it, and tell
+/// the student, than to hang for a minute and leave no trace.
+const DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Built once. A fresh `Client` per send throws away connection pooling and
+/// rebuilds TLS for every registration on the busiest hour this system has.
+static DELIVERY_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn delivery_client() -> &'static reqwest::Client {
+    DELIVERY_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(DELIVERY_TIMEOUT)
+            .build()
+            .unwrap_or_default()
+    })
+}
+
 async fn deliver_verification_code(email: &str, code: &str) -> Result<(), ApiError> {
     if let Ok(url) = std::env::var("CAMPUS_VERIFICATION_DELIVERY_URL") {
         // The gateway renders the message, but it can only say what it is told.
@@ -601,7 +631,7 @@ async fn deliver_verification_code(email: &str, code: &str) -> Result<(), ApiErr
             "app_name": "续樟 Goods4ncu",
             "purpose": "校园身份验证",
         });
-        let mut request = reqwest::Client::new()
+        let mut request = delivery_client()
             .post(url)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(payload.to_string());
@@ -855,6 +885,116 @@ mod tests {
             assert_eq!(code_hash.len(), 64);
             assert_eq!(delivery_status, "sent");
             assert!((295..=300).contains(&ttl_seconds));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn a_mail_that_never_arrived_does_not_cost_the_resend_cooldown() {
+        // The gateway going flaky must not read to a student as "you already
+        // got a code, wait a minute". They got nothing, and this is the single
+        // step every real student has to get through — a cooldown charged for
+        // an undelivered mail turns a wobbly mailer into a closed door.
+        with_test_pool(|pool| async move {
+            let user_repo = PostgresUserRepository::new(pool.clone());
+            let user_id = user_repo
+                .create(
+                    &format!("resend_{}", Uuid::new_v4()),
+                    Some("202600000005@email.ncu.edu.cn"),
+                    "hash",
+                    "user",
+                )
+                .await
+                .expect("create user");
+            let service = CampusService::new(pool.clone());
+            let membership_id = service
+                .list_user_memberships(&user_id)
+                .await
+                .expect("memberships")
+                .items[0]
+                .id;
+            let secret = "test-campus-verification-secret-32";
+
+            service
+                .request_email_verification(&user_id, membership_id, secret)
+                .await
+                .expect("first request");
+
+            // A second attempt straight away is refused: that one did arrive.
+            assert!(matches!(
+                service
+                    .request_email_verification(&user_id, membership_id, secret)
+                    .await,
+                Err(ApiError::RateLimitExceeded)
+            ));
+
+            // Now say the gateway swallowed it.
+            sqlx::query(
+                "UPDATE campus_verification_challenges
+                 SET delivery_status = 'failed' WHERE membership_id = $1",
+            )
+            .bind(membership_id)
+            .execute(&pool)
+            .await
+            .expect("mark failed");
+
+            service
+                .request_email_verification(&user_id, membership_id, secret)
+                .await
+                .expect("a failed delivery is retryable at once");
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn the_hourly_ceiling_still_counts_failed_deliveries() {
+        // Otherwise a gateway erroring on every send becomes an unbounded
+        // outbound loop pointed at one address, which is a way to use this
+        // system to hammer somebody's inbox.
+        with_test_pool(|pool| async move {
+            let user_repo = PostgresUserRepository::new(pool.clone());
+            let user_id = user_repo
+                .create(
+                    &format!("ceiling_{}", Uuid::new_v4()),
+                    Some("202600000006@email.ncu.edu.cn"),
+                    "hash",
+                    "user",
+                )
+                .await
+                .expect("create user");
+            let service = CampusService::new(pool.clone());
+            let membership_id = service
+                .list_user_memberships(&user_id)
+                .await
+                .expect("memberships")
+                .items[0]
+                .id;
+            let secret = "test-campus-verification-secret-32";
+
+            for _ in 0..VERIFICATION_HOURLY_LIMIT {
+                service
+                    .request_email_verification(&user_id, membership_id, secret)
+                    .await
+                    .expect("within the ceiling");
+                sqlx::query(
+                    "UPDATE campus_verification_challenges
+                     SET delivery_status = 'failed' WHERE membership_id = $1",
+                )
+                .bind(membership_id)
+                .execute(&pool)
+                .await
+                .expect("mark failed");
+            }
+
+            assert!(
+                matches!(
+                    service
+                        .request_email_verification(&user_id, membership_id, secret)
+                        .await,
+                    Err(ApiError::RateLimitExceeded)
+                ),
+                "every attempt counts towards the ceiling, delivered or not",
+            );
         })
         .await;
     }
