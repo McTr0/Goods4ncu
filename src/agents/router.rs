@@ -115,6 +115,8 @@ impl IntentResult {
         match self.intent {
             Intent::Chat => {
                 let msg = message.trim();
+                // Both greetings, because plenty of people still type the formal one
+                // even where the product answers in the familiar register.
                 if msg == "你好" || msg == "您好" {
                     Some("你好！我是续樟校园二手交易平台的智能助手。我可以帮你搜索商品、发起购买或议价。有什么想买的吗？".to_string())
                 } else if msg == "你是谁" || msg == "你是谁？" {
@@ -128,7 +130,7 @@ impl IntentResult {
                     None
                 }
             }
-            Intent::Blocked => Some("抱歉，您的消息包含了平台不支持的内容，无法处理。".to_string()),
+            Intent::Blocked => Some("抱歉，你的消息包含了平台不支持的内容，无法处理。".to_string()),
             _ => None,
         }
     }
@@ -265,7 +267,7 @@ impl IntentRouter {
             &lower,
             &[
                 "你好",
-                "您好",
+                "你好",
                 "hi",
                 "hello",
                 "嗨",

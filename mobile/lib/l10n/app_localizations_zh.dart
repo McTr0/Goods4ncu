@@ -365,7 +365,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get myFavorites => '我的收藏';
 
   @override
-  String get myFavoritesSubtitle => '您收藏的商品';
+  String get myFavoritesSubtitle => '你收藏的商品';
 
   @override
   String get watchlistEmpty => '你还没有收藏商品';
@@ -383,7 +383,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get myListings => '我的发布';
 
   @override
-  String get myListingsMenu => '查看和管理您的商品';
+  String get myListingsMenu => '查看和管理你的商品';
 
   @override
   String get myListingsTab => '我的发布';
@@ -1324,7 +1324,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationEmptyTitle => '还没有会话';
 
   @override
-  String get conversationEmptySubtitle => '从商品详情联系，或搜索同学开始一次会话。';
+  String get conversationEmptySubtitle => '在「大家在找什么」里回应一个人，就有第一次对话了。';
+
+  @override
+  String get conversationEmptyAction => '去看看大家在找什么';
 
   @override
   String get findClassmate => '找同学';

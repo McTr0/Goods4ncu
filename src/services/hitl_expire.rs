@@ -135,7 +135,7 @@ async fn expire_pending(
             r#"INSERT INTO notifications (
                    id, campus_id, user_id, event_type, title, body, related_listing_id
                ) VALUES ($1, $2, $3, 'negotiation_expired_seller', '议价超时未处理',
-                         '您有一笔议价请求超时未处理，已自动取消', $4)"#,
+                         '你有一笔议价请求超时未处理，已自动取消', $4)"#,
         )
         .bind(&seller_notif_id)
         .bind(campus_id)
@@ -149,7 +149,7 @@ async fn expire_pending(
             "id": seller_notif_id,
             "event_type": "negotiation_expired_seller",
             "title": "议价超时未处理",
-            "body": "您有一笔议价请求超时未处理，已自动取消",
+            "body": "你有一笔议价请求超时未处理，已自动取消",
         });
         broadcast(seller_id.to_string(), seller_notif_payload.to_string());
     }

@@ -421,10 +421,18 @@ class _ConversationListPageState extends State<ConversationListPage> {
           if (_error == null && !hasInboxData)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
+              // The old wording pointed at contacting someone from a listing
+              // or searching for a classmate — the two paths that do not work
+              // on day one, when there are no listings and you do not yet know
+              // anyone. Answering an intent is the one that does.
               child: _InlineEmptyMessage(
                 icon: Icons.forum_outlined,
                 title: l.conversationEmptyTitle,
                 subtitle: l.conversationEmptySubtitle,
+                action: TextButton(
+                  onPressed: () => context.push('/create'),
+                  child: Text(l.conversationEmptyAction),
+                ),
               ),
             ),
           if (_threads.isNotEmpty) ...[

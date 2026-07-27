@@ -2657,8 +2657,14 @@ abstract class AppLocalizations {
   /// No description provided for @conversationEmptySubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Contact someone from a listing, or search for a classmate to start a conversation.'**
+  /// **'Answer someone in \"what people are looking for\" and you\'ll have your first conversation.'**
   String get conversationEmptySubtitle;
+
+  /// No description provided for @conversationEmptyAction.
+  ///
+  /// In en, this message translates to:
+  /// **'See what people are looking for'**
+  String get conversationEmptyAction;
 
   /// No description provided for @findClassmate.
   ///

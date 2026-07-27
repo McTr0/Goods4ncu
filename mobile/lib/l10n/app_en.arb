@@ -521,7 +521,8 @@
   "homeRecentSubtitle": "See what classmates are selling right now.",
   "conversationLoadFailedTitle": "Messages could not load",
   "conversationEmptyTitle": "No conversations yet",
-  "conversationEmptySubtitle": "Contact someone from a listing, or search for a classmate to start a conversation.",
+  "conversationEmptySubtitle": "Answer someone in \"what people are looking for\" and you'll have your first conversation.",
+  "conversationEmptyAction": "See what people are looking for",
   "findClassmate": "Find classmate",
   "conversationWaitingCount": "Awaiting your reply · {count}",
   "@conversationWaitingCount": {

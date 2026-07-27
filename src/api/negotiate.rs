@@ -234,13 +234,13 @@ pub async fn respond_negotiation(
             let price = proposed_price;
             (
                 format!(
-                    "系统：卖家接受了您的还价 ¥{:.2}，线下成交已确认",
+                    "系统：卖家接受了你的还价 ¥{:.2}，线下成交已确认",
                     crate::utils::cents_to_yuan(price)
                 ),
                 Some(price),
             )
         }
-        "rejected" => ("系统：卖家拒绝了您的还价，交易取消".to_string(), None),
+        "rejected" => ("系统：卖家拒绝了你的还价，交易取消".to_string(), None),
         "countered" => (
             format!(
                 "系统：卖家还价 ¥{:.2}",
@@ -302,12 +302,12 @@ pub async fn respond_negotiation(
     // Notify the buyer after commit; notification delivery is best-effort.
     let (notif_title, notif_body): (String, String) = match new_status {
         "approved" => (
-            "卖家接受了您的还价".to_string(),
-            "卖家接受了您的还价，线下成交已确认".to_string(),
+            "卖家接受了你的还价".to_string(),
+            "卖家接受了你的还价，线下成交已确认".to_string(),
         ),
         "rejected" => (
-            "卖家拒绝了您的还价".to_string(),
-            "抱歉，卖家未能接受您的还价".to_string(),
+            "卖家拒绝了你的还价".to_string(),
+            "抱歉，卖家未能接受你的还价".to_string(),
         ),
         "countered" => (
             "卖家还价了".to_string(),
@@ -444,8 +444,8 @@ pub async fn accept_counter_negotiation(
             campus_id,
             user_id: &seller_id,
             event_type: "negotiation_buyer_accepted",
-            title: "买家接受了您的还价",
-            body: "买家接受了您的还价，线下成交已确认",
+            title: "买家接受了你的还价",
+            body: "买家接受了你的还价，线下成交已确认",
             related_order_id: Some(&id),
             related_listing_id: Some(&listing_id),
             related_conversation_id: None,
@@ -538,8 +538,8 @@ pub async fn reject_counter_negotiation(
             campus_id,
             user_id: &seller_id,
             event_type: "negotiation_buyer_rejected",
-            title: "买家拒绝了您的还价",
-            body: "抱歉，买家未能接受您的还价",
+            title: "买家拒绝了你的还价",
+            body: "抱歉，买家未能接受你的还价",
             related_order_id: Some(&id),
             related_listing_id: Some(&listing_id),
             related_conversation_id: None,

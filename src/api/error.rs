@@ -122,7 +122,7 @@ impl IntoResponse for ApiError {
             ApiError::Forbidden => (
                 StatusCode::FORBIDDEN,
                 "forbidden",
-                "您没有权限执行此操作".to_string(),
+                "你没有权限执行此操作".to_string(),
             ),
             ApiError::CampusVerificationRequired => (
                 StatusCode::FORBIDDEN,
@@ -188,7 +188,7 @@ mod tests {
             ApiError::RecentAuthenticationRequired => "需要重新验证密码".to_string(),
             ApiError::RecentAuthenticationFailed => "密码验证失败".to_string(),
             ApiError::MfaRequired => "需要动态验证码".to_string(),
-            ApiError::Forbidden => "您没有权限执行此操作".to_string(),
+            ApiError::Forbidden => "你没有权限执行此操作".to_string(),
             ApiError::CampusVerificationRequired => "需要先完成校园身份验证".to_string(),
             ApiError::CampusScopeMismatch => "该操作仅限同一校园的已认证用户".to_string(),
             ApiError::Conflict(ref m) => format!("冲突: {}", m),
@@ -285,7 +285,7 @@ mod tests {
         verify_error_response(
             ApiError::Forbidden,
             StatusCode::FORBIDDEN,
-            "您没有权限执行此操作",
+            "你没有权限执行此操作",
         );
     }
 

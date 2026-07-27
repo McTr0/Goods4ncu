@@ -1377,7 +1377,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get conversationEmptySubtitle =>
-      'Contact someone from a listing, or search for a classmate to start a conversation.';
+      'Answer someone in \"what people are looking for\" and you\'ll have your first conversation.';
+
+  @override
+  String get conversationEmptyAction => 'See what people are looking for';
 
   @override
   String get findClassmate => 'Find classmate';

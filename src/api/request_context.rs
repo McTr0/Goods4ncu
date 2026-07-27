@@ -66,7 +66,7 @@ fn framework_error_fallback_message(status: StatusCode) -> &'static str {
     match status {
         StatusCode::BAD_REQUEST => "请求格式不正确",
         StatusCode::UNAUTHORIZED => "请先登录后再操作",
-        StatusCode::FORBIDDEN => "您没有权限执行此操作",
+        StatusCode::FORBIDDEN => "你没有权限执行此操作",
         StatusCode::NOT_FOUND => "请求的接口不存在",
         StatusCode::METHOD_NOT_ALLOWED => "该接口不支持此请求方法",
         StatusCode::PAYLOAD_TOO_LARGE => "请求内容超过大小限制",

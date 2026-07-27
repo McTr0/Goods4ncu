@@ -1179,7 +1179,7 @@ pub async fn execute_negotiate_item(
         .await
         .map_err(|e| ToolError(format!("DB error: {}", e)))?;
         if existing.is_some() {
-            return Ok("您已对该商品发起过还价，请等待卖家响应后再发起新还价".to_string());
+            return Ok("你已对该商品发起过还价，请等待卖家响应后再发起新还价".to_string());
         }
 
         // Create the HITL request in the database
@@ -1221,7 +1221,7 @@ pub async fn execute_negotiate_item(
             .await;
 
         Ok(format!(
-            "您的还价 ¥{:.2} 已发送给卖家，等待确认中。\
+            "你的还价 ¥{:.2} 已发送给卖家，等待确认中。\
              卖家同意后订单将自动创建。\
              请留意通知。",
             cents_to_yuan(args.offered_price)
