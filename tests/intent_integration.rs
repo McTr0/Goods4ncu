@@ -826,6 +826,71 @@ async fn the_campus_feed_is_visible_without_posting_anything_first() {
 }
 
 #[tokio::test]
+async fn the_feed_drops_what_you_have_already_answered() {
+    // The feed is a list of what you can answer. Something you answered
+    // yesterday is not one — that conversation is already in your inbox. Left
+    // in, a week of active answering fills the feed with your own replies and
+    // the campus reads as having gone quiet, which is the one impression a
+    // young community cannot survive.
+    with_test_pool(|pool| async move {
+        let campus_id = campus(&pool).await;
+        let asker = member(&pool, campus_id, "asker").await;
+        let helper = member(&pool, campus_id, "helper").await;
+        let bystander = member(&pool, campus_id, "bystander").await;
+        let service = IntentService::new(pool.clone());
+
+        let answered = service
+            .create(stated(
+                campus_id,
+                &asker,
+                kinds::HELP,
+                "有人会修自行车吗",
+                Slots::default(),
+            ))
+            .await
+            .expect("create answered");
+        service
+            .create(stated(
+                campus_id,
+                &asker,
+                kinds::COMPANION,
+                "找个羽毛球搭子",
+                Slots::default(),
+            ))
+            .await
+            .expect("create untouched");
+
+        service
+            .record_response(campus_id, answered, &helper, None)
+            .await
+            .expect("record response");
+
+        let helper_feed = service
+            .campus_feed(campus_id, &helper, None, 30)
+            .await
+            .expect("feed");
+        assert_eq!(
+            helper_feed
+                .iter()
+                .map(|i| i.raw_input.as_str())
+                .collect::<Vec<_>>(),
+            vec!["找个羽毛球搭子"],
+            "only what is still open to this viewer",
+        );
+
+        // One person's reply does not take it off everyone else's feed. Several
+        // students can answer the same request, and hiding it after the first
+        // would make the community look thinner than it is.
+        let bystander_feed = service
+            .campus_feed(campus_id, &bystander, None, 30)
+            .await
+            .expect("feed");
+        assert_eq!(bystander_feed.len(), 2);
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn the_feed_never_carries_an_author_identity() {
     // Answering is a server-side action precisely so this surface cannot be
     // scraped into a directory of who wants what. If author ids ever appear in

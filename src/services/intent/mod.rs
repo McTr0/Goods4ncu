@@ -376,6 +376,12 @@ impl IntentService {
     ///
     /// `kind` filters when given; `None` returns every kind interleaved by
     /// recency, which is what a browsing student actually wants.
+    ///
+    /// Anything the viewer has already answered is left out. The feed is a list
+    /// of what you can answer, and something you answered yesterday is not one:
+    /// the conversation is already in your inbox. Left in, a week of active
+    /// answering fills the feed with your own replies and the campus looks like
+    /// it has gone quiet — the exact reading that kills a young community.
     pub async fn campus_feed(
         &self,
         campus_id: Uuid,
@@ -393,6 +399,10 @@ impl IntentService {
                AND author_id <> $2
                AND (valid_until IS NULL OR valid_until > NOW())
                AND ($3::text IS NULL OR kind = $3)
+               AND NOT EXISTS (
+                   SELECT 1 FROM intent_responses r
+                   WHERE r.intent_id = intents.id AND r.responder_id = $2
+               )
              ORDER BY created_at DESC
              LIMIT $4",
         )
