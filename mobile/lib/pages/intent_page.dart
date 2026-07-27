@@ -437,6 +437,7 @@ class _IntentPageState extends State<IntentPage> {
                   intent: intent,
                   kindLabel: _kindLabel(l, intent.kind),
                   matches: _matches[intent.id],
+                  onRespondToMatch: _respond,
                   onConfirm: intent.isDraft
                       ? () async {
                           await _service.confirmIntent(intent.id);
@@ -459,6 +460,7 @@ class _IntentCard extends StatelessWidget {
     required this.intent,
     required this.kindLabel,
     required this.matches,
+    required this.onRespondToMatch,
     required this.onConfirm,
     required this.onFulfilled,
     required this.onWithdraw,
@@ -467,6 +469,10 @@ class _IntentCard extends StatelessWidget {
   final UserIntent intent;
   final String kindLabel;
   final List<UserIntent>? matches;
+
+  /// Answering a match is the only reason to show one. Without this the list is
+  /// a notice that somebody wants what you have and no way to say so.
+  final void Function(UserIntent) onRespondToMatch;
   final Future<void> Function()? onConfirm;
   final VoidCallback onFulfilled;
   final VoidCallback onWithdraw;
@@ -523,16 +529,37 @@ class _IntentCard extends StatelessWidget {
                     : l.intentMatchCount(matches!.length),
                 style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
               ),
+              // Each one is answerable. The moment the system says somebody
+              // here wants what you have is the worst possible moment to give
+              // them nothing to press.
               ...matches!
                   .take(3)
                   .map(
-                    (m) => Padding(
-                      padding: const EdgeInsets.only(top: 2, left: 4),
-                      child: Text(
-                        '· ${m.slots.subject ?? m.rawInput}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12),
+                    (m) => InkWell(
+                      onTap: () => onRespondToMatch(m),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '· ${m.slots.subject ?? m.rawInput}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              l.intentRespondAction,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.primary,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),

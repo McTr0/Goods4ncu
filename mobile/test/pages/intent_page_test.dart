@@ -54,8 +54,11 @@ class _FakeIntentService extends IntentService {
     return 'conversation-1';
   }
 
+  Map<String, List<UserIntent>> matches = const {};
+
   @override
-  Future<List<UserIntent>> matchesFor(String intentId) async => const [];
+  Future<List<UserIntent>> matchesFor(String intentId) async =>
+      matches[intentId] ?? const [];
 
   @override
   Future<IntentCreated> createIntent({
@@ -394,5 +397,70 @@ void main() {
 
     expect(service.sentRawInput, '宿舍小台灯');
     expect(service.photoCalls, 0);
+  });
+
+  testWidgets('a match can be answered from where it is shown', (tester) async {
+    // Matching computed the candidates and printed them as inert text. The
+    // moment the system says somebody here wants what you have is the worst
+    // possible moment to give them nothing to press.
+    final service = _FakeIntentService(
+      mine: [
+        UserIntent(
+          id: 'intent-mine-1',
+          kind: IntentKind.goodsSeek,
+          rawInput: '想收个二手显示器',
+          slots: const IntentSlots(),
+          status: 'active',
+        ),
+      ],
+    );
+    service.matches = {
+      'intent-mine-1': [
+        UserIntent(
+          id: 'intent-theirs-1',
+          kind: IntentKind.goodsOffer,
+          rawInput: '出一台 24 寸显示器',
+          slots: const IntentSlots(subject: '显示器'),
+          status: 'active',
+        ),
+      ],
+    };
+    await tester.pumpWidget(_app(IntentPage(intentService: service)));
+    await tester.pumpAndSettle();
+    final l = _l(tester);
+
+    expect(find.text(l.intentMatchCount(1)), findsOneWidget);
+    await tester.ensureVisible(find.text(l.intentRespondAction));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(l.intentRespondAction));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).last, '还在吗，我要');
+    await tester.tap(find.text(l.intentRespondSend));
+    await tester.pumpAndSettle();
+
+    // Addressed to their intent, not to the caller's own.
+    expect(service.responses, [('intent-theirs-1', '还在吗，我要')]);
+  });
+
+  testWidgets('having no match yet is stated, not left blank', (tester) async {
+    final service = _FakeIntentService(
+      mine: [
+        UserIntent(
+          id: 'intent-mine-2',
+          kind: IntentKind.goodsSeek,
+          rawInput: '想收个电饭煲',
+          slots: const IntentSlots(),
+          status: 'active',
+        ),
+      ],
+    );
+    await tester.pumpWidget(_app(IntentPage(intentService: service)));
+    await tester.pumpAndSettle();
+    final l = _l(tester);
+
+    expect(find.text(l.intentNoMatchesYet), findsOneWidget);
+    // And nothing to press, because there is nobody to press it at.
+    expect(find.text(l.intentRespondAction), findsNothing);
   });
 }
