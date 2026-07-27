@@ -373,9 +373,19 @@ impl CampusService {
             .iter()
             .any(|allowed| allowed.eq_ignore_ascii_case(domain))
         {
-            return Err(ApiError::BadRequest(
-                "该邮箱不属于当前校园允许的域名".to_string(),
-            ));
+            // Naming the domain matters more than it looks. This fires at the
+            // single step every student must pass, and someone told only that
+            // their address is "not allowed" has to guess the right one — most
+            // will just leave instead.
+            return Err(ApiError::BadRequest(format!(
+                "请使用学校邮箱（{}）",
+                target
+                    .email_domains
+                    .iter()
+                    .map(|domain| format!("@{domain}"))
+                    .collect::<Vec<_>>()
+                    .join(" 或 ")
+            )));
         }
 
         let recent = sqlx::query(
@@ -579,11 +589,17 @@ fn verification_code_matches(
 
 async fn deliver_verification_code(email: &str, code: &str) -> Result<(), ApiError> {
     if let Ok(url) = std::env::var("CAMPUS_VERIFICATION_DELIVERY_URL") {
+        // The gateway renders the message, but it can only say what it is told.
+        // A mail reading "your code is 123456" with no product or campus named
+        // is indistinguishable from phishing, and a student who is unsure will
+        // not type it in.
         let payload = serde_json::json!({
             "to": email,
             "template": "campus_email_verification",
             "code": code,
             "expires_in_seconds": VERIFICATION_TTL_MINUTES * 60,
+            "app_name": "续樟 Goods4ncu",
+            "purpose": "校园身份验证",
         });
         let mut request = reqwest::Client::new()
             .post(url)

@@ -232,9 +232,37 @@ pub async fn update_profile(
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
         let Some(email_campus_id) = campus_id_for_email else {
-            return Err(ApiError::BadRequest(
-                "必须使用已接入校园的学校邮箱".to_string(),
-            ));
+            // Same reasoning as registration: name the domain rather than
+            // asking someone to guess it.
+            let domains: Vec<String> = sqlx::query_scalar(
+                // The primary campus only. Listing every active campus would
+                // enumerate which schools are onboard to anyone who mistypes an
+                // address, and tell an NCU student about domains that are not
+                // theirs. The LIMIT has to sit inside the subquery: `unnest`
+                // expands after the outer limit, so limiting rows out here
+                // still listed every campus.
+                "SELECT unnest(email_domains) FROM (
+                     SELECT email_domains FROM campuses
+                     WHERE status = 'active'
+                     ORDER BY (slug = 'ncu') DESC, created_at ASC
+                     LIMIT 1
+                 ) primary_campus",
+            )
+            .fetch_all(&state.infra.db)
+            .await
+            .unwrap_or_default();
+            return Err(ApiError::BadRequest(if domains.is_empty() {
+                "请使用学校邮箱".to_string()
+            } else {
+                format!(
+                    "请使用学校邮箱（{}）",
+                    domains
+                        .iter()
+                        .map(|domain| format!("@{domain}"))
+                        .collect::<Vec<_>>()
+                        .join(" 或 ")
+                )
+            }));
         };
         state.user_repo.update_email(&user_id, email).await?;
         sqlx::query(

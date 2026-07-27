@@ -346,9 +346,37 @@ async fn ensure_campus_email_domain(db: &sqlx::PgPool, domain: &str) -> Result<(
     .await
     .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
     if !allowed {
-        return Err(ApiError::BadRequest(
-            "必须使用已接入校园的学校邮箱注册".to_string(),
-        ));
+        // Say which domain, not just that this one is wrong. This is the first
+        // wall a real student hits, and "use a school email" without naming it
+        // asks them to guess.
+        let domains: Vec<String> = sqlx::query_scalar(
+            // The primary campus only, and the LIMIT has to sit inside the
+            // subquery: `unnest` expands after the outer limit, so limiting the
+            // rows out here still listed every campus. Enumerating which
+            // schools are onboard to anyone who mistypes an address is a leak,
+            // and telling an NCU student about someone else's domain is noise.
+            "SELECT unnest(email_domains) FROM (
+                 SELECT email_domains FROM campuses
+                 WHERE status = 'active'
+                 ORDER BY (slug = 'ncu') DESC, created_at ASC
+                 LIMIT 1
+             ) primary_campus",
+        )
+        .fetch_all(db)
+        .await
+        .unwrap_or_default();
+        return Err(ApiError::BadRequest(if domains.is_empty() {
+            "请使用学校邮箱注册".to_string()
+        } else {
+            format!(
+                "请使用学校邮箱注册（{}）",
+                domains
+                    .iter()
+                    .map(|domain| format!("@{domain}"))
+                    .collect::<Vec<_>>()
+                    .join(" 或 ")
+            )
+        }));
     }
     Ok(())
 }
