@@ -3,15 +3,18 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
+import '../services/intent_service.dart';
 import '../services/recommendation_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
+import '../components/intent_respond_dialog.dart';
 import '../components/price_tag.dart';
 
 class HomePage extends StatefulWidget {
   final RecommendationService? recommendationService;
+  final IntentService? intentService;
 
-  const HomePage({super.key, this.recommendationService});
+  const HomePage({super.key, this.recommendationService, this.intentService});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -19,6 +22,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   late final RecommendationService _recommendationService;
+  late final IntentService _intentService;
   final _agentPromptController = TextEditingController();
   final _agentPromptFocus = FocusNode();
 
@@ -29,11 +33,17 @@ class _HomePageState extends State<HomePage> {
   bool _feedLoading = false;
   String _directionFilter = 'all';
 
+  /// What people have actually said, loaded only when the grid comes back
+  /// empty. The publish tab opens the intent composer, so most of what gets
+  /// said here never becomes a listing — an empty grid is not an empty campus.
+  List<UserIntent> _voices = const [];
+
   @override
   void initState() {
     super.initState();
     _recommendationService =
         widget.recommendationService ?? context.read<RecommendationService>();
+    _intentService = widget.intentService ?? context.read<IntentService>();
     _loadRecommendations();
   }
 
@@ -60,6 +70,7 @@ class _HomePageState extends State<HomePage> {
           _feedLoading = false;
         });
       }
+      if (_recommendedListings.isEmpty) await _loadVoices();
     } catch (error, stackTrace) {
       debugPrint('Failed to load recommendation feed: $error');
       debugPrintStack(stackTrace: stackTrace);
@@ -70,6 +81,21 @@ class _HomePageState extends State<HomePage> {
           _feedLoading = false;
         });
       }
+    }
+  }
+
+  /// A failure here costs the section, not the screen: the cold-start card is
+  /// still a reasonable thing to land on.
+  Future<void> _loadVoices() async {
+    try {
+      final voices = await _intentService.campusFeed(limit: 8);
+      if (mounted) setState(() => _voices = voices);
+    } catch (_) {}
+  }
+
+  Future<void> _respond(UserIntent intent) async {
+    if (await respondToIntentFlow(context, _intentService, intent)) {
+      await _loadVoices();
     }
   }
 
@@ -157,17 +183,27 @@ class _HomePageState extends State<HomePage> {
                 onSubmit: _openAgent,
               ),
             ),
-            SliverFillRemaining(
-              hasScrollBody: false,
-              // Two different situations that used to share one dead-end
-              // message. On day one the place really is empty, and that is
-              // normal rather than a failure — saying "暂无商品" to the first
-              // thirty students frames a new community as a broken shop.
-              child: _HomeEmptyState(
-                isColdStart: _directionFilter == 'all',
-                onSaySomething: () => context.push('/create'),
+            // An empty grid with people talking is not an empty campus, and
+            // saying "还没有人发东西" to a community that has been posting all
+            // week is the most discouraging thing this screen could do. Most
+            // of what gets said never becomes a listing, because the publish
+            // tab is the intent composer.
+            if (_voices.isNotEmpty && _directionFilter == 'all')
+              SliverToBoxAdapter(
+                child: _WhatPeopleWant(voices: _voices, onRespond: _respond),
+              )
+            else
+              SliverFillRemaining(
+                hasScrollBody: false,
+                // Two different situations that used to share one dead-end
+                // message. On day one the place really is empty, and that is
+                // normal rather than a failure — saying "暂无商品" to the first
+                // thirty students frames a new community as a broken shop.
+                child: _HomeEmptyState(
+                  isColdStart: _directionFilter == 'all',
+                  onSaySomething: () => context.push('/create'),
+                ),
               ),
-            ),
           ],
         ),
       );
@@ -830,6 +866,80 @@ class _HomeEmptyState extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// What people are after, shown on the screen everyone lands on.
+///
+/// The grid is listings, and listings are the minority of what gets said here:
+/// a badminton partner, a hand moving a fridge, and anything offered without a
+/// price never become one. Leaving those off the home screen meant the busiest
+/// week of a new community could still open on "还没有人发东西".
+class _WhatPeopleWant extends StatelessWidget {
+  const _WhatPeopleWant({required this.voices, required this.onRespond});
+
+  final List<UserIntent> voices;
+  final void Function(UserIntent) onRespond;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppTheme.sp16,
+        AppTheme.sp8,
+        AppTheme.sp16,
+        AppTheme.sp24,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            l.homeVoicesTitle,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: AppTheme.sp4),
+          Text(
+            l.homeVoicesBody,
+            style: TextStyle(
+              fontSize: 13,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: AppTheme.sp12),
+          ...voices.map(
+            (intent) => Card(
+              margin: const EdgeInsets.only(bottom: AppTheme.sp8),
+              child: ListTile(
+                title: Text(
+                  intent.rawInput,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 14),
+                ),
+                // The reply is the point. A wall of things people want with no
+                // way to answer any of them is the same dead end as an empty
+                // grid, dressed up as content.
+                trailing: FilledButton.tonal(
+                  onPressed: () => onRespond(intent),
+                  child: Text(l.intentRespondAction),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: AppTheme.sp8),
+          Center(
+            child: OutlinedButton(
+              onPressed: () => context.push('/create'),
+              child: Text(l.homeColdStartAction),
+            ),
+          ),
+        ],
       ),
     );
   }

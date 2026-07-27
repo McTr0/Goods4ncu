@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
+import '../components/intent_respond_dialog.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../services/intent_service.dart';
@@ -216,26 +217,7 @@ class _IntentPageState extends State<IntentPage> {
   }
 
   Future<void> _respond(UserIntent intent) async {
-    final l = AppLocalizations.of(context)!;
-    final content = await showDialog<String>(
-      context: context,
-      builder: (_) => _RespondDialog(intent: intent),
-    );
-    if (content == null || content.isEmpty || !mounted) return;
-
-    try {
-      await _service.respondToIntent(intent.id, content);
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(l.intentRespondSent)));
-      await _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(l.operationFailed(e.toString()))));
-    }
+    if (await respondToIntentFlow(context, _service, intent)) await _load();
   }
 
   String _kindLabel(AppLocalizations l, IntentKind kind) => switch (kind) {
@@ -591,77 +573,6 @@ class _IntentCard extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-/// The reply composer.
-///
-/// A widget rather than an inline `showDialog` body so it owns its
-/// `TextEditingController` and disposes it in its own `dispose()`. Disposing it
-/// straight after `showDialog` returns throws — the dialog's dismissal animation
-/// is still running and rebuilds the field against a dead controller, which
-/// happened on every send and every cancel.
-class _RespondDialog extends StatefulWidget {
-  const _RespondDialog({required this.intent});
-
-  final UserIntent intent;
-
-  @override
-  State<_RespondDialog> createState() => _RespondDialogState();
-}
-
-class _RespondDialogState extends State<_RespondDialog> {
-  final _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
-    return AlertDialog(
-      title: Text(l.intentRespondTitle),
-      // Scrollable: an AlertDialog's content is not, and on a short screen with
-      // the keyboard up this column does not fit.
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Their own words, so the responder can see exactly what they are
-            // answering rather than a normalised summary.
-            Text(
-              widget.intent.rawInput,
-              style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _controller,
-              autofocus: true,
-              maxLines: 3,
-              minLines: 2,
-              decoration: InputDecoration(
-                hintText: l.intentRespondHint,
-                border: const OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(l.cancel),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, _controller.text.trim()),
-          child: Text(l.intentRespondSend),
-        ),
-      ],
     );
   }
 }

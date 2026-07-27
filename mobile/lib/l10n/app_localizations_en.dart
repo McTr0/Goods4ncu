@@ -470,6 +470,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get homeColdStartAction => 'I\'ll go first';
 
   @override
+  String get homeVoicesTitle => 'What people are after';
+
+  @override
+  String get homeVoicesBody =>
+      'Nothing in the grid yet, but these are what people here are saying. A reply is all it takes to start.';
+
+  @override
   String get homeFilterEmpty =>
       'Nothing matches this filter. Try another, or just say what you want.';
 

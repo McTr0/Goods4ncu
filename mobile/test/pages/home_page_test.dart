@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/pages/home_page.dart';
+import 'package:goods4ncu_mobile/services/intent_service.dart';
 import 'package:goods4ncu_mobile/services/recommendation_service.dart';
 import 'package:goods4ncu_mobile/theme/app_theme.dart';
 import 'package:provider/provider.dart';
@@ -40,10 +41,33 @@ class _FakeRecommendationService extends RecommendationService {
   }
 }
 
+/// What people have said, independent of what has been listed. Most of what a
+/// campus says never becomes a listing, so these two are genuinely different
+/// kinds of empty.
+class _FakeIntentService extends IntentService {
+  _FakeIntentService([this.voices = const []]);
+
+  final List<UserIntent> voices;
+  final List<(String, String)> responses = [];
+
+  @override
+  Future<List<UserIntent>> campusFeed({
+    IntentKind? kind,
+    int limit = 30,
+  }) async => voices;
+
+  @override
+  Future<String> respondToIntent(String intentId, String content) async {
+    responses.add((intentId, content));
+    return 'conversation-1';
+  }
+}
+
 Widget _buildApp({
   Locale locale = const Locale('zh'),
   ThemeMode themeMode = ThemeMode.light,
   RecommendationService? recommendations,
+  IntentService? intents,
 }) {
   final router = GoRouter(
     routes: [
@@ -65,8 +89,13 @@ Widget _buildApp({
     ],
   );
 
-  return Provider<RecommendationService>.value(
-    value: recommendations ?? _FakeRecommendationService(),
+  return MultiProvider(
+    providers: [
+      Provider<RecommendationService>.value(
+        value: recommendations ?? _FakeRecommendationService(),
+      ),
+      Provider<IntentService>.value(value: intents ?? _FakeIntentService()),
+    ],
     child: MaterialApp.router(
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
@@ -190,5 +219,87 @@ void main() {
         (decoratedBox.decoration as BoxDecoration).gradient! as LinearGradient;
 
     expect(gradient.colors.first, AppTheme.surfaceDark);
+  });
+
+  testWidgets('an empty grid with people talking is not an empty campus', (
+    tester,
+  ) async {
+    // The publish tab opens the intent composer, so most of what gets said
+    // here never becomes a listing. A busy week could still open on "还没有人发
+    // 东西", which is both false and the most discouraging thing this screen
+    // could say.
+    final intents = _FakeIntentService([
+      UserIntent(
+        id: 'intent-1',
+        kind: IntentKind.help,
+        rawInput: '有人帮我搬个冰箱吗',
+        slots: const IntentSlots(),
+        status: 'active',
+      ),
+    ]);
+    await tester.pumpWidget(
+      _buildApp(
+        recommendations: _EmptyRecommendationService(),
+        intents: intents,
+      ),
+    );
+    await tester.pumpAndSettle();
+    final l = AppLocalizations.of(tester.element(find.byType(HomePage)))!;
+
+    expect(find.text('有人帮我搬个冰箱吗'), findsOneWidget);
+    expect(find.text(l.homeColdStartTitle), findsNothing);
+  });
+
+  testWidgets('someone on the home screen can be answered from it', (
+    tester,
+  ) async {
+    // A wall of things people want with no way to answer any of them is the
+    // same dead end as an empty grid, dressed up as content.
+    final intents = _FakeIntentService([
+      UserIntent(
+        id: 'intent-2',
+        kind: IntentKind.companion,
+        rawInput: '找个羽毛球搭子',
+        slots: const IntentSlots(),
+        status: 'active',
+      ),
+    ]);
+    await tester.pumpWidget(
+      _buildApp(
+        recommendations: _EmptyRecommendationService(),
+        intents: intents,
+      ),
+    );
+    await tester.pumpAndSettle();
+    final l = AppLocalizations.of(tester.element(find.byType(HomePage)))!;
+
+    await tester.ensureVisible(find.text(l.intentRespondAction));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(l.intentRespondAction));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).last, '我周三下午有空');
+    await tester.tap(find.text(l.intentRespondSend));
+    await tester.pumpAndSettle();
+
+    expect(intents.responses, [('intent-2', '我周三下午有空')]);
+  });
+
+  testWidgets('a campus that has genuinely said nothing still gets invited', (
+    tester,
+  ) async {
+    // The day-one card is still right when it is right. Replacing it with an
+    // empty list would be the "暂无商品" mistake in a new costume.
+    await tester.pumpWidget(
+      _buildApp(
+        recommendations: _EmptyRecommendationService(),
+        intents: _FakeIntentService(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final l = AppLocalizations.of(tester.element(find.byType(HomePage)))!;
+
+    expect(find.text(l.homeColdStartTitle), findsOneWidget);
+    expect(find.text(l.homeVoicesTitle), findsNothing);
   });
 }

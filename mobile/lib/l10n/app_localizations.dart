@@ -968,6 +968,18 @@ abstract class AppLocalizations {
   /// **'I\'ll go first'**
   String get homeColdStartAction;
 
+  /// No description provided for @homeVoicesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'What people are after'**
+  String get homeVoicesTitle;
+
+  /// No description provided for @homeVoicesBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing in the grid yet, but these are what people here are saying. A reply is all it takes to start.'**
+  String get homeVoicesBody;
+
   /// No description provided for @homeFilterEmpty.
   ///
   /// In en, this message translates to:

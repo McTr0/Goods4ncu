@@ -452,6 +452,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get homeColdStartAction => '我先说一句';
 
   @override
+  String get homeVoicesTitle => '大家在找这些';
+
+  @override
+  String get homeVoicesBody => '首页的格子里还没有东西，但这些是同学们正在说的。回一句就能开始。';
+
+  @override
   String get homeFilterEmpty => '这个筛选下没有东西。换个条件，或者直接说说你想要什么。';
 
   @override

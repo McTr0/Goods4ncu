@@ -173,6 +173,8 @@
   "homeColdStartTitle": "这里刚开始",
   "homeColdStartBody": "还没有人发东西。你说一句想出什么或想找什么，别人就能看到——第一个开口的人最重要。",
   "homeColdStartAction": "我先说一句",
+  "homeVoicesTitle": "大家在找这些",
+  "homeVoicesBody": "首页的格子里还没有东西，但这些是同学们正在说的。回一句就能开始。",
   "homeFilterEmpty": "这个筛选下没有东西。换个条件，或者直接说说你想要什么。",
   "notFound": "未找到",
   "operationFailed": "操作失败: {error}",
@@ -324,7 +326,14 @@
   "undoDoneHeader": "已完成，还可以撤销",
   "undoAction": "撤销",
   "undoRemainingSeconds": "还剩 {seconds} 秒",
-  "@undoRemainingSeconds": {"description": "Countdown on the undo affordance", "placeholders": {"seconds": {"type": "int"}}},
+  "@undoRemainingSeconds": {
+    "description": "Countdown on the undo affordance",
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
   "undoSucceeded": "已撤销",
   "undoConflict": "无法撤销",
   "undoFailed": "撤销失败，请重试",
@@ -1161,8 +1170,7 @@
   "cancelQuote": "取消引用",
   "quoteContextTooltip": "引用商品、订单或议价",
   "editMessageHint": "编辑消息...",
-  "messageInputHint": "输入消息..."
-  ,
+  "messageInputHint": "输入消息...",
   "offerPriceLine": "报价：¥{price}",
   "@offerPriceLine": {
     "placeholders": {
@@ -1239,7 +1247,6 @@
       }
     }
   },
-  "loading": "加载中...",
   "negotiationStatusLine": "议价已{status}",
   "@negotiationStatusLine": {
     "placeholders": {

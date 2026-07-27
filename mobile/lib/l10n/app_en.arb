@@ -173,6 +173,8 @@
   "homeColdStartTitle": "This place is just starting",
   "homeColdStartBody": "Nobody has posted yet. Say what you're selling or looking for and others will see it — the first person to speak matters most.",
   "homeColdStartAction": "I'll go first",
+  "homeVoicesTitle": "What people are after",
+  "homeVoicesBody": "Nothing in the grid yet, but these are what people here are saying. A reply is all it takes to start.",
   "homeFilterEmpty": "Nothing matches this filter. Try another, or just say what you want.",
   "notFound": "Not found",
   "operationFailed": "Operation failed: {error}",
@@ -324,7 +326,14 @@
   "undoDoneHeader": "Done — you can still undo",
   "undoAction": "Undo",
   "undoRemainingSeconds": "{seconds}s left",
-  "@undoRemainingSeconds": {"description": "Countdown on the undo affordance", "placeholders": {"seconds": {"type": "int"}}},
+  "@undoRemainingSeconds": {
+    "description": "Countdown on the undo affordance",
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
   "undoSucceeded": "Undone",
   "undoConflict": "Could not undo",
   "undoFailed": "Undo failed, please try again",
@@ -403,11 +412,35 @@
   "handoffOnce": "Asked once, and it cannot be changed later",
   "reputationNewcomer": "New here — no record yet",
   "reputationSummary": "Completed {completed}, on time {onTime}",
-  "@reputationSummary": {"description": "Someone's record, stated as facts rather than a score", "placeholders": {"completed": {"type": "int"}, "onTime": {"type": "int"}}},
+  "@reputationSummary": {
+    "description": "Someone's record, stated as facts rather than a score",
+    "placeholders": {
+      "completed": {
+        "type": "int"
+      },
+      "onTime": {
+        "type": "int"
+      }
+    }
+  },
   "priceDiscoveryMatched": "Agreed at ¥{price}",
-  "@priceDiscoveryMatched": {"description": "The agreed price from private-limit matching", "placeholders": {"price": {"type": "String"}}},
+  "@priceDiscoveryMatched": {
+    "description": "The agreed price from private-limit matching",
+    "placeholders": {
+      "price": {
+        "type": "String"
+      }
+    }
+  },
   "intentMatchCount": "{count} possible match(es)",
-  "@intentMatchCount": {"description": "How many candidate matches an intent has", "placeholders": {"count": {"type": "int"}}},
+  "@intentMatchCount": {
+    "description": "How many candidate matches an intent has",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "agentPlanExecuted": "Action executed",
   "agentPlanCancelled": "Action cancelled",
   "fulfillWantedAction": "Mark fulfilled",
@@ -1164,8 +1197,7 @@
   "cancelQuote": "Cancel quote",
   "quoteContextTooltip": "Quote a listing, order, or negotiation",
   "editMessageHint": "Edit message...",
-  "messageInputHint": "Type a message..."
-  ,
+  "messageInputHint": "Type a message...",
   "offerPriceLine": "Offer: ¥{price}",
   "@offerPriceLine": {
     "placeholders": {
@@ -1242,7 +1274,6 @@
       }
     }
   },
-  "loading": "Loading...",
   "negotiationStatusLine": "Negotiation {status}",
   "@negotiationStatusLine": {
     "placeholders": {
