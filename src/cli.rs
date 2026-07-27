@@ -54,9 +54,11 @@ pub async fn run_cli(args: &[String]) -> Result<bool> {
 /// those exist. Something has to apply migrations before they can be cleaned up,
 /// and it cannot be the server.
 ///
-///     goods4ncu migrate
-///     psql -d <db> -v ON_ERROR_STOP=1 -f scripts/remove_demo_seed.sql
-///     # then start the app
+/// ```text
+/// goods4ncu migrate
+/// psql -d <db> -v ON_ERROR_STOP=1 -f scripts/remove_demo_seed.sql
+/// # then start the app
+/// ```
 async fn run_migrate() -> Result<()> {
     let database_url = env::var("DATABASE_URL")
         .map_err(|_| anyhow::anyhow!("DATABASE_URL must be set to run migrations"))?;
