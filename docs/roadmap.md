@@ -94,7 +94,7 @@
 - [已实现] 媒体隔离已覆盖 API 与对象存储两层。API 层（`0041`）：提交审核与资源置 `pending` 同事务；商品图与头像在所有公开读取路径按 `approved` 门槛输出，pending/rejected/failed 返回 null，所有者仍可见自己的待审图。存储层（`src/services/storage.rs`）：bucket 私有，服务端按 SigV4 生成短期 presigned URL，仅对 approved 媒体下发；`MEDIA_PRIVATE_BUCKET=true` 启用。已对真实 S3 实现（MinIO）验证：匿名直连 403、未上传 key 亦拒绝、presigned 可取、签名篡改与过期均被拒（`tests/storage_acl_integration.rs`，并纳入生产演练 check 2b）。
 - 校验文件头、MIME、尺寸和解码，审核通过后生成公开 URL 和缩略图。
 - Base64 fallback 加指标和 feature flag，不再作为新客户端主路径。
-- [已实现] `0034_moderation_cases.sql` 建立案件、状态事件和一次性申诉；机器拒绝和聊天举报自动关联，用户可查看安全摘要，平台管理员可审计处置。
+- [已实现] `0034_moderation_cases.sql` 建立案件、状态事件和一次性申诉；机器拒绝和聊天举报自动关联，listing/user 也已有 `VerifiedTenant` 举报入口（同校目标由服务端派生、1–80/1000 字限制、每小时 10 条新举报）并与 ModerationCase 同事务关联。未处理的同一举报会更新 standing report，已处理后的新举报创建新 report/case。当前 intake/start_review/dismiss 不改目标状态；listing/user 的通用 restrict/restore 留待 case-owned 可逆 effect 模型，紧急下架/封禁继续走独立近期认证与审计流程。用户可查看安全摘要，平台管理员可审计分诊。
 
 ### 运维
 

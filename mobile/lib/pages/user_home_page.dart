@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../components/contact_conversation_sheet.dart';
+import '../components/content_report_dialog.dart';
 import '../components/payment_qr_image.dart';
 import '../components/price_tag.dart';
 import '../l10n/app_localizations.dart';
@@ -11,6 +12,7 @@ import '../services/chat_service.dart';
 import '../services/user_service.dart';
 import '../components/handoff_prompt.dart';
 import '../services/reputation_service.dart';
+import '../services/content_report_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
 import '../utils/platform_utils.dart';
@@ -22,6 +24,7 @@ class UserHomePage extends StatefulWidget {
     this.userService,
     this.chatService,
     this.reputationService,
+    this.contentReportService,
   });
 
   final String userId;
@@ -30,6 +33,7 @@ class UserHomePage extends StatefulWidget {
 
   /// Injectable for tests, like the services above it.
   final ReputationService? reputationService;
+  final ContentReportService? contentReportService;
 
   @override
   State<UserHomePage> createState() => _UserHomePageState();
@@ -38,12 +42,17 @@ class UserHomePage extends StatefulWidget {
 class _UserHomePageState extends State<UserHomePage> {
   late final UserService _userService;
   late final ChatService _chatService;
+  late final ContentReportService _contentReportService;
   Map<String, dynamic>? _profile;
   List<Listing> _listings = const [];
   bool _loading = true;
   Reputation? _reputation;
   late final ReputationService _reputationService =
       widget.reputationService ?? context.read<ReputationService>();
+  String? _currentUserId;
+  bool _currentUserLoaded = false;
+  bool _reportFlowActive = false;
+  bool _isReporting = false;
   String? _error;
 
   @override
@@ -51,7 +60,36 @@ class _UserHomePageState extends State<UserHomePage> {
     super.initState();
     _userService = widget.userService ?? context.read<UserService>();
     _chatService = widget.chatService ?? context.read<ChatService>();
+    _contentReportService =
+        widget.contentReportService ?? context.read<ContentReportService>();
     _load();
+    _loadCurrentUserId();
+  }
+
+  Future<void> _loadCurrentUserId() async {
+    try {
+      final token = await _userService.getToken();
+      if (token == null || token.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _currentUserId = null;
+          _currentUserLoaded = true;
+        });
+        return;
+      }
+      final profile = await _userService.getUserProfile();
+      if (!mounted) return;
+      setState(() {
+        _currentUserId = profile['user_id']?.toString();
+        _currentUserLoaded = true;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _currentUserId = null;
+        _currentUserLoaded = true;
+      });
+    }
   }
 
   Future<void> _load() async {
@@ -121,11 +159,71 @@ class _UserHomePageState extends State<UserHomePage> {
     }
   }
 
+  bool get _canReportUser =>
+      _currentUserLoaded &&
+      _currentUserId != null &&
+      _currentUserId != widget.userId;
+
+  Future<void> _reportUser() async {
+    if (_reportFlowActive || !_canReportUser) return;
+    _reportFlowActive = true;
+    final l = AppLocalizations.of(context)!;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final result = await showContentReportDialog(
+        context: context,
+        title: l.reportUserTitle,
+      );
+      if (!mounted || result == null) return;
+      setState(() => _isReporting = true);
+      await _contentReportService.reportUser(
+        widget.userId,
+        reason: result.reason,
+        details: result.details,
+      );
+      if (mounted) {
+        messenger.showSnackBar(SnackBar(content: Text(l.reportSubmitted)));
+      }
+    } catch (error) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(l.reportFailed(error.toString())),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    } finally {
+      _reportFlowActive = false;
+      if (mounted) setState(() => _isReporting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     return Scaffold(
-      appBar: AppBar(title: Text(_profile?['username'] ?? l.publicProfile)),
+      appBar: AppBar(
+        title: Text(_profile?['username'] ?? l.publicProfile),
+        actions: [
+          if (_canReportUser)
+            if (_isReporting)
+              const Padding(
+                padding: EdgeInsets.all(AppTheme.sp16),
+                child: SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            else
+              IconButton(
+                key: const Key('user-report-action'),
+                tooltip: l.reportUserAction,
+                onPressed: _reportUser,
+                icon: const Icon(Icons.flag_outlined),
+              ),
+        ],
+      ),
       body: _buildBody(l),
     );
   }

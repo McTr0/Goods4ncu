@@ -2110,10 +2110,25 @@ class AppLocalizationsEn extends AppLocalizations {
   String get reportMessageTitle => 'Report this message';
 
   @override
+  String get reportListingAction => 'Report listing';
+
+  @override
+  String get reportUserAction => 'Report user';
+
+  @override
+  String get reportListingTitle => 'Report this listing';
+
+  @override
+  String get reportUserTitle => 'Report this user';
+
+  @override
   String get reportReasonDefault => 'Inappropriate content';
 
   @override
   String get reportReasonLabel => 'Reason';
+
+  @override
+  String get reportReasonRequired => 'Please enter a reason';
 
   @override
   String get reportDetailsLabel => 'Additional details (optional)';
@@ -2561,6 +2576,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get moderationRestore => 'Restore content';
+
+  @override
+  String get moderationManagedEnforcementHint =>
+      'Use the Listings or Users management tab to take down a listing or act on an account. Those enforcement actions are audited separately.';
 
   @override
   String get moderationActionNote => 'Internal decision note';

@@ -3924,6 +3924,30 @@ abstract class AppLocalizations {
   /// **'Report this message'**
   String get reportMessageTitle;
 
+  /// No description provided for @reportListingAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Report listing'**
+  String get reportListingAction;
+
+  /// No description provided for @reportUserAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Report user'**
+  String get reportUserAction;
+
+  /// No description provided for @reportListingTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Report this listing'**
+  String get reportListingTitle;
+
+  /// No description provided for @reportUserTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Report this user'**
+  String get reportUserTitle;
+
   /// No description provided for @reportReasonDefault.
   ///
   /// In en, this message translates to:
@@ -3935,6 +3959,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Reason'**
   String get reportReasonLabel;
+
+  /// No description provided for @reportReasonRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Please enter a reason'**
+  String get reportReasonRequired;
 
   /// No description provided for @reportDetailsLabel.
   ///
@@ -4679,6 +4709,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Restore content'**
   String get moderationRestore;
+
+  /// No description provided for @moderationManagedEnforcementHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Use the Listings or Users management tab to take down a listing or act on an account. Those enforcement actions are audited separately.'**
+  String get moderationManagedEnforcementHint;
 
   /// No description provided for @moderationActionNote.
   ///

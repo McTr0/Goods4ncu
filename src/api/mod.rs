@@ -19,6 +19,7 @@ pub mod agreements;
 pub mod auth;
 pub mod campuses;
 pub mod chat;
+pub mod content_reports;
 pub mod conversations;
 pub mod error;
 pub mod intents;
@@ -599,6 +600,10 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             "/api/listings/{id}/responses",
             post(listings::respond_to_wanted),
         )
+        .route(
+            "/api/listings/{id}/report",
+            post(content_reports::report_listing),
+        )
         .route("/api/listings/{id}/relist", post(listings::relist_listing))
         .route("/api/listings/{id}/fulfill", post(listings::fulfill_wanted))
         .route(
@@ -640,6 +645,7 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             "/api/users/{id}/listings",
             get(user::get_public_user_listings),
         )
+        .route("/api/users/{id}/report", post(content_reports::report_user))
         .route("/api/users/{id}", get(user::get_user_profile))
         .route(
             "/api/orders",

@@ -15,6 +15,8 @@ import '../theme/responsive.dart';
 import '../components/price_tag.dart';
 import '../components/recommendation_carousel.dart';
 import '../components/contact_conversation_sheet.dart';
+import '../components/content_report_dialog.dart';
+import '../services/content_report_service.dart';
 import '../utils/platform_utils.dart';
 
 class ListingDetailPage extends StatefulWidget {
@@ -23,6 +25,7 @@ class ListingDetailPage extends StatefulWidget {
   final RecommendationService? recommendationService;
   final OrderService? orderService;
   final ChatService? chatService;
+  final ContentReportService? contentReportService;
 
   const ListingDetailPage({
     super.key,
@@ -31,6 +34,7 @@ class ListingDetailPage extends StatefulWidget {
     this.recommendationService,
     this.orderService,
     this.chatService,
+    this.contentReportService,
   });
 
   @override
@@ -42,10 +46,13 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
   late final RecommendationService _recommendationService;
   late final OrderService _orderService;
   late final ChatService _chatService;
+  late final ContentReportService _contentReportService;
   Listing? _listing;
   bool _loading = true;
   String? _error;
   bool _isOperating = false;
+  bool _reportFlowActive = false;
+  bool _isReporting = false;
 
   // Similar listings state
   List<Listing> _similarListings = [];
@@ -63,12 +70,23 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         widget.recommendationService ?? context.read<RecommendationService>();
     _orderService = widget.orderService ?? context.read<OrderService>();
     _chatService = widget.chatService ?? context.read<ChatService>();
+    _contentReportService =
+        widget.contentReportService ?? context.read<ContentReportService>();
     _loadDetail();
     _loadCurrentUserId();
   }
 
   Future<void> _loadCurrentUserId() async {
     try {
+      final token = await _apiService.getToken();
+      if (token == null || token.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _currentUserId = null;
+          _currentUserLoaded = true;
+        });
+        return;
+      }
       final profile = await _apiService.getUserProfile();
       if (!mounted) return;
       setState(() {
@@ -223,6 +241,49 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
       );
     } finally {
       if (mounted) setState(() => _isOperating = false);
+    }
+  }
+
+  bool get _canReportListing {
+    final listing = _listing;
+    return _currentUserLoaded &&
+        _currentUserId != null &&
+        listing?.ownerId != null &&
+        listing!.ownerId != _currentUserId;
+  }
+
+  Future<void> _handleReportListing() async {
+    if (_reportFlowActive || !_canReportListing) return;
+    _reportFlowActive = true;
+    final l = AppLocalizations.of(context)!;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final result = await showContentReportDialog(
+        context: context,
+        title: l.reportListingTitle,
+      );
+      if (!mounted || result == null) return;
+      setState(() => _isReporting = true);
+      await _contentReportService.reportListing(
+        widget.listingId,
+        reason: result.reason,
+        details: result.details,
+      );
+      if (mounted) {
+        messenger.showSnackBar(SnackBar(content: Text(l.reportSubmitted)));
+      }
+    } catch (error) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(l.reportFailed(error.toString())),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    } finally {
+      _reportFlowActive = false;
+      if (mounted) setState(() => _isReporting = false);
     }
   }
 
@@ -415,6 +476,24 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
           icon: const Icon(Icons.arrow_back),
           onPressed: _handleBack,
         ),
+        actions: [
+          if (_canReportListing)
+            if (_isReporting)
+              const Padding(
+                padding: EdgeInsets.all(AppTheme.sp16),
+                child: SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            else
+              IconButton(
+                key: const Key('listing-report-action'),
+                tooltip: l.reportListingAction,
+                onPressed: _handleReportListing,
+                icon: const Icon(Icons.flag_outlined),
+              ),
+        ],
       ),
       body: _buildBody(desktop: desktop),
       bottomNavigationBar: _listing != null && !desktop

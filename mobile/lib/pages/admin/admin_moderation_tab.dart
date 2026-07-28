@@ -131,6 +131,29 @@ class _AdminModerationTabState extends State<AdminModerationTab> {
               Text(
                 '${l.moderationCreatedAt}: ${moderationCase['created_at'] ?? '-'}',
               ),
+              if (_usesSeparatelyAuditedManagement(moderationCase)) ...[
+                const SizedBox(height: AppTheme.sp12),
+                Container(
+                  key: const Key('moderation-managed-enforcement-hint'),
+                  padding: const EdgeInsets.all(AppTheme.sp12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.info.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.admin_panel_settings_outlined,
+                        color: AppTheme.info,
+                        size: 20,
+                      ),
+                      const SizedBox(width: AppTheme.sp8),
+                      Expanded(child: Text(l.moderationManagedEnforcementHint)),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: AppTheme.sp16),
               ExpansionTile(
                 tilePadding: EdgeInsets.zero,
@@ -176,6 +199,9 @@ class _AdminModerationTabState extends State<AdminModerationTab> {
     final l = AppLocalizations.of(context)!;
     final status = moderationCase['status']?.toString();
     final appealId = moderationCase['pending_appeal_id']?.toString();
+    final usesSeparateManagement = _usesSeparatelyAuditedManagement(
+      moderationCase,
+    );
     final actions = <Widget>[];
     if (status == 'open') {
       actions.add(
@@ -198,17 +224,19 @@ class _AdminModerationTabState extends State<AdminModerationTab> {
           OutlinedButton.styleFrom(foregroundColor: AppTheme.success),
         ),
       );
-      actions.add(
-        _actionButton(
-          sheetContext,
-          moderationCase,
-          'restrict',
-          l.moderationRestrict,
-          FilledButton.styleFrom(backgroundColor: AppTheme.error),
-        ),
-      );
+      if (!usesSeparateManagement) {
+        actions.add(
+          _actionButton(
+            sheetContext,
+            moderationCase,
+            'restrict',
+            l.moderationRestrict,
+            FilledButton.styleFrom(backgroundColor: AppTheme.error),
+          ),
+        );
+      }
     }
-    if (status == 'actioned' && appealId == null) {
+    if (!usesSeparateManagement && status == 'actioned' && appealId == null) {
       actions.add(
         _actionButton(
           sheetContext,
@@ -219,7 +247,7 @@ class _AdminModerationTabState extends State<AdminModerationTab> {
         ),
       );
     }
-    if (status == 'appealed' && appealId != null) {
+    if (!usesSeparateManagement && status == 'appealed' && appealId != null) {
       actions.add(
         _appealButton(sheetContext, appealId, 'uphold', l.moderationRestrict),
       );
@@ -356,6 +384,12 @@ class _AdminModerationTabState extends State<AdminModerationTab> {
     }
   }
 }
+
+bool _usesSeparatelyAuditedManagement(Map<String, dynamic> moderationCase) =>
+    switch (moderationCase['resource_type']?.toString()) {
+      'listing' || 'user' => true,
+      _ => false,
+    };
 
 class _CaseTile extends StatelessWidget {
   const _CaseTile({required this.moderationCase, required this.onTap});

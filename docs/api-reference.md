@@ -223,6 +223,21 @@ Content-Type: application/json
 
 公开用户主页。返回允许公开的用户名、头像、加入时间、active listing 总数和用户主动公开的 `payment_qr` URL。当前计数不拆分出/收。不会返回完整邮箱、学号、发现设置、公开开关或私有收款码。
 
+### POST `/api/users/{id}/report`
+
+`VerifiedTenant` 接口：需要有效登录态和活动校园的 verified membership。用户不能举报自己；目标账号必须是同校已认证成员。`campus_id` 从当前 session 派生，`subject_user_id` 由服务端根据路径中的目标和同校 membership 查询确定；请求体不能指定或覆盖这两个字段。
+
+```json
+{
+  "reason": "冒充他人或可疑行为",
+  "details": "可选补充说明"
+}
+```
+
+`reason` 去除首尾空白后必须为 1–80 字，`details` 可选且最长 1000 字。响应为 `{ "report_id": "uuid" }`。每个举报人每小时最多新建 10 条资源举报；同一举报人对同一校园、同一目标的未处理举报只保留一条 standing report，重复提交更新原因与说明，不额外占用新建额度。前一条已经 `resolved` 或 `dismissed` 后，新的举报会创建新 report 和新案件，不改写已封存的处理历史。
+
+举报记录、`ModerationCase` 和首个案件事件在同一数据库事务中创建并关联；任一步失败整体回滚。提交举报、开始复核或驳回案件都不会自动封禁账号。
+
 ### GET `/api/user/listings`
 
 需要登录。返回当前用户自己的 listing，供“我的发布”和推荐 wanted response 选择器使用。支持分页；当前客户端可按 `direction` 在本地或接口能力范围内展示出/收分组。
@@ -306,6 +321,10 @@ Content-Type: application/json
 ### GET `/api/listings/{id}`
 
 公开查看商品详情。未登录用户可以看基本信息；登录用户会额外拿到 `owner_id`，用于发起直聊。返回 `defects`、`description`、`owner_username`、`status`、`created_at` 等字段。
+
+### POST `/api/listings/{id}/report`
+
+举报同校 listing，请求和响应与 `POST /api/users/{id}/report` 相同。该接口使用 `VerifiedTenant`，listing 的校园和 owner 由服务端查询；不存在或跨校目标统一按不存在处理，owner 不能举报自己的发布。限制为 `reason` 1–80 字、`details` 最长 1000 字、每小时最多新建 10 条。举报与 `ModerationCase` 同事务关联，但提交、开始复核和驳回均不改变 listing 的 `active/sold/deleted/fulfilled` 业务状态。
 
 ### POST `/api/listings`
 
@@ -840,7 +859,7 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 | `GET /api/admin/audit-logs` | 管理员审计日志。 |
 | `GET /api/admin/moderation/jobs` | 按校园与可选 `status` 查看异步媒体审核任务。 |
 | `GET /api/admin/moderation/cases` | 按校园和可选 `status` 查看案件队列；包含内部证据，仅限后台角色。 |
-| `POST /api/admin/moderation/cases/{id}/review` | 平台管理员开始复核、限制内容、驳回案件或恢复内容；写入案件事件和审计。 |
+| `POST /api/admin/moderation/cases/{id}/review` | 平台管理员开始复核或驳回案件；媒体/消息资源还支持案件内限制与恢复。listing/user 案件刻意不提供通用 restrict/restore。所有动作写入案件事件和审计。 |
 | `POST /api/admin/moderation/appeals/{id}/review` | 由非原决定人员独立复核申诉，支持维持或改判。 |
 | `POST /api/admin/users/{id}/ban` | 封禁用户。 |
 | `POST /api/admin/users/{id}/unban` | 解封用户。 |
@@ -973,7 +992,9 @@ POST /api/moderation/cases/{id}/appeals
 GET  /api/moderation/appeals/{id}
 ```
 
-用户接口只返回本人当前活动校园的案件安全摘要；申诉每个案件只能提交一次。后台案件接口见上方 Admin 表格，平台管理员处置会同步资源审核状态、案件事件和 `admin_audit_logs`。
+用户接口只返回本人当前活动校园的案件安全摘要；申诉每个案件只能提交一次。后台案件接口见上方 Admin 表格。媒体和消息案件处置会同步对应审核状态、案件事件和 `admin_audit_logs`；新的 listing/user 举报当前只负责安全入队、开始复核和驳回。
+
+listing 的下架/恢复不能与 `active/sold/deleted/fulfilled` 生命周期混用，账号的封禁/解封也不能由某一案件撤销而覆盖其他封禁来源。因此，在建立 case-owned、可组合且可条件撤销的 restriction/effect 记录前，listing/user 案件的通用 `restrict`/`restore` 返回冲突，不得偷偷改写目标状态。紧急执法仍走独立的、需要近期认证并写管理员审计的 `POST /api/admin/listings/{id}/takedown` 或 `POST /api/admin/users/{id}/ban`；案件驳回或后续改判不会自动 relist/unban 这些独立动作。
 
 ```text
 GET  /api/v1/moderation/cases/{id}

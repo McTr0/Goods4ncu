@@ -2649,3 +2649,123 @@ async fn production_refuses_to_start_with_demo_seed_accounts() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn content_report_routes_require_verified_tenant_and_return_only_report_id() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let reporter_id = Uuid::new_v4().to_string();
+        let owner_id = Uuid::new_v4().to_string();
+        insert_user(
+            &pool,
+            &reporter_id,
+            &format!("route_reporter_{}", Uuid::new_v4()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &owner_id,
+            &format!("route_owner_{}", Uuid::new_v4()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+        let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("NCU campus");
+        let listing_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO inventory (
+                 id, campus_id, title, category, brand, condition_score,
+                 suggested_price_cny, defects, owner_id, status, direction
+             ) VALUES ($1, $2, 'API report target', 'other', 'Test', 8,
+                       10000, '[]', $3, 'active', 'offer')",
+        )
+        .bind(&listing_id)
+        .bind(campus_id)
+        .bind(&owner_id)
+        .execute(&pool)
+        .await
+        .expect("insert listing");
+
+        let (token, _, _) = generate_access_token_for_campus(
+            &reporter_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("reporter token");
+        let app = create_router(build_state(pool.clone()), &[]);
+        let body = json!({"reason": "疑似诈骗", "details": "请人工核对"});
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/listings/{listing_id}/report"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/listings/{listing_id}/report"))
+                    .header("Authorization", bearer(&token))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let listing_report = response_json(response).await;
+        let listing_fields = listing_report.as_object().expect("report response object");
+        assert_eq!(listing_fields.len(), 1);
+        let listing_report_id = listing_report["report_id"]
+            .as_str()
+            .expect("listing report id");
+        Uuid::parse_str(listing_report_id).expect("UUID report id");
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/users/{owner_id}/report"))
+                    .header("Authorization", bearer(&token))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(json!({"reason": "疑似骚扰"}).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let user_report = response_json(response).await;
+        let user_fields = user_report.as_object().expect("report response object");
+        assert_eq!(user_fields.len(), 1);
+        Uuid::parse_str(user_report["report_id"].as_str().expect("user report id"))
+            .expect("UUID report id");
+
+        let report_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM content_reports WHERE reporter_id = $1")
+                .bind(&reporter_id)
+                .fetch_one(&pool)
+                .await
+                .expect("report count");
+        assert_eq!(report_count, 2);
+    })
+    .await;
+}

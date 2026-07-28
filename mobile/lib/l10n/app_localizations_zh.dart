@@ -2017,10 +2017,25 @@ class AppLocalizationsZh extends AppLocalizations {
   String get reportMessageTitle => '举报这条消息';
 
   @override
+  String get reportListingAction => '举报商品';
+
+  @override
+  String get reportUserAction => '举报用户';
+
+  @override
+  String get reportListingTitle => '举报此商品';
+
+  @override
+  String get reportUserTitle => '举报此用户';
+
+  @override
   String get reportReasonDefault => '不当内容';
 
   @override
   String get reportReasonLabel => '原因';
+
+  @override
+  String get reportReasonRequired => '请填写举报原因';
 
   @override
   String get reportDetailsLabel => '补充说明（可选）';
@@ -2449,6 +2464,10 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get moderationRestore => '恢复内容';
+
+  @override
+  String get moderationManagedEnforcementHint =>
+      '如需下架商品或处置账号，请前往商品或用户管理标签页；这些操作会单独记录审计。';
 
   @override
   String get moderationActionNote => '内部处置说明';

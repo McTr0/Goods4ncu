@@ -208,6 +208,7 @@ async fn rls_policies_exist_on_all_tenant_tables() {
             "moderation_jobs",
             "moderation_cases",
             "moderation_appeals",
+            "content_reports",
             "agent_action_plans",
             "admin_audit_logs",
             "campus_memberships",

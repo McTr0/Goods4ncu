@@ -184,7 +184,7 @@ impl ModerationCaseService {
 
         let mut tx = self.pool.begin().await.map_err(db_error)?;
         let moderation_case = sqlx::query(
-            "SELECT status, resolution FROM moderation_cases
+            "SELECT status, resolution, resource_type FROM moderation_cases
              WHERE id = $1 AND subject_user_id = $2 AND campus_id = $3
              FOR UPDATE",
         )
@@ -197,6 +197,7 @@ impl ModerationCaseService {
         .ok_or(ApiError::NotFound)?;
         let current_status: String = moderation_case.get("status");
         let resolution: Option<String> = moderation_case.get("resolution");
+        let resource_type: String = moderation_case.get("resource_type");
         let can_appeal = matches!(current_status.as_str(), "actioned" | "resolved")
             && matches!(
                 resolution.as_deref(),
@@ -204,6 +205,11 @@ impl ModerationCaseService {
             );
         if !can_appeal {
             return Err(ApiError::Conflict("当前案件状态不可申诉".to_string()));
+        }
+        if matches!(resource_type.as_str(), "listing" | "user") {
+            return Err(ApiError::Conflict(
+                "该举报类型尚未定义限制或恢复动作".to_string(),
+            ));
         }
 
         let existing = sqlx::query_scalar::<_, bool>(
@@ -300,6 +306,22 @@ impl ModerationCaseService {
         let resource_type: String = row.get("resource_type");
         let resource_id: String = row.get("resource_id");
 
+        // Reporting a listing or account creates a review case, but this
+        // feature does not define what a reversible listing takedown or account
+        // sanction means. Refuse those transitions instead of marking a case
+        // actioned while silently leaving the resource unchanged. Dismissal is
+        // safe: it intentionally makes no change to the reported resource.
+        if matches!(resource_type.as_str(), "listing" | "user")
+            && matches!(
+                action,
+                CaseReviewAction::Restrict | CaseReviewAction::Restore
+            )
+        {
+            return Err(ApiError::Conflict(
+                "该举报类型尚未定义限制或恢复动作".to_string(),
+            ));
+        }
+
         let (new_status, resolution, resource_status) = match action {
             CaseReviewAction::StartReview if current_status == "open" => ("reviewing", None, None),
             CaseReviewAction::Restrict
@@ -356,8 +378,15 @@ impl ModerationCaseService {
 
         if let Some(status) = resource_status {
             update_resource_status(&mut tx, &resource_type, &resource_id, status).await?;
-            sync_report_status(&mut tx, &source_type, &source_ref_id, resolution).await?;
         }
+        sync_report_status(
+            &mut tx,
+            &source_type,
+            &source_ref_id,
+            new_status,
+            resolution,
+        )
+        .await?;
         insert_event(
             &mut tx,
             case_id,
@@ -422,6 +451,11 @@ impl ModerationCaseService {
         let resource_id: String = row.get("resource_id");
         let source_type: String = row.get("source_type");
         let source_ref_id: String = row.get("source_ref_id");
+        if matches!(resource_type.as_str(), "listing" | "user") {
+            return Err(ApiError::Conflict(
+                "该举报类型尚未定义限制或恢复动作".to_string(),
+            ));
+        }
         let (appeal_status, resolution, resource_status, event_type) = match decision {
             AppealDecision::Uphold => (
                 "upheld",
@@ -462,8 +496,15 @@ impl ModerationCaseService {
         .map_err(db_error)?;
         if let Some(status) = resource_status {
             update_resource_status(&mut tx, &resource_type, &resource_id, status).await?;
-            sync_report_status(&mut tx, &source_type, &source_ref_id, Some(resolution)).await?;
         }
+        sync_report_status(
+            &mut tx,
+            &source_type,
+            &source_ref_id,
+            "resolved",
+            Some(resolution),
+        )
+        .await?;
         insert_event(
             &mut tx,
             case_id,
@@ -575,6 +616,89 @@ pub async fn create_case_for_report(
     .await
     .map_err(db_error)?
     .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("unable to create report case")))?;
+    sqlx::query(
+        "INSERT INTO moderation_case_events (
+            case_id, actor_id, event_type, from_status, to_status
+         )
+         SELECT moderation_case.id, moderation_case.opened_by,
+                'case_created', NULL, moderation_case.status
+         FROM moderation_cases moderation_case
+         WHERE moderation_case.id = $1
+           AND NOT EXISTS (
+               SELECT 1 FROM moderation_case_events event
+               WHERE event.case_id = moderation_case.id
+                 AND event.event_type = 'case_created'
+           )",
+    )
+    .bind(case_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(db_error)?;
+    Ok(case_id)
+}
+
+/// Link a listing/user report to the shared moderation queue.
+///
+/// Content reports use a prefixed source reference. Chat report ids are UUIDs
+/// too, and `moderation_cases` de-duplicates on `(source_type, source_ref_id)`;
+/// a bare id in both tables would make an otherwise unlikely UUID collision
+/// attach one person's report to an unrelated case.
+pub async fn create_case_for_content_report(
+    tx: &mut Transaction<'_, Postgres>,
+    report_id: Uuid,
+) -> Result<Uuid, ApiError> {
+    let case_id = sqlx::query_scalar::<_, Uuid>(
+        "WITH upserted_case AS (
+            INSERT INTO moderation_cases (
+                campus_id, subject_user_id, resource_type, resource_id,
+                source_type, source_ref_id, status, reason_category,
+                public_reason, internal_details, opened_by
+            )
+            SELECT report.campus_id, report.subject_user_id,
+                   report.resource_type, report.resource_id,
+                   'user_report', 'content_report:' || report.id::text,
+                   'open',
+                   CASE report.resource_type
+                       WHEN 'listing' THEN 'listing_report'
+                       ELSE 'user_report'
+                   END,
+                   CASE report.resource_type
+                       WHEN 'listing' THEN '一条发布已进入内容审核流程'
+                       ELSE '一个账号已进入安全审核流程'
+                   END,
+                   jsonb_build_object(
+                       'reported_reason', report.reason,
+                       'details', report.details,
+                       'content_report_id', report.id,
+                       'reported_resource_type', report.resource_type
+                   ),
+                   report.reporter_id
+            FROM content_reports report
+            WHERE report.id = $1
+            ON CONFLICT (source_type, source_ref_id) DO UPDATE
+            SET subject_user_id = EXCLUDED.subject_user_id,
+                resource_type = EXCLUDED.resource_type,
+                resource_id = EXCLUDED.resource_id,
+                reason_category = EXCLUDED.reason_category,
+                public_reason = EXCLUDED.public_reason,
+                internal_details = EXCLUDED.internal_details,
+                updated_at = NOW()
+            RETURNING id
+         ), linked_report AS (
+            UPDATE content_reports report
+            SET case_id = upserted_case.id, updated_at = NOW()
+            FROM upserted_case
+            WHERE report.id = $1
+            RETURNING upserted_case.id
+         )
+         SELECT id FROM linked_report",
+    )
+    .bind(report_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(db_error)?
+    .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("unable to create content report case")))?;
+
     sqlx::query(
         "INSERT INTO moderation_case_events (
             case_id, actor_id, event_type, from_status, to_status
@@ -734,16 +858,35 @@ async fn sync_report_status(
     tx: &mut Transaction<'_, Postgres>,
     source_type: &str,
     source_ref_id: &str,
+    case_status: &str,
     resolution: Option<&str>,
 ) -> Result<(), ApiError> {
     if source_type != "user_report" {
         return Ok(());
     }
-    let report_status = match resolution {
-        Some("no_violation" | "restored") => "dismissed",
-        Some("content_restricted" | "warning" | "account_action") => "resolved",
+    let report_status = match case_status {
+        "reviewing" => "reviewing",
+        "dismissed" => "dismissed",
+        "actioned" => "resolved",
+        "resolved" if matches!(resolution, Some("no_violation" | "restored")) => "dismissed",
+        "resolved" => "resolved",
         _ => return Ok(()),
     };
+
+    if let Some(content_report_id) = source_ref_id.strip_prefix("content_report:") {
+        sqlx::query(
+            "UPDATE content_reports
+             SET status = $2, updated_at = NOW()
+             WHERE id::text = $1",
+        )
+        .bind(content_report_id)
+        .bind(report_status)
+        .execute(&mut **tx)
+        .await
+        .map_err(db_error)?;
+        return Ok(());
+    }
+
     sqlx::query("UPDATE chat_message_reports SET status = $2 WHERE id::text = $1")
         .bind(source_ref_id)
         .bind(report_status)
