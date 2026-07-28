@@ -13,6 +13,7 @@ pub mod chat_conversation;
 pub mod chat_expire;
 pub mod community_health;
 pub mod content_report;
+pub mod feed;
 pub mod hitl_expire;
 pub mod intent;
 pub mod interruption;

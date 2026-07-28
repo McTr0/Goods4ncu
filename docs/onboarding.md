@@ -76,7 +76,7 @@ offer 仍然 active
 
 然后结合关键词、embedding 距离和新鲜度排序。推荐结果应该告诉用户“为什么出现”，例如“预算内、同分类、成色满足”，但不能泄露内部权重或另一个用户的隐私画像。
 
-当前实现已有 wanted matches；完整推荐解释、反馈和多校园过滤仍是目标态。
+当前实现已在服务端强制活动校园、状态、方向和已声明槽位等硬约束；首页商品 feed 与 intent feed/matches 提供可本地化的解释，并支持“隐藏 / 少推荐这类 / 与我无关”、关闭个性化和清除旧排序信号。相似商品与 listing wanted matches 尚未消费 feedback；listing matches 自身的稳定 `match_summary` 输出、离线质量集和公平性评估仍需补齐。
 
 ### 4. 提供方响应需求
 

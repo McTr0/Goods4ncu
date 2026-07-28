@@ -247,7 +247,7 @@ where
             space_formation_sources, space_formation_pairs, chat_space_members, chat_spaces, \
             handoff_confirmations, agreement_terms, agreements, \
             price_reservations, price_discovery_sessions, \
-            intent_responses, intents, \
+            feed_feedback, feed_preferences, intent_responses, intents, \
             documents, refresh_tokens, outbox_events, users \
          RESTART IDENTITY CASCADE",
     )

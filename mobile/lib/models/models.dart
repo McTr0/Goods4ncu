@@ -20,6 +20,8 @@ class Listing {
 
   /// Why the feed ranked this item here (server-provided, personalized feeds).
   final String? rankReason;
+  final List<String> matchSummary;
+  final String? source;
 
   Listing({
     required this.id,
@@ -38,6 +40,8 @@ class Listing {
     this.ownerUsername,
     this.createdAt,
     this.rankReason,
+    this.matchSummary = const [],
+    this.source,
   });
 
   factory Listing.fromJson(Map<String, dynamic> json) {
@@ -62,6 +66,10 @@ class Listing {
       ownerUsername: json['owner_username'],
       createdAt: json['created_at'],
       rankReason: json['rank_reason'],
+      matchSummary: (json['match_summary'] as List<dynamic>? ?? const [])
+          .map((value) => value.toString())
+          .toList(),
+      source: json['source']?.toString(),
     );
   }
 
@@ -1408,6 +1416,9 @@ class UserIntent {
   final String status;
   final DateTime? validUntil;
   final String? projectedListingId;
+  final String? rankReason;
+  final List<String> matchSummary;
+  final String? source;
 
   const UserIntent({
     required this.id,
@@ -1417,6 +1428,9 @@ class UserIntent {
     required this.status,
     this.validUntil,
     this.projectedListingId,
+    this.rankReason,
+    this.matchSummary = const [],
+    this.source,
   });
 
   factory UserIntent.fromJson(Map<String, dynamic> json) => UserIntent(
@@ -1430,6 +1444,11 @@ class UserIntent {
     status: json['status']?.toString() ?? 'active',
     validUntil: DateTime.tryParse(json['valid_until']?.toString() ?? ''),
     projectedListingId: json['projected_listing_id']?.toString(),
+    rankReason: json['rank_reason']?.toString(),
+    matchSummary: (json['match_summary'] as List<dynamic>? ?? const [])
+        .map((value) => value.toString())
+        .toList(),
+    source: json['source']?.toString(),
   );
 
   /// Inferred rather than stated, so it is waiting on the author before anyone

@@ -236,7 +236,7 @@ node scripts/codex_browser_api_driver.mjs call-secret
 
 浏览器不仅检查按钮隐藏，还要用 API driver 直接调用受限接口，证明权限在后端生效。
 
-## 推荐解释与反馈测试 [目标态]
+## 推荐解释与反馈测试 [部分完成]
 
 准备满足/违反预算、成色、分类和校园条件的 offer 集合：
 
@@ -250,6 +250,8 @@ node scripts/codex_browser_api_driver.mjs call-secret
 | 隐藏反馈 | hide 后刷新不再展示，其他用户不受影响。 |
 | 清除个性化 | 清除后使用非个性化排序，不删除业务收藏/成交事实。 |
 | 排序回滚 | 切回旧 ranking version 后结果和错误率恢复基线。 |
+
+[已实现] 后端回归覆盖反馈写入的认证/租户/幂等、服务端派生 signal、精确隐藏、同类降权、个性化开关与重置边界；Flutter 测试覆盖原因 code 本地化、成功移除、失败保留、并发防重复以及设置页控制。多样性、ranking rollback、离线质量集和真实用户 guardrail 仍是目标态。
 
 离线评估必须和浏览器验收配合：指标可以证明排序整体变化，浏览器证明解释、控制和空状态不会误导用户。
 

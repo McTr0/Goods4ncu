@@ -3,7 +3,7 @@ use argon2::{
     Argon2,
 };
 use axum::body::{to_bytes, Body};
-use axum::http::{Request, StatusCode};
+use axum::http::{Method, Request, StatusCode};
 use goods4ncu::agents::router::IntentRouter;
 use goods4ncu::api::auth::{generate_access_token, generate_access_token_for_campus};
 use goods4ncu::api::{create_router, ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
@@ -11,6 +11,8 @@ use goods4ncu::repositories::{
     PostgresAuthRepository, PostgresChatRepository, PostgresListingRepository,
     PostgresOrderRepository, PostgresUserRepository,
 };
+use goods4ncu::services::intent::slots::{PriceSlot, Slots};
+use goods4ncu::services::intent::{kinds, status, IntentService, NewIntent};
 use goods4ncu::services::{self, notification::NotificationService};
 use goods4ncu::test_infra::with_test_pool;
 use serde_json::{json, Value};
@@ -138,6 +140,53 @@ async fn response_json(response: axum::response::Response) -> Value {
         .await
         .expect("read response body");
     serde_json::from_slice(&bytes).expect("parse response json")
+}
+
+async fn authenticated_json(
+    app: &axum::Router,
+    method: Method,
+    uri: &str,
+    token: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    let mut request = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("Authorization", bearer(token));
+    if body.is_some() {
+        request = request.header("Content-Type", "application/json");
+    }
+    let response = app
+        .clone()
+        .oneshot(
+            request
+                .body(body.map_or_else(Body::empty, |value| Body::from(value.to_string())))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    let status = response.status();
+    (status, response_json(response).await)
+}
+
+fn active_intent<'a>(
+    campus_id: Uuid,
+    author_id: &'a str,
+    kind: &'a str,
+    raw_input: &'a str,
+    slots: Slots,
+) -> NewIntent<'a> {
+    NewIntent {
+        campus_id,
+        author_id,
+        kind,
+        raw_input,
+        slots,
+        confidence: 1.0,
+        status: status::ACTIVE,
+        visibility: "campus",
+        valid_until: None,
+    }
 }
 
 async fn insert_user(
@@ -2234,7 +2283,7 @@ async fn recommendation_feed_explains_ranking() {
             .await
             .unwrap();
         let feed = response_json(response).await;
-        assert_eq!(feed["ranking_version"], "2026.07-affinity-v1");
+        assert_eq!(feed["ranking_version"], "2026.07-feedback-v2");
         for item in feed["items"].as_array().expect("items") {
             assert_eq!(item["source"], "recency");
             assert!(!item["rank_reason"].as_str().expect("reason").is_empty());
@@ -2766,6 +2815,863 @@ async fn content_report_routes_require_verified_tenant_and_return_only_report_id
                 .await
                 .expect("report count");
         assert_eq!(report_count, 2);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn feed_feedback_api_is_tenant_scoped_idempotent_and_server_derived() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let viewer_id = Uuid::new_v4().to_string();
+        let owner_id = Uuid::new_v4().to_string();
+        for (id, label) in [(&viewer_id, "viewer"), (&owner_id, "owner")] {
+            insert_user(
+                &pool,
+                id,
+                &format!("feed_{label}_{}", Uuid::new_v4().simple()),
+                &password_hash,
+                "user",
+                "active",
+            )
+            .await;
+        }
+        let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("ncu campus");
+
+        let listing_id = Uuid::new_v4().to_string();
+        let self_listing_id = Uuid::new_v4().to_string();
+        for (id, owner, title) in [
+            (&listing_id, &owner_id, "Target listing"),
+            (&self_listing_id, &viewer_id, "Self listing"),
+        ] {
+            sqlx::query(
+                "INSERT INTO inventory (
+                    id, campus_id, title, category, brand, condition_score,
+                    suggested_price_cny, defects, owner_id, status, direction
+                 ) VALUES ($1, $2, $3, 'Electronics', 'Test', 8, 10000,
+                           '[]', $4, 'active', 'offer')",
+            )
+            .bind(id)
+            .bind(campus_id)
+            .bind(title)
+            .bind(owner)
+            .execute(&pool)
+            .await
+            .expect("insert listing");
+        }
+
+        let other_campus = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO campuses (id, slug, name_zh, name_en, email_domains)
+             VALUES ($1, $2, '反馈测试大学', 'Feedback Test University', ARRAY['feedback.test'])",
+        )
+        .bind(other_campus)
+        .bind(format!("feedback-{}", &other_campus.to_string()[..8]))
+        .execute(&pool)
+        .await
+        .expect("insert other campus");
+        let other_listing_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO inventory (
+                id, campus_id, title, category, brand, condition_score,
+                suggested_price_cny, defects, owner_id, status, direction
+             ) VALUES ($1, $2, 'Other campus', 'Electronics', 'Test', 8,
+                       10000, '[]', $3, 'active', 'offer')",
+        )
+        .bind(&other_listing_id)
+        .bind(other_campus)
+        .bind(&owner_id)
+        .execute(&pool)
+        .await
+        .expect("insert other-campus listing");
+
+        let (token, _, _) = generate_access_token_for_campus(
+            &viewer_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("viewer token");
+        let app = create_router(build_state(pool.clone()), &[]);
+
+        let feedback_body = |resource_id: &str, action: &str| {
+            json!({
+                "resource_type": "listing",
+                "resource_id": resource_id,
+                "action": action,
+            })
+            .to_string()
+        };
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/feed/feedback")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(feedback_body(&listing_id, "less_like_this")))
+                    .unwrap(),
+            )
+            .await
+            .expect("anonymous response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let submit = |resource_id: &str, action: &str| {
+            Request::builder()
+                .method("POST")
+                .uri("/api/feed/feedback")
+                .header("Authorization", bearer(&token))
+                .header("Content-Type", "application/json")
+                .body(Body::from(feedback_body(resource_id, action)))
+                .expect("feedback request")
+        };
+        let response = app
+            .clone()
+            .oneshot(submit(&listing_id, "less_like_this"))
+            .await
+            .expect("feedback response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let first = response_json(response).await;
+        assert_eq!(first["resource_id"], listing_id);
+        assert_eq!(first["action"], "less_like_this");
+        assert!(first.get("signal_key").is_none());
+        assert!(first.get("campus_id").is_none());
+
+        let response = app
+            .clone()
+            .oneshot(submit(&listing_id, "hide"))
+            .await
+            .expect("idempotent update");
+        assert_eq!(response.status(), StatusCode::OK);
+        let second = response_json(response).await;
+        assert_eq!(second["feedback_id"], first["feedback_id"]);
+        let row: (String, String) = sqlx::query_as(
+            "SELECT action, signal_key FROM feed_feedback
+             WHERE user_id = $1 AND resource_id = $2",
+        )
+        .bind(&viewer_id)
+        .bind(&listing_id)
+        .fetch_one(&pool)
+        .await
+        .expect("stored feedback");
+        assert_eq!(row.0, "hide");
+        assert_eq!(row.1, "listing:category:electronics");
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM feed_feedback WHERE user_id = $1 AND resource_id = $2",
+        )
+        .bind(&viewer_id)
+        .bind(&listing_id)
+        .fetch_one(&pool)
+        .await
+        .expect("feedback count");
+        assert_eq!(count, 1);
+
+        for hidden_target in [&self_listing_id, &other_listing_id] {
+            let response = app
+                .clone()
+                .oneshot(submit(hidden_target, "not_relevant"))
+                .await
+                .expect("non-enumerable target response");
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/feed/preferences")
+                    .header("Authorization", bearer(&token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("default preferences");
+        assert_eq!(response.status(), StatusCode::OK);
+        let preferences = response_json(response).await;
+        assert_eq!(preferences["personalization_enabled"], true);
+        assert!(preferences["signals_reset_at"].is_null());
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/feed/preferences")
+                    .header("Authorization", bearer(&token))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        json!({"personalization_enabled": false}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .expect("update preferences");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(response).await["personalization_enabled"],
+            false
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/feed/personalization/clear")
+                    .header("Authorization", bearer(&token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("clear personalization");
+        assert_eq!(response.status(), StatusCode::OK);
+        let cleared = response_json(response).await;
+        assert_eq!(cleared["personalization_enabled"], false);
+        assert!(cleared["signals_reset_at"].is_string());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn listing_feedback_controls_ranking_without_leaking_across_users() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let viewer_id = Uuid::new_v4().to_string();
+        let other_viewer_id = Uuid::new_v4().to_string();
+        let seller_id = Uuid::new_v4().to_string();
+        for (id, label) in [
+            (&viewer_id, "viewer"),
+            (&other_viewer_id, "other"),
+            (&seller_id, "seller"),
+        ] {
+            insert_user(
+                &pool,
+                id,
+                &format!("listing_rank_{label}_{}", Uuid::new_v4().simple()),
+                &password_hash,
+                "user",
+                "active",
+            )
+            .await;
+        }
+        let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("ncu campus");
+
+        let watched_id = Uuid::new_v4().to_string();
+        let feedback_target_id = Uuid::new_v4().to_string();
+        let same_category_id = Uuid::new_v4().to_string();
+        let unrelated_id = Uuid::new_v4().to_string();
+        let ordered_signal_id = Uuid::new_v4().to_string();
+        let order_category_id = Uuid::new_v4().to_string();
+        for (id, category, age_hours) in [
+            (&watched_id, "electronics", 4_i32),
+            (&feedback_target_id, "electronics", 1_i32),
+            (&same_category_id, "electronics", 3_i32),
+            (&unrelated_id, "misc", 2_i32),
+            (&ordered_signal_id, "books", 6_i32),
+            (&order_category_id, "books", 5_i32),
+        ] {
+            sqlx::query(
+                "INSERT INTO inventory (
+                    id, campus_id, title, category, brand, condition_score,
+                    suggested_price_cny, defects, owner_id, status, direction, created_at
+                 ) VALUES ($1, $2, $3, $4, 'Test', 8, 10000, '[]', $5,
+                           'active', 'offer', NOW() - make_interval(hours => $6))",
+            )
+            .bind(id)
+            .bind(campus_id)
+            .bind(format!("Ranking {id}"))
+            .bind(category)
+            .bind(&seller_id)
+            .bind(age_hours)
+            .execute(&pool)
+            .await
+            .expect("insert listing");
+        }
+        sqlx::query(
+            "INSERT INTO watchlist (user_id, listing_id, created_at)
+             VALUES ($1, $2, NOW() - INTERVAL '1 day')",
+        )
+        .bind(&viewer_id)
+        .bind(&watched_id)
+        .execute(&pool)
+        .await
+        .expect("watch listing");
+        sqlx::query(
+            "INSERT INTO orders (
+                id, campus_id, listing_id, buyer_id, seller_id, final_price, status, created_at
+             ) VALUES ($1, $2, $3, $4, $5, 10000, 'confirmed', NOW() - INTERVAL '1 day')",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(campus_id)
+        .bind(&ordered_signal_id)
+        .bind(&viewer_id)
+        .bind(&seller_id)
+        .execute(&pool)
+        .await
+        .expect("insert order signal");
+
+        let (viewer_token, _, _) = generate_access_token_for_campus(
+            &viewer_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("viewer token");
+        let (other_token, _, _) = generate_access_token_for_campus(
+            &other_viewer_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("other viewer token");
+        let app = create_router(build_state(pool.clone()), &[]);
+
+        let (_, initial) = authenticated_json(
+            &app,
+            Method::GET,
+            "/api/recommendations/feed?direction=offer",
+            &viewer_token,
+            None,
+        )
+        .await;
+        let initial_items = initial["items"].as_array().expect("initial items");
+        let same_category = initial_items
+            .iter()
+            .find(|item| item["id"] == same_category_id)
+            .expect("same-category candidate");
+        assert_eq!(same_category["source"], "category_affinity");
+        assert_eq!(
+            initial_items
+                .iter()
+                .find(|item| item["id"] == order_category_id)
+                .expect("order-category candidate")["source"],
+            "category_affinity",
+            "order history contributes an affinity signal before reset"
+        );
+        assert!(
+            initial_items
+                .iter()
+                .position(|item| item["id"] == same_category_id)
+                .expect("same-category position")
+                < initial_items
+                    .iter()
+                    .position(|item| item["id"] == unrelated_id)
+                    .expect("unrelated position"),
+            "watch affinity should outrank newer unrelated inventory"
+        );
+        assert!(
+            !initial_items.iter().any(|item| item["id"] == watched_id),
+            "an active watchlist signal is not replayed as a recommendation"
+        );
+
+        let (status, disabled) = authenticated_json(
+            &app,
+            Method::PUT,
+            "/api/feed/preferences",
+            &viewer_token,
+            Some(json!({"personalization_enabled": false})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(disabled["personalization_enabled"], false);
+        let (_, disabled_feed) = authenticated_json(
+            &app,
+            Method::GET,
+            "/api/recommendations/feed?direction=offer",
+            &viewer_token,
+            None,
+        )
+        .await;
+        let disabled_items = disabled_feed["items"].as_array().expect("disabled items");
+        assert_eq!(
+            disabled_items
+                .iter()
+                .find(|item| item["id"] == same_category_id)
+                .expect("same-category while disabled")["source"],
+            "recency"
+        );
+        assert!(disabled_items.iter().any(|item| item["id"] == watched_id));
+
+        let (status, _) = authenticated_json(
+            &app,
+            Method::PUT,
+            "/api/feed/preferences",
+            &viewer_token,
+            Some(json!({"personalization_enabled": true})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, receipt) = authenticated_json(
+            &app,
+            Method::POST,
+            "/api/feed/feedback",
+            &viewer_token,
+            Some(json!({
+                "resource_type": "listing",
+                "resource_id": feedback_target_id,
+                "action": "less_like_this"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(receipt["action"], "less_like_this");
+
+        let (_, downranked) = authenticated_json(
+            &app,
+            Method::GET,
+            "/api/recommendations/feed?direction=offer",
+            &viewer_token,
+            None,
+        )
+        .await;
+        let downranked_items = downranked["items"].as_array().expect("downranked items");
+        assert!(
+            !downranked_items
+                .iter()
+                .any(|item| item["id"] == feedback_target_id),
+            "the feedback target is an exact exclusion"
+        );
+        let same_category = downranked_items
+            .iter()
+            .find(|item| item["id"] == same_category_id)
+            .expect("same-category remains eligible");
+        assert_eq!(
+            same_category["source"], "recency",
+            "an offset affinity must not still claim category_affinity"
+        );
+        assert!(
+            downranked_items
+                .iter()
+                .position(|item| item["id"] == unrelated_id)
+                .expect("unrelated position")
+                < downranked_items
+                    .iter()
+                    .position(|item| item["id"] == same_category_id)
+                    .expect("same-category position"),
+            "less_like_this downranks the category without banning it"
+        );
+
+        let (_, other_feed) = authenticated_json(
+            &app,
+            Method::GET,
+            "/api/recommendations/feed?direction=offer",
+            &other_token,
+            None,
+        )
+        .await;
+        assert!(
+            other_feed["items"]
+                .as_array()
+                .expect("other viewer items")
+                .iter()
+                .any(|item| item["id"] == feedback_target_id),
+            "one user's exact exclusion must not leak to another user"
+        );
+
+        sqlx::query(
+            "UPDATE feed_feedback SET updated_at = NOW() - INTERVAL '1 hour'
+             WHERE user_id = $1 AND resource_id = $2",
+        )
+        .bind(&viewer_id)
+        .bind(&feedback_target_id)
+        .execute(&pool)
+        .await
+        .expect("age generalized signal");
+        let (status, cleared) = authenticated_json(
+            &app,
+            Method::POST,
+            "/api/feed/personalization/clear",
+            &viewer_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(cleared["signals_reset_at"].is_string());
+        let (_, cleared_feed) = authenticated_json(
+            &app,
+            Method::GET,
+            "/api/recommendations/feed?direction=offer",
+            &viewer_token,
+            None,
+        )
+        .await;
+        let cleared_items = cleared_feed["items"].as_array().expect("cleared items");
+        assert!(cleared_items.iter().any(|item| item["id"] == watched_id));
+        assert!(
+            !cleared_items
+                .iter()
+                .any(|item| item["id"] == feedback_target_id),
+            "clear forgets generalized signals but preserves exact exclusions"
+        );
+        assert_eq!(
+            cleared_items
+                .iter()
+                .find(|item| item["id"] == same_category_id)
+                .expect("candidate after clear")["source"],
+            "recency"
+        );
+        assert_eq!(
+            cleared_items
+                .iter()
+                .find(|item| item["id"] == order_category_id)
+                .expect("order-category candidate after clear")["source"],
+            "recency",
+            "clear ignores order-history affinity older than signals_reset_at"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn intent_feedback_filters_and_explains_feed_and_matches() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let viewer_id = Uuid::new_v4().to_string();
+        let other_viewer_id = Uuid::new_v4().to_string();
+        let author_id = Uuid::new_v4().to_string();
+        for (id, label) in [
+            (&viewer_id, "viewer"),
+            (&other_viewer_id, "other"),
+            (&author_id, "author"),
+        ] {
+            insert_user(
+                &pool,
+                id,
+                &format!("intent_rank_{label}_{}", Uuid::new_v4().simple()),
+                &password_hash,
+                "user",
+                "active",
+            )
+            .await;
+        }
+        let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("ncu campus");
+        let service = IntentService::new(pool.clone());
+
+        let companion_target = service
+            .create(active_intent(
+                campus_id,
+                &author_id,
+                kinds::COMPANION,
+                "找最新的羽毛球搭子",
+                Slots::default(),
+            ))
+            .await
+            .expect("create companion target");
+        let companion_candidate = service
+            .create(active_intent(
+                campus_id,
+                &author_id,
+                kinds::COMPANION,
+                "找另一个羽毛球搭子",
+                Slots::default(),
+            ))
+            .await
+            .expect("create companion candidate");
+        let help_candidate = service
+            .create(active_intent(
+                campus_id,
+                &author_id,
+                kinds::HELP,
+                "请帮忙搬一个纸箱",
+                Slots::default(),
+            ))
+            .await
+            .expect("create help candidate");
+        let seeking_slots = Slots {
+            category: Some("electronics".to_string()),
+            price: Some(PriceSlot::Range {
+                min_cents: None,
+                max_cents: Some(30_000),
+            }),
+            condition_score: Some(7),
+            ..Default::default()
+        };
+        let mine = service
+            .create(active_intent(
+                campus_id,
+                &viewer_id,
+                kinds::GOODS_SEEK,
+                "收一台三百元以内的显示器",
+                seeking_slots,
+            ))
+            .await
+            .expect("create seeking intent");
+        let matching_slots = Slots {
+            category: Some("electronics".to_string()),
+            price: Some(PriceSlot::Exact { cents: 20_000 }),
+            condition_score: Some(8),
+            ..Default::default()
+        };
+        let matching_target = service
+            .create(active_intent(
+                campus_id,
+                &author_id,
+                kinds::GOODS_OFFER,
+                "出一台两百元显示器",
+                matching_slots.clone(),
+            ))
+            .await
+            .expect("create matching target");
+        let matching_visible = service
+            .create(active_intent(
+                campus_id,
+                &author_id,
+                kinds::GOODS_OFFER,
+                "再出一台两百元显示器",
+                matching_slots,
+            ))
+            .await
+            .expect("create visible match");
+        let incompatible = service
+            .create(active_intent(
+                campus_id,
+                &author_id,
+                kinds::GOODS_OFFER,
+                "出一台五百元显示器",
+                Slots {
+                    category: Some("electronics".to_string()),
+                    price: Some(PriceSlot::Exact { cents: 50_000 }),
+                    condition_score: Some(8),
+                    ..Default::default()
+                },
+            ))
+            .await
+            .expect("create incompatible offer");
+
+        for (id, age_hours) in [
+            (companion_target, 1_i32),
+            (companion_candidate, 2_i32),
+            (help_candidate, 3_i32),
+            (mine, 4_i32),
+            (matching_target, 5_i32),
+            (matching_visible, 6_i32),
+            (incompatible, 7_i32),
+        ] {
+            sqlx::query(
+                "UPDATE intents SET created_at = NOW() - make_interval(hours => $2)
+                 WHERE id = $1",
+            )
+            .bind(id)
+            .bind(age_hours)
+            .execute(&pool)
+            .await
+            .expect("set intent age");
+        }
+        let companion_target = companion_target.to_string();
+        let companion_candidate = companion_candidate.to_string();
+        let help_candidate = help_candidate.to_string();
+        let mine = mine.to_string();
+        let matching_target = matching_target.to_string();
+        let matching_visible = matching_visible.to_string();
+        let incompatible = incompatible.to_string();
+
+        let (viewer_token, _, _) = generate_access_token_for_campus(
+            &viewer_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("viewer token");
+        let (other_token, _, _) = generate_access_token_for_campus(
+            &other_viewer_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("other viewer token");
+        let app = create_router(build_state(pool.clone()), &[]);
+
+        for (resource_id, action) in [
+            (&companion_target, "less_like_this"),
+            (&matching_target, "hide"),
+        ] {
+            let (status, _) = authenticated_json(
+                &app,
+                Method::POST,
+                "/api/feed/feedback",
+                &viewer_token,
+                Some(json!({
+                    "resource_type": "intent",
+                    "resource_id": resource_id,
+                    "action": action,
+                })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+
+        let (_, downranked_feed) =
+            authenticated_json(&app, Method::GET, "/api/intents/feed", &viewer_token, None).await;
+        assert_eq!(downranked_feed["ranking_version"], "2026.07-intent-hard-v1");
+        let downranked_items = downranked_feed["items"]
+            .as_array()
+            .expect("downranked intent feed");
+        assert!(
+            !downranked_items
+                .iter()
+                .any(|item| item["id"] == companion_target),
+            "feedback exact-hides the intent"
+        );
+        assert!(
+            downranked_items
+                .iter()
+                .position(|item| item["id"] == help_candidate)
+                .expect("help position")
+                < downranked_items
+                    .iter()
+                    .position(|item| item["id"] == companion_candidate)
+                    .expect("companion position"),
+            "less_like_this downranks the same intent kind without banning it"
+        );
+        for item in downranked_items {
+            assert_eq!(item["rank_reason"], "recent_campus_intent");
+            assert_eq!(
+                item["match_summary"],
+                json!(["same_campus", "active_intent"])
+            );
+            assert_eq!(item["source"], "campus_recency");
+            assert_eq!(item["ranking_version"], "2026.07-intent-hard-v1");
+            assert!(item.get("author_id").is_none());
+        }
+
+        let (_, other_feed) =
+            authenticated_json(&app, Method::GET, "/api/intents/feed", &other_token, None).await;
+        let other_items = other_feed["items"].as_array().expect("other viewer feed");
+        assert!(other_items
+            .iter()
+            .any(|item| item["id"] == companion_target));
+        assert!(other_items.iter().any(|item| item["id"] == matching_target));
+
+        let (_, _) = authenticated_json(
+            &app,
+            Method::PUT,
+            "/api/feed/preferences",
+            &viewer_token,
+            Some(json!({"personalization_enabled": false})),
+        )
+        .await;
+        let (_, disabled_feed) =
+            authenticated_json(&app, Method::GET, "/api/intents/feed", &viewer_token, None).await;
+        let disabled_items = disabled_feed["items"].as_array().expect("disabled feed");
+        assert!(
+            disabled_items
+                .iter()
+                .position(|item| item["id"] == companion_candidate)
+                .expect("companion position")
+                < disabled_items
+                    .iter()
+                    .position(|item| item["id"] == help_candidate)
+                    .expect("help position"),
+            "personalization off ignores generalized intent signals"
+        );
+        assert!(!disabled_items
+            .iter()
+            .any(|item| item["id"] == companion_target));
+
+        let (_, _) = authenticated_json(
+            &app,
+            Method::PUT,
+            "/api/feed/preferences",
+            &viewer_token,
+            Some(json!({"personalization_enabled": true})),
+        )
+        .await;
+        let (_, reenabled_feed) =
+            authenticated_json(&app, Method::GET, "/api/intents/feed", &viewer_token, None).await;
+        let reenabled_items = reenabled_feed["items"].as_array().expect("re-enabled feed");
+        assert!(
+            reenabled_items
+                .iter()
+                .position(|item| item["id"] == help_candidate)
+                .expect("help position")
+                < reenabled_items
+                    .iter()
+                    .position(|item| item["id"] == companion_candidate)
+                    .expect("companion position")
+        );
+
+        sqlx::query(
+            "UPDATE feed_feedback SET updated_at = NOW() - INTERVAL '1 hour'
+             WHERE user_id = $1 AND resource_type = 'intent'",
+        )
+        .bind(&viewer_id)
+        .execute(&pool)
+        .await
+        .expect("age intent signals");
+        let (status, _) = authenticated_json(
+            &app,
+            Method::POST,
+            "/api/feed/personalization/clear",
+            &viewer_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, cleared_feed) =
+            authenticated_json(&app, Method::GET, "/api/intents/feed", &viewer_token, None).await;
+        let cleared_items = cleared_feed["items"].as_array().expect("cleared feed");
+        assert!(
+            cleared_items
+                .iter()
+                .position(|item| item["id"] == companion_candidate)
+                .expect("companion position")
+                < cleared_items
+                    .iter()
+                    .position(|item| item["id"] == help_candidate)
+                    .expect("help position"),
+            "clear restores recency once generalized downrank is ignored"
+        );
+        assert!(!cleared_items
+            .iter()
+            .any(|item| item["id"] == companion_target));
+
+        let (status, matches) = authenticated_json(
+            &app,
+            Method::GET,
+            &format!("/api/intents/{mine}/matches"),
+            &viewer_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(matches["ranking_version"], "2026.07-intent-hard-v1");
+        let match_items = matches["items"].as_array().expect("matches");
+        assert!(
+            !match_items.iter().any(|item| item["id"] == matching_target),
+            "clear preserves exact exclusions in matches"
+        );
+        assert!(!match_items.iter().any(|item| item["id"] == incompatible));
+        let visible_match = match_items
+            .iter()
+            .find(|item| item["id"] == matching_visible)
+            .expect("compatible match remains");
+        assert_eq!(visible_match["rank_reason"], "known_slots_compatible");
+        assert_eq!(visible_match["source"], "hard_constraints");
+        assert_eq!(
+            visible_match["match_summary"],
+            json!([
+                "kind_compatible",
+                "category_match",
+                "price_within_constraint",
+                "condition_at_least_requested"
+            ])
+        );
+        assert_eq!(visible_match["ranking_version"], "2026.07-intent-hard-v1");
+        assert!(visible_match.get("author_id").is_none());
     })
     .await;
 }

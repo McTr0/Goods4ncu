@@ -275,7 +275,7 @@ DB_NAME=goods4ncu APP_PASSWORD=<secret> ./scripts/provision_app_role.sh
 
 [已实现] `0030_normalize_money_bigint.sql` 修复历史升级库可能遗留的 `INT4` 金额列，将商品价格、成交价和议价金额统一为 `BIGINT`。若空库测试正常但现有环境列表接口出现金额 decode 错误，先检查 migration 是否已经执行到 0030，不要在应用层把金额退回 32 位。
 
-[已实现] `0034_moderation_cases.sql` 新增 `moderation_cases`、`moderation_case_events`、`moderation_appeals`，并把媒体拒绝任务和聊天举报回填为案件。`0037_outbox_events.sql` 已新增 `outbox_events`（见 Transactional Outbox 一节）；`agent_runs` 和 `agent_action_plans` 仍是目标态。
+[已实现] `0034_moderation_cases.sql` 新增 `moderation_cases`、`moderation_case_events`、`moderation_appeals`，并把媒体拒绝任务和聊天举报回填为案件；`0053_content_reports.sql` 为商品和用户举报增加同校园 intake，并在同一事务中关联统一案件。`0037_outbox_events.sql` 已新增 `outbox_events`（见 Transactional Outbox 一节），`0038_agent_action_plans.sql` 已实现需确认的 Agent 写动作计划；统一 `agent_runs` 仍是目标态。
 
 ## 内容审核策略
 
@@ -317,9 +317,11 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 
 检查 `documents` 表是否有对应商品文档，embedding 是否非空，`VECTOR_DIM` 是否与 schema 一致，商品是否 active，LLM/embedding provider key 是否可用，pgvector 索引是否存在。语义搜索问题通常横跨 provider、文档写入和 SQL 过滤三层。
 
+首页商品 feed 或 intent feed/matches 的个性化顺序/条目缺失异常，还要检查当前用户/校园的 `feed_preferences.personalization_enabled/signals_reset_at` 和 `feed_feedback.resource_type/resource_id/action/signal_key/updated_at`。重置只让旧收藏、买家成交意向和 `less_like_this` 泛化信号失效；这些已接入入口仍精确隐藏显式 feedback 的原资源。相似商品和 listing wanted matches 当前不消费该表。不要为排查排序直接删除 watchlist/order 等业务事实。
+
 ### 审核案件异常
 
-先确认当前校园，再检查 `moderation_jobs` 的 `campus_id/status/retry_count` 和 `moderation_cases` 的 `status/source_type/source_ref_id`。图片 provider 超时进入重试或 failed，不应自动创建违规案件；只有 rejected 会创建 `source_type=machine` 的 actioned 案件。聊天举报应同时存在 `chat_message_reports.case_id` 和对应的 `source_type=user_report` 案件。
+先确认当前校园，再检查 `moderation_jobs` 的 `campus_id/status/retry_count` 和 `moderation_cases` 的 `status/source_type/source_ref_id`。图片 provider 超时进入重试或 failed，不应自动创建违规案件；只有 rejected 会创建 `source_type=machine` 的 actioned 案件。聊天举报应同时存在 `chat_message_reports.case_id` 和对应的 `source_type=user_report` 案件。商品或用户举报还应存在 `content_reports.case_id`，对应案件的 `source_ref_id` 必须使用 `content_report:<report_id>` 前缀；缺少前缀会和聊天举报的 UUID 命名空间混淆。
 
 如果案件已经处置但资源仍不可见，检查 `moderation_case_events` 的最后事件、资源的 `images_moderation_status`/`moderation_status`/`avatar_moderation_status`，以及管理员审计中的 `campus_id` 和 `scope_reason`。申诉只能由案件当事人提交一次，复核必须由不同于原决定者的管理员完成；不要通过数据库直接改状态绕过事件和审计。
 
@@ -384,7 +386,7 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 
 [已实现] `scripts/backup_pitr_drill.sh` 在一次性本地集群上完整演练恢复路径：initdb（开启 WAL 归档）→ `pg_basebackup` → 记录 T1 → 写入“灾难”行 → 以 `recovery_target_time = T1` 恢复 → 断言好状态存在、灾难行被排除。脚本幂等、自清理、以退出码表示演练结果，可直接进 CI 或 cron。生产化差异：归档目标换为对象存储、备份调度化、按季度对生产快照演练并记录实际 RPO/RTO。
 
-另注意：15 张租户表已启用 FORCE RLS（`0042`）。策略在 `app.campus_id` GUC 未设置时放行（应用层为主边界），事务内 `SET LOCAL app.campus_id = '<uuid>'` 即可武装隔离。两条纪律：生产应用角色绝不可是 superuser（superuser 完全绕过 RLS）；备份/迁移以未武装会话运行即可看到全量数据。
+另注意：当前 19 张租户表已启用 FORCE RLS（`0042` 及后续领域迁移）。策略在 `app.campus_id` GUC 未设置时放行（应用层为主边界），事务内 `SET LOCAL app.campus_id = '<uuid>'` 即可武装隔离。两条纪律：生产应用角色绝不可是 superuser（superuser 完全绕过 RLS）；备份/迁移以未武装会话运行即可看到全量数据。
 
 ### 原 Runbook 目标（生产化仍需执行）
 

@@ -51,7 +51,7 @@ pub struct RecommendationItem {
 
 /// Version tag for the current ranking logic. Clients and offline evaluation
 /// reference this when comparing ranking behaviour across releases.
-pub const RANKING_VERSION: &str = "2026.07-affinity-v1";
+pub const RANKING_VERSION: &str = "2026.07-feedback-v2";
 
 #[derive(Serialize)]
 pub struct RecommendationResponse {
@@ -190,32 +190,76 @@ async fn fetch_personalized_feed(
 ) -> Result<Vec<RecommendationItem>, ApiError> {
     let rows = sqlx::query(
         r#"
-        WITH affinity AS (
+        WITH preferences AS (
+            SELECT COALESCE(pref.personalization_enabled, TRUE) AS personalization_enabled,
+                   COALESCE(pref.signals_reset_at, '-infinity'::timestamptz) AS signals_reset_at
+            FROM (SELECT 1) seed
+            LEFT JOIN feed_preferences pref
+              ON pref.campus_id = $5 AND pref.user_id = $1
+        ), affinity AS (
             SELECT i.category, COUNT(*)::float8 AS weight
             FROM (
-                SELECT listing_id FROM watchlist WHERE user_id = $1
+                SELECT watch.listing_id
+                FROM watchlist watch CROSS JOIN preferences pref
+                WHERE watch.user_id = $1
+                  AND pref.personalization_enabled
+                  AND watch.created_at >= pref.signals_reset_at
                 UNION ALL
-                SELECT listing_id FROM orders WHERE buyer_id = $1
+                SELECT purchase.listing_id
+                FROM orders purchase CROSS JOIN preferences pref
+                WHERE purchase.buyer_id = $1
+                  AND purchase.campus_id = $5
+                  AND pref.personalization_enabled
+                  AND purchase.created_at >= pref.signals_reset_at
             ) signals
             JOIN inventory i ON i.id = signals.listing_id
+            WHERE i.campus_id = $5
             GROUP BY i.category
+        ), less_like AS (
+            SELECT feedback.signal_key, COUNT(*)::float8 AS weight
+            FROM feed_feedback feedback CROSS JOIN preferences pref
+            WHERE feedback.user_id = $1
+              AND feedback.campus_id = $5
+              AND feedback.resource_type = 'listing'
+              AND feedback.action = 'less_like_this'
+              AND pref.personalization_enabled
+              AND feedback.updated_at >= pref.signals_reset_at
+            GROUP BY feedback.signal_key
         )
         SELECT inv.id, inv.title, inv.category, inv.brand, inv.direction, inv.condition_score,
                inv.suggested_price_cny, inv.status,
                CASE WHEN inv.images_moderation_status = 'approved' THEN inv.image_url ELSE NULL END AS image_url,
                inv.defects,
-               COALESCE(a.weight, 0) AS affinity_weight
+               CASE WHEN pref.personalization_enabled
+                    THEN COALESCE(a.weight, 0) - COALESCE(downrank.weight, 0)
+                    ELSE 0 END AS effective_weight,
+               pref.personalization_enabled
         FROM inventory inv
+        CROSS JOIN preferences pref
         LEFT JOIN affinity a ON a.category = inv.category
+        LEFT JOIN less_like downrank
+          ON downrank.signal_key = 'listing:category:' || LOWER(BTRIM(inv.category))
         WHERE inv.status = 'active'
           AND inv.campus_id = $5
           AND inv.owner_id <> $1
           AND ($4 = 'all' OR inv.direction = $4)
           AND NOT EXISTS (
               SELECT 1 FROM watchlist w
-              WHERE w.user_id = $1 AND w.listing_id = inv.id
+              WHERE pref.personalization_enabled
+                AND w.user_id = $1 AND w.listing_id = inv.id
+                AND w.created_at >= pref.signals_reset_at
           )
-        ORDER BY COALESCE(a.weight, 0) DESC, inv.created_at DESC
+          AND NOT EXISTS (
+              SELECT 1 FROM feed_feedback exact_feedback
+              WHERE exact_feedback.user_id = $1
+                AND exact_feedback.campus_id = $5
+                AND exact_feedback.resource_type = 'listing'
+                AND exact_feedback.resource_id = inv.id
+          )
+        ORDER BY CASE WHEN pref.personalization_enabled
+                      THEN COALESCE(a.weight, 0) - COALESCE(downrank.weight, 0)
+                      ELSE 0 END DESC,
+                 inv.created_at DESC
         LIMIT $2 OFFSET $3
         "#,
     )
@@ -231,8 +275,10 @@ async fn fetch_personalized_feed(
     Ok(rows
         .iter()
         .map(|row| {
-            let weight: f64 = row.try_get("affinity_weight").unwrap_or(0.0);
-            if weight > 0.0 {
+            let weight: f64 = row.try_get("effective_weight").unwrap_or(0.0);
+            let personalization_enabled: bool =
+                row.try_get("personalization_enabled").unwrap_or(true);
+            if personalization_enabled && weight > 0.0 {
                 let category: String = row.get("category");
                 recommendation_item_with_reason(
                     row,

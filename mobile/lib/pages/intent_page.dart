@@ -5,8 +5,10 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../components/intent_respond_dialog.dart';
+import '../components/feed_feedback_menu.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
+import '../services/feed_feedback_service.dart';
 import '../services/intent_service.dart';
 import '../theme/app_theme.dart';
 
@@ -24,10 +26,11 @@ import '../theme/app_theme.dart';
 /// when they could matter, and "whatever" and "any time" are real answers rather
 /// than skipped fields.
 class IntentPage extends StatefulWidget {
-  const IntentPage({super.key, this.intentService});
+  const IntentPage({super.key, this.intentService, this.feedbackService});
 
   /// Injectable for tests.
   final IntentService? intentService;
+  final FeedFeedbackService? feedbackService;
 
   @override
   State<IntentPage> createState() => _IntentPageState();
@@ -35,6 +38,7 @@ class IntentPage extends StatefulWidget {
 
 class _IntentPageState extends State<IntentPage> {
   late final IntentService _service;
+  late final FeedFeedbackService _feedbackService;
   final _controller = TextEditingController();
 
   IntentKind _kind = IntentKind.goodsOffer;
@@ -57,6 +61,8 @@ class _IntentPageState extends State<IntentPage> {
   void initState() {
     super.initState();
     _service = widget.intentService ?? context.read<IntentService>();
+    _feedbackService =
+        widget.feedbackService ?? context.read<FeedFeedbackService>();
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
@@ -220,6 +226,22 @@ class _IntentPageState extends State<IntentPage> {
     if (await respondToIntentFlow(context, _service, intent)) await _load();
   }
 
+  void _removeFeedIntent(UserIntent intent) {
+    if (!mounted) return;
+    setState(() => _feed.removeWhere((item) => item.id == intent.id));
+  }
+
+  void _removeMatch(String ownerIntentId, UserIntent match) {
+    if (!mounted) return;
+    setState(() {
+      final current = _matches[ownerIntentId];
+      if (current == null) return;
+      _matches[ownerIntentId] = current
+          .where((item) => item.id != match.id)
+          .toList();
+    });
+  }
+
   String _kindLabel(AppLocalizations l, IntentKind kind) => switch (kind) {
     IntentKind.goodsOffer => l.intentKindGoodsOffer,
     IntentKind.goodsSeek => l.intentKindGoodsSeek,
@@ -351,8 +373,14 @@ class _IntentPageState extends State<IntentPage> {
                 ),
               )
             else
-              ..._feed.map(
-                (intent) => Card(
+              ..._feed.map((intent) {
+                final reasons = localizedFeedReasons(
+                  l,
+                  codes: intent.matchSummary,
+                  rankReason: intent.rankReason,
+                  source: intent.source,
+                );
+                return Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: Padding(
                     padding: const EdgeInsets.all(12),
@@ -376,10 +404,30 @@ class _IntentPageState extends State<IntentPage> {
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(fontSize: 14),
                               ),
+                              if (reasons.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  reasons.join(' · '),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: AppTheme.primary,
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
                         const SizedBox(width: 8),
+                        FeedFeedbackMenu(
+                          service: _feedbackService,
+                          resourceType: FeedResourceType.intent,
+                          resourceId: intent.id,
+                          compact: true,
+                          onApplied: (_) => _removeFeedIntent(intent),
+                        ),
+                        const SizedBox(width: 4),
                         FilledButton.tonal(
                           onPressed: () => _respond(intent),
                           child: Text(l.intentRespondAction),
@@ -387,8 +435,8 @@ class _IntentPageState extends State<IntentPage> {
                       ],
                     ),
                   ),
-                ),
-              ),
+                );
+              }),
             const Divider(height: 32),
             Text(
               l.intentMineHeader,
@@ -419,7 +467,9 @@ class _IntentPageState extends State<IntentPage> {
                   intent: intent,
                   kindLabel: _kindLabel(l, intent.kind),
                   matches: _matches[intent.id],
+                  feedbackService: _feedbackService,
                   onRespondToMatch: _respond,
+                  onFeedbackApplied: (match) => _removeMatch(intent.id, match),
                   onConfirm: intent.isDraft
                       ? () async {
                           await _service.confirmIntent(intent.id);
@@ -442,7 +492,9 @@ class _IntentCard extends StatelessWidget {
     required this.intent,
     required this.kindLabel,
     required this.matches,
+    required this.feedbackService,
     required this.onRespondToMatch,
+    required this.onFeedbackApplied,
     required this.onConfirm,
     required this.onFulfilled,
     required this.onWithdraw,
@@ -451,10 +503,12 @@ class _IntentCard extends StatelessWidget {
   final UserIntent intent;
   final String kindLabel;
   final List<UserIntent>? matches;
+  final FeedFeedbackService feedbackService;
 
   /// Answering a match is the only reason to show one. Without this the list is
   /// a notice that somebody wants what you have and no way to say so.
   final void Function(UserIntent) onRespondToMatch;
+  final void Function(UserIntent) onFeedbackApplied;
   final Future<void> Function()? onConfirm;
   final VoidCallback onFulfilled;
   final VoidCallback onWithdraw;
@@ -514,37 +568,63 @@ class _IntentCard extends StatelessWidget {
               // Each one is answerable. The moment the system says somebody
               // here wants what you have is the worst possible moment to give
               // them nothing to press.
-              ...matches!
-                  .take(3)
-                  .map(
-                    (m) => InkWell(
-                      onTap: () => onRespondToMatch(m),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
+              ...matches!.take(3).map((m) {
+                final reasons = localizedFeedReasons(
+                  l,
+                  codes: m.matchSummary,
+                  rankReason: m.rankReason,
+                  source: m.source,
+                );
+                return InkWell(
+                  onTap: () => onRespondToMatch(m),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
                                 '· ${m.slots.subject ?? m.rawInput}',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(fontSize: 12),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              l.intentRespondAction,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.primary,
-                              ),
-                            ),
-                          ],
+                              if (reasons.isNotEmpty)
+                                Text(
+                                  reasons.join(' · '),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    color: AppTheme.primary,
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
-                      ),
+                        const SizedBox(width: 8),
+                        Text(
+                          l.intentRespondAction,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.primary,
+                          ),
+                        ),
+                        FeedFeedbackMenu(
+                          service: feedbackService,
+                          resourceType: FeedResourceType.intent,
+                          resourceId: m.id,
+                          compact: true,
+                          onApplied: (_) => onFeedbackApplied(m),
+                        ),
+                      ],
                     ),
                   ),
+                );
+              }),
             ],
             const SizedBox(height: 4),
             Row(

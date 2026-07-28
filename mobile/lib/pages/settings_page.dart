@@ -10,12 +10,14 @@ import '../l10n/app_localizations.dart';
 import '../services/locale_service.dart';
 import '../services/user_service.dart';
 import '../services/base_service.dart';
+import '../services/feed_feedback_service.dart';
 import '../theme/app_theme.dart';
 
 class SettingsPage extends StatefulWidget {
   final UserService? userService;
+  final FeedFeedbackService? feedbackService;
 
-  const SettingsPage({super.key, this.userService});
+  const SettingsPage({super.key, this.userService, this.feedbackService});
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -23,16 +25,41 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   late final UserService _userService;
+  late final FeedFeedbackService _feedbackService;
 
   Map<String, dynamic>? _profile;
   bool _loading = true;
   String? _error;
+  bool? _personalizationEnabled;
+  bool _preferencesLoading = true;
+  bool _preferencesUpdating = false;
+  bool _personalizationClearing = false;
 
   @override
   void initState() {
     super.initState();
     _userService = widget.userService ?? context.read<UserService>();
+    _feedbackService =
+        widget.feedbackService ?? context.read<FeedFeedbackService>();
     _loadProfile();
+    _loadFeedPreferences();
+  }
+
+  Future<void> _loadFeedPreferences() async {
+    try {
+      final preferences = await _feedbackService.getPreferences();
+      if (!mounted) return;
+      setState(() {
+        _personalizationEnabled = preferences.personalizationEnabled;
+        _preferencesLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _personalizationEnabled = null;
+        _preferencesLoading = false;
+      });
+    }
   }
 
   Future<void> _loadProfile() async {
@@ -123,6 +150,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: 12),
 
                   _buildDiscoverySettings(),
+                  const SizedBox(height: 12),
+
+                  _buildFeedSettings(),
                   const SizedBox(height: 12),
 
                   _buildReadReceiptSettings(),
@@ -279,6 +309,108 @@ class _SettingsPageState extends State<SettingsPage> {
       messenger.showSnackBar(
         SnackBar(content: Text(l.settingsUpdateFailed(error.toString()))),
       );
+    }
+  }
+
+  Widget _buildFeedSettings() {
+    final l = AppLocalizations.of(context)!;
+    final enabled = _personalizationEnabled;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader(title: l.feedPreferencesSectionTitle),
+        const SizedBox(height: 8),
+        _DiscoverySwitchCard(
+          icon: Icons.auto_awesome_outlined,
+          title: l.feedPersonalizationTitle,
+          subtitle: _preferencesLoading || enabled == null
+              ? l.feedPersonalizationUnavailable
+              : enabled
+              ? l.feedPersonalizationOnSubtitle
+              : l.feedPersonalizationOffSubtitle,
+          value: enabled ?? false,
+          onChanged:
+              _preferencesLoading || _preferencesUpdating || enabled == null
+              ? null
+              : _updatePersonalization,
+        ),
+        const SizedBox(height: 8),
+        _SettingsCard(
+          icon: Icons.restart_alt_outlined,
+          title: l.feedPersonalizationClearTitle,
+          subtitle: l.feedPersonalizationClearSubtitle,
+          trailing: _personalizationClearing
+              ? const SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : null,
+          onTap: () {
+            if (!_personalizationClearing) _confirmClearPersonalization();
+          },
+        ),
+      ],
+    );
+  }
+
+  Future<void> _updatePersonalization(bool enabled) async {
+    if (_preferencesUpdating) return;
+    final l = AppLocalizations.of(context)!;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _preferencesUpdating = true);
+    try {
+      final updated = await _feedbackService.updatePersonalization(enabled);
+      if (!mounted) return;
+      setState(() => _personalizationEnabled = updated.personalizationEnabled);
+      messenger.showSnackBar(
+        SnackBar(content: Text(l.feedPersonalizationUpdated)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(l.feedPreferencesUpdateFailed)),
+      );
+    } finally {
+      if (mounted) setState(() => _preferencesUpdating = false);
+    }
+  }
+
+  Future<void> _confirmClearPersonalization() async {
+    final l = AppLocalizations.of(context)!;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l.feedPersonalizationClearConfirmTitle),
+        content: Text(l.feedPersonalizationClearConfirmBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(l.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(l.feedPersonalizationClearAction),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || _personalizationClearing) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _personalizationClearing = true);
+    try {
+      await _feedbackService.clearPersonalization();
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(l.feedPersonalizationCleared)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(l.feedPersonalizationClearFailed)),
+      );
+    } finally {
+      if (mounted) setState(() => _personalizationClearing = false);
     }
   }
 
@@ -968,7 +1100,7 @@ class _DiscoverySwitchCard extends StatelessWidget {
           subtitle,
           style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
         ),
-        value: enabled && value,
+        value: value,
         onChanged: onChanged,
       ),
     );

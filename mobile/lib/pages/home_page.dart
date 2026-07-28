@@ -9,12 +9,20 @@ import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
 import '../components/intent_respond_dialog.dart';
 import '../components/price_tag.dart';
+import '../components/feed_feedback_menu.dart';
+import '../services/feed_feedback_service.dart';
 
 class HomePage extends StatefulWidget {
   final RecommendationService? recommendationService;
   final IntentService? intentService;
+  final FeedFeedbackService? feedbackService;
 
-  const HomePage({super.key, this.recommendationService, this.intentService});
+  const HomePage({
+    super.key,
+    this.recommendationService,
+    this.intentService,
+    this.feedbackService,
+  });
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -23,6 +31,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   late final RecommendationService _recommendationService;
   late final IntentService _intentService;
+  late final FeedFeedbackService _feedbackService;
   final _agentPromptController = TextEditingController();
   final _agentPromptFocus = FocusNode();
 
@@ -44,6 +53,8 @@ class _HomePageState extends State<HomePage> {
     _recommendationService =
         widget.recommendationService ?? context.read<RecommendationService>();
     _intentService = widget.intentService ?? context.read<IntentService>();
+    _feedbackService =
+        widget.feedbackService ?? context.read<FeedFeedbackService>();
     _loadRecommendations();
   }
 
@@ -97,6 +108,19 @@ class _HomePageState extends State<HomePage> {
     if (await respondToIntentFlow(context, _intentService, intent)) {
       await _loadVoices();
     }
+  }
+
+  void _removeVoice(UserIntent intent) {
+    if (!mounted) return;
+    setState(() => _voices.removeWhere((item) => item.id == intent.id));
+  }
+
+  void _removeListing(Listing listing) {
+    if (!mounted) return;
+    setState(
+      () => _recommendedListings.removeWhere((item) => item.id == listing.id),
+    );
+    if (_recommendedListings.isEmpty) _loadVoices();
   }
 
   @override
@@ -190,7 +214,12 @@ class _HomePageState extends State<HomePage> {
             // tab is the intent composer.
             if (_voices.isNotEmpty && _directionFilter == 'all')
               SliverToBoxAdapter(
-                child: _WhatPeopleWant(voices: _voices, onRespond: _respond),
+                child: _WhatPeopleWant(
+                  voices: _voices,
+                  onRespond: _respond,
+                  feedbackService: _feedbackService,
+                  onFeedbackApplied: _removeVoice,
+                ),
               )
             else
               SliverFillRemaining(
@@ -273,10 +302,18 @@ class _HomePageState extends State<HomePage> {
               sliver: SliverLayoutBuilder(
                 builder: (context, constraints) {
                   final desktop = constraints.crossAxisExtent >= 820;
+                  final textScale = MediaQuery.textScalerOf(
+                    context,
+                  ).scale(1).clamp(1.0, 2.0);
+                  final baseAspectRatio = desktop ? 0.76 : 0.66;
                   return SliverGrid(
                     gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
                       maxCrossAxisExtent: desktop ? 300 : 320,
-                      childAspectRatio: desktop ? 0.76 : 0.66,
+                      // Let accessibility text grow the card as well as the
+                      // glyphs. Otherwise the controls are separated correctly
+                      // but the title/price body becomes clipped at 200%.
+                      childAspectRatio:
+                          baseAspectRatio / (1 + (textScale - 1) * 0.35),
                       crossAxisSpacing: desktop ? 18 : 14,
                       mainAxisSpacing: desktop ? 18 : 14,
                     ),
@@ -294,6 +331,12 @@ class _HomePageState extends State<HomePage> {
                         return ListingCard(
                           listing: listing,
                           onTap: () => context.push('/listing/${listing.id}'),
+                          feedbackMenu: FeedFeedbackMenu(
+                            service: _feedbackService,
+                            resourceType: FeedResourceType.listing,
+                            resourceId: listing.id,
+                            onApplied: (_) => _removeListing(listing),
+                          ),
                         );
                       },
                       childCount:
@@ -878,10 +921,17 @@ class _HomeEmptyState extends StatelessWidget {
 /// price never become one. Leaving those off the home screen meant the busiest
 /// week of a new community could still open on "还没有人发东西".
 class _WhatPeopleWant extends StatelessWidget {
-  const _WhatPeopleWant({required this.voices, required this.onRespond});
+  const _WhatPeopleWant({
+    required this.voices,
+    required this.onRespond,
+    required this.feedbackService,
+    required this.onFeedbackApplied,
+  });
 
   final List<UserIntent> voices;
   final void Function(UserIntent) onRespond;
+  final FeedFeedbackService feedbackService;
+  final void Function(UserIntent) onFeedbackApplied;
 
   @override
   Widget build(BuildContext context) {
@@ -925,9 +975,22 @@ class _WhatPeopleWant extends StatelessWidget {
                 // The reply is the point. A wall of things people want with no
                 // way to answer any of them is the same dead end as an empty
                 // grid, dressed up as content.
-                trailing: FilledButton.tonal(
-                  onPressed: () => onRespond(intent),
-                  child: Text(l.intentRespondAction),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FeedFeedbackMenu(
+                      service: feedbackService,
+                      resourceType: FeedResourceType.intent,
+                      resourceId: intent.id,
+                      compact: true,
+                      onApplied: (_) => onFeedbackApplied(intent),
+                    ),
+                    const SizedBox(width: AppTheme.sp4),
+                    FilledButton.tonal(
+                      onPressed: () => onRespond(intent),
+                      child: Text(l.intentRespondAction),
+                    ),
+                  ],
                 ),
               ),
             ),

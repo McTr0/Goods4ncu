@@ -160,13 +160,13 @@ Agent 权限等级和确认协议见 [Agent 系统设计](agent-system.md)。
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
 | 物品 offer/wanted | [已实现] | 使用 `inventory.direction`；完整生命周期仍需继续收敛 |
-| wanted 条件匹配与商品响应 | [已实现] | 已有 matches/responses 接口，推荐解释和反馈仍是目标态 |
+| wanted 条件匹配与商品响应 | [已实现] | 已有 matches/responses 接口；意图匹配已带稳定解释和反馈，listing matches 的 `match_summary` 契约仍待收敛 |
 | 联系人线程与 realtime/mail | [已实现] | 底层会话独立，收件箱按联系人聚合 |
 | 群组、频道、通话 | [实验中] | 已有 API 和 UI，生产权限与弱网能力仍不足 |
 | 线下成交记录 | [已实现] | 不托管资金，不追踪支付和物流 |
-| Agent 搜索和工具 | [已实现] | 部分写工具还未统一进入 ActionPlan 确认协议 |
-| 多校园 membership | [目标态] | 当前仍以单校园假设为主 |
-| 解释型 Feed 与用户反馈 | [目标态] | 当前以分类亲和度、新鲜度和向量相似为主 |
+| Agent 搜索和工具 | [已实现] | 五个写工具已统一进入 ActionPlan；L2 单次确认、L3 二次确认，资源版本快照仍待补 |
+| 多校园 membership | [部分完成] | membership、活动校园 session、核心资源作用域与 RLS 已落地；资格续期和多副本生产验证仍待完成 |
+| 解释型 Feed 与用户反馈 | [部分完成] | 首页商品 feed 与 intent feed/matches 已有解释、精确隐藏、同类降权、个性化开关和清除；相似商品/listing matches 接入与质量/公平评估仍待完成 |
 | Secret Chat E2EE | [实验中][待弃用] | 不进入生产承诺，迁移方向见信任安全设计 |
 
 ## 阅读下一步

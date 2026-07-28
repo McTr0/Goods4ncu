@@ -2537,5 +2537,100 @@ class AppLocalizationsZh extends AppLocalizations {
   String get avatar => '头像';
 
   @override
+  String get feedFeedbackMenuTooltip => '推荐选项';
+
+  @override
+  String get feedFeedbackHide => '隐藏这条';
+
+  @override
+  String get feedFeedbackLessLikeThis => '少推荐这类';
+
+  @override
+  String get feedFeedbackNotRelevant => '与我无关';
+
+  @override
+  String get feedFeedbackSaved => '收到，这条已从你的信息流移除。';
+
+  @override
+  String get feedFeedbackFailed => '没有保存成功，这条内容仍会保留。';
+
+  @override
+  String get feedReasonRecent => '最近发布';
+
+  @override
+  String get feedReasonSameCategory => '来自你常看的分类';
+
+  @override
+  String get feedReasonCategoryMatch => '分类符合你的需求';
+
+  @override
+  String get feedReasonSimilar => '与你看过的内容相似';
+
+  @override
+  String get feedReasonWithinBudget => '符合你的预算';
+
+  @override
+  String get feedReasonConditionMatch => '符合你想要的成色';
+
+  @override
+  String get feedReasonIntentKind => '与你正在找的内容匹配';
+
+  @override
+  String get feedReasonKeywordMatch => '与你需求中的关键词匹配';
+
+  @override
+  String get feedReasonRequirementsMatch => '符合你写明的条件';
+
+  @override
+  String get feedReasonTimeOverlap => '时间安排与你重合';
+
+  @override
+  String get feedReasonRecommended => '为你推荐';
+
+  @override
+  String get feedPreferencesSectionTitle => '信息流控制';
+
+  @override
+  String get feedPersonalizationTitle => '个性化推荐';
+
+  @override
+  String get feedPersonalizationOnSubtitle => '根据你的信息流偏好，让推荐更相关。';
+
+  @override
+  String get feedPersonalizationOffSubtitle => '改为显示非个性化信息流。';
+
+  @override
+  String get feedPersonalizationUnavailable => '暂时无法读取信息流偏好。';
+
+  @override
+  String get feedPersonalizationUpdated => '信息流偏好已更新';
+
+  @override
+  String get feedPreferencesUpdateFailed => '没有更新成功，请重试。';
+
+  @override
+  String get feedPersonalizationClearTitle => '重置个性化推荐';
+
+  @override
+  String get feedPersonalizationClearSubtitle =>
+      '不再使用此前的收藏、成交意向与“少推荐这类”信号；已隐藏的具体内容仍保持隐藏。';
+
+  @override
+  String get feedPersonalizationClearConfirmTitle => '重置个性化推荐？';
+
+  @override
+  String get feedPersonalizationClearConfirmBody =>
+      '推荐将不再使用此前的收藏、成交意向与“少推荐这类”信号。相关业务记录不会删除，已隐藏的具体内容仍保持隐藏。';
+
+  @override
+  String get feedPersonalizationClearAction => '重置推荐';
+
+  @override
+  String get feedPersonalizationCleared => '个性化推荐已重置';
+
+  @override
+  String get feedPersonalizationClearFailed => '没有重置成功，请重试。';
+
+  @override
   String get warning => '警告';
 }

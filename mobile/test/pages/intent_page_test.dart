@@ -3,7 +3,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/pages/intent_page.dart';
+import 'package:goods4ncu_mobile/services/feed_feedback_service.dart';
 import 'package:goods4ncu_mobile/services/intent_service.dart';
+import 'package:provider/provider.dart';
 
 /// Records what the page actually sent, which is the only way to check that it
 /// did not quietly invent a price nobody typed.
@@ -85,12 +87,40 @@ class _FakeIntentService extends IntentService {
   Future<void> withdrawIntent(String id) async => withdrawn.add(id);
 }
 
-Widget _app(Widget child) => MaterialApp(
-  locale: const Locale('zh'),
-  localizationsDelegates: AppLocalizations.localizationsDelegates,
-  supportedLocales: AppLocalizations.supportedLocales,
-  home: child,
-);
+class _FakeFeedFeedbackService extends FeedFeedbackService {
+  final List<
+    ({
+      FeedResourceType resourceType,
+      String resourceId,
+      FeedFeedbackAction action,
+    })
+  >
+  calls = [];
+
+  @override
+  Future<void> submitFeedback({
+    required FeedResourceType resourceType,
+    required String resourceId,
+    required FeedFeedbackAction action,
+  }) async {
+    calls.add((
+      resourceType: resourceType,
+      resourceId: resourceId,
+      action: action,
+    ));
+  }
+}
+
+Widget _app(Widget child, {FeedFeedbackService? feedbackService}) =>
+    Provider<FeedFeedbackService>.value(
+      value: feedbackService ?? _FakeFeedFeedbackService(),
+      child: MaterialApp(
+        locale: const Locale('zh'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: child,
+      ),
+    );
 
 AppLocalizations _l(WidgetTester tester) =>
     AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
@@ -422,6 +452,8 @@ void main() {
           rawInput: '出一台 24 寸显示器',
           slots: const IntentSlots(subject: '显示器'),
           status: 'active',
+          matchSummary: const ['within_budget', 'condition_match'],
+          source: 'intent_match',
         ),
       ],
     };
@@ -430,6 +462,8 @@ void main() {
     final l = _l(tester);
 
     expect(find.text(l.intentMatchCount(1)), findsOneWidget);
+    expect(find.textContaining(l.feedReasonWithinBudget), findsOneWidget);
+    expect(find.textContaining('within_budget'), findsNothing);
     await tester.ensureVisible(find.text(l.intentRespondAction));
     await tester.pumpAndSettle();
     await tester.tap(find.text(l.intentRespondAction));
@@ -462,5 +496,93 @@ void main() {
     expect(find.text(l.intentNoMatchesYet), findsOneWidget);
     // And nothing to press, because there is nobody to press it at.
     expect(find.text(l.intentRespondAction), findsNothing);
+  });
+
+  testWidgets('campus feed feedback removes the item after success', (
+    tester,
+  ) async {
+    final intents = _FakeIntentService(
+      feed: [
+        UserIntent(
+          id: 'intent-feedback-1',
+          kind: IntentKind.activity,
+          rawInput: '周末一起去爬山',
+          slots: const IntentSlots(),
+          status: 'active',
+          rankReason: 'same_kind',
+          source: 'campus_feed',
+        ),
+      ],
+    );
+    final feedback = _FakeFeedFeedbackService();
+    await tester.pumpWidget(
+      _app(IntentPage(intentService: intents), feedbackService: feedback),
+    );
+    await tester.pumpAndSettle();
+    final l = _l(tester);
+    final menu = find.byKey(
+      const ValueKey('feed-feedback-intent-intent-feedback-1'),
+    );
+
+    expect(find.text(l.feedReasonIntentKind), findsOneWidget);
+    await tester.tap(menu);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(l.feedFeedbackLessLikeThis));
+    await tester.pumpAndSettle();
+
+    expect(find.text('周末一起去爬山'), findsNothing);
+    expect(find.text(l.intentFeedEmpty), findsOneWidget);
+    expect(feedback.calls, hasLength(1));
+    expect(feedback.calls.single.action, FeedFeedbackAction.lessLikeThis);
+  });
+
+  testWidgets('feedback can dismiss an item from a match list', (tester) async {
+    final intents = _FakeIntentService(
+      mine: [
+        UserIntent(
+          id: 'intent-owner',
+          kind: IntentKind.goodsSeek,
+          rawInput: '想收个键盘',
+          slots: const IntentSlots(),
+          status: 'active',
+        ),
+      ],
+    );
+    intents.matches = {
+      'intent-owner': [
+        UserIntent(
+          id: 'intent-match-feedback',
+          kind: IntentKind.goodsOffer,
+          rawInput: '出机械键盘',
+          slots: const IntentSlots(subject: '机械键盘'),
+          status: 'active',
+          matchSummary: const ['keyword_match'],
+        ),
+      ],
+    };
+    final feedback = _FakeFeedFeedbackService();
+    await tester.pumpWidget(
+      _app(IntentPage(intentService: intents), feedbackService: feedback),
+    );
+    await tester.pumpAndSettle();
+    final l = _l(tester);
+    final menu = find.byKey(
+      const ValueKey('feed-feedback-intent-intent-match-feedback'),
+    );
+
+    await tester.scrollUntilVisible(
+      menu,
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(menu);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(l.feedFeedbackNotRelevant));
+    await tester.pumpAndSettle();
+
+    expect(find.text('· 机械键盘'), findsNothing);
+    expect(find.text(l.intentNoMatchesYet), findsOneWidget);
+    expect(feedback.calls.single.resourceId, 'intent-match-feedback');
   });
 }

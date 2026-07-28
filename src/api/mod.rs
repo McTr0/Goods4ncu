@@ -22,6 +22,7 @@ pub mod chat;
 pub mod content_reports;
 pub mod conversations;
 pub mod error;
+pub mod feed;
 pub mod intents;
 pub mod interruptions;
 pub mod listings;
@@ -484,6 +485,15 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .route(
             "/api/recommendations/similar",
             get(recommendations::get_similar_listings),
+        )
+        .route("/api/feed/feedback", post(feed::submit_feedback))
+        .route(
+            "/api/feed/preferences",
+            get(feed::get_preferences).put(feed::update_preferences),
+        )
+        .route(
+            "/api/feed/personalization/clear",
+            post(feed::clear_personalization),
         )
         .route("/api/categories", get(listings::get_categories))
         .route("/api/campuses", get(campuses::list_campuses))

@@ -235,16 +235,44 @@ impl IntentService {
         limit: i64,
     ) -> Result<Vec<Intent>> {
         let rows = sqlx::query(
-            "SELECT id, kind, raw_input, slots, confidence, status, visibility,
-                    valid_until, projected_listing_id, created_at, author_id
-             FROM intents
-             WHERE campus_id = $1
-               AND kind = $2
-               AND status = 'active'
-               AND visibility = 'campus'
-               AND author_id <> $3
-               AND (valid_until IS NULL OR valid_until > NOW())
-             ORDER BY created_at DESC
+            "WITH preferences AS (
+                 SELECT COALESCE(pref.personalization_enabled, TRUE) AS enabled,
+                        COALESCE(pref.signals_reset_at, '-infinity'::timestamptz) AS reset_at
+                 FROM (SELECT 1) seed
+                 LEFT JOIN feed_preferences pref
+                   ON pref.campus_id = $1 AND pref.user_id = $3
+             ), less_like AS (
+                 SELECT feedback.signal_key, COUNT(*)::float8 AS weight
+                 FROM feed_feedback feedback CROSS JOIN preferences pref
+                 WHERE feedback.campus_id = $1 AND feedback.user_id = $3
+                   AND feedback.resource_type = 'intent'
+                   AND feedback.action = 'less_like_this'
+                   AND pref.enabled AND feedback.updated_at >= pref.reset_at
+                 GROUP BY feedback.signal_key
+             )
+             SELECT intent.id, intent.kind, intent.raw_input, intent.slots,
+                    intent.confidence, intent.status, intent.visibility,
+                    intent.valid_until, intent.projected_listing_id,
+                    intent.created_at, intent.author_id
+             FROM intents intent
+             CROSS JOIN preferences pref
+             LEFT JOIN less_like downrank
+               ON downrank.signal_key = 'intent:kind:' || LOWER(BTRIM(intent.kind))
+             WHERE intent.campus_id = $1
+               AND intent.kind = $2
+               AND intent.status = 'active'
+               AND intent.visibility = 'campus'
+               AND intent.author_id <> $3
+               AND (intent.valid_until IS NULL OR intent.valid_until > NOW())
+               AND NOT EXISTS (
+                   SELECT 1 FROM feed_feedback exact_feedback
+                   WHERE exact_feedback.campus_id = $1
+                     AND exact_feedback.user_id = $3
+                     AND exact_feedback.resource_type = 'intent'
+                     AND exact_feedback.resource_id = intent.id::text
+               )
+             ORDER BY CASE WHEN pref.enabled THEN COALESCE(downrank.weight, 0) ELSE 0 END ASC,
+                      intent.created_at DESC
              LIMIT $4",
         )
         .bind(campus_id)
@@ -390,20 +418,48 @@ impl IntentService {
         limit: i64,
     ) -> Result<Vec<Intent>> {
         let rows = sqlx::query(
-            "SELECT id, kind, raw_input, slots, confidence, status, visibility,
-                    valid_until, projected_listing_id, created_at, author_id
-             FROM intents
-             WHERE campus_id = $1
-               AND status = 'active'
-               AND visibility = 'campus'
-               AND author_id <> $2
-               AND (valid_until IS NULL OR valid_until > NOW())
-               AND ($3::text IS NULL OR kind = $3)
+            "WITH preferences AS (
+                 SELECT COALESCE(pref.personalization_enabled, TRUE) AS enabled,
+                        COALESCE(pref.signals_reset_at, '-infinity'::timestamptz) AS reset_at
+                 FROM (SELECT 1) seed
+                 LEFT JOIN feed_preferences pref
+                   ON pref.campus_id = $1 AND pref.user_id = $2
+             ), less_like AS (
+                 SELECT feedback.signal_key, COUNT(*)::float8 AS weight
+                 FROM feed_feedback feedback CROSS JOIN preferences pref
+                 WHERE feedback.campus_id = $1 AND feedback.user_id = $2
+                   AND feedback.resource_type = 'intent'
+                   AND feedback.action = 'less_like_this'
+                   AND pref.enabled AND feedback.updated_at >= pref.reset_at
+                 GROUP BY feedback.signal_key
+             )
+             SELECT intent.id, intent.kind, intent.raw_input, intent.slots,
+                    intent.confidence, intent.status, intent.visibility,
+                    intent.valid_until, intent.projected_listing_id,
+                    intent.created_at, intent.author_id
+             FROM intents intent
+             CROSS JOIN preferences pref
+             LEFT JOIN less_like downrank
+               ON downrank.signal_key = 'intent:kind:' || LOWER(BTRIM(intent.kind))
+             WHERE intent.campus_id = $1
+               AND intent.status = 'active'
+               AND intent.visibility = 'campus'
+               AND intent.author_id <> $2
+               AND (intent.valid_until IS NULL OR intent.valid_until > NOW())
+               AND ($3::text IS NULL OR intent.kind = $3)
                AND NOT EXISTS (
                    SELECT 1 FROM intent_responses r
-                   WHERE r.intent_id = intents.id AND r.responder_id = $2
+                   WHERE r.intent_id = intent.id AND r.responder_id = $2
                )
-             ORDER BY created_at DESC
+               AND NOT EXISTS (
+                   SELECT 1 FROM feed_feedback exact_feedback
+                   WHERE exact_feedback.campus_id = $1
+                     AND exact_feedback.user_id = $2
+                     AND exact_feedback.resource_type = 'intent'
+                     AND exact_feedback.resource_id = intent.id::text
+               )
+             ORDER BY CASE WHEN pref.enabled THEN COALESCE(downrank.weight, 0) ELSE 0 END ASC,
+                      intent.created_at DESC
              LIMIT $4",
         )
         .bind(campus_id)

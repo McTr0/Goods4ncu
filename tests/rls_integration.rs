@@ -192,6 +192,80 @@ async fn armed_tenant_context_blocks_cross_campus_writes() {
     .await;
 }
 
+#[tokio::test]
+async fn armed_tenant_context_isolates_feed_controls() {
+    with_test_pool(|pool| async move {
+        let (ncu_id, other_id, ncu_listing, other_listing) = seed_two_campus_listings(&pool).await;
+        let user_id: String = sqlx::query_scalar("SELECT owner_id FROM inventory WHERE id = $1")
+            .bind(&ncu_listing)
+            .fetch_one(&pool)
+            .await
+            .expect("owner");
+        for (campus_id, resource_id) in [
+            (ncu_id, ncu_listing.as_str()),
+            (other_id, other_listing.as_str()),
+        ] {
+            sqlx::query(
+                "INSERT INTO feed_preferences (campus_id, user_id, personalization_enabled)
+                 VALUES ($1, $2, FALSE)",
+            )
+            .bind(campus_id)
+            .bind(&user_id)
+            .execute(&pool)
+            .await
+            .expect("insert feed preferences");
+            sqlx::query(
+                "INSERT INTO feed_feedback (
+                    campus_id, user_id, resource_type, resource_id, action, signal_key
+                 ) VALUES ($1, $2, 'listing', $3, 'hide', 'listing:category:misc')",
+            )
+            .bind(campus_id)
+            .bind(&user_id)
+            .bind(resource_id)
+            .execute(&pool)
+            .await
+            .expect("insert feed feedback");
+        }
+        ensure_probe_role(&pool).await;
+
+        let mut tx = pool.begin().await.expect("begin");
+        arm(&mut tx, ncu_id).await;
+        let visible_preferences: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM feed_preferences WHERE user_id = $1")
+                .bind(&user_id)
+                .fetch_one(&mut *tx)
+                .await
+                .expect("visible preferences");
+        let visible_feedback: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM feed_feedback WHERE user_id = $1")
+                .bind(&user_id)
+                .fetch_one(&mut *tx)
+                .await
+                .expect("visible feedback");
+        assert_eq!((visible_preferences, visible_feedback), (1, 1));
+        let visible_resource: String =
+            sqlx::query_scalar("SELECT resource_id FROM feed_feedback WHERE user_id = $1")
+                .bind(&user_id)
+                .fetch_one(&mut *tx)
+                .await
+                .expect("visible resource");
+        assert_eq!(visible_resource, ncu_listing);
+
+        let updated = sqlx::query(
+            "UPDATE feed_preferences SET personalization_enabled = TRUE
+             WHERE campus_id = $1 AND user_id = $2",
+        )
+        .bind(other_id)
+        .bind(&user_id)
+        .execute(&mut *tx)
+        .await
+        .expect("cross-campus update is filtered");
+        assert_eq!(updated.rows_affected(), 0);
+        tx.rollback().await.expect("rollback");
+    })
+    .await;
+}
+
 /// The policies cover every tenant-scoped table, not just inventory.
 #[tokio::test]
 async fn rls_policies_exist_on_all_tenant_tables() {
@@ -209,6 +283,9 @@ async fn rls_policies_exist_on_all_tenant_tables() {
             "moderation_cases",
             "moderation_appeals",
             "content_reports",
+            "intents",
+            "feed_feedback",
+            "feed_preferences",
             "agent_action_plans",
             "admin_audit_logs",
             "campus_memberships",

@@ -884,7 +884,19 @@ POST 写接口仍只允许平台管理员，并且 access token 必须带 10 分
 推荐路径：
 
 - `GET /api/recommendations/similar?listing_id=...` 用 pgvector 余弦距离返回同校园相似 active 商品；无 embedding 时回退到同校园最新 active 列表。
-- `GET /api/recommendations/feed?direction=offer|wanted|all` 对匿名用户在 NCU 公开校园内按 `created_at` 返回最新 active 内容。若请求带有效 Bearer token，则切换到设备活动校园，按收藏与买家成交意向的分类亲和度排序，排除自己的内容和已收藏内容。
+- `GET /api/recommendations/feed?direction=offer|wanted|all` 对匿名用户在 NCU 公开校园内按 `created_at` 返回最新 active 内容。若请求带有效 Bearer token，则切换到设备活动校园，按仍有效的收藏与买家成交意向分类亲和度排序，并排除自己的内容、仍有效的已收藏内容和用户明确反馈过的条目。每项包含 `rank_reason`、`source`，响应包含 `ranking_version=2026.07-feedback-v2`。
+- `GET /api/intents/feed` 返回当前校园内其他人的 active 公开意图；`GET /api/intents/{id}/matches` 先执行校园、状态、方向和已声明槽位的硬约束，再返回候选。两者的条目都包含稳定的 `rank_reason`、`match_summary`、`source` 和 `ranking_version`；理由只来自已知约束，不包含作者 ID，也不让 LLM 猜测用户画像。
+
+当前未版本化信息流控制接口均要求当前活动校园的 verified membership：
+
+| 方法和路径 | 行为 |
+| --- | --- |
+| `POST /api/feed/feedback` | body 为 `resource_type=listing|intent`、`resource_id`、`action=hide|less_like_this|not_relevant`。服务端解析同校园 active 目标并派生分类/意图类型信号；缺失、跨校园和自己的目标统一按不存在处理。同一用户对同一资源重复提交只更新一条记录。 |
+| `GET /api/feed/preferences` | 返回 `personalization_enabled` 与可选 `signals_reset_at`；没有设置时默认开启。 |
+| `PUT /api/feed/preferences` | body 为 `{ "personalization_enabled": true|false }`。关闭后，首页商品 feed 与 intent feed/matches 使用非个性化排序，但这些入口仍排除明确反馈过的具体条目。 |
+| `POST /api/feed/personalization/clear` | 让清除时间之前的收藏、买家成交意向和“少推荐这类”信号不再参与排序；不删除业务记录，也不在已接入的 feed/matches 中恢复已经明确反馈过的具体条目。 |
+
+三种 feedback action 都会立刻从该用户后续的首页商品 feed 或 intent feed/matches 中排除对应资源；`less_like_this` 还会在这些入口降低同分类商品或同 kind 意图的排序。`/api/recommendations/similar` 和 listing wanted matches 尚未消费 feedback。泛化降权受个性化开关和清除时间控制，已接入入口的精确排除不受影响。
 
 公开用户搜索、`GET /api/users/{id}` 和 `GET /api/users/{id}/listings` 采用相同规则：游客使用 NCU 公开校园，有效登录态使用设备活动校园。目标用户没有该校园 verified membership 时不返回其主页或在售内容。
 
@@ -966,7 +978,7 @@ Feed item 在当前 listing 字段之外增加：
 
 `rank_reason` 使用稳定枚举，不暴露内部权重、敏感画像或另一个用户的私有行为。
 
-Feedback 支持 hide、less_like_this、not_relevant 和 clear_personalization 等用户控制，写入行为信号前明确目的和保留策略。
+[当前未版本化已实现] `/api/feed/feedback` 支持 `hide`、`less_like_this`、`not_relevant`；偏好开关和 clear 使用独立的 `/api/feed/preferences`、`/api/feed/personalization/clear`。目标 `/api/v1` 版本仍需补统一错误、cursor 与明确的数据保留策略。
 
 ### Agent ActionPlan
 

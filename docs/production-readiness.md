@@ -3,8 +3,8 @@
 | 项目 | 内容 |
 | --- | --- |
 | 适用读者 | 决定是否上线的负责人、执行部署的工程师、验收测试者 |
-| 当前状态 | 工程侧全部关闭；本机已用真实 Postgres/Redis/MinIO 完成生产模式演练；剩余为生产资源开通与人工运营验收 |
-| 事实来源 | 本仓库测试套件（20 个 Rust 套件约 760 用例 + 213 Flutter 用例）、`scripts/` 下可执行演练（含真实 MinIO/Redis/Postgres）、迁移 0001–0042 |
+| 当前状态 | 关键工程安全门槛已关闭；本机已用真实 Postgres/Redis/MinIO 完成生产模式演练；生产资源开通、真实学生效果/公平性验证与人工运营验收仍待完成 |
+| 事实来源 | 本仓库全量 Rust 单元/29 个集成套件与 293 个 Flutter 测试、`scripts/` 下可执行演练（含真实 MinIO/Redis/Postgres）、迁移 0001–0054 |
 | 验收方式 | 每一项都给出可执行证据；无证据的项目明确标注为部署侧待办 |
 
 本报告把[生产路线图](roadmap.md)的全部退出门槛折叠为一张就绪矩阵。“代码侧关闭”指该门槛由本仓库的代码、schema、测试或可重复脚本强制并验证；“部署侧待办”指需要真实基础设施、账号或人工运营才能执行的验收步骤，本仓库已为其准备了可直接运行的验收程序。
@@ -18,7 +18,7 @@
 | 统一 session extractor（Session/OptionalSession/VerifiedTenant） | `src/api/session.rs`；全量回归套件 |
 | 平台管理员 TOTP MFA（注册/确认/step-up 强制/防重放） | `tests/admin_auth_regression.rs`（RFC 4226/6238 向量见 `src/services/totp.rs`） |
 | 关键写接口 verified membership 门禁（含 STS 凭证） | `tests/api_regressions.rs::upload_token_requires_verified_campus_membership` |
-| 15 张租户表 FORCE RLS（事务级 `app.campus_id` 武装） | `migrations/0042` + `tests/rls_integration.rs`（非超级用户角色验证读隐藏/写拒绝） |
+| 19 张租户表 FORCE RLS（事务级 `app.campus_id` 武装） | `migrations/0042` 及后续领域迁移 + `tests/rls_integration.rs`（读隐藏、写拒绝与 feed controls 隔离） |
 | 应用以 NOSUPERUSER 角色运行，RLS 对其真实生效；pgvector 由管理员预装 | `scripts/provision_app_role.sh`（校验两条不变量）+ 生产演练 check 2c；`src/db.rs` 在缺失扩展时给出可执行修复指引 |
 | 双校园隔离（市场/推荐/通知/直聊/后台/审核/案件） | `tests/tenant_scope_integration.rs`、`tests/api_regressions.rs`、`tests/admin_auth_regression.rs` |
 | 生产密钥卫生（开发标记/低熵 JWT_SECRET 拒绝启动） | `src/config.rs` 单元测试 + `scripts/production_rehearsal.sh` check 0（真实二进制验证） |

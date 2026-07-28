@@ -2651,5 +2651,109 @@ class AppLocalizationsEn extends AppLocalizations {
   String get avatar => 'Avatar';
 
   @override
+  String get feedFeedbackMenuTooltip => 'Recommendation options';
+
+  @override
+  String get feedFeedbackHide => 'Hide this';
+
+  @override
+  String get feedFeedbackLessLikeThis => 'Show me fewer like this';
+
+  @override
+  String get feedFeedbackNotRelevant => 'Not relevant';
+
+  @override
+  String get feedFeedbackSaved =>
+      'Thanks. This item has been removed from your feed.';
+
+  @override
+  String get feedFeedbackFailed =>
+      'Couldn\'t save that preference. The item is still here.';
+
+  @override
+  String get feedReasonRecent => 'Recently posted';
+
+  @override
+  String get feedReasonSameCategory => 'Matches categories you view';
+
+  @override
+  String get feedReasonCategoryMatch => 'Category matches your request';
+
+  @override
+  String get feedReasonSimilar => 'Similar to something you viewed';
+
+  @override
+  String get feedReasonWithinBudget => 'Within your budget';
+
+  @override
+  String get feedReasonConditionMatch => 'Matches the condition you wanted';
+
+  @override
+  String get feedReasonIntentKind => 'Matches what you are looking for';
+
+  @override
+  String get feedReasonKeywordMatch => 'Matches the words in your request';
+
+  @override
+  String get feedReasonRequirementsMatch => 'Matches the details you specified';
+
+  @override
+  String get feedReasonTimeOverlap => 'The available time overlaps with yours';
+
+  @override
+  String get feedReasonRecommended => 'Recommended for you';
+
+  @override
+  String get feedPreferencesSectionTitle => 'Feed controls';
+
+  @override
+  String get feedPersonalizationTitle => 'Personalized recommendations';
+
+  @override
+  String get feedPersonalizationOnSubtitle =>
+      'Use your feed preferences to make suggestions more relevant.';
+
+  @override
+  String get feedPersonalizationOffSubtitle =>
+      'Show a non-personalized feed instead.';
+
+  @override
+  String get feedPersonalizationUnavailable =>
+      'Feed preferences are temporarily unavailable.';
+
+  @override
+  String get feedPersonalizationUpdated => 'Feed preference updated';
+
+  @override
+  String get feedPreferencesUpdateFailed =>
+      'Couldn\'t update your feed preference. Try again.';
+
+  @override
+  String get feedPersonalizationClearTitle =>
+      'Reset personalized recommendations';
+
+  @override
+  String get feedPersonalizationClearSubtitle =>
+      'Stop using past watchlist, deal activity, and “show fewer” signals. Items you hid stay hidden.';
+
+  @override
+  String get feedPersonalizationClearConfirmTitle =>
+      'Reset personalized recommendations?';
+
+  @override
+  String get feedPersonalizationClearConfirmBody =>
+      'Recommendations will no longer use your previous watchlist, deal activity, or “show fewer” signals. The underlying records are not deleted, and specific items you hid stay hidden.';
+
+  @override
+  String get feedPersonalizationClearAction => 'Reset recommendations';
+
+  @override
+  String get feedPersonalizationCleared => 'Personalized recommendations reset';
+
+  @override
+  String get feedPersonalizationClearFailed =>
+      'Couldn\'t reset personalized recommendations. Try again.';
+
+  @override
   String get warning => 'Warning';
 }

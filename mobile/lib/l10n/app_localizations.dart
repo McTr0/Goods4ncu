@@ -4848,6 +4848,192 @@ abstract class AppLocalizations {
   /// **'Avatar'**
   String get avatar;
 
+  /// No description provided for @feedFeedbackMenuTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Recommendation options'**
+  String get feedFeedbackMenuTooltip;
+
+  /// No description provided for @feedFeedbackHide.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide this'**
+  String get feedFeedbackHide;
+
+  /// No description provided for @feedFeedbackLessLikeThis.
+  ///
+  /// In en, this message translates to:
+  /// **'Show me fewer like this'**
+  String get feedFeedbackLessLikeThis;
+
+  /// No description provided for @feedFeedbackNotRelevant.
+  ///
+  /// In en, this message translates to:
+  /// **'Not relevant'**
+  String get feedFeedbackNotRelevant;
+
+  /// No description provided for @feedFeedbackSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Thanks. This item has been removed from your feed.'**
+  String get feedFeedbackSaved;
+
+  /// No description provided for @feedFeedbackFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t save that preference. The item is still here.'**
+  String get feedFeedbackFailed;
+
+  /// No description provided for @feedReasonRecent.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently posted'**
+  String get feedReasonRecent;
+
+  /// No description provided for @feedReasonSameCategory.
+  ///
+  /// In en, this message translates to:
+  /// **'Matches categories you view'**
+  String get feedReasonSameCategory;
+
+  /// No description provided for @feedReasonCategoryMatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Category matches your request'**
+  String get feedReasonCategoryMatch;
+
+  /// No description provided for @feedReasonSimilar.
+  ///
+  /// In en, this message translates to:
+  /// **'Similar to something you viewed'**
+  String get feedReasonSimilar;
+
+  /// No description provided for @feedReasonWithinBudget.
+  ///
+  /// In en, this message translates to:
+  /// **'Within your budget'**
+  String get feedReasonWithinBudget;
+
+  /// No description provided for @feedReasonConditionMatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Matches the condition you wanted'**
+  String get feedReasonConditionMatch;
+
+  /// No description provided for @feedReasonIntentKind.
+  ///
+  /// In en, this message translates to:
+  /// **'Matches what you are looking for'**
+  String get feedReasonIntentKind;
+
+  /// No description provided for @feedReasonKeywordMatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Matches the words in your request'**
+  String get feedReasonKeywordMatch;
+
+  /// No description provided for @feedReasonRequirementsMatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Matches the details you specified'**
+  String get feedReasonRequirementsMatch;
+
+  /// No description provided for @feedReasonTimeOverlap.
+  ///
+  /// In en, this message translates to:
+  /// **'The available time overlaps with yours'**
+  String get feedReasonTimeOverlap;
+
+  /// No description provided for @feedReasonRecommended.
+  ///
+  /// In en, this message translates to:
+  /// **'Recommended for you'**
+  String get feedReasonRecommended;
+
+  /// No description provided for @feedPreferencesSectionTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Feed controls'**
+  String get feedPreferencesSectionTitle;
+
+  /// No description provided for @feedPersonalizationTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Personalized recommendations'**
+  String get feedPersonalizationTitle;
+
+  /// No description provided for @feedPersonalizationOnSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Use your feed preferences to make suggestions more relevant.'**
+  String get feedPersonalizationOnSubtitle;
+
+  /// No description provided for @feedPersonalizationOffSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Show a non-personalized feed instead.'**
+  String get feedPersonalizationOffSubtitle;
+
+  /// No description provided for @feedPersonalizationUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Feed preferences are temporarily unavailable.'**
+  String get feedPersonalizationUnavailable;
+
+  /// No description provided for @feedPersonalizationUpdated.
+  ///
+  /// In en, this message translates to:
+  /// **'Feed preference updated'**
+  String get feedPersonalizationUpdated;
+
+  /// No description provided for @feedPreferencesUpdateFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t update your feed preference. Try again.'**
+  String get feedPreferencesUpdateFailed;
+
+  /// No description provided for @feedPersonalizationClearTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset personalized recommendations'**
+  String get feedPersonalizationClearTitle;
+
+  /// No description provided for @feedPersonalizationClearSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop using past watchlist, deal activity, and “show fewer” signals. Items you hid stay hidden.'**
+  String get feedPersonalizationClearSubtitle;
+
+  /// No description provided for @feedPersonalizationClearConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset personalized recommendations?'**
+  String get feedPersonalizationClearConfirmTitle;
+
+  /// No description provided for @feedPersonalizationClearConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Recommendations will no longer use your previous watchlist, deal activity, or “show fewer” signals. The underlying records are not deleted, and specific items you hid stay hidden.'**
+  String get feedPersonalizationClearConfirmBody;
+
+  /// No description provided for @feedPersonalizationClearAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset recommendations'**
+  String get feedPersonalizationClearAction;
+
+  /// No description provided for @feedPersonalizationCleared.
+  ///
+  /// In en, this message translates to:
+  /// **'Personalized recommendations reset'**
+  String get feedPersonalizationCleared;
+
+  /// No description provided for @feedPersonalizationClearFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t reset personalized recommendations. Try again.'**
+  String get feedPersonalizationClearFailed;
+
   /// No description provided for @warning.
   ///
   /// In en, this message translates to:

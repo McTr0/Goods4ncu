@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/pages/home_page.dart';
+import 'package:goods4ncu_mobile/services/feed_feedback_service.dart';
 import 'package:goods4ncu_mobile/services/intent_service.dart';
 import 'package:goods4ncu_mobile/services/recommendation_service.dart';
 import 'package:goods4ncu_mobile/theme/app_theme.dart';
@@ -36,8 +37,36 @@ class _FakeRecommendationService extends RecommendationService {
         conditionScore: 8,
         suggestedPriceCny: 35,
         status: 'active',
+        rankReason: 'same_category',
+        source: 'intent_match',
       ),
     ];
+  }
+}
+
+class _FakeFeedFeedbackService extends FeedFeedbackService {
+  bool fail = false;
+  final List<
+    ({
+      FeedResourceType resourceType,
+      String resourceId,
+      FeedFeedbackAction action,
+    })
+  >
+  calls = [];
+
+  @override
+  Future<void> submitFeedback({
+    required FeedResourceType resourceType,
+    required String resourceId,
+    required FeedFeedbackAction action,
+  }) async {
+    calls.add((
+      resourceType: resourceType,
+      resourceId: resourceId,
+      action: action,
+    ));
+    if (fail) throw Exception('offline');
   }
 }
 
@@ -68,6 +97,8 @@ Widget _buildApp({
   ThemeMode themeMode = ThemeMode.light,
   RecommendationService? recommendations,
   IntentService? intents,
+  FeedFeedbackService? feedback,
+  double textScaleFactor = 1,
 }) {
   final router = GoRouter(
     routes: [
@@ -95,6 +126,9 @@ Widget _buildApp({
         value: recommendations ?? _FakeRecommendationService(),
       ),
       Provider<IntentService>.value(value: intents ?? _FakeIntentService()),
+      Provider<FeedFeedbackService>.value(
+        value: feedback ?? _FakeFeedFeedbackService(),
+      ),
     ],
     child: MaterialApp.router(
       theme: AppTheme.light,
@@ -104,6 +138,12 @@ Widget _buildApp({
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       routerConfig: router,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(
+          context,
+        ).copyWith(textScaler: TextScaler.linear(textScaleFactor)),
+        child: child!,
+      ),
     ),
   );
 }
@@ -179,6 +219,8 @@ void main() {
     expect(find.text('收'), findsOneWidget);
     expect(find.text('可解释排序'), findsNothing);
     expect(find.text('程序设计教材'), findsOneWidget);
+    expect(find.text('分类符合你的需求'), findsOneWidget);
+    expect(find.text('same_category'), findsNothing);
   });
 
   testWidgets('home page localizes the entry in English', (tester) async {
@@ -302,4 +344,74 @@ void main() {
     expect(find.text(l.homeColdStartTitle), findsOneWidget);
     expect(find.text(l.homeVoicesTitle), findsNothing);
   });
+
+  testWidgets('successful listing feedback removes only that card', (
+    tester,
+  ) async {
+    final feedback = _FakeFeedFeedbackService();
+    await tester.pumpWidget(_buildApp(feedback: feedback));
+    await tester.pumpAndSettle();
+    final l = AppLocalizations.of(tester.element(find.byType(HomePage)))!;
+    final menu = find.byKey(const ValueKey('feed-feedback-listing-listing-1'));
+
+    await tester.ensureVisible(menu);
+    await tester.tap(menu);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(l.feedFeedbackHide));
+    await tester.pumpAndSettle();
+
+    expect(find.text('程序设计教材'), findsNothing);
+    expect(feedback.calls, hasLength(1));
+    expect(feedback.calls.single.resourceType, FeedResourceType.listing);
+    expect(feedback.calls.single.resourceId, 'listing-1');
+    expect(feedback.calls.single.action, FeedFeedbackAction.hide);
+  });
+
+  testWidgets('listing controls do not overlap at 200% text scaling', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_buildApp(textScaleFactor: 2));
+    await tester.pumpAndSettle();
+    // At 200% the hero is taller, so the lazily built grid starts farther
+    // below the viewport. Scroll it into the tree before measuring the card.
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -1200));
+    await tester.pumpAndSettle();
+    final menu = find.byKey(const ValueKey('feed-feedback-listing-listing-1'));
+    final direction = find.byKey(const ValueKey('listing-direction-listing-1'));
+
+    await tester.ensureVisible(menu);
+    await tester.pumpAndSettle();
+    final menuRect = tester.getRect(menu);
+    final directionRect = tester.getRect(direction);
+
+    expect(menuRect.overlaps(directionRect), isFalse);
+    expect(
+      menuRect.top,
+      greaterThanOrEqualTo(directionRect.bottom),
+      reason: 'the feedback menu belongs below the direction pill',
+    );
+  });
+
+  testWidgets(
+    'failed listing feedback keeps the card and explains the failure',
+    (tester) async {
+      final feedback = _FakeFeedFeedbackService()..fail = true;
+      await tester.pumpWidget(_buildApp(feedback: feedback));
+      await tester.pumpAndSettle();
+      final l = AppLocalizations.of(tester.element(find.byType(HomePage)))!;
+      final menu = find.byKey(
+        const ValueKey('feed-feedback-listing-listing-1'),
+      );
+
+      await tester.ensureVisible(menu);
+      await tester.tap(menu);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(l.feedFeedbackNotRelevant));
+      await tester.pump();
+
+      expect(find.text('程序设计教材'), findsOneWidget);
+      expect(find.text(l.feedFeedbackFailed), findsOneWidget);
+      expect(feedback.calls, hasLength(1));
+    },
+  );
 }

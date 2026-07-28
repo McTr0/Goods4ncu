@@ -9,13 +9,33 @@ use axum::{
     extract::{Path, Query, State},
     Json,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
 use crate::api::session::{Session, VerifiedTenant};
 use crate::api::AppState;
-use crate::services::intent::{kinds, slots::Slots, status, IntentService, NewIntent};
+use crate::services::intent::{
+    kinds,
+    slots::{PriceSlot, Slots},
+    status, Intent, IntentService, NewIntent,
+};
+
+const INTENT_RANKING_VERSION: &str = "2026.07-intent-hard-v1";
+
+#[derive(Serialize)]
+struct RankedIntent {
+    #[serde(flatten)]
+    intent: Intent,
+    /// Stable code. Clients localize it; the server does not reveal weights or
+    /// infer private facts to explain a deterministic filter.
+    rank_reason: &'static str,
+    /// Stable codes derived only from tenant/lifecycle constraints and slots
+    /// the two authors actually stated.
+    match_summary: Vec<&'static str>,
+    source: &'static str,
+    ranking_version: &'static str,
+}
 
 #[derive(Deserialize)]
 pub struct CreateIntentRequest {
@@ -358,7 +378,20 @@ pub async fn intent_feed(
         )
         .await
         .map_err(ApiError::Internal)?;
-    Ok(Json(serde_json::json!({ "items": items })))
+    let items: Vec<_> = items
+        .into_iter()
+        .map(|intent| RankedIntent {
+            intent,
+            rank_reason: "recent_campus_intent",
+            match_summary: vec!["same_campus", "active_intent"],
+            source: "campus_recency",
+            ranking_version: INTENT_RANKING_VERSION,
+        })
+        .collect();
+    Ok(Json(serde_json::json!({
+        "items": items,
+        "ranking_version": INTENT_RANKING_VERSION,
+    })))
 }
 
 #[derive(Deserialize)]
@@ -666,13 +699,64 @@ pub async fn intent_matches(
                 other.slots.compatible_with(&mine.slots)
             }
         })
+        .map(|other| {
+            let (constraint, offer) = if seeking {
+                (&mine.slots, &other.slots)
+            } else {
+                (&other.slots, &mine.slots)
+            };
+            let match_summary = deterministic_match_summary(constraint, offer);
+            let rank_reason = if match_summary.len() > 1 {
+                "known_slots_compatible"
+            } else {
+                "kind_compatible"
+            };
+            RankedIntent {
+                intent: other,
+                rank_reason,
+                match_summary,
+                source: "hard_constraints",
+                ranking_version: INTENT_RANKING_VERSION,
+            }
+        })
         .collect();
 
     Ok(Json(serde_json::json!({
         "intent_id": intent_id,
         "against": against,
         "items": candidates,
+        "ranking_version": INTENT_RANKING_VERSION,
     })))
+}
+
+fn deterministic_match_summary(constraint: &Slots, offer: &Slots) -> Vec<&'static str> {
+    let mut summary = vec!["kind_compatible"];
+    if constraint.category.is_some() && offer.category.is_some() {
+        summary.push("category_match");
+    }
+    let has_price_bound = constraint.price.as_ref().is_some_and(|price| match price {
+        PriceSlot::Exact { .. } | PriceSlot::Free => true,
+        PriceSlot::Range {
+            min_cents,
+            max_cents,
+        } => min_cents.is_some() || max_cents.is_some(),
+        PriceSlot::Whatever { .. } => false,
+    });
+    let has_known_offer_price = offer
+        .price
+        .as_ref()
+        .and_then(PriceSlot::nominal_cents)
+        .is_some();
+    if has_price_bound && has_known_offer_price {
+        summary.push("price_within_constraint");
+    }
+    if constraint.time.is_some() && offer.time.is_some() {
+        summary.push("time_overlap");
+    }
+    if constraint.condition_score.is_some() && offer.condition_score.is_some() {
+        summary.push("condition_at_least_requested");
+    }
+    summary
 }
 
 /// The kind an intent naturally pairs with.
@@ -711,6 +795,7 @@ pub async fn why_this_space(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::intent::slots::TimeSlot;
 
     #[test]
     fn goods_cross_while_people_and_events_pair_with_their_own_kind() {
@@ -721,5 +806,82 @@ mod tests {
         assert_eq!(counterpart(kinds::COMPANION), kinds::COMPANION);
         assert_eq!(counterpart(kinds::ACTIVITY), kinds::ACTIVITY);
         assert_eq!(counterpart(kinds::HELP), kinds::HELP);
+    }
+
+    #[test]
+    fn match_explanations_use_only_stated_hard_constraints() {
+        let constraint = Slots {
+            category: Some("electronics".to_string()),
+            price: Some(PriceSlot::Exact { cents: 30_000 }),
+            time: Some(TimeSlot::Flexible { hint: None }),
+            condition_score: Some(7),
+            place: Some("图书馆".to_string()),
+            ..Default::default()
+        };
+        let offer = Slots {
+            category: Some("electronics".to_string()),
+            price: Some(PriceSlot::Exact { cents: 20_000 }),
+            time: Some(TimeSlot::Flexible { hint: None }),
+            condition_score: Some(8),
+            place: Some("宿舍".to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            deterministic_match_summary(&constraint, &offer),
+            vec![
+                "kind_compatible",
+                "category_match",
+                "price_within_constraint",
+                "time_overlap",
+                "condition_at_least_requested",
+            ],
+            "place is not a hard constraint today, so it must not be invented as an explanation",
+        );
+    }
+
+    #[test]
+    fn match_explanations_do_not_claim_an_unknown_price_is_within_budget() {
+        let known_offer = Slots {
+            price: Some(PriceSlot::Exact { cents: 20_000 }),
+            ..Default::default()
+        };
+        for unknown_constraint in [
+            PriceSlot::Whatever { hint: None },
+            PriceSlot::Range {
+                min_cents: None,
+                max_cents: None,
+            },
+        ] {
+            let constraint = Slots {
+                price: Some(unknown_constraint),
+                ..Default::default()
+            };
+            assert_eq!(
+                deterministic_match_summary(&constraint, &known_offer),
+                vec!["kind_compatible"]
+            );
+        }
+
+        let bounded_constraint = Slots {
+            price: Some(PriceSlot::Exact { cents: 30_000 }),
+            ..Default::default()
+        };
+        for unknown_offer in [
+            PriceSlot::Whatever { hint: None },
+            PriceSlot::Range {
+                min_cents: None,
+                max_cents: None,
+            },
+        ] {
+            let offer = Slots {
+                price: Some(unknown_offer),
+                ..Default::default()
+            };
+            assert_eq!(
+                deterministic_match_summary(&bounded_constraint, &offer),
+                vec!["kind_compatible"]
+            );
+        }
     }
 }

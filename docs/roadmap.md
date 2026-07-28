@@ -29,12 +29,12 @@
 
 当前能力还不是生产就绪。主要差距：
 
-- CampusMembership、核心资源校园作用域、后台审核队列、跨校园理由审计和统一 session extractor 已落地。15 张租户表已启用 FORCE RLS（`0042`，`app.campus_id` 事务级 GUC 触发，未设置时放行以保持应用层为主边界），隔离与写拒绝有集成测试；应用侧全请求 GUC 注入（fail-closed）与多副本租户验证仍属 Phase 4。
+- CampusMembership、核心资源校园作用域、后台审核队列、跨校园理由审计和统一 session extractor 已落地。当前 19 张租户表已启用 FORCE RLS（`0042` 及后续领域迁移，`app.campus_id` 事务级 GUC 触发，未设置时放行以保持应用层为主边界），隔离与写拒绝有集成测试；应用侧全请求 GUC 注入（fail-closed）与多副本租户验证仍属 Phase 4。
 - Agent 写工具已接入统一 ActionPlan 确认协议（模型只能提出、用户确认才执行，L3 需二次确认）；资源版本快照仍待补。
 - WebSocket 跨副本投递已具备（Redis fan-out，双实例端到端验证）；typing/call signaling 多副本化与压测仍待做。outbox 基础与通知推送已持久化，其余事件消费者仍在进程内。
 - 媒体隔离、审核公开门槛、缩略图和 Base64 退出不完整；案件事实层已具备，但对象存储隔离仍需生产化。
 - API 缺少统一版本和 cursor；[已实现] 未版本化接口已有兼容旧客户端的稳定错误字段、服务端 request ID，以及 listing 发布幂等，其他写接口仍需收敛。
-- 推荐解释、反馈、评估和公平性指标不足。
+- 首页商品 feed 与意图撮合已有解释和显式反馈控制；相似商品/listing wanted matches 的 feedback 消费、统一解释、离线评估和公平性指标仍不足。
 - Secret Chat 与服务器可治理通信目标冲突。
 - 备份恢复、密钥管理、SLO、告警和事故演练未闭环。
 
@@ -132,8 +132,8 @@
 
 - 两阶段推荐：硬约束/召回，再排序/多样性。
 - 所有检索先过滤 campus、status、direction 和 visibility。
-- [部分完成] Feed/相似接口每项返回 `rank_reason`（用户可读原因，亲和命中会点名分类）与 `source`（`recency|category_affinity|vector_similarity`），响应携带 `ranking_version`（当前 `2026.07-affinity-v1`）；移动端卡片展示原因。`match_summary` 与反馈入口仍待补。
-- 增加隐藏、减少此类、清除个性化信号和非个性化排序入口。
+- [部分完成] 商品 Feed/相似接口每项返回 `rank_reason` 与 `source`（`recency|category_affinity|vector_similarity`），响应携带 `ranking_version`（当前 `2026.07-feedback-v2`）；意图 feed/matches 返回稳定 `rank_reason`、`match_summary`、`source` 与 `2026.07-intent-hard-v1`，只解释已知生命周期和双方声明的约束，不序列化作者 ID。移动端把稳定 code 本地化为人话理由。listing wanted matches 自身的统一 `match_summary` 契约仍待补。
+- [已实现] `feed_feedback`/`feed_preferences` 与未版本化 API 提供隐藏、少推荐这类、不相关、个性化开关和重置。目标与校园由服务端派生；重复反馈幂等更新。在首页商品 feed 与 intent feed/matches 中，三种 action 精确排除对应资源，`less_like_this` 额外降低同分类/kind；关闭个性化或重置只停用泛化旧信号，明确反馈仍保留。Flutter 的商品卡、意图流、意图匹配和设置页均有入口；相似商品/listing wanted matches 尚未消费 feedback。
 - 防止重复条目、单一类别垄断和自己内容反复出现。
 
 ### 评估
@@ -147,7 +147,7 @@
 
 - [部分完成] wanted/offer 的创建、匹配、响应（含 accept/dismiss/withdraw）、完成和重新开启已有后端端到端回归；浏览器全旅程验收仍待做。
 - 硬约束违反率为零；没有 embedding 时关键词和条件 fallback 可用。
-- 每条个性化推荐有用户可理解原因和反馈入口。
+- [已实现] 商品推荐与意图 feed/matches 的当前移动端路径都有用户可理解原因和反馈入口；未知机器 code 不直接展示。listing wanted matches 的原因契约仍按上一节继续收敛。
 - 新排序在质量、信任和公平 guardrail 上不劣于基线。
 - Feed/Search p95 在目标容量下小于 500ms。
 

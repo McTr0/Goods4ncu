@@ -63,7 +63,7 @@ WebSocket 用于低延迟提示，不是业务事实来源。事件包括 conver
 
 ### 审核案件的当前链路
 
-`ModerationCaseService` 是机器拒绝、聊天举报、人工处置和申诉的事务边界。图片 Worker 在完成拒绝时同时更新 `moderation_jobs`、资源审核状态和案件；聊天举报在写入 `chat_message_reports` 的同一事务中创建案件。用户 API 只通过 service 查询本人安全摘要，后台 API 先解析校园管理员作用域，再允许平台管理员处置并写入 `admin_audit_logs`。审核队列的校园过滤不能只放在 Flutter 或 handler 查询参数里。
+`ModerationCaseService` 是机器拒绝、用户举报、人工处置和申诉的事务边界。图片 Worker 在完成拒绝时同时更新 `moderation_jobs`、资源审核状态和案件；聊天消息举报在写入 `chat_message_reports` 的同一事务中创建案件，商品和用户举报则通过 `ContentReportService` 同时写入 `content_reports` 并关联统一案件。举报目标和 `campus_id` 均由服务端解析，不能信任客户端提交。用户 API 只通过 service 查询本人安全摘要，后台 API 先解析校园管理员作用域，再允许平台管理员处置并写入 `admin_audit_logs`。审核队列的校园过滤不能只放在 Flutter 或 handler 查询参数里。
 
 ## 请求如何穿过各层
 
@@ -105,7 +105,7 @@ direction=wanted -> price 是预算上限，condition 是最低可接受成色
 
 `documents` 保存商品/需求的检索文本和 embedding。相似推荐使用 pgvector 距离；首页 Feed 对登录用户结合收藏和买家成交意向的分类亲和度，再按新鲜度排序。游客在 NCU 公开校园内检索，登录用户先从 token 解析活动校园，再在该校园内完成召回和排序。
 
-wanted matches 使用活动 campus、分类、预算、成色和 active 状态等条件，并排除自己的 offer。设备级 active campus session 已实现；稳定解释字段、用户反馈和多样性控制仍属于目标态。
+wanted matches 使用活动 campus、分类、预算、成色和 active 状态等条件，并排除自己的 offer。设备级 active campus session 已实现；首页商品 feed 与 intent feed/matches 已有稳定解释和反馈控制。listing wanted matches 自身的解释、feedback 消费，以及跨入口多样性控制仍属于目标态。
 
 更完整的对象定义见[信息模型](information-model.md)，目标推荐原则见[产品设计](product-design.md)。
 

@@ -3,9 +3,9 @@
 | 项目 | 内容 |
 | --- | --- |
 | 适用读者 | 产品经理、后端工程师、数据工程师、测试工程师和需要理解状态机的移动端工程师 |
-| 当前状态 | 核心业务、通知、审核任务和管理审计校园归属已实现；统一意图模型、审核 case/申诉、MFA 与 RLS 属于目标态 |
+| 当前状态 | 统一意图、活动校园 session、审核案件/申诉、管理员 MFA、RLS 与显式信息流反馈均已实现；全请求 fail-closed tenant context 和真实用户质量评估仍待完成 |
 | 事实来源 | `migrations/`、repository 查询、service 状态转换和 API JSON 模型 |
-| 最后核对范围 | 迁移 `0001` 至 `0033`，商品、聊天、成交、通知、审核、管理和 Agent 相关代码 |
+| 最后核对范围 | 迁移 `0001` 至 `0054`，商品、意图、信息流、聊天、成交、通知、审核、管理和 Agent 相关代码 |
 
 这篇文档定义平台中“什么是事实、事实如何变化、哪些对象可以互相引用”。API 字段见 [API 参考](api-reference.md)，用户流程见 [业务流程](domain-flows.md)。
 
@@ -47,44 +47,43 @@ flowchart LR
 
 ### Campus 与 CampusMembership
 
-[目标态] `Campus` 是租户与策略边界，保存学校标识、展示名称、允许的邮箱域名、分类配置、审核策略版本、时区和启用状态。
+[已实现] `Campus` 是租户与策略边界，当前保存学校标识、展示名称、允许的邮箱域名和启用状态。校园级分类、审核策略版本和时区覆盖仍是目标态。
 
-[目标态] `CampusMembership` 表示一个全局用户在某个校园中的资格：
+[已实现] `CampusMembership` 表示一个全局用户在某个校园中的资格：
 
 ```text
 user_id
 campus_id
-status: pending | verified | suspended | expired
+status: pending | verified | suspended | revoked
 role: member | operator | admin
-verified_method
+verification_method
 verified_at
-expires_at
+created_at / updated_at
 ```
 
 用户可以拥有多个 membership，但每次请求必须有明确的 active campus context。跨校园读取默认禁止；管理员跨租户访问必须带审计原因。
 
-[已实现] `campuses`、`campus_memberships`、学校邮箱 OTP、核心/通知/审核/审计 tenant 字段和设备级 active campus session 已落地。membership 当前状态是 `pending | verified | suspended | revoked`；access claim 与 refresh session 保存同一 campus，切换时轮换 token，业务执行时再次验证 membership。推荐、公开用户页面和通知读取使用该校园。后台读权限使用 membership 的 `operator|admin`，平台写权限仍由全局用户角色控制。[目标态] membership 到期/定期刷新、全请求统一 tenant extractor、管理员 MFA/近期认证和关键表 RLS 仍未完成。
+[已实现] `campuses`、`campus_memberships`、学校邮箱 OTP、核心/通知/审核/审计 tenant 字段和设备级 active campus session 已落地；access claim 与 refresh session 保存同一 campus，切换时轮换 token，业务执行时再次验证 membership。推荐、公开用户页面和通知读取使用该校园。后台读权限使用 membership 的 `operator|admin`，平台写权限仍由全局用户角色控制。平台管理员近期认证与 TOTP MFA、关键 tenant 表的 FORCE RLS 也已落地。[目标态] membership 到期/定期刷新和所有应用查询自动注入 fail-closed RLS context 仍未完成。
 
 ### IntentItem
 
-`IntentItem` 是用户希望信息如何流动的声明。当前代码仍使用 `inventory` 和 listing API；设计文档用 `IntentItem` 统一解释它。
+`IntentItem` 是用户希望信息如何流动的声明。当前 `intents` 是统一事实表，`inventory` 是 goods 意图兼容现有市场浏览面的投影；旧 listing API 继续可用。
 
 | 字段 | 含义 | 当前映射 |
 | --- | --- | --- |
-| `id` | 意图稳定标识 | `inventory.id` |
-| `campus_id` | 所属校园 | [已实现] `inventory.campus_id`，由服务端 tenant context 写入 |
-| `owner_id` | 声明意图的人 | `inventory.owner_id` |
-| `kind` | 信息类型，V1 固定为 `goods` | [目标态]，当前由 listing 语义隐含 |
-| `direction` | `offer` 或 `wanted` | `inventory.direction` |
-| `title/category/brand` | 可检索描述 | 已实现 |
-| `price` | offer 售价或 wanted 预算上限 | `suggested_price_cny` |
-| `condition_score` | 当前成色或最低可接受成色 | 已实现 |
-| `attributes` | 类型扩展字段 | [目标态] JSONB，V1 不对外开放任意 schema |
-| `status` | 生命周期状态 | `inventory.status`，语义需按 direction 解释 |
-| `moderation_status` | 公开资格 | 当前媒体和消息已有部分状态，目标统一 |
-| `idempotency_key/hash` | 发布重试的唯一尝试与内容快照 | [已实现] `inventory.idempotency_key/idempotency_hash`，只用于协议去重，不是业务身份 |
+| `id` | 意图稳定标识 | `intents.id`（UUID） |
+| `campus_id` | 所属校园 | `intents.campus_id`，由活动 tenant context 写入 |
+| `author_id` | 声明意图的人 | `intents.author_id`；他人 feed/matches 响应不序列化此字段 |
+| `kind` | `goods_offer | goods_seek | companion | help | activity` | 数据库 CHECK 与 service 枚举共同约束 |
+| `raw_input` | 用户原始表达 | 原文保存，允许未来重新解析 |
+| `slots` | 结构化但允许模糊/缺失的槽位 | JSONB；价格、时间等支持 `whatever/flexible` 语义 |
+| `confidence` | 对槽位解析的置信度 | 0–1；这是解析置信度，不是匹配分数 |
+| `status` | 生命周期状态 | `draft | active | fulfilled | withdrawn | expired` |
+| `visibility` | `campus | private` | 只有 active、未过期、campus 可见意图进入公共撮合池 |
+| `valid_until` | 可选失效时间 | 过期后不再进入 feed/matches |
+| `projected_listing_id` | goods 投影链接 | 一对一唯一索引指向兼容的 `inventory` 条目 |
 
-V1 只允许 `kind=goods`。未来新增服务、技能或活动时，必须先定义新的字段 schema、状态机和审核规则，不能直接把未知结构塞进 `attributes` 后上线。
+新增 kind 或 slot 时仍必须先定义 schema、匹配语义和审核规则，不能把未知结构直接作为公开事实上线。listing 发布幂等继续由 `inventory.idempotency_key/idempotency_hash` 承担。
 
 ### Match
 
@@ -102,11 +101,17 @@ computed_at
 expires_at
 ```
 
-[已实现] 当前 `/api/listings/{wanted_id}/matches` 实时查询 active offer，并按分类、预算、成色、关键词/向量和新鲜度匹配。
+[已实现] 当前 `/api/listings/{wanted_id}/matches` 实时查询 active offer，并按分类、预算、成色、关键词/向量和新鲜度匹配；`/api/intents/{id}/matches` 对五种 intent kind 先执行校园、生命周期和已声明 slots 的确定性硬约束。
 
 [已实现] wanted 与 offer 必须属于同一 `campus_id`；`wanted_responses` 同时保存 tenant，并用复合外键约束两侧 listing。
 
-[目标态] Match 可以被短期缓存或物化以支持解释和评估，但必须允许重算；模型版本和原因代码要可追踪。不得保存敏感用户画像作为公开原因。
+[部分完成] intent feed/matches 已返回稳定 `rank_reason`、`match_summary`、`source` 和 `ranking_version`，原因只来自公开生命周期和双方已声明 slots。商品推荐也返回排序原因和版本。listing wanted matches 自身的稳定原因契约、短期物化、离线评估和公平性 guardrail 仍待完成；不得保存敏感用户画像作为公开原因。
+
+### FeedFeedback 与 FeedPreferences
+
+[已实现] `feed_feedback` 保存用户对一个 listing 或 intent 的显式指令：`hide | less_like_this | not_relevant`。`campus_id` 和分类/kind `signal_key` 均由服务端根据活动校园和目标资源派生；同一用户、校园和资源只有一条 standing signal，重试或改选 action 使用 upsert。
+
+在当前已接入的首页商品 feed 与 intent feed/matches 中，三种 action 都会对该用户精确排除该资源；`less_like_this` 还会降低同分类或同 kind 候选的顺序。`feed_preferences.personalization_enabled=false` 会停用泛化亲和/降权，但保留这些入口的精确排除。`signals_reset_at` 让此前的收藏、买家成交意向和“少推荐这类”不再参与排序，不删除这些业务记录，也不恢复明确反馈过的具体资源。相似商品与 listing wanted matches 消费该事实仍是后续项。
 
 ### Response
 
@@ -153,31 +158,29 @@ confirmed -> cancelled
 
 ### ModerationCase
 
-[目标态] `ModerationCase` 统一承载文本、图片、头像、消息、群组和举报的审核过程：
+[已实现] `ModerationCase` 统一承载机器图片拒绝、聊天消息举报、商品举报、用户举报、人工处置和申诉：
 
 ```text
-pending -> approved
-pending -> rejected
-pending -> needs_review -> approved | rejected
-rejected -> appealed -> approved | upheld
+open -> reviewing -> actioned | dismissed
+actioned -> appealed -> resolved
+appealed -> resolved
 ```
 
-Case 保存资源引用、策略版本、机器判断、人类操作、理由类别和时间线。原始敏感内容只在授权范围内访问，普通用户只看到可行动的结果和申诉入口。
+Case 保存校园、资源引用、来源引用、机器或人工判断、公开理由、受限的内部证据、处置结果和事件时间线。`moderation_appeals` 保存一次性申诉和独立复核结果；普通用户接口不返回举报人身份或 `internal_details`。`content_reports` 承载商品/用户举报，`chat_message_reports` 承载消息举报，两者都在同一事务中关联统一案件，并在案件流转时同步举报状态。
 
-[已实现] `moderation_jobs`、资源审核状态、文本同步规则、消息举报和管理员审计已覆盖部分能力。审核任务与审计事件都有明确 `campus_id`；跨校园后台访问还保存 `scope_reason`。当前仍没有统一 case 与 appeal 模型。
+当前 intake、开始复核和 dismiss 已统一；机器拒绝也可在案件复核后恢复对应媒体状态。商品/用户案件尚未拥有通用、可逆的 restrict/restore effect，紧急下架或封禁仍走独立的近期认证与管理员审计流程。
 
 ### AgentRun 与 AgentActionPlan
 
-[已实现] AgentRun 的部分事实分散在聊天消息、LLM metrics、工具结果和日志中。
-
-[目标态] 每次 Agent 请求形成可追踪的 `AgentRun`，每个会改变业务数据的动作形成 `AgentActionPlan`：
+[已实现] AgentRun 的部分事实仍分散在聊天消息、LLM metrics、工具结果和日志中；统一 `AgentRun` 仍是目标态。每个受支持的 Agent 写动作已经形成 `AgentActionPlan`：
 
 ```text
 AgentRun: request -> routing -> retrieval -> model/tool steps -> outcome
-ActionPlan: drafted -> awaiting_confirmation -> executing -> succeeded | failed | expired | cancelled
+ActionPlan: pending -> confirmed_once (L3) -> executing -> executed | failed
+            pending -> cancelled | expired
 ```
 
-ActionPlan 保存的是待执行输入快照，不是已执行事实。执行时必须重新检查资源版本、权限和状态，防止用户确认后上下文已经变化。
+ActionPlan 保存待执行输入快照、风险级、短期 confirmation token 和执行结果，不是已执行事实。L2 一次确认，L3 二次确认；执行时重新检查 tenant、membership、权限和资源状态。通用资源版本快照比较仍待补齐。
 
 ### AuditEvent 与 DomainEvent
 

@@ -281,6 +281,9 @@ void main() {
         'owner_id': 'user-456',
         'owner_username': 'johndoe',
         'created_at': '2024-01-15T10:00:00Z',
+        'rank_reason': 'within_budget',
+        'match_summary': ['within_budget', 'condition_match'],
+        'source': 'wanted_match',
       };
 
       final listing = Listing.fromJson(json);
@@ -302,6 +305,9 @@ void main() {
       expect(listing.ownerId, 'user-456');
       expect(listing.ownerUsername, 'johndoe');
       expect(listing.createdAt, '2024-01-15T10:00:00Z');
+      expect(listing.rankReason, 'within_budget');
+      expect(listing.matchSummary, ['within_budget', 'condition_match']);
+      expect(listing.source, 'wanted_match');
     });
 
     test('fromJson handles missing optional fields', () {
@@ -912,6 +918,25 @@ void main() {
       expect(response.unreadCount, 0);
       expect(response.limit, 20);
       expect(response.offset, 0);
+    });
+  });
+
+  group('UserIntent feed explanation', () {
+    test('parses rank reason, match summary, and source', () {
+      final intent = UserIntent.fromJson({
+        'id': 'intent-1',
+        'kind': 'goods_offer',
+        'raw_input': '出一台显示器',
+        'slots': {'subject': '显示器'},
+        'status': 'active',
+        'rank_reason': 'within_budget',
+        'match_summary': ['within_budget', 'condition_match'],
+        'source': 'intent_match',
+      });
+
+      expect(intent.rankReason, 'within_budget');
+      expect(intent.matchSummary, ['within_budget', 'condition_match']);
+      expect(intent.source, 'intent_match');
     });
   });
 }
