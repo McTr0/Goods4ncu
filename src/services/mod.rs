@@ -33,6 +33,7 @@ pub mod token_denylist;
 pub mod totp;
 pub mod undo;
 pub mod vector;
+pub mod wanted_match;
 #[cfg(feature = "redis")]
 pub mod ws_fanout;
 

@@ -91,7 +91,7 @@ CREATE EXTENSION IF NOT EXISTS vector
 检查 documents.embedding 的 vector 维度
 ```
 
-如果 pgvector 没安装，数据库初始化会失败。如果 `VECTOR_DIM` 与 schema 中 `vector(768)` 之类的定义不一致，应用会 fail fast。这种失败是好的，因为它避免系统运行到某个语义搜索请求时才暴露问题。
+如果 pgvector 没安装，数据库初始化会失败。部署需使用 pgvector `0.8.0` 或更高版本：相似商品查询通过 `hnsw.iterative_scan=strict_order` 在校园、生命周期和用户反馈过滤后继续召回，避免一次近似扫描导致结果不足。可用 `SELECT extversion FROM pg_extension WHERE extname = 'vector';` 核对版本。如果 `VECTOR_DIM` 与 schema 中 `vector(768)` 之类的定义不一致，应用会 fail fast。
 
 数据库相关测试必须使用测试库。测试基础设施会拒绝清理明显不是测试库的连接，除非显式设置 override。不要为了省事把 `TEST_DATABASE_URL` 指到真实开发库。
 
@@ -317,7 +317,7 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 
 检查 `documents` 表是否有对应商品文档，embedding 是否非空，`VECTOR_DIM` 是否与 schema 一致，商品是否 active，LLM/embedding provider key 是否可用，pgvector 索引是否存在。语义搜索问题通常横跨 provider、文档写入和 SQL 过滤三层。
 
-首页商品 feed 或 intent feed/matches 的个性化顺序/条目缺失异常，还要检查当前用户/校园的 `feed_preferences.personalization_enabled/signals_reset_at` 和 `feed_feedback.resource_type/resource_id/action/signal_key/updated_at`。重置只让旧收藏、买家成交意向和 `less_like_this` 泛化信号失效；这些已接入入口仍精确隐藏显式 feedback 的原资源。相似商品和 listing wanted matches 当前不消费该表。不要为排查排序直接删除 watchlist/order 等业务事实。
+首页商品 feed、相似商品、listing wanted matches 或 intent feed/matches 的个性化顺序/条目缺失异常，还要检查当前用户/校园的 `feed_preferences.personalization_enabled/signals_reset_at` 和 `feed_feedback.resource_type/resource_id/action/signal_key/updated_at`。重置只让旧收藏、买家成交意向和 `less_like_this` 泛化信号失效；所有入口仍精确隐藏显式 feedback 的原资源。相似商品使用分类泛化降权；wanted matches 因分类已是硬约束，查询会把 feedback 目标连接回 inventory 并用规范化品牌降低同品牌候选。不要为排查排序直接删除 watchlist/order 等业务事实。
 
 ### 审核案件异常
 

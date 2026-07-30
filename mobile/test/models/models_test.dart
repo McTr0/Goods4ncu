@@ -284,6 +284,7 @@ void main() {
         'rank_reason': 'within_budget',
         'match_summary': ['within_budget', 'condition_match'],
         'source': 'wanted_match',
+        'ranking_version': '2026.07-wanted-feedback-v1',
       };
 
       final listing = Listing.fromJson(json);
@@ -308,6 +309,7 @@ void main() {
       expect(listing.rankReason, 'within_budget');
       expect(listing.matchSummary, ['within_budget', 'condition_match']);
       expect(listing.source, 'wanted_match');
+      expect(listing.rankingVersion, '2026.07-wanted-feedback-v1');
     });
 
     test('fromJson handles missing optional fields', () {
@@ -347,6 +349,21 @@ void main() {
       final listing = Listing.fromJson(json);
 
       expect(listing.suggestedPriceCny, 100.0);
+    });
+
+    test('fromJson stringifies non-string ranking metadata safely', () {
+      final listing = Listing.fromJson({
+        'id': 'listing-ranked',
+        'title': 'Ranked item',
+        'category': 'books',
+        'brand': 'NCU',
+        'condition_score': 8,
+        'suggested_price_cny': 20,
+        'status': 'active',
+        'rank_reason': 42,
+      });
+
+      expect(listing.rankReason, '42');
     });
 
     test('conditionLabel returns correct Chinese labels', () {
@@ -778,6 +795,7 @@ void main() {
         'total': 50,
         'limit': 20,
         'offset': 0,
+        'ranking_version': '2026.07-wanted-feedback-v1',
       };
 
       final response = ListingsResponse.fromJson(json);
@@ -788,6 +806,12 @@ void main() {
       expect(response.total, 50);
       expect(response.limit, 20);
       expect(response.offset, 0);
+      expect(response.rankingVersion, '2026.07-wanted-feedback-v1');
+      expect(
+        response.items.first.rankingVersion,
+        '2026.07-wanted-feedback-v1',
+        reason: 'envelope ranking metadata follows each item into the UI',
+      );
     });
 
     test('fromJson handles empty items', () {

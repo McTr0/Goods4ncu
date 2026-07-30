@@ -105,13 +105,13 @@ expires_at
 
 [已实现] wanted 与 offer 必须属于同一 `campus_id`；`wanted_responses` 同时保存 tenant，并用复合外键约束两侧 listing。
 
-[部分完成] intent feed/matches 已返回稳定 `rank_reason`、`match_summary`、`source` 和 `ranking_version`，原因只来自公开生命周期和双方已声明 slots。商品推荐也返回排序原因和版本。listing wanted matches 自身的稳定原因契约、短期物化、离线评估和公平性 guardrail 仍待完成；不得保存敏感用户画像作为公开原因。
+[部分完成] intent feed/matches 与 listing wanted matches 已返回稳定 `rank_reason`、`match_summary`、`source` 和 `ranking_version`，原因只来自公开生命周期和双方已声明/实际执行的硬约束。首页与相似商品推荐也返回排序原因和独立版本。短期物化、跨表达软匹配、置信度校准、离线评估和公平性 guardrail 仍待完成；不得保存敏感用户画像作为公开原因。
 
 ### FeedFeedback 与 FeedPreferences
 
 [已实现] `feed_feedback` 保存用户对一个 listing 或 intent 的显式指令：`hide | less_like_this | not_relevant`。`campus_id` 和分类/kind `signal_key` 均由服务端根据活动校园和目标资源派生；同一用户、校园和资源只有一条 standing signal，重试或改选 action 使用 upsert。
 
-在当前已接入的首页商品 feed 与 intent feed/matches 中，三种 action 都会对该用户精确排除该资源；`less_like_this` 还会降低同分类或同 kind 候选的顺序。`feed_preferences.personalization_enabled=false` 会停用泛化亲和/降权，但保留这些入口的精确排除。`signals_reset_at` 让此前的收藏、买家成交意向和“少推荐这类”不再参与排序，不删除这些业务记录，也不恢复明确反馈过的具体资源。相似商品与 listing wanted matches 消费该事实仍是后续项。
+在首页商品 feed、相似商品、listing wanted matches 与 intent feed/matches 中，三种 action 都会对该用户精确排除该资源；`less_like_this` 还会降低同分类、wanted hard-category 内同品牌或同 kind 候选的顺序。wanted 的品牌信号不是客户端或公开画像提供，而是查询时把该用户自己的 feedback 目标安全连接回同校园 inventory 后派生。`feed_preferences.personalization_enabled=false` 会停用泛化亲和/降权，但保留所有入口的精确排除。`signals_reset_at` 让此前的收藏、买家成交意向和“少推荐这类”不再参与排序，不删除这些业务记录，也不恢复明确反馈过的具体资源。
 
 ### Response
 

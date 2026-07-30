@@ -17,6 +17,8 @@ import '../components/recommendation_carousel.dart';
 import '../components/contact_conversation_sheet.dart';
 import '../components/content_report_dialog.dart';
 import '../services/content_report_service.dart';
+import '../components/feed_feedback_menu.dart';
+import '../services/feed_feedback_service.dart';
 import '../utils/platform_utils.dart';
 
 class ListingDetailPage extends StatefulWidget {
@@ -26,6 +28,7 @@ class ListingDetailPage extends StatefulWidget {
   final OrderService? orderService;
   final ChatService? chatService;
   final ContentReportService? contentReportService;
+  final FeedFeedbackService? feedbackService;
 
   const ListingDetailPage({
     super.key,
@@ -35,6 +38,7 @@ class ListingDetailPage extends StatefulWidget {
     this.orderService,
     this.chatService,
     this.contentReportService,
+    this.feedbackService,
   });
 
   @override
@@ -47,6 +51,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
   late final OrderService _orderService;
   late final ChatService _chatService;
   late final ContentReportService _contentReportService;
+  late final FeedFeedbackService _feedbackService;
   Listing? _listing;
   bool _loading = true;
   String? _error;
@@ -61,6 +66,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
   bool _wantedMatchesLoading = false;
   String? _currentUserId;
   bool _currentUserLoaded = false;
+  int _loadGeneration = 0;
 
   @override
   void initState() {
@@ -72,8 +78,18 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     _chatService = widget.chatService ?? context.read<ChatService>();
     _contentReportService =
         widget.contentReportService ?? context.read<ContentReportService>();
+    _feedbackService =
+        widget.feedbackService ?? context.read<FeedFeedbackService>();
     _loadDetail();
     _loadCurrentUserId();
+  }
+
+  @override
+  void didUpdateWidget(covariant ListingDetailPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.listingId != widget.listingId) {
+      _loadDetail();
+    }
   }
 
   Future<void> _loadCurrentUserId() async {
@@ -103,22 +119,39 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
   }
 
   Future<void> _loadDetail() async {
-    setState(() => _loading = true);
+    final listingId = widget.listingId;
+    final generation = ++_loadGeneration;
+    setState(() {
+      _listing = null;
+      _loading = true;
+      _error = null;
+      _similarListings = [];
+      _similarLoading = true;
+      _wantedMatches = [];
+      _wantedMatchesLoading = false;
+      _isOperating = false;
+      _reportFlowActive = false;
+      _isReporting = false;
+    });
     try {
-      final listing = await _apiService.getListingDetail(widget.listingId);
-      if (mounted) {
+      final listing = await _apiService.getListingDetail(listingId);
+      if (mounted &&
+          generation == _loadGeneration &&
+          listingId == widget.listingId) {
         setState(() {
           _listing = listing;
           _loading = false;
         });
         if (listing.isWanted) {
-          _loadWantedMatches();
+          _loadWantedMatches(listingId, generation);
         } else {
-          _loadSimilarListings();
+          _loadSimilarListings(listingId, generation);
         }
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted &&
+          generation == _loadGeneration &&
+          listingId == widget.listingId) {
         setState(() {
           _loading = false;
           _error = e.toString();
@@ -127,20 +160,24 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     }
   }
 
-  Future<void> _loadSimilarListings() async {
+  Future<void> _loadSimilarListings(String listingId, int generation) async {
     setState(() => _similarLoading = true);
     try {
       final similar = await _recommendationService.getSimilarListings(
-        widget.listingId,
+        listingId,
       );
-      if (mounted) {
+      if (mounted &&
+          generation == _loadGeneration &&
+          listingId == widget.listingId) {
         setState(() {
           _similarListings = similar;
           _similarLoading = false;
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted &&
+          generation == _loadGeneration &&
+          listingId == widget.listingId) {
         setState(() {
           _similarListings = [];
           _similarLoading = false;
@@ -149,24 +186,50 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     }
   }
 
-  Future<void> _loadWantedMatches() async {
+  Future<void> _loadWantedMatches(String listingId, int generation) async {
     setState(() => _wantedMatchesLoading = true);
     try {
-      final response = await _apiService.getWantedMatches(widget.listingId);
-      if (mounted) {
+      final response = await _apiService.getWantedMatches(listingId);
+      if (mounted &&
+          generation == _loadGeneration &&
+          listingId == widget.listingId) {
         setState(() {
           _wantedMatches = response.items;
           _wantedMatchesLoading = false;
         });
       }
     } catch (_) {
-      if (mounted) {
+      if (mounted &&
+          generation == _loadGeneration &&
+          listingId == widget.listingId) {
         setState(() {
           _wantedMatches = [];
           _wantedMatchesLoading = false;
         });
       }
     }
+  }
+
+  void _removeRecommendation(Listing listing) {
+    if (!mounted) return;
+    setState(() {
+      _similarListings.removeWhere((item) => item.id == listing.id);
+      _wantedMatches.removeWhere((item) => item.id == listing.id);
+    });
+  }
+
+  RecommendationFeedbackMenuBuilder? get _feedbackMenuBuilder {
+    final currentUserId = _currentUserId;
+    if (!_currentUserLoaded || currentUserId == null || currentUserId.isEmpty) {
+      return null;
+    }
+    return (listing) => FeedFeedbackMenu(
+      service: _feedbackService,
+      resourceType: FeedResourceType.listing,
+      resourceId: listing.id,
+      compact: true,
+      onApplied: (_) => _removeRecommendation(listing),
+    );
   }
 
   /// Open the private-limit price sheet for this listing.
@@ -808,6 +871,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
       return RecommendationCarousel(
         listings: _wantedMatches,
         title: l.wantedMatchesTitle,
+        feedbackMenuBuilder: _feedbackMenuBuilder,
       );
     }
     if (_similarLoading) {
@@ -817,6 +881,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     return RecommendationCarousel(
       listings: _similarListings,
       title: l.similarRecommendations,
+      feedbackMenuBuilder: _feedbackMenuBuilder,
     );
   }
 
@@ -903,6 +968,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
       if (isOwner) {
         final isFulfilled = listing?.status == 'fulfilled';
         return Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(

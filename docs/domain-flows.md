@@ -108,7 +108,7 @@ active wanted
   -> 返回候选
 ```
 
-[已实现] 所有召回先限定活动校园和生命周期；首页商品 feed 与 intent feed/matches 已返回稳定 reason codes/排序版本，并提供精确隐藏、同类降权、非个性化排序和清除旧信号。当前 listing wanted matches 仍返回传统 listing 形状，尚未消费 feedback，其自身的稳定 `match_summary` 契约属于后续收敛项。
+[已实现] 所有召回先限定活动校园和生命周期；首页商品 feed、相似商品、listing wanted matches 与 intent feed/matches 均返回排序原因、稳定来源和排序版本，并提供精确隐藏、泛化降权、非个性化排序和清除旧信号。新撮合入口使用稳定 reason code；兼容中的首页商品 feed 仍可返回服务端人话原因。listing wanted matches 的解释只陈述实际执行的分类、预算和成色约束，不公开作者、距离、权重或反馈事实。
 
 提供方调用 responses API 时只能选择自己的 active offer，不能推荐 wanted、sold 或 deleted 条目。重复 pending response 返回已有记录或明确冲突，不重复通知。
 
@@ -136,7 +136,7 @@ tenant / visibility / status hard filter
   -> user feedback
 ```
 
-当前首页商品 feed 与 intent feed/matches 已完成 tenant/visibility/status 硬过滤、排序原因/版本和反馈控制。三种反馈都会在这些入口精确隐藏原资源；`less_like_this` 还降低同分类或同 kind 候选。关闭个性化或重置会停用泛化旧信号，但不撤销精确隐藏。相似商品与 listing wanted matches 尚未消费 feedback；lexical/vector 的统一两阶段召回、多样性、完整度/信任特征和评估闭环仍是目标态。
+当前首页商品 feed、相似商品、listing wanted matches 与 intent feed/matches 已完成 tenant/visibility/status 硬过滤、排序原因/版本和反馈控制。三种反馈都会在这些入口精确隐藏原资源；`less_like_this` 在首页/相似商品降低同分类、在 wanted matches 降低同品牌、在意图流降低同 kind 候选。关闭个性化或重置会停用泛化旧信号，但不撤销精确隐藏。lexical/vector 的统一两阶段召回、多样性、完整度/信任特征、置信度校准和评估闭环仍是目标态。
 
 收藏自己的条目会被拦截。收藏列表只展示仍可见的 active 内容；删除收藏不删除 listing，也不应抹掉已有审计或聚合统计。
 

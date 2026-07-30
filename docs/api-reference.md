@@ -374,9 +374,9 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 ### GET `/api/listings/{id}/matches`
 
-需要登录。`id` 必须指向 active wanted。返回满足分类、预算、最低成色和 active 约束的 offer，排除需求方自己的内容。存在 embedding 时结合向量相似度，无 embedding 时回退到条件、关键词和新鲜度。
+无需登录；游客使用默认公开校园，有效登录态使用当前活动校园。`id` 必须指向该校园的 wanted。active wanted 返回满足分类、预算、最低成色、方向和 active 约束的 offer，排除需求方自己的内容；登录查看者还会排除自己的内容。存在 embedding 时结合向量相似度，无 embedding 时回退到条件、关键词和新鲜度。
 
-对 offer 调用返回 bad request。当前响应还没有生产目标中的 `rank_reason` 和 `match_summary` 稳定契约。
+对 offer 调用返回 bad request，跨校园或不存在的 wanted 返回 not found；inactive wanted 返回带版本的空响应。响应条目包含 `rank_reason=known_slots_compatible`、实际执行过的 `match_summary`、`source=wanted_match` 和 `ranking_version=2026.07-wanted-feedback-v1`；响应 envelope 也带同一版本。登录查看者的三种显式反馈都会精确排除目标；个性化开启时，当前且未重置的 `less_like_this` 还会降低同品牌候选。
 
 ### POST `/api/listings/{id}/responses`
 
@@ -658,7 +658,7 @@ Group 成员按角色发言；Channel 只有 owner/admin 发言，成员可读�
 - `GET /api/wanted-responses?role=requester|responder&status=` — 按角色列出自己的推荐（含两侧标题）。
 - `POST /api/wanted-responses/{id}/accept|dismiss`（requester）与 `/withdraw`（responder）— 仅能从 `pending` 转移，单赢并发；他人的响应统一 404，重复动作 409；对方收到 `wanted_response_accepted|dismissed|withdrawn` 通知。
 
-推荐接口每个条目携带 `rank_reason`（用户可读）与 `source`（`recency|category_affinity|vector_similarity`），响应携带 `ranking_version`。
+新推荐与匹配接口的每个条目携带稳定的 `rank_reason` 与 `source` code，客户端负责本地化为人话；响应携带 `ranking_version`。兼容中的首页商品 feed 仍可能返回服务端人话 `rank_reason`，其 `source` 保持稳定 code。listing wanted matches 还返回只来自已执行硬约束的 `match_summary`，不返回作者、距离、权重或反馈信号。
 
 ## Agent ActionPlan
 
@@ -883,8 +883,9 @@ POST 写接口仍只允许平台管理员，并且 access token 必须带 10 分
 
 推荐路径：
 
-- `GET /api/recommendations/similar?listing_id=...` 用 pgvector 余弦距离返回同校园相似 active 商品；无 embedding 时回退到同校园最新 active 列表。
+- `GET /api/recommendations/similar?listing_id=...` 要求源条目本身是当前校园的 active offer；missing、inactive、wanted 或跨校园源统一返回 not found。接口用 pgvector 余弦距离返回同校园有 embedding 的相似 active offer；源无 embedding 时回退到同校园最新 active offer。游客使用公开校园基础排序；有效登录态会在 LIMIT 前排除自己的商品和三种显式反馈目标，`less_like_this` 在个性化开启且信号未被重置时降低同分类候选。条目返回 `vector_similarity|recency` 稳定原因，响应版本为 `2026.07-similar-feedback-v1`。
 - `GET /api/recommendations/feed?direction=offer|wanted|all` 对匿名用户在 NCU 公开校园内按 `created_at` 返回最新 active 内容。若请求带有效 Bearer token，则切换到设备活动校园，按仍有效的收藏与买家成交意向分类亲和度排序，并排除自己的内容、仍有效的已收藏内容和用户明确反馈过的条目。每项包含 `rank_reason`、`source`，响应包含 `ranking_version=2026.07-feedback-v2`。
+- `GET /api/listings/{wanted_id}/matches` 保留分类、预算上限、最低成色、校园、方向和 active 状态硬约束，返回 `rank_reason=known_slots_compatible`、`match_summary`、`source=wanted_match` 与 `ranking_version=2026.07-wanted-feedback-v1`。有效登录态会精确排除三种显式反馈目标；`less_like_this` 还会在个性化开启且信号未重置时，根据被反馈商品的服务端品牌事实降低同品牌候选。关闭或重置只停用泛化品牌降权，不恢复明确排除。
 - `GET /api/intents/feed` 返回当前校园内其他人的 active 公开意图；`GET /api/intents/{id}/matches` 先执行校园、状态、方向和已声明槽位的硬约束，再返回候选。两者的条目都包含稳定的 `rank_reason`、`match_summary`、`source` 和 `ranking_version`；理由只来自已知约束，不包含作者 ID，也不让 LLM 猜测用户画像。
 
 当前未版本化信息流控制接口均要求当前活动校园的 verified membership：
@@ -893,10 +894,10 @@ POST 写接口仍只允许平台管理员，并且 access token 必须带 10 分
 | --- | --- |
 | `POST /api/feed/feedback` | body 为 `resource_type=listing|intent`、`resource_id`、`action=hide|less_like_this|not_relevant`。服务端解析同校园 active 目标并派生分类/意图类型信号；缺失、跨校园和自己的目标统一按不存在处理。同一用户对同一资源重复提交只更新一条记录。 |
 | `GET /api/feed/preferences` | 返回 `personalization_enabled` 与可选 `signals_reset_at`；没有设置时默认开启。 |
-| `PUT /api/feed/preferences` | body 为 `{ "personalization_enabled": true|false }`。关闭后，首页商品 feed 与 intent feed/matches 使用非个性化排序，但这些入口仍排除明确反馈过的具体条目。 |
-| `POST /api/feed/personalization/clear` | 让清除时间之前的收藏、买家成交意向和“少推荐这类”信号不再参与排序；不删除业务记录，也不在已接入的 feed/matches 中恢复已经明确反馈过的具体条目。 |
+| `PUT /api/feed/preferences` | body 为 `{ "personalization_enabled": true|false }`。关闭后，首页商品 feed、相似商品、listing wanted matches 与 intent feed/matches 使用非个性化排序，但仍排除明确反馈过的具体条目。 |
+| `POST /api/feed/personalization/clear` | 让清除时间之前的收藏、买家成交意向和“少推荐这类”泛化信号不再参与排序；不删除业务记录，也不在已接入的推荐/匹配入口恢复已经明确反馈过的具体条目。 |
 
-三种 feedback action 都会立刻从该用户后续的首页商品 feed 或 intent feed/matches 中排除对应资源；`less_like_this` 还会在这些入口降低同分类商品或同 kind 意图的排序。`/api/recommendations/similar` 和 listing wanted matches 尚未消费 feedback。泛化降权受个性化开关和清除时间控制，已接入入口的精确排除不受影响。
+三种 feedback action 都会立刻从该用户后续的首页商品 feed、相似商品、listing wanted matches 或 intent feed/matches 中排除对应资源；`less_like_this` 还会分别降低同分类商品、wanted matches 中同品牌商品或同 kind 意图的排序。泛化降权受个性化开关和清除时间控制，所有入口的精确排除不受影响。
 
 公开用户搜索、`GET /api/users/{id}` 和 `GET /api/users/{id}/listings` 采用相同规则：游客使用 NCU 公开校园，有效登录态使用设备活动校园。目标用户没有该校园 verified membership 时不返回其主页或在售内容。
 

@@ -2549,7 +2549,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get feedFeedbackNotRelevant => '与我无关';
 
   @override
-  String get feedFeedbackSaved => '收到，这条已从你的信息流移除。';
+  String get feedFeedbackSaved => '收到，这条推荐已移除。';
 
   @override
   String get feedFeedbackFailed => '没有保存成功，这条内容仍会保留。';

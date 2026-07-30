@@ -4,7 +4,7 @@
 | --- | --- |
 | 适用读者 | 决定是否上线的负责人、执行部署的工程师、验收测试者 |
 | 当前状态 | 关键工程安全门槛已关闭；本机已用真实 Postgres/Redis/MinIO 完成生产模式演练；生产资源开通、真实学生效果/公平性验证与人工运营验收仍待完成 |
-| 事实来源 | 本仓库全量 Rust 单元/29 个集成套件与 293 个 Flutter 测试、`scripts/` 下可执行演练（含真实 MinIO/Redis/Postgres）、迁移 0001–0054 |
+| 事实来源 | 本仓库 390 个 Rust 单元测试/29 个集成套件与 300 个 Flutter 测试、`scripts/` 下可执行演练（含真实 MinIO/Redis/Postgres）、迁移 0001–0054 |
 | 验收方式 | 每一项都给出可执行证据；无证据的项目明确标注为部署侧待办 |
 
 本报告把[生产路线图](roadmap.md)的全部退出门槛折叠为一张就绪矩阵。“代码侧关闭”指该门槛由本仓库的代码、schema、测试或可重复脚本强制并验证；“部署侧待办”指需要真实基础设施、账号或人工运营才能执行的验收步骤，本仓库已为其准备了可直接运行的验收程序。
@@ -47,7 +47,7 @@
 | --- | --- |
 | wanted fulfilled/reopen 生命周期（匹配停止、历史保留、响应者通知） | `tests/api_regressions.rs::wanted_fulfill_and_reopen_lifecycle` |
 | Response accept/dismiss/withdraw（单赢转移、对方通知、无归属泄露） | `tests/api_regressions.rs::wanted_response_actions_transition_once_and_notify` |
-| 每条推荐带 `rank_reason`/`source`/`ranking_version` 并在移动端展示 | `tests/api_regressions.rs::recommendation_feed_explains_ranking` |
+| 首页、相似商品与 wanted matches 带版本化解释、消费反馈并在移动端展示 | `tests/api_regressions.rs::recommendation_feed_explains_ranking`、`similar_recommendations_apply_feedback_to_vector_and_recency_paths`、`wanted_matches_are_versioned_private_and_feedback_aware`；`mobile/test/components/recommendation_carousel_test.dart`、`mobile/test/pages/listing_detail_page_test.dart` |
 
 ### 运行与可靠性
 

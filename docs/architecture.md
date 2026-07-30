@@ -105,7 +105,7 @@ direction=wanted -> price 是预算上限，condition 是最低可接受成色
 
 `documents` 保存商品/需求的检索文本和 embedding。相似推荐使用 pgvector 距离；首页 Feed 对登录用户结合收藏和买家成交意向的分类亲和度，再按新鲜度排序。游客在 NCU 公开校园内检索，登录用户先从 token 解析活动校园，再在该校园内完成召回和排序。
 
-wanted matches 使用活动 campus、分类、预算、成色和 active 状态等条件，并排除自己的 offer。设备级 active campus session 已实现；首页商品 feed 与 intent feed/matches 已有稳定解释和反馈控制。listing wanted matches 自身的解释、feedback 消费，以及跨入口多样性控制仍属于目标态。
+wanted matches 使用活动 campus、分类、预算、成色和 active 状态等条件，并排除自己的 offer。设备级 active campus session 已实现；首页商品 feed、相似商品、listing wanted matches 与 intent feed/matches 已有稳定解释和反馈控制。wanted matches 在硬分类内用服务端派生的同品牌事实处理 `less_like_this`，不放松预算/成色等资格条件；跨表达软排序、置信度校准和跨入口多样性控制仍属于目标态。
 
 更完整的对象定义见[信息模型](information-model.md)，目标推荐原则见[产品设计](product-design.md)。
 

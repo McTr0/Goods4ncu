@@ -2371,6 +2371,20 @@ async fn unapproved_media_is_not_served_publicly() {
         .await
         .expect("insert pending-media listing");
 
+        let wanted_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO inventory (id, campus_id, title, category, brand, condition_score,
+                                    suggested_price_cny, defects, owner_id, status, direction)
+             SELECT $1, id, 'Wanted quarantined item', 'misc', '不限', 5, 20000, '[]',
+                    $2, 'active', 'wanted'
+             FROM campuses WHERE slug = 'ncu'",
+        )
+        .bind(&wanted_id)
+        .bind(&viewer_id)
+        .execute(&pool)
+        .await
+        .expect("insert wanted listing");
+
         // Owner avatar pending moderation.
         sqlx::query(
             "UPDATE users SET avatar_url = 'https://cdn.example.com/avatar.jpg',
@@ -2395,6 +2409,7 @@ async fn unapproved_media_is_not_served_publicly() {
         for uri in [
             "/api/listings?limit=50".to_string(),
             format!("/api/listings/{listing_id}"),
+            format!("/api/listings/{wanted_id}/matches"),
             "/api/recommendations/feed?direction=offer".to_string(),
         ] {
             let response = app
@@ -3327,6 +3342,820 @@ async fn listing_feedback_controls_ranking_without_leaking_across_users() {
             "recency",
             "clear ignores order-history affinity older than signals_reset_at"
         );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn similar_recommendations_apply_feedback_to_vector_and_recency_paths() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let viewer_id = Uuid::new_v4().to_string();
+        let other_viewer_id = Uuid::new_v4().to_string();
+        let seller_id = Uuid::new_v4().to_string();
+        for (id, label) in [
+            (&viewer_id, "viewer"),
+            (&other_viewer_id, "other"),
+            (&seller_id, "seller"),
+        ] {
+            insert_user(
+                &pool,
+                id,
+                &format!("similar_{label}_{}", Uuid::new_v4().simple()),
+                &password_hash,
+                "user",
+                "active",
+            )
+            .await;
+        }
+        let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("ncu campus");
+
+        let source_id = Uuid::new_v4().to_string();
+        let fallback_source_id = Uuid::new_v4().to_string();
+        let feedback_target_id = Uuid::new_v4().to_string();
+        let same_category_id = Uuid::new_v4().to_string();
+        let other_category_id = Uuid::new_v4().to_string();
+        let self_candidate_id = Uuid::new_v4().to_string();
+        let inactive_id = Uuid::new_v4().to_string();
+        for (id, title, category, owner, status, age_hours) in [
+            (
+                &source_id,
+                "Vector source",
+                "electronics",
+                &seller_id,
+                "active",
+                10_i32,
+            ),
+            (
+                &fallback_source_id,
+                "Fallback source",
+                "other",
+                &seller_id,
+                "active",
+                9,
+            ),
+            (
+                &feedback_target_id,
+                "Closest electronics",
+                "electronics",
+                &seller_id,
+                "active",
+                0,
+            ),
+            (
+                &same_category_id,
+                "Second electronics",
+                "electronics",
+                &seller_id,
+                "active",
+                1,
+            ),
+            (
+                &other_category_id,
+                "Further book",
+                "books",
+                &seller_id,
+                "active",
+                2,
+            ),
+            (
+                &self_candidate_id,
+                "Viewer owned candidate",
+                "electronics",
+                &viewer_id,
+                "active",
+                0,
+            ),
+            (
+                &inactive_id,
+                "Inactive candidate",
+                "books",
+                &seller_id,
+                "sold",
+                0,
+            ),
+        ] {
+            sqlx::query(
+                "INSERT INTO inventory (
+                    id, campus_id, title, category, brand, condition_score,
+                    suggested_price_cny, defects, owner_id, status, direction, created_at
+                 ) VALUES ($1, $2, $3, $4, 'Test', 8, 10000, '[]', $5, $6,
+                           'offer', NOW() - make_interval(hours => $7))",
+            )
+            .bind(id)
+            .bind(campus_id)
+            .bind(title)
+            .bind(category)
+            .bind(owner)
+            .bind(status)
+            .bind(age_hours)
+            .execute(&pool)
+            .await
+            .expect("insert similar listing");
+        }
+
+        let embedding = |x: f64, y: f64| {
+            let mut value = vec![0.0_f64; 768];
+            value[0] = x;
+            value[1] = y;
+            value
+        };
+        for (id, vector) in [
+            (&source_id, embedding(1.0, 0.0)),
+            (&feedback_target_id, embedding(1.0, 0.0)),
+            (&same_category_id, embedding(0.999, 0.001)),
+            (&other_category_id, embedding(0.8, 0.2)),
+            (&self_candidate_id, embedding(1.0, 0.0)),
+            (&inactive_id, embedding(1.0, 0.0)),
+        ] {
+            sqlx::query(
+                "INSERT INTO documents (id, document, embedded_text, embedding)
+                 VALUES ($1, $2::jsonb, $3, $4)",
+            )
+            .bind(id)
+            .bind(json!({"id": id}))
+            .bind(id)
+            .bind(vector)
+            .execute(&pool)
+            .await
+            .expect("insert embedding");
+        }
+
+        let (viewer_token, _, _) = generate_access_token_for_campus(
+            &viewer_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("viewer token");
+        let (other_token, _, _) = generate_access_token_for_campus(
+            &other_viewer_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("other viewer token");
+        let app = create_router(build_state(pool.clone()), &[]);
+        let similar_uri = format!("/api/recommendations/similar?listing_id={source_id}&limit=10");
+
+        for uri in [
+            similar_uri.as_str(),
+            "/api/recommendations/feed?direction=offer",
+        ] {
+            let (status, _) = authenticated_json(&app, Method::GET, uri, "not-a-jwt", None).await;
+            assert_eq!(
+                status,
+                StatusCode::UNAUTHORIZED,
+                "a malformed Bearer token must not silently lose viewer filtering"
+            );
+        }
+
+        let (_, initial) =
+            authenticated_json(&app, Method::GET, &similar_uri, &viewer_token, None).await;
+        assert_eq!(initial["ranking_version"], "2026.07-similar-feedback-v1");
+        let initial_items = initial["items"].as_array().expect("initial similar items");
+        for expected in [&feedback_target_id, &same_category_id, &other_category_id] {
+            assert!(
+                initial_items.iter().any(|item| item["id"] == *expected),
+                "eligible vector candidate {expected} should be present"
+            );
+        }
+        assert!(
+            !initial_items
+                .iter()
+                .any(|item| item["id"] == self_candidate_id || item["id"] == inactive_id),
+            "self-owned and inactive candidates must be filtered before ranking"
+        );
+        for item in initial_items {
+            assert_eq!(item["rank_reason"], "vector_similarity");
+            assert_eq!(item["source"], "vector_similarity");
+            let object = item.as_object().expect("recommendation object");
+            assert!(!object.contains_key("owner_id"));
+            assert!(!object.contains_key("signal_key"));
+        }
+
+        let (status, _) = authenticated_json(
+            &app,
+            Method::POST,
+            "/api/feed/feedback",
+            &viewer_token,
+            Some(json!({
+                "resource_type": "listing",
+                "resource_id": feedback_target_id,
+                "action": "less_like_this"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (_, downranked) =
+            authenticated_json(&app, Method::GET, &similar_uri, &viewer_token, None).await;
+        let downranked_items = downranked["items"].as_array().expect("downranked items");
+        assert!(
+            !downranked_items
+                .iter()
+                .any(|item| item["id"] == feedback_target_id),
+            "feedback target must be an exact exclusion"
+        );
+        let position = |items: &[Value], id: &str| {
+            items
+                .iter()
+                .position(|item| item["id"] == id)
+                .unwrap_or_else(|| panic!("missing candidate {id}"))
+        };
+        assert!(
+            position(downranked_items, &other_category_id)
+                < position(downranked_items, &same_category_id),
+            "less_like_this should demote same-category vector candidates"
+        );
+
+        let fallback_uri =
+            format!("/api/recommendations/similar?listing_id={fallback_source_id}&limit=2");
+        let (_, fallback) =
+            authenticated_json(&app, Method::GET, &fallback_uri, &viewer_token, None).await;
+        let fallback_items = fallback["items"].as_array().expect("fallback items");
+        assert_eq!(fallback_items.len(), 2);
+        assert!(
+            !fallback_items
+                .iter()
+                .any(|item| item["id"] == feedback_target_id),
+            "recency fallback must exact-filter before applying its limit"
+        );
+        assert_eq!(fallback_items[0]["id"], other_category_id);
+        assert_eq!(fallback_items[0]["rank_reason"], "recency");
+        assert_eq!(fallback_items[0]["source"], "recency");
+
+        let (status, _) = authenticated_json(
+            &app,
+            Method::GET,
+            &format!("/api/recommendations/similar?listing_id={inactive_id}"),
+            &viewer_token,
+            None,
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "an inactive listing cannot be used as a recommendation source"
+        );
+
+        let (_, other_view) =
+            authenticated_json(&app, Method::GET, &similar_uri, &other_token, None).await;
+        assert!(
+            other_view["items"]
+                .as_array()
+                .expect("other viewer items")
+                .iter()
+                .any(|item| item["id"] == feedback_target_id),
+            "one viewer's exact feedback must not affect another viewer"
+        );
+
+        let (status, _) = authenticated_json(
+            &app,
+            Method::PUT,
+            "/api/feed/preferences",
+            &viewer_token,
+            Some(json!({"personalization_enabled": false})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, disabled) =
+            authenticated_json(&app, Method::GET, &similar_uri, &viewer_token, None).await;
+        let disabled_items = disabled["items"].as_array().expect("disabled items");
+        assert!(
+            !disabled_items
+                .iter()
+                .any(|item| item["id"] == feedback_target_id),
+            "turning personalization off must preserve exact exclusions"
+        );
+        assert!(
+            position(disabled_items, &same_category_id)
+                < position(disabled_items, &other_category_id),
+            "turning personalization off restores vector order"
+        );
+
+        let (status, _) = authenticated_json(
+            &app,
+            Method::PUT,
+            "/api/feed/preferences",
+            &viewer_token,
+            Some(json!({"personalization_enabled": true})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        sqlx::query(
+            "UPDATE feed_feedback SET updated_at = NOW() - INTERVAL '1 hour'
+             WHERE user_id = $1 AND resource_id = $2",
+        )
+        .bind(&viewer_id)
+        .bind(&feedback_target_id)
+        .execute(&pool)
+        .await
+        .expect("age similar feedback");
+        let (status, _) = authenticated_json(
+            &app,
+            Method::POST,
+            "/api/feed/personalization/clear",
+            &viewer_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, cleared) =
+            authenticated_json(&app, Method::GET, &similar_uri, &viewer_token, None).await;
+        let cleared_items = cleared["items"].as_array().expect("cleared items");
+        assert!(
+            !cleared_items
+                .iter()
+                .any(|item| item["id"] == feedback_target_id),
+            "reset must not restore an explicitly rejected candidate"
+        );
+        assert!(
+            position(cleared_items, &same_category_id)
+                < position(cleared_items, &other_category_id),
+            "reset ignores generalized feedback older than signals_reset_at"
+        );
+
+        for (resource_id, action) in [
+            (&same_category_id, "hide"),
+            (&other_category_id, "not_relevant"),
+        ] {
+            let (status, _) = authenticated_json(
+                &app,
+                Method::POST,
+                "/api/feed/feedback",
+                &viewer_token,
+                Some(json!({
+                    "resource_type": "listing",
+                    "resource_id": resource_id,
+                    "action": action
+                })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+        for uri in [&similar_uri, &fallback_uri] {
+            let (_, response) =
+                authenticated_json(&app, Method::GET, uri, &viewer_token, None).await;
+            let items = response["items"]
+                .as_array()
+                .expect("filtered similar items");
+            assert!(
+                !items.iter().any(|item| {
+                    item["id"] == same_category_id || item["id"] == other_category_id
+                }),
+                "hide and not_relevant must exact-filter both recommendation paths"
+            );
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn wanted_matches_are_versioned_private_and_feedback_aware() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let requester_id = Uuid::new_v4().to_string();
+        let other_viewer_id = Uuid::new_v4().to_string();
+        let seller_id = Uuid::new_v4().to_string();
+        for (id, label) in [
+            (&requester_id, "requester"),
+            (&other_viewer_id, "other"),
+            (&seller_id, "seller"),
+        ] {
+            insert_user(
+                &pool,
+                id,
+                &format!("wanted_match_{label}_{}", Uuid::new_v4().simple()),
+                &password_hash,
+                "user",
+                "active",
+            )
+            .await;
+        }
+        let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("ncu campus");
+
+        let wanted_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO inventory (
+                id, campus_id, title, category, brand, condition_score,
+                suggested_price_cny, defects, owner_id, status, direction
+             ) VALUES ($1, $2, '想收一台显示器', 'electronics', '不限', 5, 50000,
+                       '[]', $3, 'active', 'wanted')",
+        )
+        .bind(&wanted_id)
+        .bind(campus_id)
+        .bind(&requester_id)
+        .execute(&pool)
+        .await
+        .expect("insert wanted");
+
+        let feedback_target_id = Uuid::new_v4().to_string();
+        let same_brand_id = Uuid::new_v4().to_string();
+        let alternate_brand_id = Uuid::new_v4().to_string();
+        let hidden_id = Uuid::new_v4().to_string();
+        let irrelevant_id = Uuid::new_v4().to_string();
+        let over_budget_id = Uuid::new_v4().to_string();
+        let low_condition_id = Uuid::new_v4().to_string();
+        let wrong_category_id = Uuid::new_v4().to_string();
+        let inactive_id = Uuid::new_v4().to_string();
+        let self_owned_id = Uuid::new_v4().to_string();
+        for (id, brand, category, price, condition, owner, status, age_hours) in [
+            (
+                &feedback_target_id,
+                "Acme",
+                "electronics",
+                30000_i64,
+                8_i32,
+                &seller_id,
+                "active",
+                0_i32,
+            ),
+            (
+                &same_brand_id,
+                "Acme",
+                "electronics",
+                32000,
+                8,
+                &seller_id,
+                "active",
+                1,
+            ),
+            (
+                &alternate_brand_id,
+                "Beta",
+                "electronics",
+                33000,
+                8,
+                &seller_id,
+                "active",
+                2,
+            ),
+            (
+                &hidden_id,
+                "Gamma",
+                "electronics",
+                34000,
+                8,
+                &seller_id,
+                "active",
+                3,
+            ),
+            (
+                &irrelevant_id,
+                "Delta",
+                "electronics",
+                35000,
+                8,
+                &seller_id,
+                "active",
+                4,
+            ),
+            (
+                &over_budget_id,
+                "Budget",
+                "electronics",
+                60000,
+                8,
+                &seller_id,
+                "active",
+                0,
+            ),
+            (
+                &low_condition_id,
+                "Condition",
+                "electronics",
+                30000,
+                4,
+                &seller_id,
+                "active",
+                0,
+            ),
+            (
+                &wrong_category_id,
+                "Category",
+                "books",
+                30000,
+                8,
+                &seller_id,
+                "active",
+                0,
+            ),
+            (
+                &inactive_id,
+                "Inactive",
+                "electronics",
+                30000,
+                8,
+                &seller_id,
+                "sold",
+                0,
+            ),
+            (
+                &self_owned_id,
+                "Self",
+                "electronics",
+                30000,
+                8,
+                &requester_id,
+                "active",
+                0,
+            ),
+        ] {
+            sqlx::query(
+                "INSERT INTO inventory (
+                    id, campus_id, title, category, brand, condition_score,
+                    suggested_price_cny, defects, owner_id, status, direction, created_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, '[]', $8, $9, 'offer',
+                           NOW() - make_interval(hours => $10))",
+            )
+            .bind(id)
+            .bind(campus_id)
+            .bind(format!("匹配候选 {brand}"))
+            .bind(category)
+            .bind(brand)
+            .bind(condition)
+            .bind(price)
+            .bind(owner)
+            .bind(status)
+            .bind(age_hours)
+            .execute(&pool)
+            .await
+            .expect("insert wanted match candidate");
+        }
+
+        let (requester_token, _, _) = generate_access_token_for_campus(
+            &requester_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("requester token");
+        let (other_token, _, _) = generate_access_token_for_campus(
+            &other_viewer_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("other token");
+        let app = create_router(build_state(pool.clone()), &[]);
+        let matches_uri = format!("/api/listings/{wanted_id}/matches");
+
+        let (status, initial) =
+            authenticated_json(&app, Method::GET, &matches_uri, &requester_token, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(initial["ranking_version"], "2026.07-wanted-feedback-v1");
+        let initial_items = initial["items"].as_array().expect("initial matches");
+        for expected in [
+            &feedback_target_id,
+            &same_brand_id,
+            &alternate_brand_id,
+            &hidden_id,
+            &irrelevant_id,
+        ] {
+            assert!(
+                initial_items.iter().any(|item| item["id"] == *expected),
+                "eligible candidate {expected} should be present"
+            );
+        }
+        for rejected in [
+            &over_budget_id,
+            &low_condition_id,
+            &wrong_category_id,
+            &inactive_id,
+            &self_owned_id,
+        ] {
+            assert!(
+                !initial_items.iter().any(|item| item["id"] == *rejected),
+                "hard-ineligible candidate {rejected} must not be returned"
+            );
+        }
+        for item in initial_items {
+            assert_eq!(item["rank_reason"], "known_slots_compatible");
+            assert_eq!(item["source"], "wanted_match");
+            assert_eq!(item["ranking_version"], "2026.07-wanted-feedback-v1");
+            let summary = item["match_summary"].as_array().expect("match summary");
+            for reason in [
+                "category_match",
+                "price_within_constraint",
+                "condition_at_least_requested",
+            ] {
+                assert!(
+                    summary.iter().any(|value| value == reason),
+                    "missing truthful match reason {reason}"
+                );
+            }
+            let object = item.as_object().expect("match object");
+            for private in [
+                "owner_id",
+                "campus_id",
+                "signal_key",
+                "feedback_weight",
+                "distance",
+            ] {
+                assert!(
+                    !object.contains_key(private),
+                    "private ranking field {private} leaked"
+                );
+            }
+        }
+
+        for (resource_id, action) in [
+            (&feedback_target_id, "less_like_this"),
+            (&hidden_id, "hide"),
+            (&irrelevant_id, "not_relevant"),
+        ] {
+            let (status, _) = authenticated_json(
+                &app,
+                Method::POST,
+                "/api/feed/feedback",
+                &requester_token,
+                Some(json!({
+                    "resource_type": "listing",
+                    "resource_id": resource_id,
+                    "action": action
+                })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+
+        let (_, downranked) =
+            authenticated_json(&app, Method::GET, &matches_uri, &requester_token, None).await;
+        let downranked_items = downranked["items"].as_array().expect("downranked matches");
+        for excluded in [&feedback_target_id, &hidden_id, &irrelevant_id] {
+            assert!(
+                !downranked_items.iter().any(|item| item["id"] == *excluded),
+                "every explicit feedback action must exact-filter its target"
+            );
+        }
+        let position = |items: &[Value], id: &str| {
+            items
+                .iter()
+                .position(|item| item["id"] == id)
+                .unwrap_or_else(|| panic!("missing wanted candidate {id}"))
+        };
+        assert!(
+            position(downranked_items, &alternate_brand_id)
+                < position(downranked_items, &same_brand_id),
+            "less_like_this should demote same-brand siblings within the hard category"
+        );
+
+        let (_, other_view) =
+            authenticated_json(&app, Method::GET, &matches_uri, &other_token, None).await;
+        let other_items = other_view["items"]
+            .as_array()
+            .expect("other viewer matches");
+        for expected in [&feedback_target_id, &hidden_id, &irrelevant_id] {
+            assert!(
+                other_items.iter().any(|item| item["id"] == *expected),
+                "one user's feedback must not affect another user's matches"
+            );
+        }
+
+        let (status, _) = authenticated_json(
+            &app,
+            Method::PUT,
+            "/api/feed/preferences",
+            &requester_token,
+            Some(json!({"personalization_enabled": false})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, disabled) =
+            authenticated_json(&app, Method::GET, &matches_uri, &requester_token, None).await;
+        let disabled_items = disabled["items"].as_array().expect("disabled matches");
+        assert!(
+            position(disabled_items, &same_brand_id)
+                < position(disabled_items, &alternate_brand_id),
+            "turning personalization off restores the base match order"
+        );
+        for excluded in [&feedback_target_id, &hidden_id, &irrelevant_id] {
+            assert!(
+                !disabled_items.iter().any(|item| item["id"] == *excluded),
+                "personalization off must preserve exact exclusions"
+            );
+        }
+
+        let (status, _) = authenticated_json(
+            &app,
+            Method::PUT,
+            "/api/feed/preferences",
+            &requester_token,
+            Some(json!({"personalization_enabled": true})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        sqlx::query(
+            "UPDATE feed_feedback SET updated_at = NOW() - INTERVAL '1 hour'
+             WHERE user_id = $1",
+        )
+        .bind(&requester_id)
+        .execute(&pool)
+        .await
+        .expect("age wanted feedback");
+        let (status, _) = authenticated_json(
+            &app,
+            Method::POST,
+            "/api/feed/personalization/clear",
+            &requester_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, cleared) =
+            authenticated_json(&app, Method::GET, &matches_uri, &requester_token, None).await;
+        let cleared_items = cleared["items"].as_array().expect("cleared matches");
+        assert!(
+            position(cleared_items, &same_brand_id) < position(cleared_items, &alternate_brand_id),
+            "reset ignores old same-brand feedback"
+        );
+        for excluded in [&feedback_target_id, &hidden_id, &irrelevant_id] {
+            assert!(
+                !cleared_items.iter().any(|item| item["id"] == *excluded),
+                "reset must preserve exact exclusions"
+            );
+        }
+
+        sqlx::query("UPDATE inventory SET status = 'fulfilled' WHERE id = $1")
+            .bind(&wanted_id)
+            .execute(&pool)
+            .await
+            .expect("fulfill wanted");
+        let (_, fulfilled) =
+            authenticated_json(&app, Method::GET, &matches_uri, &requester_token, None).await;
+        assert_eq!(fulfilled["ranking_version"], "2026.07-wanted-feedback-v1");
+        assert!(fulfilled["items"]
+            .as_array()
+            .expect("fulfilled items")
+            .is_empty());
+
+        sqlx::query("UPDATE inventory SET status = 'active' WHERE id = $1")
+            .bind(&wanted_id)
+            .execute(&pool)
+            .await
+            .expect("reopen wanted");
+        let (_, reopened) =
+            authenticated_json(&app, Method::GET, &matches_uri, &requester_token, None).await;
+        for excluded in [&feedback_target_id, &hidden_id, &irrelevant_id] {
+            assert!(
+                !reopened["items"]
+                    .as_array()
+                    .expect("reopened matches")
+                    .iter()
+                    .any(|item| item["id"] == *excluded),
+                "reopening a wanted must not restore exact-hidden candidates"
+            );
+        }
+
+        let other_campus_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO campuses (id, slug, name_zh, name_en, email_domains)
+             VALUES ($1, $2, '跨校匹配测试', 'Cross-campus match test', ARRAY['match.test'])",
+        )
+        .bind(other_campus_id)
+        .bind(format!(
+            "wanted-match-{}",
+            &other_campus_id.to_string()[..8]
+        ))
+        .execute(&pool)
+        .await
+        .expect("insert other campus");
+        let other_wanted_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO inventory (
+                id, campus_id, title, category, brand, condition_score,
+                suggested_price_cny, defects, owner_id, status, direction
+             ) VALUES ($1, $2, 'Other campus wanted', 'electronics', '不限', 5,
+                       50000, '[]', $3, 'active', 'wanted')",
+        )
+        .bind(&other_wanted_id)
+        .bind(other_campus_id)
+        .bind(&seller_id)
+        .execute(&pool)
+        .await
+        .expect("insert other-campus wanted");
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/listings/{other_wanted_id}/matches"))
+                    .header("Authorization", bearer(&requester_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("cross-campus source response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     })
     .await;
 }

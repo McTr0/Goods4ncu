@@ -14,6 +14,7 @@ use crate::categories::{normalize_category, valid_category_message, MARKETPLACE_
 use crate::repositories::{CreateListingInput, ListingRepository, UpdateListingInput};
 use crate::services::campus::CampusService;
 use crate::services::notification::NewNotification;
+use crate::services::wanted_match::WantedMatchService;
 use crate::utils::cents_to_yuan;
 
 // ---------------------------------------------------------------------------
@@ -64,6 +65,32 @@ pub struct ListingsResponse {
     pub total: i64,
     pub limit: i64,
     pub offset: i64,
+}
+
+/// Version of the deterministic hard constraints and per-viewer ordering used
+/// by the legacy wanted-listing match surface.
+pub const WANTED_MATCH_RANKING_VERSION: &str = "2026.07-wanted-feedback-v1";
+
+/// A wanted-match item is additive to the ordinary browse shape. Keeping this
+/// wrapper separate prevents browse/search results from acquiring meaningless
+/// recommendation fields.
+#[derive(Serialize)]
+pub struct WantedMatchItem {
+    #[serde(flatten)]
+    pub listing: ListingSummary,
+    pub rank_reason: &'static str,
+    pub match_summary: Vec<&'static str>,
+    pub source: &'static str,
+    pub ranking_version: &'static str,
+}
+
+#[derive(Serialize)]
+pub struct WantedMatchesResponse {
+    pub items: Vec<WantedMatchItem>,
+    pub total: i64,
+    pub limit: i64,
+    pub offset: i64,
+    pub ranking_version: &'static str,
 }
 
 /// Full detail returned by GET /api/listings/:id
@@ -172,6 +199,22 @@ fn listing_summary_from_listing(listing: crate::repositories::Listing) -> Listin
         status: listing.status,
         image_url: listing.image_url,
         defect_hint,
+    }
+}
+
+fn wanted_match_item_from_listing(listing: crate::repositories::Listing) -> WantedMatchItem {
+    WantedMatchItem {
+        listing: listing_summary_from_listing(listing),
+        // Every returned row passed all three public, deterministic hard
+        // constraints below. This says no more than the server can prove.
+        rank_reason: "known_slots_compatible",
+        match_summary: vec![
+            "category_match",
+            "price_within_constraint",
+            "condition_at_least_requested",
+        ],
+        source: "wanted_match",
+        ranking_version: WANTED_MATCH_RANKING_VERSION,
     }
 }
 
@@ -437,89 +480,36 @@ pub async fn get_wanted_matches(
     State(state): State<AppState>,
     OptionalSession(session): OptionalSession,
     Path(id): Path<String>,
-) -> Result<Json<ListingsResponse>, ApiError> {
+) -> Result<Json<WantedMatchesResponse>, ApiError> {
     let campus_service = CampusService::new(state.infra.db.clone());
-    let campus_id = match session {
+    let (viewer_id, campus_id) = match session {
         Some(session) => {
-            campus_service
+            let campus_id = campus_service
                 .resolve_session_campus(&session.user_id, session.campus_id)
-                .await?
+                .await?;
+            (Some(session.user_id), campus_id)
         }
-        None => campus_service.default_public_campus_id().await?,
+        None => (None, campus_service.default_public_campus_id().await?),
     };
-    let wanted = state
-        .listing_repo
-        .find_by_id(&id)
-        .await?
-        .filter(|listing| listing.campus_id == campus_id)
-        .ok_or(ApiError::NotFound)?;
 
-    if wanted.direction != "wanted" {
-        return Err(ApiError::BadRequest(
-            "只有收物需求可以查看匹配商品".to_string(),
-        ));
-    }
-    if wanted.status != "active" {
-        return Ok(Json(ListingsResponse {
-            items: Vec::new(),
-            total: 0,
-            limit: 20,
-            offset: 0,
-        }));
-    }
-
-    let search_text = format!("%{}%", wanted.title.replace('%', "\\%").replace('_', "\\_"));
-    let rows = sqlx::query_as::<_, crate::repositories::Listing>(
-        r#"
-        SELECT i.id, i.campus_id, i.title, i.category, i.brand, i.direction, i.condition_score,
-               i.suggested_price_cny, i.defects, i.description, i.image_url,
-               i.owner_id, i.status, i.created_at
-        FROM inventory i
-        LEFT JOIN documents wanted_doc ON wanted_doc.id = $1
-        LEFT JOIN documents offer_doc ON offer_doc.id = i.id
-        WHERE i.status = 'active'
-          AND i.direction = 'offer'
-          AND i.owner_id <> $2
-          AND i.category = $3
-          AND i.suggested_price_cny <= $4
-          AND i.condition_score >= $5
-          AND i.campus_id = $7
-        ORDER BY
-          CASE WHEN wanted_doc.embedding IS NULL OR offer_doc.embedding IS NULL THEN 1 ELSE 0 END ASC,
-          CASE WHEN wanted_doc.embedding IS NULL OR offer_doc.embedding IS NULL
-               THEN NULL ELSE offer_doc.embedding <=> wanted_doc.embedding END ASC,
-          CASE WHEN i.title ILIKE $6 OR COALESCE(i.description, '') ILIKE $6 THEN 0 ELSE 1 END ASC,
-          i.created_at DESC
-        LIMIT 20
-        "#,
-    )
-    .bind(&wanted.id)
-    .bind(&wanted.owner_id)
-    .bind(&wanted.category)
-    .bind(wanted.suggested_price_cny)
-    .bind(wanted.condition_score)
-    .bind(&search_text)
-    .bind(wanted.campus_id)
-    .fetch_all(&state.infra.db)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-    let items: Vec<ListingSummary> = rows.into_iter().map(listing_summary_from_listing).collect();
-    let total = items.len() as i64;
-    // Private-bucket deployments serve approved media as presigned URLs; the
-    // moderation gate already nulled anything unapproved.
-    let items = items
+    let matches = WantedMatchService::new(state.infra.db.clone())
+        .matches(campus_id, viewer_id.as_deref(), &id)
+        .await?;
+    let items = matches
         .into_iter()
+        .map(wanted_match_item_from_listing)
         .map(|mut item| {
-            item.image_url = state.public_media_url(item.image_url);
+            item.listing.image_url = state.public_media_url(item.listing.image_url);
             item
         })
         .collect::<Vec<_>>();
-    Ok(Json(ListingsResponse {
+    let total = items.len() as i64;
+    Ok(Json(WantedMatchesResponse {
         items,
         total,
         limit: 20,
         offset: 0,
+        ranking_version: WANTED_MATCH_RANKING_VERSION,
     }))
 }
 
@@ -1257,6 +1247,81 @@ mod tests {
         let json = serde_json::to_string(&response).unwrap();
         assert!(json.contains("\"items\":[]"));
         assert!(json.contains("\"total\":0"));
+    }
+
+    #[test]
+    fn wanted_match_response_is_additive_versioned_and_private() {
+        let response = WantedMatchesResponse {
+            items: vec![WantedMatchItem {
+                listing: ListingSummary {
+                    id: "offer-1".to_string(),
+                    title: "Matching offer".to_string(),
+                    category: "electronics".to_string(),
+                    brand: "Campus Brand".to_string(),
+                    direction: "offer".to_string(),
+                    condition_score: 9,
+                    suggested_price_cny: 299.0,
+                    status: "active".to_string(),
+                    image_url: None,
+                    defect_hint: None,
+                },
+                rank_reason: "known_slots_compatible",
+                match_summary: vec![
+                    "category_match",
+                    "price_within_constraint",
+                    "condition_at_least_requested",
+                ],
+                source: "wanted_match",
+                ranking_version: WANTED_MATCH_RANKING_VERSION,
+            }],
+            total: 1,
+            limit: 20,
+            offset: 0,
+            ranking_version: WANTED_MATCH_RANKING_VERSION,
+        };
+
+        let json = serde_json::to_value(response).expect("wanted matches serialize");
+        assert_eq!(json["ranking_version"], "2026.07-wanted-feedback-v1");
+        let item = &json["items"][0];
+        assert_eq!(item["id"], "offer-1");
+        assert_eq!(item["rank_reason"], "known_slots_compatible");
+        assert_eq!(
+            item["match_summary"],
+            serde_json::json!([
+                "category_match",
+                "price_within_constraint",
+                "condition_at_least_requested"
+            ])
+        );
+        assert_eq!(item["source"], "wanted_match");
+        assert_eq!(item["ranking_version"], json["ranking_version"]);
+        for private_key in [
+            "owner_id",
+            "campus_id",
+            "embedding",
+            "distance",
+            "brand_key",
+            "weight",
+        ] {
+            assert!(
+                item.get(private_key).is_none(),
+                "{private_key} must not cross the wanted-match boundary"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_wanted_match_response_keeps_ranking_version() {
+        let response = WantedMatchesResponse {
+            items: Vec::new(),
+            total: 0,
+            limit: 20,
+            offset: 0,
+            ranking_version: WANTED_MATCH_RANKING_VERSION,
+        };
+        let json = serde_json::to_value(response).expect("empty wanted matches serialize");
+        assert_eq!(json["items"], serde_json::json!([]));
+        assert_eq!(json["ranking_version"], "2026.07-wanted-feedback-v1");
     }
 
     #[test]

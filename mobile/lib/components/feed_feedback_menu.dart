@@ -115,10 +115,13 @@ class _FeedbackMenuRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
     children: [
       Icon(icon, size: 20, color: AppTheme.textSecondary),
       const SizedBox(width: 12),
-      Text(label),
+      Flexible(
+        child: Text(label, maxLines: 3, overflow: TextOverflow.ellipsis),
+      ),
     ],
   );
 }

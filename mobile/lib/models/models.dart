@@ -22,6 +22,7 @@ class Listing {
   final String? rankReason;
   final List<String> matchSummary;
   final String? source;
+  final String? rankingVersion;
 
   Listing({
     required this.id,
@@ -42,6 +43,7 @@ class Listing {
     this.rankReason,
     this.matchSummary = const [],
     this.source,
+    this.rankingVersion,
   });
 
   factory Listing.fromJson(Map<String, dynamic> json) {
@@ -65,11 +67,12 @@ class Listing {
       ownerId: json['owner_id'],
       ownerUsername: json['owner_username'],
       createdAt: json['created_at'],
-      rankReason: json['rank_reason'],
+      rankReason: json['rank_reason']?.toString(),
       matchSummary: (json['match_summary'] as List<dynamic>? ?? const [])
           .map((value) => value.toString())
           .toList(),
       source: json['source']?.toString(),
+      rankingVersion: json['ranking_version']?.toString(),
     );
   }
 
@@ -93,22 +96,30 @@ class ListingsResponse {
   final int total;
   final int limit;
   final int offset;
+  final String? rankingVersion;
 
   ListingsResponse({
     required this.items,
     required this.total,
     required this.limit,
     required this.offset,
+    this.rankingVersion,
   });
 
   factory ListingsResponse.fromJson(Map<String, dynamic> json) {
+    final rankingVersion = json['ranking_version']?.toString();
     return ListingsResponse(
-      items: (json['items'] as List<dynamic>)
-          .map((e) => Listing.fromJson(e as Map<String, dynamic>))
-          .toList(),
+      items: (json['items'] as List<dynamic>).map((e) {
+        final item = Map<String, dynamic>.from(e as Map<String, dynamic>);
+        if (rankingVersion != null && !item.containsKey('ranking_version')) {
+          item['ranking_version'] = rankingVersion;
+        }
+        return Listing.fromJson(item);
+      }).toList(),
       total: json['total'] ?? 0,
       limit: json['limit'] ?? 20,
       offset: json['offset'] ?? 0,
+      rankingVersion: rankingVersion,
     );
   }
 }

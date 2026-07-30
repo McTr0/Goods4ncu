@@ -34,7 +34,7 @@
 - WebSocket 跨副本投递已具备（Redis fan-out，双实例端到端验证）；typing/call signaling 多副本化与压测仍待做。outbox 基础与通知推送已持久化，其余事件消费者仍在进程内。
 - 媒体隔离、审核公开门槛、缩略图和 Base64 退出不完整；案件事实层已具备，但对象存储隔离仍需生产化。
 - API 缺少统一版本和 cursor；[已实现] 未版本化接口已有兼容旧客户端的稳定错误字段、服务端 request ID，以及 listing 发布幂等，其他写接口仍需收敛。
-- 首页商品 feed 与意图撮合已有解释和显式反馈控制；相似商品/listing wanted matches 的 feedback 消费、统一解释、离线评估和公平性指标仍不足。
+- 首页商品 feed、相似商品、listing wanted matches 与意图撮合均已有统一解释和显式反馈控制；离线质量评估、公平性指标与跨表达软排序仍不足。
 - Secret Chat 与服务器可治理通信目标冲突。
 - 备份恢复、密钥管理、SLO、告警和事故演练未闭环。
 
@@ -132,8 +132,8 @@
 
 - 两阶段推荐：硬约束/召回，再排序/多样性。
 - 所有检索先过滤 campus、status、direction 和 visibility。
-- [部分完成] 商品 Feed/相似接口每项返回 `rank_reason` 与 `source`（`recency|category_affinity|vector_similarity`），响应携带 `ranking_version`（当前 `2026.07-feedback-v2`）；意图 feed/matches 返回稳定 `rank_reason`、`match_summary`、`source` 与 `2026.07-intent-hard-v1`，只解释已知生命周期和双方声明的约束，不序列化作者 ID。移动端把稳定 code 本地化为人话理由。listing wanted matches 自身的统一 `match_summary` 契约仍待补。
-- [已实现] `feed_feedback`/`feed_preferences` 与未版本化 API 提供隐藏、少推荐这类、不相关、个性化开关和重置。目标与校园由服务端派生；重复反馈幂等更新。在首页商品 feed 与 intent feed/matches 中，三种 action 精确排除对应资源，`less_like_this` 额外降低同分类/kind；关闭个性化或重置只停用泛化旧信号，明确反馈仍保留。Flutter 的商品卡、意图流、意图匹配和设置页均有入口；相似商品/listing wanted matches 尚未消费 feedback。
+- [部分完成] 首页商品 Feed 返回 `2026.07-feedback-v2`、服务端人话 `rank_reason` 与稳定 `source`；相似商品返回稳定解释 code 和 `2026.07-similar-feedback-v1`。listing wanted matches 返回 `known_slots_compatible`、只来自已执行硬约束的 `match_summary`、`source=wanted_match` 和 `2026.07-wanted-feedback-v1`。意图 feed/matches 返回稳定解释与 `2026.07-intent-hard-v1`。移动端把稳定 code 本地化为人话，并兼容已有服务端人话原因；不序列化作者、距离、权重或反馈信号。跨表达软排序与置信度校准仍待补。
+- [已实现] `feed_feedback`/`feed_preferences` 与未版本化 API 提供隐藏、少推荐这类、不相关、个性化开关和重置。目标与校园由服务端派生；重复反馈幂等更新。在首页商品、相似商品、listing wanted matches 与 intent feed/matches 中，三种 action 精确排除对应资源；`less_like_this` 分别降低同分类、wanted hard-category 内同品牌或同 kind 候选。关闭个性化或重置只停用泛化旧信号，明确反馈仍保留。Flutter 当前推荐与匹配入口均有本地化理由和反馈控件。
 - 防止重复条目、单一类别垄断和自己内容反复出现。
 
 ### 评估
@@ -145,9 +145,9 @@
 
 ### 退出门槛
 
-- [部分完成] wanted/offer 的创建、匹配、响应（含 accept/dismiss/withdraw）、完成和重新开启已有后端端到端回归；浏览器全旅程验收仍待做。
+- [部分完成] wanted/offer 的创建、匹配、响应（含 accept/dismiss/withdraw）、完成和重新开启已有后端端到端回归；真实窄屏浏览器已验证登录、wanted 匹配解释、反馈移除和详情同路由切换，完整的浏览器创建→响应→接受/忽略→完成→重开多角色旅程仍待做。
 - 硬约束违反率为零；没有 embedding 时关键词和条件 fallback 可用。
-- [已实现] 商品推荐与意图 feed/matches 的当前移动端路径都有用户可理解原因和反馈入口；未知机器 code 不直接展示。listing wanted matches 的原因契约仍按上一节继续收敛。
+- [已实现] 商品首页、相似商品、listing wanted matches 与意图 feed/matches 的当前移动端路径都有用户可理解原因和反馈入口；未知机器 code 不直接展示。
 - 新排序在质量、信任和公平 guardrail 上不劣于基线。
 - Feed/Search p95 在目标容量下小于 500ms。
 

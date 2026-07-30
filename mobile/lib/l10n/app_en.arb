@@ -1329,7 +1329,7 @@
   "feedFeedbackHide": "Hide this",
   "feedFeedbackLessLikeThis": "Show me fewer like this",
   "feedFeedbackNotRelevant": "Not relevant",
-  "feedFeedbackSaved": "Thanks. This item has been removed from your feed.",
+  "feedFeedbackSaved": "Thanks. This recommendation has been removed.",
   "feedFeedbackFailed": "Couldn't save that preference. The item is still here.",
   "feedReasonRecent": "Recently posted",
   "feedReasonSameCategory": "Matches categories you view",

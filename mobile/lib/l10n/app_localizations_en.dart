@@ -2664,7 +2664,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get feedFeedbackSaved =>
-      'Thanks. This item has been removed from your feed.';
+      'Thanks. This recommendation has been removed.';
 
   @override
   String get feedFeedbackFailed =>

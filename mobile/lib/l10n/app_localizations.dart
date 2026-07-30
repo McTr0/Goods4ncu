@@ -4875,7 +4875,7 @@ abstract class AppLocalizations {
   /// No description provided for @feedFeedbackSaved.
   ///
   /// In en, this message translates to:
-  /// **'Thanks. This item has been removed from your feed.'**
+  /// **'Thanks. This recommendation has been removed.'**
   String get feedFeedbackSaved;
 
   /// No description provided for @feedFeedbackFailed.

@@ -11,9 +11,14 @@ class RecommendationService extends BaseService {
   List<Listing> _parseItems(String body) {
     final data = jsonDecode(body) as Map<String, dynamic>;
     final items = data['items'] as List<dynamic>? ?? [];
-    return items
-        .map((e) => Listing.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final rankingVersion = data['ranking_version']?.toString();
+    return items.map((e) {
+      final item = Map<String, dynamic>.from(e as Map<String, dynamic>);
+      if (rankingVersion != null && !item.containsKey('ranking_version')) {
+        item['ranking_version'] = rankingVersion;
+      }
+      return Listing.fromJson(item);
+    }).toList();
   }
 
   /// GET /api/recommendations/similar?listing_id=xxx
