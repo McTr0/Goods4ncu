@@ -1108,6 +1108,99 @@ class AppLocalizationsZh extends AppLocalizations {
   String get wantedReopenedToast => '需求已重新开启';
 
   @override
+  String get wantedFulfillConfirmTitle => '确认标记需求已完成？';
+
+  @override
+  String get wantedFulfillConfirmBody => '新的匹配和推荐将停止；已有会话和推荐历史会保留，之后仍可重新开启需求。';
+
+  @override
+  String get wantedClosedResponderHint => '该需求已关闭，暂时不能接收新的商品推荐。';
+
+  @override
+  String get wantedResponsesReceivedTitle => '收到的推荐';
+
+  @override
+  String get wantedResponsesSentTitle => '我发出的推荐';
+
+  @override
+  String get wantedResponsesReceivedEmpty => '暂时还没有同学为这条需求推荐商品。';
+
+  @override
+  String get wantedResponsesSentEmpty => '你还没有为这条需求推荐商品。';
+
+  @override
+  String get wantedResponseLoadFailed => '推荐暂时没有加载出来，请重试。';
+
+  @override
+  String wantedResponseActionFailed(String error) {
+    return '推荐状态更新失败：$error';
+  }
+
+  @override
+  String get wantedResponseAcceptedToast => '已接受这条推荐';
+
+  @override
+  String get wantedResponseDismissedToast => '已忽略这条推荐';
+
+  @override
+  String get wantedResponseWithdrawnToast => '已撤回这条推荐';
+
+  @override
+  String get wantedResponseStatusPending => '等待处理';
+
+  @override
+  String get wantedResponseStatusAccepted => '已接受';
+
+  @override
+  String get wantedResponseStatusDismissed => '已忽略';
+
+  @override
+  String get wantedResponseStatusWithdrawn => '已撤回';
+
+  @override
+  String get wantedResponseStatusUnknown => '状态未知';
+
+  @override
+  String get wantedResponseListingStatusActive => '进行中';
+
+  @override
+  String get wantedResponseListingStatusFulfilled => '已完成';
+
+  @override
+  String get wantedResponseListingStatusSold => '已售';
+
+  @override
+  String get wantedResponseListingStatusDeleted => '已下架';
+
+  @override
+  String get wantedResponseListingStatusUnknown => '状态未知';
+
+  @override
+  String wantedResponseWantedContext(String title, String status) {
+    return '需求：$title · $status';
+  }
+
+  @override
+  String wantedResponseOfferContext(String title, String status) {
+    return '商品：$title · $status';
+  }
+
+  @override
+  String get wantedResponseMessageLabel => '推荐留言';
+
+  @override
+  String get wantedResponseOpenOfferAction => '查看商品';
+
+  @override
+  String get wantedResponseAcceptAction => '接受';
+
+  @override
+  String get wantedResponseDismissAction => '忽略';
+
+  @override
+  String get wantedResponseWithdrawAction => '撤回';
+
+  @override
   String get agentPlanSecondConfirmTitle => '高风险操作，请再次确认';
 
   @override

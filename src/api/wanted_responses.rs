@@ -13,7 +13,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
-use crate::api::session::Session;
+use crate::api::session::VerifiedTenant;
 use crate::api::AppState;
 use crate::services::notification::NewNotification;
 
@@ -23,15 +23,18 @@ pub struct ResponseListQuery {
     /// `responder` — recommendations I sent.
     pub role: Option<String>,
     pub status: Option<String>,
+    pub wanted_listing_id: Option<String>,
     pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 /// GET /api/wanted-responses — the caller's responses, by role.
 pub async fn list_wanted_responses(
     State(state): State<AppState>,
-    Session(session): Session,
+    tenant: VerifiedTenant,
     Query(params): Query<ResponseListQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = tenant.session;
     let role = params.role.as_deref().unwrap_or("requester");
     let column = match role {
         "requester" => "requester_id",
@@ -48,21 +51,50 @@ pub async fn list_wanted_responses(
         }
     }
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
+    let offset = params.offset.unwrap_or(0).max(0);
+    let wanted_listing_id = params
+        .wanted_listing_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    let filter = format!(
+        "FROM wanted_responses r
+         WHERE r.{column} = $1
+           AND r.campus_id = $2
+           AND ($3::text IS NULL OR r.status = $3)
+           AND ($4::text IS NULL OR r.wanted_listing_id = $4)"
+    );
+    let total: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) {filter}"))
+        .bind(&session.user_id)
+        .bind(tenant.campus_id)
+        .bind(params.status.as_deref())
+        .bind(wanted_listing_id)
+        .fetch_one(&state.infra.db)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
     let rows = sqlx::query(&format!(
         "SELECT r.id, r.wanted_listing_id, r.offer_listing_id, r.responder_id, r.requester_id,
                 r.message, r.status, r.created_at, r.responded_at,
-                w.title AS wanted_title, o.title AS offer_title
+                w.title AS wanted_title, w.status AS wanted_status,
+                o.title AS offer_title, o.status AS offer_status
          FROM wanted_responses r
          JOIN inventory w ON w.id = r.wanted_listing_id
          JOIN inventory o ON o.id = r.offer_listing_id
-         WHERE r.{column} = $1 AND ($2::text IS NULL OR r.status = $2)
+         WHERE r.{column} = $1
+           AND r.campus_id = $2
+           AND ($3::text IS NULL OR r.status = $3)
+           AND ($4::text IS NULL OR r.wanted_listing_id = $4)
          ORDER BY r.created_at DESC
-         LIMIT $3"
+         LIMIT $5 OFFSET $6"
     ))
     .bind(&session.user_id)
+    .bind(tenant.campus_id)
     .bind(params.status.as_deref())
+    .bind(wanted_listing_id)
     .bind(limit)
+    .bind(offset)
     .fetch_all(&state.infra.db)
     .await
     .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
@@ -74,8 +106,10 @@ pub async fn list_wanted_responses(
                 "id": row.get::<Uuid, _>("id").to_string(),
                 "wanted_listing_id": row.get::<String, _>("wanted_listing_id"),
                 "wanted_title": row.get::<String, _>("wanted_title"),
+                "wanted_status": row.get::<String, _>("wanted_status"),
                 "offer_listing_id": row.get::<String, _>("offer_listing_id"),
                 "offer_title": row.get::<String, _>("offer_title"),
+                "offer_status": row.get::<String, _>("offer_status"),
                 "responder_id": row.get::<String, _>("responder_id"),
                 "requester_id": row.get::<String, _>("requester_id"),
                 "message": row.get::<Option<String>, _>("message"),
@@ -86,7 +120,12 @@ pub async fn list_wanted_responses(
         })
         .collect();
 
-    Ok(Json(serde_json::json!({ "items": items })))
+    Ok(Json(serde_json::json!({
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    })))
 }
 
 struct ResponseAction {
@@ -99,58 +138,104 @@ struct ResponseAction {
     event_type: &'static str,
     title: &'static str,
     body: fn(&str) -> String,
+    require_wanted_active: bool,
+    require_offer_active: bool,
 }
 
 async fn act_on_response(
     state: &AppState,
     user_id: &str,
+    campus_id: Uuid,
     response_id: Uuid,
     action: ResponseAction,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    // Load first so unauthorized callers get 404 (no response existence leak
-    // across users) and so we have the counterpart + titles for notification.
-    let row = sqlx::query(
-        "SELECT r.campus_id, r.responder_id, r.requester_id, r.status,
-                w.title AS wanted_title, o.title AS offer_title
+    let mut tx = state
+        .infra
+        .db
+        .begin()
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+    // Scope both the lookup and transition to the verified active campus. This
+    // keeps a guessed response id from revealing another campus's data, even
+    // when the caller happens to be one of its parties. Lock all three state
+    // rows so fulfillment, sale and another response action serialize with the
+    // eligibility decision rather than racing a preflight read.
+    let row = sqlx::query(&format!(
+        "SELECT r.responder_id, r.requester_id, r.status, r.wanted_listing_id,
+                w.status AS wanted_status, o.status AS offer_status,
+                o.title AS offer_title
          FROM wanted_responses r
          JOIN inventory w ON w.id = r.wanted_listing_id
          JOIN inventory o ON o.id = r.offer_listing_id
-         WHERE r.id = $1",
-    )
+         WHERE r.id = $1 AND r.campus_id = $2 AND r.{} = $3
+         FOR UPDATE OF r, w, o",
+        action.actor_column
+    ))
     .bind(response_id)
-    .fetch_optional(&state.infra.db)
+    .bind(campus_id)
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
     .ok_or(ApiError::NotFound)?;
 
-    let actor: String = row.get(action.actor_column);
-    if actor != user_id {
-        return Err(ApiError::NotFound);
+    let status: String = row.get("status");
+    let wanted_status: String = row.get("wanted_status");
+    let offer_status: String = row.get("offer_status");
+    let ineligible_reason = if status != "pending" {
+        Some(format!("该推荐当前状态为 {status}，无法操作"))
+    } else if action.require_wanted_active && wanted_status != "active" {
+        Some(format!("收物需求当前状态为 {wanted_status}，无法操作"))
+    } else if action.require_offer_active && offer_status != "active" {
+        Some(format!("推荐商品当前状态为 {offer_status}，无法操作"))
+    } else {
+        None
+    };
+    if let Some(reason) = ineligible_reason {
+        return Err(ApiError::Conflict(reason));
     }
 
+    // Keep the same predicates on the write as defense in depth. The locked
+    // rows make the cross-table decision atomic; these predicates also protect
+    // the transition if this query is later reused without the preflight.
     let updated = sqlx::query(&format!(
-        "UPDATE wanted_responses
+        "UPDATE wanted_responses AS r
          SET status = $2, responded_at = NOW()
-         WHERE id = $1 AND status = 'pending' AND {} = $3",
+         FROM inventory AS w, inventory AS o
+         WHERE r.id = $1
+           AND r.status = 'pending'
+           AND r.{} = $3
+           AND r.campus_id = $4
+           AND w.id = r.wanted_listing_id
+           AND w.campus_id = r.campus_id
+           AND o.id = r.offer_listing_id
+           AND o.campus_id = r.campus_id
+           AND (NOT $5::boolean OR w.status = 'active')
+           AND (NOT $6::boolean OR o.status = 'active')",
         action.actor_column
     ))
     .bind(response_id)
     .bind(action.to_status)
     .bind(user_id)
-    .execute(&state.infra.db)
+    .bind(campus_id)
+    .bind(action.require_wanted_active)
+    .bind(action.require_offer_active)
+    .execute(&mut *tx)
     .await
     .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
     if updated.rows_affected() == 0 {
-        let status: String = row.get("status");
-        return Err(ApiError::Conflict(format!(
-            "该推荐当前状态为 {}，无法操作",
-            status
-        )));
+        return Err(ApiError::Conflict(
+            "该推荐状态已发生变化，无法操作".to_string(),
+        ));
     }
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
-    let campus_id: Uuid = row.get("campus_id");
     let counterpart: String = row.get(action.notify_column);
     let offer_title: String = row.get("offer_title");
+    let wanted_listing_id: String = row.get("wanted_listing_id");
     if let Err(e) = state
         .infra
         .notification
@@ -161,7 +246,7 @@ async fn act_on_response(
             title: action.title,
             body: &(action.body)(&offer_title),
             related_order_id: None,
-            related_listing_id: None,
+            related_listing_id: Some(&wanted_listing_id),
             related_conversation_id: None,
             related_space_id: None,
         })
@@ -179,12 +264,13 @@ async fn act_on_response(
 /// POST /api/wanted-responses/{id}/accept — requester accepts a recommendation.
 pub async fn accept_wanted_response(
     State(state): State<AppState>,
-    Session(session): Session,
+    tenant: VerifiedTenant,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     act_on_response(
         &state,
-        &session.user_id,
+        &tenant.session.user_id,
+        tenant.campus_id,
         id,
         ResponseAction {
             to_status: "accepted",
@@ -193,6 +279,8 @@ pub async fn accept_wanted_response(
             event_type: "wanted_response_accepted",
             title: "你的推荐被采纳了",
             body: |offer| format!("需求方接受了你推荐的“{}”，可以开始联系", offer),
+            require_wanted_active: true,
+            require_offer_active: true,
         },
     )
     .await
@@ -201,12 +289,13 @@ pub async fn accept_wanted_response(
 /// POST /api/wanted-responses/{id}/dismiss — requester declines a recommendation.
 pub async fn dismiss_wanted_response(
     State(state): State<AppState>,
-    Session(session): Session,
+    tenant: VerifiedTenant,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     act_on_response(
         &state,
-        &session.user_id,
+        &tenant.session.user_id,
+        tenant.campus_id,
         id,
         ResponseAction {
             to_status: "dismissed",
@@ -215,6 +304,8 @@ pub async fn dismiss_wanted_response(
             event_type: "wanted_response_dismissed",
             title: "你的推荐未被采纳",
             body: |offer| format!("需求方暂不需要“{}”，感谢你的推荐", offer),
+            require_wanted_active: true,
+            require_offer_active: false,
         },
     )
     .await
@@ -224,12 +315,13 @@ pub async fn dismiss_wanted_response(
 /// recommendation.
 pub async fn withdraw_wanted_response(
     State(state): State<AppState>,
-    Session(session): Session,
+    tenant: VerifiedTenant,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     act_on_response(
         &state,
-        &session.user_id,
+        &tenant.session.user_id,
+        tenant.campus_id,
         id,
         ResponseAction {
             to_status: "withdrawn",
@@ -238,6 +330,8 @@ pub async fn withdraw_wanted_response(
             event_type: "wanted_response_withdrawn",
             title: "一条推荐已被撤回",
             body: |offer| format!("对方撤回了推荐的“{}”", offer),
+            require_wanted_active: false,
+            require_offer_active: false,
         },
     )
     .await

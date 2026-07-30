@@ -18,11 +18,20 @@ class _ListingApiService extends ApiService {
     required this.listing,
     required this.currentUserId,
     this.wantedMatches = const [],
-  });
+    List<WantedResponse> wantedResponses = const [],
+    this.failWantedAction = false,
+  }) : wantedResponses = List.of(wantedResponses);
 
   final Listing listing;
   final String? currentUserId;
   final List<Listing> wantedMatches;
+  final List<WantedResponse> wantedResponses;
+  final bool failWantedAction;
+  final List<String> wantedResponseActions = [];
+  String? wantedResponseRole;
+  String? wantedResponseListingId;
+  int fulfillCalls = 0;
+  int relistCalls = 0;
 
   @override
   Future<String?> getToken() async => currentUserId == null ? null : 'token';
@@ -39,6 +48,74 @@ class _ListingApiService extends ApiService {
         offset: 0,
         rankingVersion: '2026.07-wanted-feedback-v1',
       );
+
+  @override
+  Future<WantedResponsesResponse> getWantedResponses({
+    String role = 'requester',
+    String? wantedListingId,
+    String? status,
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    wantedResponseRole = role;
+    wantedResponseListingId = wantedListingId;
+    return WantedResponsesResponse(
+      items: wantedResponses,
+      total: wantedResponses.length,
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  @override
+  Future<WantedResponseActionResult> acceptWantedResponse(String id) =>
+      _actOnWantedResponse(id, 'accepted');
+
+  @override
+  Future<WantedResponseActionResult> dismissWantedResponse(String id) =>
+      _actOnWantedResponse(id, 'dismissed');
+
+  @override
+  Future<WantedResponseActionResult> withdrawWantedResponse(String id) =>
+      _actOnWantedResponse(id, 'withdrawn');
+
+  Future<WantedResponseActionResult> _actOnWantedResponse(
+    String id,
+    String status,
+  ) async {
+    wantedResponseActions.add('$status:$id');
+    if (failWantedAction) throw Exception('offline');
+    final index = wantedResponses.indexWhere((response) => response.id == id);
+    if (index >= 0) {
+      final response = wantedResponses[index];
+      wantedResponses[index] = WantedResponse(
+        id: response.id,
+        wantedListingId: response.wantedListingId,
+        wantedTitle: response.wantedTitle,
+        wantedStatus: response.wantedStatus,
+        offerListingId: response.offerListingId,
+        offerTitle: response.offerTitle,
+        offerStatus: response.offerStatus,
+        responderId: response.responderId,
+        requesterId: response.requesterId,
+        message: response.message,
+        status: status,
+        createdAt: response.createdAt,
+        respondedAt: DateTime.utc(2026, 7, 30),
+      );
+    }
+    return WantedResponseActionResult(id: id, status: status);
+  }
+
+  @override
+  Future<void> fulfillWanted(String id) async {
+    fulfillCalls += 1;
+  }
+
+  @override
+  Future<void> relistListing(String id) async {
+    relistCalls += 1;
+  }
 
   @override
   Future<Map<String, dynamic>> getUserProfile() async {
@@ -125,8 +202,18 @@ Widget _buildDetail({
   ContentReportService? contentReportService,
   List<Listing> similarListings = const [],
   List<Listing> wantedMatches = const [],
+  List<WantedResponse> wantedResponses = const [],
   FeedFeedbackService? feedbackService,
+  _ListingApiService? apiService,
 }) {
+  final resolvedApiService =
+      apiService ??
+      _ListingApiService(
+        listing: listing,
+        currentUserId: currentUserId,
+        wantedMatches: wantedMatches,
+        wantedResponses: wantedResponses,
+      );
   return MaterialApp(
     theme: AppTheme.light,
     locale: const Locale('zh'),
@@ -134,11 +221,7 @@ Widget _buildDetail({
     supportedLocales: AppLocalizations.supportedLocales,
     home: ListingDetailPage(
       listingId: listing.id,
-      apiService: _ListingApiService(
-        listing: listing,
-        currentUserId: currentUserId,
-        wantedMatches: wantedMatches,
-      ),
+      apiService: resolvedApiService,
       recommendationService: _RecommendationService(similarListings),
       orderService: OrderService(),
       chatService: ChatService(),
@@ -146,6 +229,44 @@ Widget _buildDetail({
           contentReportService ?? _RecordingContentReportService(),
       feedbackService: feedbackService ?? _RecordingFeedFeedbackService(),
     ),
+  );
+}
+
+Listing _wantedListing({
+  String status = 'active',
+  String ownerId = 'requester-1',
+}) {
+  return Listing(
+    id: 'wanted-response-source',
+    title: '想收宿舍机械键盘',
+    category: 'electronics',
+    brand: '不限',
+    direction: 'wanted',
+    conditionScore: 6,
+    suggestedPriceCny: 160,
+    status: status,
+    ownerId: ownerId,
+    ownerUsername: 'requester',
+  );
+}
+
+WantedResponse _wantedResponse({
+  String status = 'pending',
+  String wantedStatus = 'active',
+}) {
+  return WantedResponse(
+    id: 'response-1',
+    wantedListingId: 'wanted-response-source',
+    wantedTitle: '想收宿舍机械键盘',
+    wantedStatus: wantedStatus,
+    offerListingId: 'offer-1',
+    offerTitle: '青轴机械键盘',
+    offerStatus: 'active',
+    responderId: 'responder-1',
+    requesterId: 'requester-1',
+    message: '可以在前湖校区当面试键',
+    status: status,
+    createdAt: DateTime.utc(2026, 7, 30),
   );
 }
 
@@ -422,6 +543,177 @@ void main() {
       expect(feedback.calls.single.action, FeedFeedbackAction.lessLikeThis);
     },
   );
+
+  testWidgets('wanted owner can accept a received offer recommendation', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final wanted = _wantedListing();
+    final response = _wantedResponse();
+    final api = _ListingApiService(
+      listing: wanted,
+      currentUserId: 'requester-1',
+      wantedResponses: [response],
+    );
+
+    await tester.pumpWidget(
+      _buildDetail(
+        listing: wanted,
+        currentUserId: 'requester-1',
+        apiService: api,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(api.wantedResponseRole, 'requester');
+    expect(api.wantedResponseListingId, wanted.id);
+    expect(find.textContaining(response.offerTitle), findsOneWidget);
+    final accept = find.byKey(
+      const ValueKey('wanted-response-accept-response-1'),
+    );
+    await tester.scrollUntilVisible(
+      accept,
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(accept);
+    await tester.pumpAndSettle();
+
+    final l = AppLocalizations.of(
+      tester.element(find.byType(ListingDetailPage)),
+    )!;
+    expect(api.wantedResponseActions, ['accepted:response-1']);
+    expect(find.text(l.wantedResponseStatusAccepted), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('wanted-response-accept-response-1')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('failed wanted response action preserves the pending card', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final wanted = _wantedListing();
+    final response = _wantedResponse();
+    final api = _ListingApiService(
+      listing: wanted,
+      currentUserId: 'requester-1',
+      wantedResponses: [response],
+      failWantedAction: true,
+    );
+
+    await tester.pumpWidget(
+      _buildDetail(
+        listing: wanted,
+        currentUserId: 'requester-1',
+        apiService: api,
+      ),
+    );
+    await tester.pumpAndSettle();
+    final accept = find.byKey(
+      const ValueKey('wanted-response-accept-response-1'),
+    );
+    await tester.scrollUntilVisible(
+      accept,
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(accept);
+    await tester.pumpAndSettle();
+
+    expect(api.wantedResponseActions, ['accepted:response-1']);
+    expect(
+      find.byKey(const ValueKey('wanted-response-response-1')),
+      findsOneWidget,
+    );
+    expect(accept, findsOneWidget);
+    expect(find.textContaining('offline'), findsOneWidget);
+  });
+
+  testWidgets(
+    'responder can withdraw history while a fulfilled wanted hides recommend',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final wanted = _wantedListing(status: 'fulfilled');
+      final response = _wantedResponse(wantedStatus: 'fulfilled');
+      final api = _ListingApiService(
+        listing: wanted,
+        currentUserId: 'responder-1',
+        wantedResponses: [response],
+      );
+
+      await tester.pumpWidget(
+        _buildDetail(
+          listing: wanted,
+          currentUserId: 'responder-1',
+          apiService: api,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final l = AppLocalizations.of(
+        tester.element(find.byType(ListingDetailPage)),
+      )!;
+
+      expect(api.wantedResponseRole, 'responder');
+      expect(find.text(l.recommendMyOffer), findsNothing);
+      expect(find.text(l.wantedClosedResponderHint), findsOneWidget);
+      final withdraw = find.byKey(
+        const ValueKey('wanted-response-withdraw-response-1'),
+      );
+      await tester.scrollUntilVisible(
+        withdraw,
+        250,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(withdraw);
+      await tester.pumpAndSettle();
+
+      expect(api.wantedResponseActions, ['withdrawn:response-1']);
+      expect(find.text(l.wantedResponseStatusWithdrawn), findsOneWidget);
+    },
+  );
+
+  testWidgets('fulfilling a wanted listing requires explicit confirmation', (
+    tester,
+  ) async {
+    final wanted = _wantedListing();
+    final api = _ListingApiService(
+      listing: wanted,
+      currentUserId: 'requester-1',
+    );
+
+    await tester.pumpWidget(
+      _buildDetail(
+        listing: wanted,
+        currentUserId: 'requester-1',
+        apiService: api,
+      ),
+    );
+    await tester.pumpAndSettle();
+    final l = AppLocalizations.of(
+      tester.element(find.byType(ListingDetailPage)),
+    )!;
+
+    await tester.tap(find.text(l.fulfillWantedAction));
+    await tester.pumpAndSettle();
+    expect(find.text(l.wantedFulfillConfirmTitle), findsOneWidget);
+    expect(api.fulfillCalls, 0);
+
+    await tester.tap(find.text(l.cancel));
+    await tester.pumpAndSettle();
+    expect(api.fulfillCalls, 0);
+
+    await tester.tap(find.text(l.fulfillWantedAction));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('wanted-fulfill-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(api.fulfillCalls, 1);
+  });
 
   testWidgets('changing the route id reloads the reused detail page state', (
     tester,

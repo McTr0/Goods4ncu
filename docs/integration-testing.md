@@ -157,7 +157,8 @@ node scripts/codex_browser_api_driver.mjs p0-chat
 | 发布 wanted | 选择“我要收”，填写预算、最低成色和要求 | 不要求图片；发布后在“我的发布/收”可见。 |
 | wanted 匹配 | 打开 wanted 详情 | 只显示满足预算/成色的 active offer，不显示自己的 offer。 |
 | 推荐我的商品 | seller 选择自己的 active offer 响应 wanted | 需求方收到通知；不自动创建聊天或成交。 |
-| wanted 完成 [目标态] | 需求方关闭为 fulfilled | 停止新匹配，历史 response/thread 保留。 |
+| wanted 双角色闭环 | buyer 发布 wanted；seller 推荐三件 offer 并撤回一件；buyer 从通知接受/忽略 | 两侧详情分别显示 received/sent history；状态动作只在合法阶段出现，动作通知可回到 wanted。 |
+| wanted 完成与重开 | 需求方确认关闭为 fulfilled，离开详情后经“个人→我的发布”找回并重开 | 停止新匹配并保留 response/thread；fulfilled 状态清晰，重开后 feed 与匹配恢复。 |
 | 商品图片 | 打开多个商品详情 | URL 图片显示，失败时有占位，不出现大片空白。 |
 | 收藏 | 收藏、取消收藏、刷新 | 状态持久化，不能收藏自己的商品。 |
 | 发布商品 | 填表发布商品 | 必填校验明确，价格单位正确，提交成功后可在“我的发布”看到。 |
@@ -168,6 +169,17 @@ node scripts/codex_browser_api_driver.mjs p0-chat
 | 确认线下成交 | seller 确认成交，可切换自动下架 | 状态进入 `confirmed`；开启自动下架时商品进入 sold。 |
 | 平台不处理付款/物流 | 访问旧支付或发货入口 | 返回明确提示，不推进资金或物流状态；UI 使用“成交记录”。 |
 | 取消成交记录 | `intent_pending` 状态取消 | 权限和状态校验正确；不会自动重新上架已售商品。 |
+
+### Wanted 双角色浏览器验收
+
+1. `buyer1` 从“我的发布”的“发布商品”入口进入结构化表单，切到“我要收”，填写唯一标题、预算、最低成色和要求并提交。
+2. 切换到 `seller1`，从首页收物 feed 打开该需求，连续推荐三件自己的 active offer；在“我发出的推荐”中撤回第三件。
+3. 切回 `buyer1`，从推荐通知进入 wanted 详情；接受第一件、忽略第二件，确认失败或重复操作不会提前移除卡片。
+4. 从 accepted response 打开 offer，确认联系卖家入口存在；回到 wanted，经过确认弹窗标记 fulfilled。
+5. 离开详情，经“个人→我的发布”找到带 fulfilled/reopen 标识的 wanted，打开并重新开启。
+6. 切回 `seller1`，从 accepted/dismissed 状态通知进入 wanted，确认 sent history 与三种最终状态一致。
+
+每一步同时检查后端请求无 4xx/5xx、页面无 Flutter assertion/白屏。组件回归还应覆盖 `390x844` 与 200% 文字缩放。
 
 ## 用户、隐私和主页测试
 

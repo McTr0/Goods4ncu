@@ -1145,6 +1145,104 @@ class AppLocalizationsEn extends AppLocalizations {
   String get wantedReopenedToast => 'Request reopened';
 
   @override
+  String get wantedFulfillConfirmTitle => 'Mark this request fulfilled?';
+
+  @override
+  String get wantedFulfillConfirmBody =>
+      'New matches and recommendations will stop. Existing conversations and recommendation history will remain, and you can reopen the request later.';
+
+  @override
+  String get wantedClosedResponderHint =>
+      'This request is closed, so it cannot receive new recommendations.';
+
+  @override
+  String get wantedResponsesReceivedTitle => 'Recommendations received';
+
+  @override
+  String get wantedResponsesSentTitle => 'Recommendations sent';
+
+  @override
+  String get wantedResponsesReceivedEmpty =>
+      'No one has recommended an offer for this request yet.';
+
+  @override
+  String get wantedResponsesSentEmpty =>
+      'You have not recommended an offer yet.';
+
+  @override
+  String get wantedResponseLoadFailed =>
+      'Recommendations could not be loaded. Try again.';
+
+  @override
+  String wantedResponseActionFailed(String error) {
+    return 'The recommendation could not be updated: $error';
+  }
+
+  @override
+  String get wantedResponseAcceptedToast => 'Recommendation accepted';
+
+  @override
+  String get wantedResponseDismissedToast => 'Recommendation dismissed';
+
+  @override
+  String get wantedResponseWithdrawnToast => 'Recommendation withdrawn';
+
+  @override
+  String get wantedResponseStatusPending => 'Awaiting decision';
+
+  @override
+  String get wantedResponseStatusAccepted => 'Accepted';
+
+  @override
+  String get wantedResponseStatusDismissed => 'Dismissed';
+
+  @override
+  String get wantedResponseStatusWithdrawn => 'Withdrawn';
+
+  @override
+  String get wantedResponseStatusUnknown => 'Status unavailable';
+
+  @override
+  String get wantedResponseListingStatusActive => 'Active';
+
+  @override
+  String get wantedResponseListingStatusFulfilled => 'Fulfilled';
+
+  @override
+  String get wantedResponseListingStatusSold => 'Sold';
+
+  @override
+  String get wantedResponseListingStatusDeleted => 'Unavailable';
+
+  @override
+  String get wantedResponseListingStatusUnknown => 'Status unavailable';
+
+  @override
+  String wantedResponseWantedContext(String title, String status) {
+    return 'Request: $title · $status';
+  }
+
+  @override
+  String wantedResponseOfferContext(String title, String status) {
+    return 'Offer: $title · $status';
+  }
+
+  @override
+  String get wantedResponseMessageLabel => 'Message';
+
+  @override
+  String get wantedResponseOpenOfferAction => 'View offer';
+
+  @override
+  String get wantedResponseAcceptAction => 'Accept';
+
+  @override
+  String get wantedResponseDismissAction => 'Dismiss';
+
+  @override
+  String get wantedResponseWithdrawAction => 'Withdraw';
+
+  @override
   String get agentPlanSecondConfirmTitle => 'High-risk action — confirm again';
 
   @override

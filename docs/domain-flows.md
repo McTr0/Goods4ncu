@@ -81,14 +81,14 @@ Agent 不能绕过表单使用的审核和校验。[目标态] Agent 发布先�
 
 ### 状态
 
-当前 `inventory.status` 主要包含 active、sold、deleted 等历史语义。[目标态] 对 wanted 明确支持 fulfilled，避免把“需求完成”误写成 sold。
+当前 `inventory.status` 支持 active、sold、deleted 与 wanted 专用的 fulfilled，需求完成不会再误写成 sold。
 
 ```text
 offer:  active -> sold | deleted
         sold/deleted -> relisted/active（满足权限和规则时）
 
 wanted: active -> fulfilled | deleted
-        fulfilled -> active（用户重新开启时创建审计）
+        fulfilled -> active（用户重新开启）
 ```
 
 任何非 active 条目都要从普通 Feed、匹配和新联系入口排除；历史 Conversation、Response 和 DealRecord 仍保留。
@@ -110,16 +110,16 @@ active wanted
 
 [已实现] 所有召回先限定活动校园和生命周期；首页商品 feed、相似商品、listing wanted matches 与 intent feed/matches 均返回排序原因、稳定来源和排序版本，并提供精确隐藏、泛化降权、非个性化排序和清除旧信号。新撮合入口使用稳定 reason code；兼容中的首页商品 feed 仍可返回服务端人话原因。listing wanted matches 的解释只陈述实际执行的分类、预算和成色约束，不公开作者、距离、权重或反馈事实。
 
-提供方调用 responses API 时只能选择自己的 active offer，不能推荐 wanted、sold 或 deleted 条目。重复 pending response 返回已有记录或明确冲突，不重复通知。
+提供方调用 responses API 时只能选择自己的 active offer，不能推荐 wanted、sold 或 deleted 条目。重复 pending response 返回明确冲突，不重复通知。response 列表和动作在每次请求时重新验证活动校园 verified membership，并按 `campus_id` 隔离；跨校园 response id 与非本人 response id 一样返回 404。
 
 ```text
 pending response
-  -> requester accepts
-  -> requester dismisses
-  -> responder withdraws
+  -> requester accepts（wanted + offer 均为 active）
+  -> requester dismisses（wanted 为 active）
+  -> responder withdraws（wanted 关闭后仍可撤回）
 ```
 
-Response 不自动创建 Conversation 或 DealRecord。接受后界面可以建议联系，但由用户决定实时沟通或留言。
+三种动作都在同一事务中锁定 response、wanted 与 offer，避免资格检查和状态写入之间的竞态；动作通知关联 wanted，移动端从通知进入详情即可看到本地化状态和操作。Response 不自动创建 Conversation 或 DealRecord。接受后界面提供查看 offer，由用户决定是否实时沟通或留言。fulfilled wanted 保留 response 历史；“我的发布”包含非 active 条目，因此用户离开详情后仍可找回并重新开启。
 
 ## Feed、搜索与收藏
 

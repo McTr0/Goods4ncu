@@ -2211,6 +2211,547 @@ async fn wanted_response_actions_transition_once_and_notify() {
     .await;
 }
 
+#[tokio::test]
+async fn wanted_response_http_journey_lists_statuses_and_gates_actions() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let requester_id = Uuid::new_v4().to_string();
+        let responder_id = Uuid::new_v4().to_string();
+        insert_user(
+            &pool,
+            &requester_id,
+            &format!("response_requester_{}", Uuid::new_v4().simple()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &responder_id,
+            &format!("response_responder_{}", Uuid::new_v4().simple()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+
+        let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("ncu campus");
+        let wanted_id = Uuid::new_v4().to_string();
+        let accepted_offer_id = Uuid::new_v4().to_string();
+        let dismissed_offer_id = Uuid::new_v4().to_string();
+        let withdrawn_offer_id = Uuid::new_v4().to_string();
+        for (id, owner, direction, title) in [
+            (
+                &wanted_id,
+                &requester_id,
+                "wanted",
+                "Wanted response journey",
+            ),
+            (
+                &accepted_offer_id,
+                &responder_id,
+                "offer",
+                "Accepted offer",
+            ),
+            (
+                &dismissed_offer_id,
+                &responder_id,
+                "offer",
+                "Dismissed offer",
+            ),
+            (
+                &withdrawn_offer_id,
+                &responder_id,
+                "offer",
+                "Withdrawn offer",
+            ),
+        ] {
+            sqlx::query(
+                "INSERT INTO inventory (
+                    id, campus_id, title, category, brand, condition_score,
+                    suggested_price_cny, defects, owner_id, status, direction
+                 ) VALUES ($1, $2, $3, 'electronics', 'Test', 8, 10000, '[]',
+                           $4, 'active', $5)",
+            )
+            .bind(id)
+            .bind(campus_id)
+            .bind(title)
+            .bind(owner)
+            .bind(direction)
+            .execute(&pool)
+            .await
+            .expect("insert wanted journey listing");
+        }
+
+        let (requester_token, _, _) = generate_access_token_for_campus(
+            &requester_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("requester token");
+        let (responder_token, _, _) = generate_access_token_for_campus(
+            &responder_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("responder token");
+        let app = create_router(build_state(pool.clone()), &[]);
+        let responses_uri = format!("/api/listings/{wanted_id}/responses");
+
+        // Exercise the real creation endpoint rather than seeding the response
+        // row, including the directed inbox notification.
+        let (status, accepted_created) = authenticated_json(
+            &app,
+            Method::POST,
+            &responses_uri,
+            &responder_token,
+            Some(json!({
+                "offer_listing_id": accepted_offer_id,
+                "message": "符合你的预算，可以看看"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let accepted_response_id = accepted_created["id"]
+            .as_str()
+            .expect("accepted response id");
+        Uuid::parse_str(accepted_response_id).expect("response id is a UUID");
+        let creation_notice_target: Option<String> = sqlx::query_scalar(
+            "SELECT related_listing_id FROM notifications
+             WHERE user_id = $1 AND event_type = 'wanted_response'
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(&requester_id)
+        .fetch_one(&pool)
+        .await
+        .expect("wanted response notification");
+        assert_eq!(creation_notice_target.as_deref(), Some(wanted_id.as_str()));
+
+        // The list contract is tenant/role/filter scoped and remains pageable
+        // even when the requested page is empty.
+        let list_uri = format!(
+            "/api/wanted-responses?role=requester&status=pending&wanted_listing_id={wanted_id}&limit=1&offset=0"
+        );
+        let (status, listed) =
+            authenticated_json(&app, Method::GET, &list_uri, &requester_token, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(listed["total"], 1);
+        assert_eq!(listed["limit"], 1);
+        assert_eq!(listed["offset"], 0);
+        assert_eq!(listed["items"].as_array().map(Vec::len), Some(1));
+        assert_eq!(listed["items"][0]["id"], accepted_response_id);
+        assert_eq!(listed["items"][0]["wanted_status"], "active");
+        assert_eq!(listed["items"][0]["offer_status"], "active");
+        let empty_page_uri = format!(
+            "/api/wanted-responses?role=requester&wanted_listing_id={wanted_id}&limit=1&offset=1"
+        );
+        let (status, empty_page) =
+            authenticated_json(&app, Method::GET, &empty_page_uri, &requester_token, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(empty_page["total"], 1);
+        assert_eq!(empty_page["offset"], 1);
+        assert!(empty_page["items"]
+            .as_array()
+            .expect("empty page items")
+            .is_empty());
+
+        let (status, accepted) = authenticated_json(
+            &app,
+            Method::POST,
+            &format!("/api/wanted-responses/{accepted_response_id}/accept"),
+            &requester_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(accepted["status"], "accepted");
+        let accepted_notice_target: Option<String> = sqlx::query_scalar(
+            "SELECT related_listing_id FROM notifications
+             WHERE user_id = $1 AND event_type = 'wanted_response_accepted'
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(&responder_id)
+        .fetch_one(&pool)
+        .await
+        .expect("accepted notification");
+        assert_eq!(accepted_notice_target.as_deref(), Some(wanted_id.as_str()));
+
+        // A sold offer cannot be accepted, but the requester may still dismiss
+        // its pending response while the wanted listing remains active.
+        let (status, dismissed_created) = authenticated_json(
+            &app,
+            Method::POST,
+            &responses_uri,
+            &responder_token,
+            Some(json!({ "offer_listing_id": dismissed_offer_id })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let dismissed_response_id = dismissed_created["id"]
+            .as_str()
+            .expect("dismissed response id");
+        sqlx::query("UPDATE inventory SET status = 'sold' WHERE id = $1")
+            .bind(&dismissed_offer_id)
+            .execute(&pool)
+            .await
+            .expect("sell offered listing");
+        let (status, error) = authenticated_json(
+            &app,
+            Method::POST,
+            &format!("/api/wanted-responses/{dismissed_response_id}/accept"),
+            &requester_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(error["code"], "conflict");
+        let (status, dismissed) = authenticated_json(
+            &app,
+            Method::POST,
+            &format!("/api/wanted-responses/{dismissed_response_id}/dismiss"),
+            &requester_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(dismissed["status"], "dismissed");
+        let dismissed_notice_target: Option<String> = sqlx::query_scalar(
+            "SELECT related_listing_id FROM notifications
+             WHERE user_id = $1 AND event_type = 'wanted_response_dismissed'
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(&responder_id)
+        .fetch_one(&pool)
+        .await
+        .expect("dismissed notification");
+        assert_eq!(
+            dismissed_notice_target.as_deref(),
+            Some(wanted_id.as_str())
+        );
+
+        // Once the wanted listing is no longer active, neither positive nor
+        // negative requester decisions may rewrite the response. The responder
+        // may still retract their own pending recommendation.
+        let (status, withdrawn_created) = authenticated_json(
+            &app,
+            Method::POST,
+            &responses_uri,
+            &responder_token,
+            Some(json!({ "offer_listing_id": withdrawn_offer_id })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let withdrawn_response_id = withdrawn_created["id"]
+            .as_str()
+            .expect("withdrawn response id");
+        sqlx::query("UPDATE inventory SET status = 'fulfilled' WHERE id = $1")
+            .bind(&wanted_id)
+            .execute(&pool)
+            .await
+            .expect("fulfill wanted");
+        for action in ["accept", "dismiss"] {
+            let (status, error) = authenticated_json(
+                &app,
+                Method::POST,
+                &format!("/api/wanted-responses/{withdrawn_response_id}/{action}"),
+                &requester_token,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::CONFLICT, "{action}");
+            assert_eq!(error["code"], "conflict");
+        }
+        let (status, withdrawn) = authenticated_json(
+            &app,
+            Method::POST,
+            &format!("/api/wanted-responses/{withdrawn_response_id}/withdraw"),
+            &responder_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(withdrawn["status"], "withdrawn");
+        let withdrawn_notice_target: Option<String> = sqlx::query_scalar(
+            "SELECT related_listing_id FROM notifications
+             WHERE user_id = $1 AND event_type = 'wanted_response_withdrawn'
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(&requester_id)
+        .fetch_one(&pool)
+        .await
+        .expect("withdrawn notification");
+        assert_eq!(
+            withdrawn_notice_target.as_deref(),
+            Some(wanted_id.as_str())
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn wanted_response_list_and_actions_require_the_verified_active_campus() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let requester_id = Uuid::new_v4().to_string();
+        let responder_id = Uuid::new_v4().to_string();
+        insert_user(
+            &pool,
+            &requester_id,
+            &format!("tenant_requester_{}", Uuid::new_v4().simple()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &responder_id,
+            &format!("tenant_responder_{}", Uuid::new_v4().simple()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+
+        let ncu_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("ncu campus");
+        let other_campus_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO campuses (id, slug, name_zh, name_en, email_domains)
+             VALUES ($1, $2, '响应租户测试大学', 'Response tenant test',
+                     ARRAY['response-tenant.test'])",
+        )
+        .bind(other_campus_id)
+        .bind(format!(
+            "response-tenant-{}",
+            &other_campus_id.to_string()[..8]
+        ))
+        .execute(&pool)
+        .await
+        .expect("insert other campus");
+        for user_id in [&requester_id, &responder_id] {
+            sqlx::query(
+                "INSERT INTO campus_memberships (
+                    campus_id, user_id, status, verification_method, verified_at
+                 ) VALUES ($1, $2, 'verified', 'test_fixture', NOW())",
+            )
+            .bind(other_campus_id)
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .expect("insert other campus membership");
+        }
+
+        let ncu_wanted_id = Uuid::new_v4().to_string();
+        let ncu_offer_id = Uuid::new_v4().to_string();
+        let other_wanted_id = Uuid::new_v4().to_string();
+        let other_offer_id = Uuid::new_v4().to_string();
+        for (id, campus, owner, direction, title) in [
+            (
+                &ncu_wanted_id,
+                ncu_id,
+                &requester_id,
+                "wanted",
+                "NCU wanted",
+            ),
+            (&ncu_offer_id, ncu_id, &responder_id, "offer", "NCU offer"),
+            (
+                &other_wanted_id,
+                other_campus_id,
+                &requester_id,
+                "wanted",
+                "Other wanted",
+            ),
+            (
+                &other_offer_id,
+                other_campus_id,
+                &responder_id,
+                "offer",
+                "Other offer",
+            ),
+        ] {
+            sqlx::query(
+                "INSERT INTO inventory (
+                    id, campus_id, title, category, brand, condition_score,
+                    suggested_price_cny, defects, owner_id, status, direction
+                 ) VALUES ($1, $2, $3, 'misc', 'Test', 8, 10000, '[]',
+                           $4, 'active', $5)",
+            )
+            .bind(id)
+            .bind(campus)
+            .bind(title)
+            .bind(owner)
+            .bind(direction)
+            .execute(&pool)
+            .await
+            .expect("insert tenant listing");
+        }
+        let ncu_response_id = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO wanted_responses (
+                campus_id, wanted_listing_id, offer_listing_id, responder_id, requester_id
+             ) VALUES ($1, $2, $3, $4, $5)
+             RETURNING id",
+        )
+        .bind(ncu_id)
+        .bind(&ncu_wanted_id)
+        .bind(&ncu_offer_id)
+        .bind(&responder_id)
+        .bind(&requester_id)
+        .fetch_one(&pool)
+        .await
+        .expect("insert ncu response");
+        let other_response_id = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO wanted_responses (
+                campus_id, wanted_listing_id, offer_listing_id, responder_id, requester_id
+             ) VALUES ($1, $2, $3, $4, $5)
+             RETURNING id",
+        )
+        .bind(other_campus_id)
+        .bind(&other_wanted_id)
+        .bind(&other_offer_id)
+        .bind(&responder_id)
+        .bind(&requester_id)
+        .fetch_one(&pool)
+        .await
+        .expect("insert other response");
+
+        let (requester_ncu_token, _, _) = generate_access_token_for_campus(
+            &requester_id,
+            "user",
+            Some(ncu_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("ncu requester token");
+        let (requester_other_token, _, _) = generate_access_token_for_campus(
+            &requester_id,
+            "user",
+            Some(other_campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("other requester token");
+        let (responder_ncu_token, _, _) = generate_access_token_for_campus(
+            &responder_id,
+            "user",
+            Some(ncu_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("ncu responder token");
+        let app = create_router(build_state(pool.clone()), &[]);
+
+        let (status, ncu_list) = authenticated_json(
+            &app,
+            Method::GET,
+            "/api/wanted-responses?role=requester",
+            &requester_ncu_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(ncu_list["total"], 1);
+        assert_eq!(ncu_list["items"][0]["wanted_listing_id"], ncu_wanted_id);
+
+        let (status, filtered_cross_campus) = authenticated_json(
+            &app,
+            Method::GET,
+            &format!("/api/wanted-responses?role=requester&wanted_listing_id={other_wanted_id}"),
+            &requester_ncu_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(filtered_cross_campus["total"], 0);
+
+        // The caller is a party to this response, but it belongs to a different
+        // active campus. Treat it exactly like a missing response.
+        let (status, error) = authenticated_json(
+            &app,
+            Method::POST,
+            &format!("/api/wanted-responses/{other_response_id}/accept"),
+            &requester_ncu_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(error["code"], "not_found");
+
+        let (status, other_list) = authenticated_json(
+            &app,
+            Method::GET,
+            "/api/wanted-responses?role=requester",
+            &requester_other_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(other_list["total"], 1);
+        assert_eq!(other_list["items"][0]["wanted_listing_id"], other_wanted_id);
+
+        sqlx::query(
+            "UPDATE campus_memberships SET status = 'suspended'
+             WHERE campus_id = $1 AND user_id = $2",
+        )
+        .bind(ncu_id)
+        .bind(&requester_id)
+        .execute(&pool)
+        .await
+        .expect("suspend requester membership");
+        for (method, uri) in [
+            (Method::GET, "/api/wanted-responses".to_string()),
+            (
+                Method::POST,
+                format!("/api/wanted-responses/{ncu_response_id}/accept"),
+            ),
+        ] {
+            let (status, error) =
+                authenticated_json(&app, method, &uri, &requester_ncu_token, None).await;
+            assert_eq!(status, StatusCode::FORBIDDEN);
+            assert_eq!(error["code"], "campus_scope_mismatch");
+        }
+
+        sqlx::query(
+            "UPDATE campus_memberships SET status = 'revoked'
+             WHERE campus_id = $1 AND user_id = $2",
+        )
+        .bind(ncu_id)
+        .bind(&responder_id)
+        .execute(&pool)
+        .await
+        .expect("revoke responder membership");
+        let (status, error) = authenticated_json(
+            &app,
+            Method::POST,
+            &format!("/api/wanted-responses/{ncu_response_id}/withdraw"),
+            &responder_ncu_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(error["code"], "campus_scope_mismatch");
+
+        let response_status: String =
+            sqlx::query_scalar("SELECT status FROM wanted_responses WHERE id = $1")
+                .bind(ncu_response_id)
+                .fetch_one(&pool)
+                .await
+                .expect("ncu response status");
+        assert_eq!(response_status, "pending");
+    })
+    .await;
+}
+
 /// Phase 2 explainability: every feed item carries a user-readable
 /// rank_reason and a machine-readable source; responses carry the ranking
 /// version.

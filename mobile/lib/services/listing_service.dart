@@ -127,6 +127,70 @@ class ListingService extends BaseService {
     return handleResponse(response, (data) => data['message'] ?? '');
   }
 
+  /// List explicit offer recommendations received for, or sent to, wanted
+  /// listings owned by the current user.
+  Future<WantedResponsesResponse> getWantedResponses({
+    String role = 'requester',
+    String? wantedListingId,
+    String? status,
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final headers = await authHeaders();
+    final queryParameters = <String, String>{
+      'role': role,
+      'limit': limit.clamp(1, 100).toString(),
+      'offset': offset.clamp(0, 1 << 31).toString(),
+    };
+    if (wantedListingId != null && wantedListingId.trim().isNotEmpty) {
+      queryParameters['wanted_listing_id'] = wantedListingId.trim();
+    }
+    if (status != null && status.trim().isNotEmpty) {
+      queryParameters['status'] = status.trim();
+    }
+    final uri = Uri.parse(
+      '$baseUrl/api/wanted-responses',
+    ).replace(queryParameters: queryParameters);
+    final response = await get(uri, headers);
+    return handleResponse(
+      response,
+      (data) => WantedResponsesResponse.fromJson(
+        Map<String, dynamic>.from(data as Map),
+      ),
+    );
+  }
+
+  Future<WantedResponseActionResult> acceptWantedResponse(String id) {
+    return _actOnWantedResponse(id, 'accept');
+  }
+
+  Future<WantedResponseActionResult> dismissWantedResponse(String id) {
+    return _actOnWantedResponse(id, 'dismiss');
+  }
+
+  Future<WantedResponseActionResult> withdrawWantedResponse(String id) {
+    return _actOnWantedResponse(id, 'withdraw');
+  }
+
+  Future<WantedResponseActionResult> _actOnWantedResponse(
+    String id,
+    String action,
+  ) async {
+    final headers = await authHeaders();
+    final encodedId = Uri.encodeComponent(id.trim());
+    final response = await post(
+      Uri.parse('$baseUrl/api/wanted-responses/$encodedId/$action'),
+      headers,
+      '{}',
+    );
+    return handleResponse(
+      response,
+      (data) => WantedResponseActionResult.fromJson(
+        Map<String, dynamic>.from(data as Map),
+      ),
+    );
+  }
+
   /// Update existing listing.
   /// PUT /api/listings/{id}
   Future<void> updateListing(String id, Map<String, dynamic> updates) async {

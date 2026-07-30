@@ -421,6 +421,62 @@
   "wantedFulfilledHint": "该需求已完成，不再接收新的匹配和推荐",
   "wantedFulfilledToast": "需求已标记完成",
   "wantedReopenedToast": "需求已重新开启",
+  "wantedFulfillConfirmTitle": "确认标记需求已完成？",
+  "wantedFulfillConfirmBody": "新的匹配和推荐将停止；已有会话和推荐历史会保留，之后仍可重新开启需求。",
+  "wantedClosedResponderHint": "该需求已关闭，暂时不能接收新的商品推荐。",
+  "wantedResponsesReceivedTitle": "收到的推荐",
+  "wantedResponsesSentTitle": "我发出的推荐",
+  "wantedResponsesReceivedEmpty": "暂时还没有同学为这条需求推荐商品。",
+  "wantedResponsesSentEmpty": "你还没有为这条需求推荐商品。",
+  "wantedResponseLoadFailed": "推荐暂时没有加载出来，请重试。",
+  "wantedResponseActionFailed": "推荐状态更新失败：{error}",
+  "@wantedResponseActionFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "wantedResponseAcceptedToast": "已接受这条推荐",
+  "wantedResponseDismissedToast": "已忽略这条推荐",
+  "wantedResponseWithdrawnToast": "已撤回这条推荐",
+  "wantedResponseStatusPending": "等待处理",
+  "wantedResponseStatusAccepted": "已接受",
+  "wantedResponseStatusDismissed": "已忽略",
+  "wantedResponseStatusWithdrawn": "已撤回",
+  "wantedResponseStatusUnknown": "状态未知",
+  "wantedResponseListingStatusActive": "进行中",
+  "wantedResponseListingStatusFulfilled": "已完成",
+  "wantedResponseListingStatusSold": "已售",
+  "wantedResponseListingStatusDeleted": "已下架",
+  "wantedResponseListingStatusUnknown": "状态未知",
+  "wantedResponseWantedContext": "需求：{title} · {status}",
+  "@wantedResponseWantedContext": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      },
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "wantedResponseOfferContext": "商品：{title} · {status}",
+  "@wantedResponseOfferContext": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      },
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "wantedResponseMessageLabel": "推荐留言",
+  "wantedResponseOpenOfferAction": "查看商品",
+  "wantedResponseAcceptAction": "接受",
+  "wantedResponseDismissAction": "忽略",
+  "wantedResponseWithdrawAction": "撤回",
   "agentPlanSecondConfirmTitle": "高风险操作，请再次确认",
   "agentPlanSecondConfirmAction": "确认执行",
   "adminReauthenticateSuccess": "管理员身份已验证，敏感操作已临时解锁",

@@ -173,7 +173,12 @@ class ApiService extends BaseService {
   Future<Map<String, dynamic>> getUserListings({
     int limit = 20,
     int offset = 0,
-  }) => _userService.getUserListings(limit: limit, offset: offset);
+    String? status,
+  }) => _userService.getUserListings(
+    limit: limit,
+    offset: offset,
+    status: status,
+  );
 
   // -----------------------------------------------------------------
   // Backward-compatibility wrappers (delegate to ListingService)
@@ -245,6 +250,29 @@ class ApiService extends BaseService {
     offerListingId: offerListingId,
     message: message,
   );
+
+  Future<WantedResponsesResponse> getWantedResponses({
+    String role = 'requester',
+    String? wantedListingId,
+    String? status,
+    int limit = 20,
+    int offset = 0,
+  }) => _listingService.getWantedResponses(
+    role: role,
+    wantedListingId: wantedListingId,
+    status: status,
+    limit: limit,
+    offset: offset,
+  );
+
+  Future<WantedResponseActionResult> acceptWantedResponse(String id) =>
+      _listingService.acceptWantedResponse(id);
+
+  Future<WantedResponseActionResult> dismissWantedResponse(String id) =>
+      _listingService.dismissWantedResponse(id);
+
+  Future<WantedResponseActionResult> withdrawWantedResponse(String id) =>
+      _listingService.withdrawWantedResponse(id);
 
   Future<RecognizedItem> recognizeItem(String imageBase64) =>
       _listingService.recognizeItem(imageBase64);

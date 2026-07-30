@@ -95,6 +95,7 @@
 - 校验文件头、MIME、尺寸和解码，审核通过后生成公开 URL 和缩略图。
 - Base64 fallback 加指标和 feature flag，不再作为新客户端主路径。
 - [已实现] `0034_moderation_cases.sql` 建立案件、状态事件和一次性申诉；机器拒绝和聊天举报自动关联，listing/user 也已有 `VerifiedTenant` 举报入口（同校目标由服务端派生、1–80/1000 字限制、每小时 10 条新举报）并与 ModerationCase 同事务关联。未处理的同一举报会更新 standing report，已处理后的新举报创建新 report/case。当前 intake/start_review/dismiss 不改目标状态；listing/user 的通用 restrict/restore 留待 case-owned 可逆 effect 模型，紧急下架/封禁继续走独立近期认证与审计流程。用户可查看安全摘要，平台管理员可审计分诊。
+- [下一步] 把管理员下架与用户自行删除从同一个 `deleted` 语义中拆开；owner 的 `relist` 不得恢复仍受审核限制的 listing，恢复必须由 case-owned 可逆 effect 或明确管理员动作完成。
 
 ### 运维
 
@@ -123,9 +124,10 @@
 
 ### 信息生命周期
 
-- [已实现] wanted fulfilled/reopen：`POST /api/listings/{id}/fulfill` 由所有者把收物需求置为 `fulfilled`（条件状态转移，`0040` 同时为 `inventory.status` 建立 CHECK 并归一化旧 `takedown` 值）；`relist` 可重新开启。移动端详情页提供“标记已完成/重新开启”。
-- [已实现] Response 用户动作：requester 可 accept/dismiss，responder 可 withdraw（`/api/wanted-responses/{id}/*`），全部从 `pending` 单赢转移并通知对方；`GET /api/wanted-responses?role=` 按角色列出。
+- [已实现] wanted fulfilled/reopen：`POST /api/listings/{id}/fulfill` 由所有者把收物需求置为 `fulfilled`（条件状态转移，`0040` 同时为 `inventory.status` 建立 CHECK 并归一化旧 `takedown` 值）；`relist` 可重新开启。移动端详情页在确认后完成需求，“我的发布”读取 `status=all`、标记非 active 状态，使用户离开详情后仍能找回并重开。
+- [已实现] Response 用户动作：requester 可在 wanted 详情查看并 accept/dismiss，responder 可查看 sent history 并 withdraw（`/api/wanted-responses/{id}/*`）。动作事务内锁定 response/wanted/offer 并从 `pending` 单赢转移；accept 要求 wanted+offer active，dismiss 要求 wanted active，withdraw 保持 pending-only。列表和动作都由 `VerifiedTenant` 限定活动校园；动作通知携带 wanted 目标，可从通知回到详情。
 - [已实现] wanted 完成后停止新匹配（feed/匹配/响应均按 `active` 过滤），已有 Thread、Response 和 DealRecord 保留并有回归覆盖；pending 响应者会收到完成通知。
+- [下一步] 给 wanted reopen 引入 lifecycle epoch：关闭时冻结旧 pending response，重开后旧轮次只读，同时允许同一 offer 在新轮次重新响应；response 创建加入幂等 key，并与 wanted active 校验在同一事务完成。
 - 品牌“不限”改为结构化空值/偏好，不把展示词当数据事实。
 
 ### 召回与排序
@@ -135,6 +137,7 @@
 - [部分完成] 首页商品 Feed 返回 `2026.07-feedback-v2`、服务端人话 `rank_reason` 与稳定 `source`；相似商品返回稳定解释 code 和 `2026.07-similar-feedback-v1`。listing wanted matches 返回 `known_slots_compatible`、只来自已执行硬约束的 `match_summary`、`source=wanted_match` 和 `2026.07-wanted-feedback-v1`。意图 feed/matches 返回稳定解释与 `2026.07-intent-hard-v1`。移动端把稳定 code 本地化为人话，并兼容已有服务端人话原因；不序列化作者、距离、权重或反馈信号。跨表达软排序与置信度校准仍待补。
 - [已实现] `feed_feedback`/`feed_preferences` 与未版本化 API 提供隐藏、少推荐这类、不相关、个性化开关和重置。目标与校园由服务端派生；重复反馈幂等更新。在首页商品、相似商品、listing wanted matches 与 intent feed/matches 中，三种 action 精确排除对应资源；`less_like_this` 分别降低同分类、wanted hard-category 内同品牌或同 kind 候选。关闭个性化或重置只停用泛化旧信号，明确反馈仍保留。Flutter 当前推荐与匹配入口均有本地化理由和反馈控件。
 - 防止重复条目、单一类别垄断和自己内容反复出现。
+- [下一步] 普通 HTTP/Flutter listing 发布也写入 embedding outbox；当前只有 Agent 发布路径保证生成向量，浏览器创建的 wanted/offer 仍可能退化到规则/新鲜度 fallback。
 
 ### 评估
 
@@ -145,7 +148,7 @@
 
 ### 退出门槛
 
-- [部分完成] wanted/offer 的创建、匹配、响应（含 accept/dismiss/withdraw）、完成和重新开启已有后端端到端回归；真实窄屏浏览器已验证登录、wanted 匹配解释、反馈移除和详情同路由切换，完整的浏览器创建→响应→接受/忽略→完成→重开多角色旅程仍待做。
+- [已实现] wanted/offer 的创建、匹配、响应（含 accept/dismiss/withdraw）、完成和重新开启已有后端端到端回归。真实双账号浏览器已完成：结构化创建 wanted → seller 从校园 feed 发现 → 推荐三件 active offer → withdraw → requester 从通知进入并 accept/dismiss → 打开 accepted offer → 确认 fulfill → 从“个人→我的发布”找回 fulfilled wanted → reopen → seller 从状态通知回到详情。Flutter 组件另以 `390x844`、200% 文字缩放覆盖动作换行，无溢出。
 - 硬约束违反率为零；没有 embedding 时关键词和条件 fallback 可用。
 - [已实现] 商品首页、相似商品、listing wanted matches 与意图 feed/matches 的当前移动端路径都有用户可理解原因和反馈入口；未知机器 code 不直接展示。
 - 新排序在质量、信任和公平 guardrail 上不劣于基线。

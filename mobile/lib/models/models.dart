@@ -124,6 +124,191 @@ class ListingsResponse {
   }
 }
 
+enum WantedResponseRole { requester, responder }
+
+extension WantedResponseRoleWireValue on WantedResponseRole {
+  String get wireValue => switch (this) {
+    WantedResponseRole.requester => 'requester',
+    WantedResponseRole.responder => 'responder',
+  };
+}
+
+/// One explicit recommendation of an offer for a wanted listing.
+///
+/// This is deliberately separate from an algorithmic wanted match: it records
+/// that another person chose to recommend their own offer, along with the
+/// requester's eventual decision.
+class WantedResponse {
+  final String id;
+  final String wantedListingId;
+  final String wantedTitle;
+  final String wantedStatus;
+  final String offerListingId;
+  final String offerTitle;
+  final String offerStatus;
+  final String responderId;
+  final String requesterId;
+  final String? message;
+  final String status;
+  final DateTime? createdAt;
+  final DateTime? respondedAt;
+
+  const WantedResponse({
+    required this.id,
+    required this.wantedListingId,
+    required this.wantedTitle,
+    required this.wantedStatus,
+    required this.offerListingId,
+    required this.offerTitle,
+    required this.offerStatus,
+    required this.responderId,
+    required this.requesterId,
+    this.message,
+    required this.status,
+    this.createdAt,
+    this.respondedAt,
+  });
+
+  factory WantedResponse.fromJson(Map<String, dynamic> json) {
+    final wanted = _jsonObject(json['wanted_listing']);
+    final offer = _jsonObject(json['offer_listing']);
+    return WantedResponse(
+      id: _jsonString(json['id']),
+      wantedListingId: _firstJsonString([
+        json['wanted_listing_id'],
+        wanted['id'],
+      ]),
+      wantedTitle: _firstJsonString([json['wanted_title'], wanted['title']]),
+      wantedStatus: _firstJsonString([
+        json['wanted_status'],
+        json['wanted_listing_status'],
+        wanted['status'],
+      ], fallback: 'unknown'),
+      offerListingId: _firstJsonString([json['offer_listing_id'], offer['id']]),
+      offerTitle: _firstJsonString([json['offer_title'], offer['title']]),
+      offerStatus: _firstJsonString([
+        json['offer_status'],
+        json['offer_listing_status'],
+        offer['status'],
+      ], fallback: 'unknown'),
+      responderId: _jsonString(json['responder_id']),
+      requesterId: _jsonString(json['requester_id']),
+      message: _nullableJsonString(json['message']),
+      status: _jsonString(json['status'], fallback: 'pending'),
+      createdAt: _jsonDateTime(json['created_at']),
+      respondedAt: _jsonDateTime(json['responded_at']),
+    );
+  }
+
+  bool get isPending => status == 'pending';
+
+  bool get isAccepted => status == 'accepted';
+
+  bool get isDismissed => status == 'dismissed';
+
+  bool get isWithdrawn => status == 'withdrawn';
+
+  WantedResponse copyWith({String? status, DateTime? respondedAt}) {
+    return WantedResponse(
+      id: id,
+      wantedListingId: wantedListingId,
+      wantedTitle: wantedTitle,
+      wantedStatus: wantedStatus,
+      offerListingId: offerListingId,
+      offerTitle: offerTitle,
+      offerStatus: offerStatus,
+      responderId: responderId,
+      requesterId: requesterId,
+      message: message,
+      status: status ?? this.status,
+      createdAt: createdAt,
+      respondedAt: respondedAt ?? this.respondedAt,
+    );
+  }
+}
+
+class WantedResponsesResponse {
+  final List<WantedResponse> items;
+  final int total;
+  final int limit;
+  final int offset;
+
+  const WantedResponsesResponse({
+    required this.items,
+    required this.total,
+    required this.limit,
+    required this.offset,
+  });
+
+  factory WantedResponsesResponse.fromJson(Map<String, dynamic> json) {
+    final rawItems = json['items'];
+    final items = rawItems is List
+        ? rawItems
+              .whereType<Map>()
+              .map(
+                (item) => WantedResponse.fromJson(
+                  item.map((key, value) => MapEntry(key.toString(), value)),
+                ),
+              )
+              .toList(growable: false)
+        : const <WantedResponse>[];
+    return WantedResponsesResponse(
+      items: items,
+      total: _jsonInt(json['total'], fallback: items.length),
+      limit: _jsonInt(json['limit'], fallback: 20),
+      offset: _jsonInt(json['offset']),
+    );
+  }
+}
+
+class WantedResponseActionResult {
+  final String id;
+  final String status;
+
+  const WantedResponseActionResult({required this.id, required this.status});
+
+  factory WantedResponseActionResult.fromJson(Map<String, dynamic> json) {
+    return WantedResponseActionResult(
+      id: _jsonString(json['id']),
+      status: _jsonString(json['status']),
+    );
+  }
+}
+
+Map<String, dynamic> _jsonObject(dynamic value) {
+  if (value is! Map) return const <String, dynamic>{};
+  return value.map((key, item) => MapEntry(key.toString(), item));
+}
+
+String _jsonString(dynamic value, {String fallback = ''}) {
+  if (value == null) return fallback;
+  final normalized = value.toString().trim();
+  return normalized.isEmpty ? fallback : normalized;
+}
+
+String _firstJsonString(Iterable<dynamic> values, {String fallback = ''}) {
+  for (final value in values) {
+    final normalized = _jsonString(value);
+    if (normalized.isNotEmpty) return normalized;
+  }
+  return fallback;
+}
+
+String? _nullableJsonString(dynamic value) {
+  final normalized = _jsonString(value);
+  return normalized.isEmpty ? null : normalized;
+}
+
+int _jsonInt(dynamic value, {int fallback = 0}) {
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString() ?? '') ?? fallback;
+}
+
+DateTime? _jsonDateTime(dynamic value) {
+  final normalized = _jsonString(value);
+  return normalized.isEmpty ? null : DateTime.tryParse(normalized);
+}
+
 class WatchlistItem {
   final String listingId;
   final String title;

@@ -275,12 +275,17 @@ class UserService extends BaseService {
   Future<Map<String, dynamic>> getUserListings({
     int limit = 20,
     int offset = 0,
+    String? status,
   }) async {
     final headers = await authHeaders();
-    final response = await get(
-      Uri.parse('$baseUrl/api/user/listings?limit=$limit&offset=$offset'),
-      headers,
+    final uri = Uri.parse('$baseUrl/api/user/listings').replace(
+      queryParameters: {
+        'limit': '$limit',
+        'offset': '$offset',
+        if (status != null && status.isNotEmpty) 'status': status,
+      },
     );
+    final response = await get(uri, headers);
     return handleResponse(response, (data) => data as Map<String, dynamic>);
   }
 

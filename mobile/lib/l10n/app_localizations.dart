@@ -2240,6 +2240,180 @@ abstract class AppLocalizations {
   /// **'Request reopened'**
   String get wantedReopenedToast;
 
+  /// No description provided for @wantedFulfillConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Mark this request fulfilled?'**
+  String get wantedFulfillConfirmTitle;
+
+  /// No description provided for @wantedFulfillConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'New matches and recommendations will stop. Existing conversations and recommendation history will remain, and you can reopen the request later.'**
+  String get wantedFulfillConfirmBody;
+
+  /// No description provided for @wantedClosedResponderHint.
+  ///
+  /// In en, this message translates to:
+  /// **'This request is closed, so it cannot receive new recommendations.'**
+  String get wantedClosedResponderHint;
+
+  /// No description provided for @wantedResponsesReceivedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Recommendations received'**
+  String get wantedResponsesReceivedTitle;
+
+  /// No description provided for @wantedResponsesSentTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Recommendations sent'**
+  String get wantedResponsesSentTitle;
+
+  /// No description provided for @wantedResponsesReceivedEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No one has recommended an offer for this request yet.'**
+  String get wantedResponsesReceivedEmpty;
+
+  /// No description provided for @wantedResponsesSentEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'You have not recommended an offer yet.'**
+  String get wantedResponsesSentEmpty;
+
+  /// No description provided for @wantedResponseLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Recommendations could not be loaded. Try again.'**
+  String get wantedResponseLoadFailed;
+
+  /// No description provided for @wantedResponseActionFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The recommendation could not be updated: {error}'**
+  String wantedResponseActionFailed(String error);
+
+  /// No description provided for @wantedResponseAcceptedToast.
+  ///
+  /// In en, this message translates to:
+  /// **'Recommendation accepted'**
+  String get wantedResponseAcceptedToast;
+
+  /// No description provided for @wantedResponseDismissedToast.
+  ///
+  /// In en, this message translates to:
+  /// **'Recommendation dismissed'**
+  String get wantedResponseDismissedToast;
+
+  /// No description provided for @wantedResponseWithdrawnToast.
+  ///
+  /// In en, this message translates to:
+  /// **'Recommendation withdrawn'**
+  String get wantedResponseWithdrawnToast;
+
+  /// No description provided for @wantedResponseStatusPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Awaiting decision'**
+  String get wantedResponseStatusPending;
+
+  /// No description provided for @wantedResponseStatusAccepted.
+  ///
+  /// In en, this message translates to:
+  /// **'Accepted'**
+  String get wantedResponseStatusAccepted;
+
+  /// No description provided for @wantedResponseStatusDismissed.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismissed'**
+  String get wantedResponseStatusDismissed;
+
+  /// No description provided for @wantedResponseStatusWithdrawn.
+  ///
+  /// In en, this message translates to:
+  /// **'Withdrawn'**
+  String get wantedResponseStatusWithdrawn;
+
+  /// No description provided for @wantedResponseStatusUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Status unavailable'**
+  String get wantedResponseStatusUnknown;
+
+  /// No description provided for @wantedResponseListingStatusActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get wantedResponseListingStatusActive;
+
+  /// No description provided for @wantedResponseListingStatusFulfilled.
+  ///
+  /// In en, this message translates to:
+  /// **'Fulfilled'**
+  String get wantedResponseListingStatusFulfilled;
+
+  /// No description provided for @wantedResponseListingStatusSold.
+  ///
+  /// In en, this message translates to:
+  /// **'Sold'**
+  String get wantedResponseListingStatusSold;
+
+  /// No description provided for @wantedResponseListingStatusDeleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Unavailable'**
+  String get wantedResponseListingStatusDeleted;
+
+  /// No description provided for @wantedResponseListingStatusUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Status unavailable'**
+  String get wantedResponseListingStatusUnknown;
+
+  /// No description provided for @wantedResponseWantedContext.
+  ///
+  /// In en, this message translates to:
+  /// **'Request: {title} · {status}'**
+  String wantedResponseWantedContext(String title, String status);
+
+  /// No description provided for @wantedResponseOfferContext.
+  ///
+  /// In en, this message translates to:
+  /// **'Offer: {title} · {status}'**
+  String wantedResponseOfferContext(String title, String status);
+
+  /// No description provided for @wantedResponseMessageLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Message'**
+  String get wantedResponseMessageLabel;
+
+  /// No description provided for @wantedResponseOpenOfferAction.
+  ///
+  /// In en, this message translates to:
+  /// **'View offer'**
+  String get wantedResponseOpenOfferAction;
+
+  /// No description provided for @wantedResponseAcceptAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Accept'**
+  String get wantedResponseAcceptAction;
+
+  /// No description provided for @wantedResponseDismissAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismiss'**
+  String get wantedResponseDismissAction;
+
+  /// No description provided for @wantedResponseWithdrawAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Withdraw'**
+  String get wantedResponseWithdrawAction;
+
   /// No description provided for @agentPlanSecondConfirmTitle.
   ///
   /// In en, this message translates to:

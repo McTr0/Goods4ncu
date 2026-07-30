@@ -240,7 +240,7 @@ Content-Type: application/json
 
 ### GET `/api/user/listings`
 
-需要登录。返回当前用户自己的 listing，供“我的发布”和推荐 wanted response 选择器使用。支持分页；当前客户端可按 `direction` 在本地或接口能力范围内展示出/收分组。
+需要登录。返回当前用户自己的 listing，供“我的发布”和推荐 wanted response 选择器使用。支持 `limit`、`offset` 与 `status=active|sold|deleted|all`；默认只返回 active。Flutter“我的发布”使用 `status=all` 并在本地按 `direction` 分组，因此 fulfilled wanted 离开详情后仍可找到并重新开启。
 
 ### GET `/api/users/search`
 
@@ -655,8 +655,10 @@ Group 成员按角色发言；Channel 只有 owner/admin 发言，成员可读�
 [已实现] Phase 2 信息流闭环接口：
 
 - `POST /api/listings/{id}/fulfill` — 所有者把收物需求标记为 `fulfilled`；非所有者 403，offer 400，非 active 409。完成后 feed/匹配/新响应全部停止，历史 Thread/Response/成交保留，pending 响应者收到 `wanted_fulfilled` 通知。`POST /api/listings/{id}/relist` 可重新开启（同样适用于 sold/deleted）。
-- `GET /api/wanted-responses?role=requester|responder&status=` — 按角色列出自己的推荐（含两侧标题）。
-- `POST /api/wanted-responses/{id}/accept|dismiss`（requester）与 `/withdraw`（responder）— 仅能从 `pending` 转移，单赢并发；他人的响应统一 404，重复动作 409；对方收到 `wanted_response_accepted|dismissed|withdrawn` 通知。
+- `GET /api/wanted-responses?role=requester|responder&status=&wanted_listing_id=&limit=&offset=` — 按角色和指定 wanted 列出自己的推荐。响应 envelope 为 `{items,total,limit,offset}`；条目包含 wanted/offer 的 id、标题、当前状态、双方用户 id、留言和 response 生命周期状态。接口每次重新校验活动校园 verified membership，并只读取该校园数据。
+- `POST /api/wanted-responses/{id}/accept|dismiss`（requester）与 `/withdraw`（responder）— 事务内锁定 response、wanted 和 offer 后从 `pending` 单赢转移。accept 还要求 wanted 与 offer 都为 active；dismiss 要求 wanted active；withdraw 只要求 response pending。非本人或跨校园响应统一 404，重复/失效状态为 409，活动校园资格 suspended/revoked 后为 403。对方收到带 wanted `related_listing_id` 的 `wanted_response_accepted|dismissed|withdrawn` 通知，可直接回到需求详情。
+
+Flutter 在 wanted 详情按当前用户身份展示“收到的推荐”或“我发出的推荐”，提供 accept/dismiss/withdraw 与查看 offer 操作；动作成功后先更新本地确定状态再刷新服务端事实，失败则保留原卡片。完成 wanted 前有确认弹窗，非 active wanted 不再向 responder 展示新的推荐操作。
 
 新推荐与匹配接口的每个条目携带稳定的 `rank_reason` 与 `source` code，客户端负责本地化为人话；响应携带 `ranking_version`。兼容中的首页商品 feed 仍可能返回服务端人话 `rank_reason`，其 `source` 保持稳定 code。listing wanted matches 还返回只来自已执行硬约束的 `match_summary`，不返回作者、距离、权重或反馈信号。
 

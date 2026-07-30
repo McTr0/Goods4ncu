@@ -3,22 +3,22 @@ import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 import '../models/models.dart';
-import '../services/api_service.dart';
+import '../services/user_service.dart';
 import '../theme/app_theme.dart';
 import '../components/price_tag.dart';
 import '../components/shimmer_grid.dart';
 
 class MyListingsPage extends StatefulWidget {
-  final ApiService? apiService;
+  final UserService? userService;
 
-  const MyListingsPage({super.key, this.apiService});
+  const MyListingsPage({super.key, this.userService});
 
   @override
   State<MyListingsPage> createState() => _MyListingsPageState();
 }
 
 class _MyListingsPageState extends State<MyListingsPage> {
-  late final ApiService _apiService;
+  late final UserService _userService;
 
   List<Listing> _listings = [];
   bool _loading = true;
@@ -28,7 +28,7 @@ class _MyListingsPageState extends State<MyListingsPage> {
   @override
   void initState() {
     super.initState();
-    _apiService = widget.apiService ?? context.read<ApiService>();
+    _userService = widget.userService ?? context.read<UserService>();
     _load();
   }
 
@@ -38,7 +38,10 @@ class _MyListingsPageState extends State<MyListingsPage> {
       _error = null;
     });
     try {
-      final data = await _apiService.getUserListings();
+      final data = await _userService.getUserListings(
+        status: 'all',
+        limit: 100,
+      );
       final items = data['items'] as List<dynamic>?;
       if (mounted) {
         setState(() {
@@ -60,7 +63,17 @@ class _MyListingsPageState extends State<MyListingsPage> {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     return Scaffold(
-      appBar: AppBar(title: Text(l.myListings)),
+      appBar: AppBar(
+        title: Text(l.myListings),
+        actions: [
+          IconButton(
+            key: const ValueKey('my-listings-create-action'),
+            tooltip: l.createListing,
+            onPressed: () => context.push('/create/listing'),
+            icon: const Icon(Icons.add_circle_outline),
+          ),
+        ],
+      ),
       body: _buildBody(),
     );
   }
@@ -104,7 +117,8 @@ class _MyListingsPageState extends State<MyListingsPage> {
             ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
-              onPressed: () => context.go('/create'),
+              key: const ValueKey('my-listings-empty-create-action'),
+              onPressed: () => context.push('/create/listing'),
               icon: const Icon(Icons.add),
               label: Text(l.createListing),
             ),
@@ -163,14 +177,91 @@ class _MyListingsPageState extends State<MyListingsPage> {
               itemCount: visibleListings.length,
               itemBuilder: (context, i) {
                 final listing = visibleListings[i];
-                return ListingCard(
-                  listing: listing,
-                  onTap: () => context.push('/listing/${listing.id}'),
+                return Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ListingCard(
+                      listing: listing,
+                      onTap: () => context.push('/listing/${listing.id}'),
+                    ),
+                    if (listing.status != 'active')
+                      Positioned(
+                        top: 44,
+                        left: AppTheme.sp8,
+                        right: 48,
+                        child: IgnorePointer(
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: _ListingStatusBadge(
+                              key: ValueKey('listing-status-${listing.id}'),
+                              label: _statusLabel(l, listing),
+                              status: listing.status,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 );
               },
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  String _statusLabel(AppLocalizations l, Listing listing) {
+    return switch (listing.status) {
+      'fulfilled' when listing.isWanted =>
+        '${l.wantedResponseListingStatusFulfilled} · ${l.reopenWantedAction}',
+      'fulfilled' => l.wantedResponseListingStatusFulfilled,
+      'sold' => l.wantedResponseListingStatusSold,
+      'deleted' => l.wantedResponseListingStatusDeleted,
+      _ => l.wantedResponseListingStatusUnknown,
+    };
+  }
+}
+
+class _ListingStatusBadge extends StatelessWidget {
+  const _ListingStatusBadge({
+    super.key,
+    required this.label,
+    required this.status,
+  });
+
+  final String label;
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (status) {
+      'fulfilled' => AppTheme.info,
+      'sold' => AppTheme.success,
+      'deleted' => AppTheme.textSecondary,
+      _ => AppTheme.warning,
+    };
+    return Semantics(
+      label: label,
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppTheme.sp8,
+          vertical: AppTheme.sp4,
+        ),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+        ),
+        child: Text(
+          label,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
       ),
     );
   }

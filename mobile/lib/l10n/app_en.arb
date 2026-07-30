@@ -448,6 +448,62 @@
   "wantedFulfilledHint": "This request is fulfilled and no longer receives matches",
   "wantedFulfilledToast": "Request marked fulfilled",
   "wantedReopenedToast": "Request reopened",
+  "wantedFulfillConfirmTitle": "Mark this request fulfilled?",
+  "wantedFulfillConfirmBody": "New matches and recommendations will stop. Existing conversations and recommendation history will remain, and you can reopen the request later.",
+  "wantedClosedResponderHint": "This request is closed, so it cannot receive new recommendations.",
+  "wantedResponsesReceivedTitle": "Recommendations received",
+  "wantedResponsesSentTitle": "Recommendations sent",
+  "wantedResponsesReceivedEmpty": "No one has recommended an offer for this request yet.",
+  "wantedResponsesSentEmpty": "You have not recommended an offer yet.",
+  "wantedResponseLoadFailed": "Recommendations could not be loaded. Try again.",
+  "wantedResponseActionFailed": "The recommendation could not be updated: {error}",
+  "@wantedResponseActionFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "wantedResponseAcceptedToast": "Recommendation accepted",
+  "wantedResponseDismissedToast": "Recommendation dismissed",
+  "wantedResponseWithdrawnToast": "Recommendation withdrawn",
+  "wantedResponseStatusPending": "Awaiting decision",
+  "wantedResponseStatusAccepted": "Accepted",
+  "wantedResponseStatusDismissed": "Dismissed",
+  "wantedResponseStatusWithdrawn": "Withdrawn",
+  "wantedResponseStatusUnknown": "Status unavailable",
+  "wantedResponseListingStatusActive": "Active",
+  "wantedResponseListingStatusFulfilled": "Fulfilled",
+  "wantedResponseListingStatusSold": "Sold",
+  "wantedResponseListingStatusDeleted": "Unavailable",
+  "wantedResponseListingStatusUnknown": "Status unavailable",
+  "wantedResponseWantedContext": "Request: {title} · {status}",
+  "@wantedResponseWantedContext": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      },
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "wantedResponseOfferContext": "Offer: {title} · {status}",
+  "@wantedResponseOfferContext": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      },
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "wantedResponseMessageLabel": "Message",
+  "wantedResponseOpenOfferAction": "View offer",
+  "wantedResponseAcceptAction": "Accept",
+  "wantedResponseDismissAction": "Dismiss",
+  "wantedResponseWithdrawAction": "Withdraw",
   "agentPlanSecondConfirmTitle": "High-risk action — confirm again",
   "agentPlanSecondConfirmAction": "Confirm and run",
   "adminReauthenticateSuccess": "Administrator verified. Sensitive actions are temporarily unlocked.",

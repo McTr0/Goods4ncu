@@ -18,6 +18,7 @@ import '../components/contact_conversation_sheet.dart';
 import '../components/content_report_dialog.dart';
 import '../services/content_report_service.dart';
 import '../components/feed_feedback_menu.dart';
+import '../components/wanted_response_section.dart';
 import '../services/feed_feedback_service.dart';
 import '../utils/platform_utils.dart';
 
@@ -64,6 +65,12 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
   bool _similarLoading = true;
   List<Listing> _wantedMatches = [];
   bool _wantedMatchesLoading = false;
+  List<WantedResponse> _wantedResponses = [];
+  bool _wantedResponsesLoading = false;
+  String? _wantedResponsesError;
+  String? _wantedResponseOperatingId;
+  String? _wantedResponsesRequestKey;
+  int _wantedResponsesRequestSerial = 0;
   String? _currentUserId;
   bool _currentUserLoaded = false;
   int _loadGeneration = 0;
@@ -101,6 +108,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
           _currentUserId = null;
           _currentUserLoaded = true;
         });
+        await _loadWantedResponsesIfReady();
         return;
       }
       final profile = await _apiService.getUserProfile();
@@ -109,12 +117,14 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         _currentUserId = profile['user_id']?.toString();
         _currentUserLoaded = true;
       });
+      await _loadWantedResponsesIfReady();
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _currentUserId = null;
         _currentUserLoaded = true;
       });
+      await _loadWantedResponsesIfReady();
     }
   }
 
@@ -129,6 +139,12 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
       _similarLoading = true;
       _wantedMatches = [];
       _wantedMatchesLoading = false;
+      _wantedResponses = [];
+      _wantedResponsesLoading = false;
+      _wantedResponsesError = null;
+      _wantedResponseOperatingId = null;
+      _wantedResponsesRequestKey = null;
+      _wantedResponsesRequestSerial += 1;
       _isOperating = false;
       _reportFlowActive = false;
       _isReporting = false;
@@ -144,6 +160,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         });
         if (listing.isWanted) {
           _loadWantedMatches(listingId, generation);
+          await _loadWantedResponsesIfReady();
         } else {
           _loadSimilarListings(listingId, generation);
         }
@@ -157,6 +174,67 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
           _error = e.toString();
         });
       }
+    }
+  }
+
+  Future<void> _loadWantedResponsesIfReady({bool force = false}) async {
+    final listing = _listing;
+    final currentUserId = _currentUserId;
+    if (!_currentUserLoaded ||
+        currentUserId == null ||
+        currentUserId.isEmpty ||
+        listing == null ||
+        !listing.isWanted) {
+      if (mounted && _currentUserLoaded) {
+        setState(() {
+          _wantedResponses = [];
+          _wantedResponsesLoading = false;
+          _wantedResponsesError = null;
+        });
+      }
+      return;
+    }
+
+    final generation = _loadGeneration;
+    final listingId = listing.id;
+    final role = listing.ownerId == currentUserId ? 'requester' : 'responder';
+    final requestKey = '$generation:$listingId:$role';
+    if (!force && _wantedResponsesRequestKey == requestKey) return;
+
+    final requestSerial = ++_wantedResponsesRequestSerial;
+    _wantedResponsesRequestKey = requestKey;
+    setState(() {
+      _wantedResponsesLoading = true;
+      _wantedResponsesError = null;
+    });
+
+    try {
+      final response = await _apiService.getWantedResponses(
+        role: role,
+        wantedListingId: listingId,
+        limit: 100,
+      );
+      if (!mounted ||
+          generation != _loadGeneration ||
+          listingId != widget.listingId ||
+          requestSerial != _wantedResponsesRequestSerial) {
+        return;
+      }
+      setState(() {
+        _wantedResponses = response.items;
+        _wantedResponsesLoading = false;
+      });
+    } catch (error) {
+      if (!mounted ||
+          generation != _loadGeneration ||
+          listingId != widget.listingId ||
+          requestSerial != _wantedResponsesRequestSerial) {
+        return;
+      }
+      setState(() {
+        _wantedResponsesLoading = false;
+        _wantedResponsesError = error.toString();
+      });
     }
   }
 
@@ -511,6 +589,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
           backgroundColor: AppTheme.success,
         ),
       );
+      await _loadWantedResponsesIfReady(force: true);
     } catch (e) {
       if (!mounted) return;
       messenger.showSnackBar(
@@ -627,6 +706,8 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
                     ],
                   ),
                   const SizedBox(height: AppTheme.sp32),
+                  _buildWantedResponseSection(l),
+                  const SizedBox(height: AppTheme.sp32),
                   _buildSimilarSection(l),
                   const SizedBox(height: AppTheme.sp32),
                 ],
@@ -637,6 +718,8 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
                   _buildListingImage(listing, height: 300),
                   const SizedBox(height: AppTheme.sp20),
                   _buildListingInformation(listing, l),
+                  const SizedBox(height: AppTheme.sp24),
+                  _buildWantedResponseSection(l),
                   const SizedBox(height: AppTheme.sp24),
                   _buildSimilarSection(l),
                   const SizedBox(height: 100),
@@ -885,6 +968,119 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     );
   }
 
+  Widget _buildWantedResponseSection(AppLocalizations l) {
+    final listing = _listing;
+    final currentUserId = _currentUserId;
+    if (listing == null ||
+        !listing.isWanted ||
+        !_currentUserLoaded ||
+        currentUserId == null ||
+        currentUserId.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final isOwner = listing.ownerId == currentUserId;
+    final wantedIsActive = listing.status == 'active';
+    return WantedResponseSection(
+      key: ValueKey('wanted-responses-${listing.id}'),
+      role: isOwner
+          ? WantedResponseRole.requester
+          : WantedResponseRole.responder,
+      responses: _wantedResponses,
+      isLoading: _wantedResponsesLoading,
+      errorMessage: _wantedResponsesError == null
+          ? null
+          : l.wantedResponseLoadFailed,
+      onRetry: () => _loadWantedResponsesIfReady(force: true),
+      busyResponseIds: _wantedResponseOperatingId == null
+          ? const <String>{}
+          : {_wantedResponseOperatingId!},
+      onOpenOffer: (response) =>
+          context.push('/listing/${response.offerListingId}'),
+      onAccept: isOwner && wantedIsActive
+          ? (response) => _handleWantedResponseAction(response, 'accept')
+          : null,
+      onDismiss: isOwner && wantedIsActive
+          ? (response) => _handleWantedResponseAction(response, 'dismiss')
+          : null,
+      onWithdraw: !isOwner
+          ? (response) => _handleWantedResponseAction(response, 'withdraw')
+          : null,
+    );
+  }
+
+  Future<void> _handleWantedResponseAction(
+    WantedResponse response,
+    String action,
+  ) async {
+    if (_wantedResponseOperatingId != null) return;
+    final l = AppLocalizations.of(context)!;
+    final messenger = ScaffoldMessenger.of(context);
+    final generation = _loadGeneration;
+    final listingId = widget.listingId;
+    setState(() => _wantedResponseOperatingId = response.id);
+    try {
+      late final WantedResponseActionResult result;
+      late final String successMessage;
+      switch (action) {
+        case 'accept':
+          result = await _apiService.acceptWantedResponse(response.id);
+          successMessage = l.wantedResponseAcceptedToast;
+          break;
+        case 'dismiss':
+          result = await _apiService.dismissWantedResponse(response.id);
+          successMessage = l.wantedResponseDismissedToast;
+          break;
+        case 'withdraw':
+          result = await _apiService.withdrawWantedResponse(response.id);
+          successMessage = l.wantedResponseWithdrawnToast;
+          break;
+        default:
+          throw ArgumentError.value(action, 'action');
+      }
+      if (mounted &&
+          generation == _loadGeneration &&
+          listingId == widget.listingId) {
+        setState(() {
+          _wantedResponses = _wantedResponses
+              .map(
+                (item) => item.id == response.id
+                    ? item.copyWith(
+                        status: result.status,
+                        respondedAt: DateTime.now().toUtc(),
+                      )
+                    : item,
+              )
+              .toList(growable: false);
+        });
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(successMessage),
+            backgroundColor: result.status == 'accepted'
+                ? AppTheme.success
+                : null,
+          ),
+        );
+        await _loadWantedResponsesIfReady(force: true);
+      }
+    } catch (error) {
+      if (mounted &&
+          generation == _loadGeneration &&
+          listingId == widget.listingId) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(l.wantedResponseActionFailed(error.toString())),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted && _wantedResponseOperatingId == response.id) {
+        setState(() => _wantedResponseOperatingId = null);
+      }
+    }
+  }
+
   String _getCategoryDisplayName(BuildContext context, String key) {
     final l = AppLocalizations.of(context)!;
     switch (key) {
@@ -918,9 +1114,30 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
 
   Future<void> _handleFulfillWanted() async {
     final l = AppLocalizations.of(context)!;
+    if (_isOperating || _listing == null) return;
+    final listingId = _listing!.id;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l.wantedFulfillConfirmTitle),
+        content: Text(l.wantedFulfillConfirmBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(l.cancel),
+          ),
+          FilledButton(
+            key: const Key('wanted-fulfill-confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(l.confirm),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || listingId != widget.listingId) return;
     setState(() => _isOperating = true);
     try {
-      await _apiService.fulfillWanted(_listing!.id);
+      await _apiService.fulfillWanted(listingId);
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -1016,6 +1233,36 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
               ),
             ),
           ],
+        );
+      }
+      if (listing?.status != 'active') {
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(AppTheme.sp14),
+          decoration: BoxDecoration(
+            color: Theme.of(
+              context,
+            ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.65),
+            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.lock_clock_outlined,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  l.wantedClosedResponderHint,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
         );
       }
       return Row(
