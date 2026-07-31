@@ -885,22 +885,29 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 | `GET /api/admin/stats` | 平台管理统计。 |
 | `GET /api/admin/capabilities` | 返回当前校园的后台读取、复核、跨校园和近期认证状态；校园运营可读但不能处置。 |
 | `GET /api/admin/users` | 用户列表；支持 `q` 按用户名或用户 ID 字面量包含检索，以及 `limit`、`offset` 分页。 |
-| `GET /api/admin/listings` | 商品列表。 |
+| `GET /api/admin/listings` | 商品列表；同时返回 lifecycle `status`、组合后的 `restriction_state`、后台可见的 `restriction` 摘要、`active_restriction_count` 与权威 `available_admin_actions`；`restricted` 保留为兼容布尔值。 |
 | `GET /api/admin/orders` | 线下成交记录列表。 |
 | `GET /api/admin/audit-logs` | 管理员审计日志。 |
 | `GET /api/admin/moderation/jobs` | 按校园与可选 `status` 查看异步媒体审核任务。 |
 | `GET /api/admin/moderation/cases` | 按校园和可选 `status` 查看案件队列；包含内部证据，仅限后台角色。 |
-| `POST /api/admin/moderation/cases/{id}/review` | 平台管理员开始复核或驳回案件；媒体/消息资源还支持案件内限制与恢复。listing/user 案件刻意不提供通用 restrict/restore。所有动作写入案件事件和审计。 |
+| `POST /api/admin/moderation/cases/{id}/review` | 平台管理员开始复核、驳回、限制或恢复案件资源。listing 的 `restrict` 创建该 case 自己的 effect；`restore` 只释放该 case 的 effect。所有动作、effect 和审计同事务写入。 |
 | `POST /api/admin/moderation/appeals/{id}/review` | 由非原决定人员独立复核申诉，支持维持或改判。 |
 | `POST /api/admin/users/{id}/ban` | 封禁用户。 |
 | `POST /api/admin/users/{id}/unban` | 解封用户。 |
-| `POST /api/admin/listings/{id}/takedown` | 下架商品。 |
+| `POST /api/admin/listings/{id}/takedown` | 紧急下架：幂等创建或复用一个 manual ModerationCase 及其 case-owned effect，不改 listing lifecycle `status`。 |
+| `POST /api/admin/listings/{id}/restore` | 明确管理员恢复：只释放紧急 manual case 的 effect，不释放举报/其他案件的 effect，也不把 deleted/sold/fulfilled 改回 active。 |
 | `POST /api/admin/users/{id}/impersonate` | 生成目标用户 JWT，用于排查。 |
 | `POST /api/admin/tokens/{jti}/revoke` | 撤销 access token。 |
 | `POST /api/admin/users/{id}/role` | 修改用户角色。 |
 | `POST /api/admin/orders/{id}/status` | 管理员按允许状态处理成交记录。 |
 
-POST 写接口仍只允许平台管理员，并且 access token 必须带 10 分钟内的 `auth_time`；过期或旧 token 返回 HTTP 403 与 `recent_authentication_required`。`ban/unban/role/impersonate` 的目标用户、takedown 的 listing 和成交状态操作的 order 必须属于所选校园，否则按不存在处理。跨校园写操作同样必须提供 `campus_id` 与 `reason`，审计记录保存目标校园和该理由。代登录 token 绑定目标校园，不能借此获得另一个校园的上下文。
+POST 写接口仍只允许平台管理员，并且 access token 必须带 10 分钟内的 `auth_time`；过期或旧 token 返回 HTTP 403 与 `recent_authentication_required`。`ban/unban/role/impersonate` 的目标用户、takedown/restore 的 listing 和成交状态操作的 order 必须属于所选校园，否则按不存在处理。跨校园写操作同样必须提供 `campus_id` 与 `reason`，审计记录保存目标校园和该理由。代登录 token 绑定目标校园，不能借此获得另一个校园的上下文。
+
+listing 的生命周期和可用性是两个正交维度：`inventory.status` 继续只表示 `active|sold|deleted|fulfilled`；`listing_restriction_effects` 中任何一条 `released_at IS NULL` 的记录都会把有效状态派生为 restricted。普通 feed、搜索、推荐、详情、收藏、联系、议价、成交与 wanted response 创建/动作全部 fail closed。owner/admin 可读取安全摘要；非 owner 的 detail 按不存在处理。owner 删除不会清除 effect，owner relist 在仍有任一 active effect 时返回 `409`、`code=listing_restricted`。
+
+`POST /api/admin/listings/{id}/takedown` 的公开处置理由固定使用安全文案；query `reason` 不会进入 `ModerationCase.public_reason`，只在跨校园操作时作为必填的作用域/审计说明，同校园可省略。成功返回 `{message, case_id, restricted: true}`；相同 listing 的并发/重试复用当前 manual case/effect。`POST /api/admin/listings/{id}/restore` 必须提供非空 query `reason` 作为恢复与审计理由，成功返回 `{message, case_id, restricted}`；其中 `restricted` 是释放 manual effect 后重新计算的组合状态，因此另一 case 仍有效时仍为 `true`。两者都保持 `inventory.status` 原值。
+
+普通 owner detail 的规范新增字段是 `restriction_state=clear|restricted`、可选嵌套 `restriction`（只含公开原因、限制时间和可申诉 case，不含举报人/内部证据）以及服务端权威 `available_actions`。过渡期同时返回 `restricted` 与扁平 `restriction_reason`；客户端遇到缺失、冲突或未知 restriction state 必须 fail closed。
 
 `GET /api/admin/capabilities` 的附加字段为 `recent_authentication_required`、`recent_authentication_valid` 和 `recent_authentication_expires_at`。Flutter 后台据此锁定处置按钮并展示密码验证入口，但服务端校验仍是最终边界。
 
@@ -1036,9 +1043,9 @@ POST /api/moderation/cases/{id}/appeals
 GET  /api/moderation/appeals/{id}
 ```
 
-用户接口只返回本人当前活动校园的案件安全摘要；申诉每个案件只能提交一次。后台案件接口见上方 Admin 表格。媒体和消息案件处置会同步对应审核状态、案件事件和 `admin_audit_logs`；新的 listing/user 举报当前只负责安全入队、开始复核和驳回。
+用户接口只返回本人当前活动校园的案件安全摘要；申诉每个案件只能提交一次。后台案件接口见上方 Admin 表格。媒体和消息案件处置会同步对应审核状态；listing 案件通过 case-owned effect 限制和恢复，并与案件事件、审计同事务落库。
 
-listing 的下架/恢复不能与 `active/sold/deleted/fulfilled` 生命周期混用，账号的封禁/解封也不能由某一案件撤销而覆盖其他封禁来源。因此，在建立 case-owned、可组合且可条件撤销的 restriction/effect 记录前，listing/user 案件的通用 `restrict`/`restore` 返回冲突，不得偷偷改写目标状态。紧急执法仍走独立的、需要近期认证并写管理员审计的 `POST /api/admin/listings/{id}/takedown` 或 `POST /api/admin/users/{id}/ban`；案件驳回或后续改判不会自动 relist/unban 这些独立动作。
+listing effect 按 case 归属并可组合：恢复或申诉改判只释放目标 case 的 effect；另一案件或 manual 紧急 case 仍有效时 listing 继续 restricted。紧急 `takedown` 也通过 manual case/effect 表达，显式 `restore` 只处理这类 manual effect。任何释放都只改变 effect，不改 lifecycle，所以 deleted/sold/fulfilled 绝不会被审核恢复动作“复活”。user ban 的多来源 effect 仍是后续工作。
 
 ```text
 GET  /api/v1/moderation/cases/{id}

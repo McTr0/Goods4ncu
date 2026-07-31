@@ -8,8 +8,8 @@ use goods4ncu::api::auth::{
 use goods4ncu::api::error::ApiError;
 use goods4ncu::api::{create_router, ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
 use goods4ncu::repositories::{
-    AuthRepository, PostgresAuthRepository, PostgresChatRepository, PostgresListingRepository,
-    PostgresOrderRepository, PostgresUserRepository,
+    AuthRepository, ListingRepository, PostgresAuthRepository, PostgresChatRepository,
+    PostgresListingRepository, PostgresOrderRepository, PostgresUserRepository,
 };
 use goods4ncu::services::{self, notification::NotificationService};
 use goods4ncu::test_infra::with_test_pool;
@@ -19,6 +19,423 @@ use tower::ServiceExt;
 
 fn bearer(value: &str) -> String {
     format!("Bearer {}", value)
+}
+
+#[tokio::test]
+async fn listing_restrictions_compose_and_never_overwrite_owner_lifecycle() {
+    with_test_pool(|pool| async move {
+        use goods4ncu::services::moderation_case::{CaseReviewAction, ModerationCaseService};
+
+        let suffix = uuid::Uuid::new_v4().simple().to_string();
+        let admin_id = format!("restriction-admin-{suffix}");
+        let reviewer_id = format!("restriction-reviewer-{suffix}");
+        let owner_id = format!("restriction-owner-{suffix}");
+        for (id, role) in [
+            (admin_id.as_str(), "admin"),
+            (reviewer_id.as_str(), "admin"),
+            (owner_id.as_str(), "user"),
+        ] {
+            insert_user(&pool, id, &format!("{id}-username"), role).await;
+        }
+        let campus_id = uuid::Uuid::parse_str("c0000000-0000-0000-0000-000000000001").expect("ncu");
+        let listing_id = format!("restriction-listing-{suffix}");
+        insert_listing(&pool, &listing_id, &owner_id, "active").await;
+        let service = ModerationCaseService::new(pool.clone());
+
+        // Emergency enforcement is an idempotent manual case/effect, and the
+        // owner's lifecycle remains truthful instead of being rewritten to deleted.
+        let (first, retry) = tokio::join!(
+            service.impose_manual_listing_takedown(
+                &listing_id,
+                campus_id,
+                &admin_id,
+                "紧急人工下架测试",
+                None,
+            ),
+            service.impose_manual_listing_takedown(
+                &listing_id,
+                campus_id,
+                &admin_id,
+                "紧急人工下架测试",
+                None,
+            )
+        );
+        let manual_case = first.expect("first takedown");
+        assert_eq!(retry.expect("concurrent retry"), manual_case);
+        let lifecycle: String = sqlx::query_scalar("SELECT status FROM inventory WHERE id = $1")
+            .bind(&listing_id)
+            .fetch_one(&pool)
+            .await
+            .expect("lifecycle");
+        assert_eq!(lifecycle, "active");
+        let (manual_cases, active_effects, takedown_audits): (i64, i64, i64) = (
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM moderation_cases
+                 WHERE resource_type = 'listing' AND resource_id = $1
+                   AND source_type = 'manual' AND reason_category = 'admin_takedown'",
+            )
+            .bind(&listing_id)
+            .fetch_one(&pool)
+            .await
+            .expect("manual cases"),
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM listing_restriction_effects
+                 WHERE listing_id = $1 AND released_at IS NULL",
+            )
+            .bind(&listing_id)
+            .fetch_one(&pool)
+            .await
+            .expect("effects"),
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM admin_audit_logs
+                 WHERE action = 'takedown_listing' AND target_id = $1",
+            )
+            .bind(&listing_id)
+            .fetch_one(&pool)
+            .await
+            .expect("audits"),
+        );
+        assert_eq!((manual_cases, active_effects, takedown_audits), (1, 1, 1));
+
+        // A report-owned effect composes with the emergency effect.
+        let report_case =
+            insert_open_listing_case(&pool, campus_id, &listing_id, &owner_id, &reviewer_id).await;
+        service
+            .review_case(
+                report_case,
+                campus_id,
+                &reviewer_id,
+                CaseReviewAction::Restrict,
+                Some("报告证据成立"),
+                Some("该发布违反平台规则"),
+            )
+            .await
+            .expect("restrict report case");
+        let active_effects: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM listing_restriction_effects
+             WHERE listing_id = $1 AND released_at IS NULL",
+        )
+        .bind(&listing_id)
+        .fetch_one(&pool)
+        .await
+        .expect("two active effects");
+        assert_eq!(active_effects, 2);
+
+        // Explicit admin restore owns only the emergency case. The report effect
+        // survives, and owner relist fails with the stable coded conflict.
+        assert_eq!(
+            service
+                .restore_manual_listing_takedown(
+                    &listing_id,
+                    campus_id,
+                    &admin_id,
+                    "紧急风险已经解除",
+                    None,
+                )
+                .await
+                .expect("manual restore"),
+            manual_case
+        );
+        sqlx::query("UPDATE inventory SET status = 'deleted' WHERE id = $1")
+            .bind(&listing_id)
+            .execute(&pool)
+            .await
+            .expect("owner delete fixture");
+        let relist = PostgresListingRepository::new(pool.clone())
+            .relist(&listing_id, &owner_id, campus_id)
+            .await;
+        assert!(matches!(
+            relist,
+            Err(ApiError::CodedConflict {
+                code: "listing_restricted",
+                ..
+            })
+        ));
+        let active_case: uuid::Uuid = sqlx::query_scalar(
+            "SELECT case_id FROM listing_restriction_effects
+             WHERE listing_id = $1 AND released_at IS NULL",
+        )
+        .bind(&listing_id)
+        .fetch_one(&pool)
+        .await
+        .expect("remaining case");
+        assert_eq!(active_case, report_case);
+
+        service
+            .review_case(
+                report_case,
+                campus_id,
+                &admin_id,
+                CaseReviewAction::Restore,
+                Some("案件复核后恢复"),
+                Some("案件复核后恢复"),
+            )
+            .await
+            .expect("restore report case");
+        let lifecycle: String = sqlx::query_scalar("SELECT status FROM inventory WHERE id = $1")
+            .bind(&listing_id)
+            .fetch_one(&pool)
+            .await
+            .expect("deleted lifecycle retained");
+        assert_eq!(lifecycle, "deleted", "case restore must never relist");
+        PostgresListingRepository::new(pool.clone())
+            .relist(&listing_id, &owner_id, campus_id)
+            .await
+            .expect("owner may relist only after all effects are released");
+
+        for terminal in ["sold", "fulfilled", "deleted"] {
+            let terminal_id = format!("restriction-{terminal}-{suffix}");
+            insert_listing(&pool, &terminal_id, &owner_id, terminal).await;
+            service
+                .impose_manual_listing_takedown(
+                    &terminal_id,
+                    campus_id,
+                    &admin_id,
+                    "终态限制正交性测试",
+                    None,
+                )
+                .await
+                .expect("restrict terminal listing");
+            service
+                .restore_manual_listing_takedown(
+                    &terminal_id,
+                    campus_id,
+                    &admin_id,
+                    "终态限制解除测试",
+                    None,
+                )
+                .await
+                .expect("restore terminal listing restriction");
+            let actual: String = sqlx::query_scalar("SELECT status FROM inventory WHERE id = $1")
+                .bind(&terminal_id)
+                .fetch_one(&pool)
+                .await
+                .expect("terminal status");
+            assert_eq!(
+                actual, terminal,
+                "restriction release resurrected {terminal}"
+            );
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn listing_appeal_releases_only_the_appealed_case_effect() {
+    with_test_pool(|pool| async move {
+        use goods4ncu::services::moderation_case::{
+            AppealDecision, CaseReviewAction, ModerationCaseService,
+        };
+
+        let suffix = uuid::Uuid::new_v4().simple().to_string();
+        let reviewer_a = format!("effect-reviewer-a-{suffix}");
+        let reviewer_b = format!("effect-reviewer-b-{suffix}");
+        let owner_id = format!("effect-owner-{suffix}");
+        for (id, role) in [
+            (reviewer_a.as_str(), "admin"),
+            (reviewer_b.as_str(), "admin"),
+            (owner_id.as_str(), "user"),
+        ] {
+            insert_user(&pool, id, &format!("{id}-username"), role).await;
+        }
+        let campus_id = uuid::Uuid::parse_str("c0000000-0000-0000-0000-000000000001").expect("ncu");
+        let listing_id = format!("appeal-effects-{suffix}");
+        insert_listing(&pool, &listing_id, &owner_id, "active").await;
+        let service = ModerationCaseService::new(pool.clone());
+        let case_a =
+            insert_open_listing_case(&pool, campus_id, &listing_id, &owner_id, &reviewer_a).await;
+        let case_b =
+            insert_open_listing_case(&pool, campus_id, &listing_id, &owner_id, &reviewer_b).await;
+        for (case_id, reviewer) in [(case_a, reviewer_a.as_str()), (case_b, reviewer_b.as_str())] {
+            service
+                .review_case(
+                    case_id,
+                    campus_id,
+                    reviewer,
+                    CaseReviewAction::Restrict,
+                    Some("独立案件限制"),
+                    Some("该发布正在限制中"),
+                )
+                .await
+                .expect("restrict case");
+        }
+
+        let appeal = service
+            .submit_appeal(case_a, &owner_id, campus_id, "请由独立审核员复核本案件")
+            .await
+            .expect("submit appeal");
+        service
+            .review_appeal(
+                appeal.id,
+                campus_id,
+                &reviewer_b,
+                AppealDecision::Overturn,
+                "独立复核后撤销本案件限制",
+            )
+            .await
+            .expect("overturn appeal");
+
+        let rows = sqlx::query(
+            "SELECT case_id, released_at IS NULL AS active
+             FROM listing_restriction_effects WHERE listing_id = $1",
+        )
+        .bind(&listing_id)
+        .fetch_all(&pool)
+        .await
+        .expect("effects after appeal");
+        assert_eq!(rows.len(), 2);
+        for row in rows {
+            let case_id: uuid::Uuid = sqlx::Row::get(&row, "case_id");
+            let active: bool = sqlx::Row::get(&row, "active");
+            assert_eq!(active, case_id == case_b);
+        }
+        assert!(
+            sqlx::query_scalar::<_, bool>("SELECT listing_has_active_restriction($1)")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("effective restriction")
+        );
+
+        service
+            .review_case(
+                case_b,
+                campus_id,
+                &reviewer_a,
+                CaseReviewAction::Restore,
+                Some("第二案件独立恢复"),
+                Some("第二案件独立恢复"),
+            )
+            .await
+            .expect("restore second case");
+        assert!(
+            !sqlx::query_scalar::<_, bool>("SELECT listing_has_active_restriction($1)")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("restriction fully released")
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn concurrent_manual_restore_and_appeal_review_release_once_without_deadlock() {
+    with_test_pool(|pool| async move {
+        use goods4ncu::services::moderation_case::{AppealDecision, ModerationCaseService};
+        use std::time::Duration;
+
+        let suffix = uuid::Uuid::new_v4().simple().to_string();
+        let takedown_admin = format!("race-takedown-admin-{suffix}");
+        let appeal_reviewer = format!("race-appeal-reviewer-{suffix}");
+        let restore_admin = format!("race-restore-admin-{suffix}");
+        let owner_id = format!("race-owner-{suffix}");
+        for (id, role) in [
+            (takedown_admin.as_str(), "admin"),
+            (appeal_reviewer.as_str(), "admin"),
+            (restore_admin.as_str(), "admin"),
+            (owner_id.as_str(), "user"),
+        ] {
+            insert_user(&pool, id, &format!("{id}-username"), role).await;
+        }
+        let campus_id = uuid::Uuid::parse_str("c0000000-0000-0000-0000-000000000001").expect("ncu");
+        let listing_id = format!("restriction-race-{suffix}");
+        insert_listing(&pool, &listing_id, &owner_id, "active").await;
+        let service = ModerationCaseService::new(pool.clone());
+        let case_id = service
+            .impose_manual_listing_takedown(
+                &listing_id,
+                campus_id,
+                &takedown_admin,
+                "并发恢复与申诉测试",
+                None,
+            )
+            .await
+            .expect("manual restriction");
+        let appeal = service
+            .submit_appeal(case_id, &owner_id, campus_id, "请求独立复核并恢复发布")
+            .await
+            .expect("appeal");
+
+        let appeal_service = service.clone();
+        let restore_service = service.clone();
+        let listing_for_restore = listing_id.clone();
+        let outcome = tokio::time::timeout(Duration::from_secs(5), async move {
+            tokio::join!(
+                appeal_service.review_appeal(
+                    appeal.id,
+                    campus_id,
+                    &appeal_reviewer,
+                    AppealDecision::Overturn,
+                    "独立复核决定撤销限制",
+                ),
+                restore_service.restore_manual_listing_takedown(
+                    &listing_for_restore,
+                    campus_id,
+                    &restore_admin,
+                    "管理员确认紧急风险解除",
+                    None,
+                )
+            )
+        })
+        .await
+        .expect("normalized inventory-case-effect locks must not deadlock");
+        assert_ne!(
+            outcome.0.is_ok(),
+            outcome.1.is_ok(),
+            "exactly one serialized release path must win: {outcome:?}"
+        );
+
+        let effect = sqlx::query(
+            "SELECT released_at, released_by FROM listing_restriction_effects
+             WHERE case_id = $1",
+        )
+        .bind(case_id)
+        .fetch_one(&pool)
+        .await
+        .expect("effect");
+        assert!(
+            sqlx::Row::get::<Option<chrono::DateTime<chrono::Utc>>, _>(&effect, "released_at")
+                .is_some()
+        );
+        assert!(
+            sqlx::Row::get::<Option<String>, _>(&effect, "released_by").is_some(),
+            "the single release must retain its winning actor"
+        );
+        let active_effects: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM listing_restriction_effects
+             WHERE case_id = $1 AND released_at IS NULL",
+        )
+        .bind(case_id)
+        .fetch_one(&pool)
+        .await
+        .expect("active effects");
+        assert_eq!(active_effects, 0);
+        let case_row = sqlx::query("SELECT status, resolution FROM moderation_cases WHERE id = $1")
+            .bind(case_id)
+            .fetch_one(&pool)
+            .await
+            .expect("case");
+        assert_eq!(sqlx::Row::get::<String, _>(&case_row, "status"), "resolved");
+        assert_eq!(
+            sqlx::Row::get::<Option<String>, _>(&case_row, "resolution").as_deref(),
+            Some("restored")
+        );
+        let appeal_status: String =
+            sqlx::query_scalar("SELECT status FROM moderation_appeals WHERE id = $1")
+                .bind(appeal.id)
+                .fetch_one(&pool)
+                .await
+                .expect("appeal status");
+        assert!(matches!(appeal_status.as_str(), "pending" | "overturned"));
+        let lifecycle: String = sqlx::query_scalar("SELECT status FROM inventory WHERE id = $1")
+            .bind(&listing_id)
+            .fetch_one(&pool)
+            .await
+            .expect("lifecycle");
+        assert_eq!(lifecycle, "active");
+    })
+    .await;
 }
 
 fn hash_refresh_token(token: &str) -> String {
@@ -219,6 +636,36 @@ async fn insert_listing(pool: &sqlx::PgPool, listing_id: &str, owner_id: &str, s
     .execute(pool)
     .await
     .expect("insert listing");
+}
+
+async fn insert_open_listing_case(
+    pool: &sqlx::PgPool,
+    campus_id: uuid::Uuid,
+    listing_id: &str,
+    subject_user_id: &str,
+    opened_by: &str,
+) -> uuid::Uuid {
+    let case_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO moderation_cases (
+             id, campus_id, subject_user_id, resource_type, resource_id,
+             source_type, source_ref_id, status, reason_category,
+             public_reason, opened_by
+         ) VALUES (
+             $1, $2, $3, 'listing', $4, 'user_report', $5, 'open',
+             'listing_report', '该发布正在接受内容安全复核', $6
+         )",
+    )
+    .bind(case_id)
+    .bind(campus_id)
+    .bind(subject_user_id)
+    .bind(listing_id)
+    .bind(format!("listing-restriction-test:{case_id}"))
+    .bind(opened_by)
+    .execute(pool)
+    .await
+    .expect("insert listing case");
+    case_id
 }
 
 async fn insert_order(
@@ -889,6 +1336,120 @@ async fn platform_admin_cross_campus_access_requires_reason_and_is_audited() {
         assert_eq!(body["campus_id"], other_campus_id.to_string());
         assert_eq!(body["total"], 1);
         assert_eq!(body["listings"][0]["id"], "cross-campus-listing");
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/admin/listings/cross-campus-listing/takedown?reason=incident-review")
+                    .header("Authorization", bearer(&admin_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "an unscoped mutation must not discover another campus's listing"
+        );
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/admin/listings/cross-campus-listing/takedown?campus_id={other_campus_id}"
+                    ))
+                    .header("Authorization", bearer(&admin_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/admin/listings/cross-campus-listing/takedown?campus_id={other_campus_id}&reason=internal-incident-secret"
+                    ))
+                    .header("Authorization", bearer(&admin_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let effect_scope: uuid::Uuid = sqlx::query_scalar(
+            "SELECT campus_id FROM listing_restriction_effects
+             WHERE listing_id = 'cross-campus-listing' AND released_at IS NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("cross-campus listing effect");
+        assert_eq!(effect_scope, other_campus_id);
+        let public_reason: String = sqlx::query_scalar(
+             "SELECT c.public_reason
+             FROM listing_restriction_effects e
+             JOIN moderation_cases c ON c.id = e.case_id
+             WHERE e.listing_id = 'cross-campus-listing' AND e.released_at IS NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("cross-campus public reason");
+        assert_ne!(public_reason, "internal-incident-secret");
+        assert!(!public_reason.contains("internal-incident-secret"));
+
+        let (owner_token, _, _) = generate_access_token_for_campus(
+            "cross-campus-user",
+            "user",
+            Some(other_campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("cross-campus owner token");
+        let owner_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/listings/cross-campus-listing")
+                    .header("Authorization", bearer(&owner_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("cross-campus owner detail");
+        assert_eq!(owner_response.status(), StatusCode::OK);
+        let owner_detail: serde_json::Value = serde_json::from_slice(
+            &to_bytes(owner_response.into_body(), usize::MAX)
+                .await
+                .expect("owner detail body"),
+        )
+        .expect("owner detail json");
+        assert_eq!(owner_detail["restriction"]["public_reason"], public_reason);
+        assert_ne!(
+            owner_detail["restriction"]["public_reason"],
+            "internal-incident-secret"
+        );
+        let effect_audit = sqlx::query(
+            "SELECT campus_id, scope_reason FROM admin_audit_logs
+             WHERE action = 'takedown_listing' AND target_id = 'cross-campus-listing'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("cross-campus takedown audit");
+        assert_eq!(
+            sqlx::Row::get::<uuid::Uuid, _>(&effect_audit, "campus_id"),
+            other_campus_id
+        );
+        assert_eq!(
+            sqlx::Row::get::<Option<String>, _>(&effect_audit, "scope_reason").as_deref(),
+            Some("internal-incident-secret")
+        );
 
         let mutation_uri = format!(
             "/api/admin/users/cross-campus-user/ban?campus_id={other_campus_id}&reason=incident-review"
@@ -1838,6 +2399,515 @@ async fn second_campus_onboarding_journey_end_to_end() {
             response.status(),
             StatusCode::FORBIDDEN,
             "a deactivated campus must stop accepting writes"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn admin_listing_restriction_http_contract_gates_public_and_commercial_paths() {
+    with_test_pool(|pool| async move {
+        use goods4ncu::services::moderation_case::{CaseReviewAction, ModerationCaseService};
+
+        let suffix = uuid::Uuid::new_v4().simple().to_string();
+        let admin_id = format!("restriction-http-admin-{suffix}");
+        let owner_id = format!("restriction-http-owner-{suffix}");
+        let viewer_id = format!("restriction-http-viewer-{suffix}");
+        insert_user(
+            &pool,
+            &admin_id,
+            &format!("restriction_admin_{suffix}"),
+            "admin",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &owner_id,
+            &format!("restriction_owner_{suffix}"),
+            "user",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &viewer_id,
+            &format!("restriction_viewer_{suffix}"),
+            "user",
+        )
+        .await;
+        let campus_id = uuid::Uuid::parse_str("c0000000-0000-0000-0000-000000000001").expect("ncu");
+        let listing_id = format!("restriction-http-listing-{suffix}");
+        insert_listing(&pool, &listing_id, &owner_id, "active").await;
+        let (admin_token, _, _) = generate_access_token_for_campus(
+            &admin_id,
+            "admin",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("admin token");
+        let (owner_token, _, _) = generate_access_token_for_campus(
+            &owner_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("owner token");
+        let (viewer_token, _, _) = generate_access_token_for_campus(
+            &viewer_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("viewer token");
+        let app = create_router(build_state(pool.clone()), &[]);
+        let takedown_uri =
+            format!("/api/admin/listings/{listing_id}/takedown?reason=urgent-policy-review");
+
+        let mut case_ids = Vec::new();
+        for _ in 0..2 {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(&takedown_uri)
+                        .header("Authorization", bearer(&admin_token))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .expect("takedown response");
+            assert_eq!(response.status(), StatusCode::OK);
+            let body: serde_json::Value = serde_json::from_slice(
+                &to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .expect("takedown body"),
+            )
+            .expect("takedown json");
+            assert_eq!(body["restricted"], true);
+            case_ids.push(body["case_id"].as_str().expect("case id").to_string());
+        }
+        assert_eq!(case_ids[0], case_ids[1], "retry must reuse manual case");
+        let lifecycle: String = sqlx::query_scalar("SELECT status FROM inventory WHERE id = $1")
+            .bind(&listing_id)
+            .fetch_one(&pool)
+            .await
+            .expect("lifecycle");
+        assert_eq!(lifecycle, "active");
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/listings?direction=all")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("public feed");
+        assert_eq!(response.status(), StatusCode::OK);
+        let feed: serde_json::Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("feed body"),
+        )
+        .expect("feed json");
+        assert!(!feed["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .any(|item| item["id"] == listing_id));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/listings/{listing_id}"))
+                    .header("Authorization", bearer(&viewer_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("viewer detail");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/listings/{listing_id}"))
+                    .header("Authorization", bearer(&owner_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("owner detail");
+        assert_eq!(response.status(), StatusCode::OK);
+        let owner_detail: serde_json::Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("owner detail body"),
+        )
+        .expect("owner detail json");
+        assert_eq!(owner_detail["status"], "active");
+        assert_eq!(owner_detail["restricted"], true);
+        assert_eq!(owner_detail["restriction_state"], "restricted");
+        assert!(owner_detail["restriction_reason"].is_string());
+        assert_eq!(
+            owner_detail["restriction"]["moderation_case_id"],
+            case_ids[0]
+        );
+        assert!(owner_detail["restriction"]["public_reason"].is_string());
+        assert!(owner_detail["restriction"]["restricted_at"].is_string());
+        assert!(!owner_detail["available_actions"]
+            .as_array()
+            .expect("actions")
+            .iter()
+            .any(|action| matches!(action.as_str(), Some("relist" | "contact" | "create_order"))));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/listings")
+                    .header("Authorization", bearer(&admin_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("admin listing representation");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("admin listings body"),
+        )
+        .expect("admin listings json");
+        let admin_listing = body["listings"]
+            .as_array()
+            .expect("admin listings")
+            .iter()
+            .find(|item| item["id"] == listing_id)
+            .expect("restricted listing in admin response");
+        assert_eq!(admin_listing["status"], "active");
+        assert_eq!(admin_listing["restriction_state"], "restricted");
+        assert_eq!(admin_listing["active_restriction_count"], 1);
+        assert_eq!(
+            admin_listing["restriction"]["moderation_case_id"],
+            case_ids[0]
+        );
+        assert_eq!(
+            admin_listing["available_admin_actions"],
+            serde_json::json!(["restore"])
+        );
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/price-discovery")
+                    .header("Authorization", bearer(&viewer_token))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"listing_id": listing_id}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .expect("commercial action");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/orders")
+                    .header("Authorization", bearer(&viewer_token))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "listing_id": listing_id,
+                            "offered_price_cny": 100.0,
+                            "message": "restriction gate"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .expect("order gate");
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body: serde_json::Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("order gate body"),
+        )
+        .expect("order gate json");
+        assert_eq!(body["code"], "listing_restricted");
+        let order_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM orders WHERE listing_id = $1")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("order count");
+        assert_eq!(order_count, 0);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/chat/conversations")
+                    .header("Authorization", bearer(&viewer_token))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "client_request_id": uuid::Uuid::new_v4(),
+                            "recipient_id": owner_id,
+                            "listing_id": listing_id,
+                            "mode": "mail",
+                            "subject": "restricted listing",
+                            "content": "restriction gate"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .expect("contact gate");
+        assert!(matches!(
+            response.status(),
+            StatusCode::FORBIDDEN | StatusCode::NOT_FOUND | StatusCode::CONFLICT
+        ));
+        let conversation_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM chat_conversations WHERE listing_id = $1")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("conversation count");
+        assert_eq!(conversation_count, 0);
+
+        // Add an independent report effect, then manual restore must report that
+        // the listing remains effectively restricted.
+        let report_case =
+            insert_open_listing_case(&pool, campus_id, &listing_id, &owner_id, &viewer_id).await;
+        let service = ModerationCaseService::new(pool.clone());
+        service
+            .review_case(
+                report_case,
+                campus_id,
+                &admin_id,
+                CaseReviewAction::Restrict,
+                Some("另一个案件限制"),
+                Some("该发布仍在复核"),
+            )
+            .await
+            .expect("second effect");
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/admin/listings/{listing_id}/restore?reason=manual-risk-cleared"
+                    ))
+                    .header("Authorization", bearer(&admin_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("manual restore response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("manual restore body"),
+        )
+        .expect("manual restore json");
+        assert_eq!(body["case_id"], case_ids[0]);
+        assert_eq!(body["restricted"], true);
+
+        let retry = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/admin/listings/{listing_id}/restore?reason=manual-risk-cleared"
+                    ))
+                    .header("Authorization", bearer(&admin_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("manual restore retry response");
+        assert_eq!(retry.status(), StatusCode::OK);
+        let retry_body: serde_json::Value = serde_json::from_slice(
+            &to_bytes(retry.into_body(), usize::MAX)
+                .await
+                .expect("manual restore retry body"),
+        )
+        .expect("manual restore retry json");
+        assert_eq!(retry_body["case_id"], case_ids[0]);
+        assert_eq!(retry_body["restricted"], true);
+        let release_events: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM moderation_case_events
+             WHERE case_id = $1 AND event_type = 'content_restored'",
+        )
+        .bind(uuid::Uuid::parse_str(&case_ids[0]).expect("manual case uuid"))
+        .fetch_one(&pool)
+        .await
+        .expect("release events");
+        let restore_audits: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM admin_audit_logs
+             WHERE action = 'restore_listing' AND target_id = $1",
+        )
+        .bind(&listing_id)
+        .fetch_one(&pool)
+        .await
+        .expect("restore audits");
+        let remaining_effects: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM listing_restriction_effects
+             WHERE listing_id = $1 AND released_at IS NULL",
+        )
+        .bind(&listing_id)
+        .fetch_one(&pool)
+        .await
+        .expect("remaining effects");
+        assert_eq!(
+            (release_events, restore_audits, remaining_effects),
+            (1, 1, 1)
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT status FROM inventory WHERE id = $1")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("status after restore"),
+            "active"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn restricted_wanted_keeps_its_current_epoch_pending_response_frozen() {
+    with_test_pool(|pool| async move {
+        let suffix = uuid::Uuid::new_v4().simple().to_string();
+        let admin_id = format!("wanted-freeze-admin-{suffix}");
+        let requester_id = format!("wanted-freeze-requester-{suffix}");
+        let responder_id = format!("wanted-freeze-responder-{suffix}");
+        insert_user(&pool, &admin_id, &format!("wanted_admin_{suffix}"), "admin").await;
+        insert_user(
+            &pool,
+            &requester_id,
+            &format!("wanted_requester_{suffix}"),
+            "user",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &responder_id,
+            &format!("wanted_responder_{suffix}"),
+            "user",
+        )
+        .await;
+        let campus_id = uuid::Uuid::parse_str("c0000000-0000-0000-0000-000000000001").expect("ncu");
+        let wanted_id = format!("restricted-wanted-{suffix}");
+        let offer_id = format!("restricted-offer-{suffix}");
+        insert_listing(&pool, &wanted_id, &requester_id, "active").await;
+        insert_listing(&pool, &offer_id, &responder_id, "active").await;
+        sqlx::query("UPDATE inventory SET direction = 'wanted' WHERE id = $1")
+            .bind(&wanted_id)
+            .execute(&pool)
+            .await
+            .expect("wanted direction");
+        let response_id: uuid::Uuid = sqlx::query_scalar(
+            "INSERT INTO wanted_responses (
+                 wanted_listing_id, offer_listing_id, responder_id, requester_id, campus_id
+             ) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+        )
+        .bind(&wanted_id)
+        .bind(&offer_id)
+        .bind(&responder_id)
+        .bind(&requester_id)
+        .bind(campus_id)
+        .fetch_one(&pool)
+        .await
+        .expect("pending response");
+        goods4ncu::services::moderation_case::ModerationCaseService::new(pool.clone())
+            .impose_manual_listing_takedown(
+                &wanted_id,
+                campus_id,
+                &admin_id,
+                "冻结当前需求轮次",
+                None,
+            )
+            .await
+            .expect("restrict wanted");
+        let (responder_token, _, _) = generate_access_token_for_campus(
+            &responder_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("responder token");
+        let app = create_router(build_state(pool.clone()), &[]);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/wanted-responses?role=responder&wanted_listing_id={wanted_id}"
+                    ))
+                    .header("Authorization", bearer(&responder_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response list");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("response list body"),
+        )
+        .expect("response list json");
+        assert_eq!(body["items"][0]["status"], "pending");
+        assert_eq!(body["items"][0]["round_state"], "closed");
+        assert_eq!(body["items"][0]["available_actions"], serde_json::json!([]));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/wanted-responses/{response_id}/withdraw"))
+                    .header("Authorization", bearer(&responder_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("withdraw response");
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT status FROM wanted_responses WHERE id = $1",)
+                .bind(response_id)
+                .fetch_one(&pool)
+                .await
+                .expect("response status"),
+            "pending"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT lifecycle_epoch FROM inventory WHERE id = $1")
+                .bind(&wanted_id)
+                .fetch_one(&pool)
+                .await
+                .expect("wanted epoch"),
+            1
         );
     })
     .await;

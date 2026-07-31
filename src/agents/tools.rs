@@ -441,7 +441,7 @@ impl Tool for SearchInventoryTool {
         }
 
         let campus_id = resolve_read_campus(&self.ctx).await?;
-        let mut sql = String::from("SELECT id, title, brand, category, condition_score, suggested_price_cny FROM inventory WHERE status = 'active' AND campus_id = $1");
+        let mut sql = String::from("SELECT id, title, brand, category, condition_score, suggested_price_cny FROM inventory WHERE status = 'active' AND campus_id = $1 AND NOT listing_has_active_restriction(id)");
         let mut param_idx: usize = 2;
 
         if args.keyword.is_some() {
@@ -562,7 +562,10 @@ impl Tool for GetListingDetailsTool {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let campus_id = resolve_read_campus(&self.ctx).await?;
         let row = sqlx::query_as::<_, FullListingRow>(
-            "SELECT id, title, category, brand, condition_score, suggested_price_cny, defects, description, owner_id, status FROM inventory WHERE id = $1 AND campus_id = $2",
+            "SELECT id, title, category, brand, condition_score, suggested_price_cny,
+                    defects, description, owner_id, status
+             FROM inventory WHERE id = $1 AND campus_id = $2
+               AND NOT listing_has_active_restriction(id)",
         )
         .bind(&args.listing_id)
         .bind(campus_id)
@@ -690,7 +693,8 @@ pub async fn execute_update_listing(
             // First fetch the current listing so we can build accurate content for re-embedding.
             let existing = sqlx::query_as::<_, ExistingListingRow>(
                 "SELECT title, category, brand, condition_score, description \
-                 FROM inventory WHERE id = $1 AND owner_id = $2 AND status = 'active'",
+                 FROM inventory WHERE id = $1 AND owner_id = $2 AND status = 'active'
+                   AND NOT listing_has_active_restriction(id)",
             )
             .bind(&args.listing_id)
             .bind(&owner_id)
@@ -981,7 +985,9 @@ pub async fn execute_purchase_item(
         // The service creates only an intent; seller confirmation performs any
         // optional delisting later.
         let listing = sqlx::query_as::<_, ListingCheckRow>(
-            "SELECT id, campus_id, owner_id, suggested_price_cny, status FROM inventory WHERE id = $1",
+            "SELECT id, campus_id, owner_id, suggested_price_cny, status
+             FROM inventory WHERE id = $1
+               AND NOT listing_has_active_restriction(id)",
         )
         .bind(&args.listing_id)
         .fetch_optional(&ctx.db_pool)
@@ -1126,34 +1132,48 @@ pub async fn execute_negotiate_item(
             .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
         let campus_id = require_verified_campus(ctx, &buyer_id).await?;
 
-        // Fetch the listing to get the seller and check it's active
+        let mut tx = ctx
+            .db_pool
+            .begin()
+            .await
+            .map_err(|e| ToolError(format!("Transaction error: {}", e)))?;
+
+        // Inventory is the first lock. This serializes eligibility, duplicate
+        // detection and HITL insertion against takedown and concurrent retries.
         let listing_row = sqlx::query_as::<_, ListingCheckRow>(
-            "SELECT id, campus_id, owner_id, suggested_price_cny, status FROM inventory WHERE id = $1",
+            "SELECT id, campus_id, owner_id, suggested_price_cny, status
+             FROM inventory WHERE id = $1 AND campus_id = $2 FOR UPDATE",
         )
         .bind(&args.listing_id)
-        .fetch_optional(&ctx.db_pool)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|e| ToolError(format!("DB error: {}", e)))?;
 
         let listing = match listing_row {
             Some(l) => l,
-            None => return Ok(format!("No listing found with ID: {}", args.listing_id)),
+            None => return Err(ToolError("当前校园未找到可议价的商品".to_string())),
         };
 
-        if listing.campus_id != campus_id {
-            return Err(ToolError("只能对当前校园的商品发起还价".to_string()));
+        if buyer_id == listing.owner_id {
+            return Err(ToolError("不能对自己的商品发起还价".to_string()));
         }
+
         CampusService::new(ctx.db_pool.clone())
             .require_verified_in_campus(&listing.owner_id, campus_id)
             .await
             .map_err(|_| ToolError("只能与当前校园的已认证用户议价".to_string()))?;
 
+        let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+            .bind(&args.listing_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| ToolError(format!("DB error: {}", e)))?;
+        if restricted {
+            return Err(ToolError("该商品受平台限制，无法发起还价".to_string()));
+        }
         if listing.status != "active" {
             return Ok(format!("商品 {} 已下架或售出，无法还价", args.listing_id));
-        }
-
-        if buyer_id == listing.owner_id {
-            return Err(ToolError("不能对自己的商品发起还价".to_string()));
         }
 
         // Validate offered price is within a reasonable range (±50% of asking price)
@@ -1175,7 +1195,7 @@ pub async fn execute_negotiate_item(
         )
         .bind(&args.listing_id)
         .bind(&buyer_id)
-        .fetch_optional(&ctx.db_pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|e| ToolError(format!("DB error: {}", e)))?;
         if existing.is_some() {
@@ -1196,9 +1216,13 @@ pub async fn execute_negotiate_item(
         .bind(&listing.owner_id)
         .bind(args.offered_price)
         .bind(&args.reason)
-        .execute(&ctx.db_pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| ToolError(format!("DB error: {}", e)))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| ToolError(format!("Commit error: {}", e)))?;
 
         // Notify the seller immediately
         let _ = ctx

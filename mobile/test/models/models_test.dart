@@ -335,6 +335,106 @@ void main() {
       expect(listing.createdAt, isNull);
     });
 
+    test('parses authoritative lifecycle and restriction actions', () {
+      final listing = Listing.fromJson({
+        'id': 'listing-restricted',
+        'title': 'Restricted item',
+        'category': 'other',
+        'brand': 'NCU',
+        'condition_score': 8,
+        'suggested_price_cny': 20,
+        'status': 'active',
+        'restriction_state': 'restricted',
+        'restriction': {
+          'public_reason': 'Needs review',
+          'moderation_case_id': 'case-1',
+          'can_appeal': true,
+        },
+        'available_actions': ['delete', 'buy'],
+        'available_admin_actions': ['restore'],
+      });
+
+      expect(listing.isRestricted, isTrue);
+      expect(listing.restriction?.reason, 'Needs review');
+      expect(listing.restriction?.moderationCaseId, 'case-1');
+      expect(listing.restriction?.canAppeal, isTrue);
+      expect(listing.allowsAction(Listing.actionDelete), isTrue);
+      expect(listing.allowsAction(Listing.actionBuy), isFalse);
+      expect(listing.allowsAdminAction(Listing.adminActionRestore), isTrue);
+      expect(listing.allowsAdminAction(Listing.adminActionTakedown), isFalse);
+    });
+
+    test('malformed enforcement metadata fails closed', () {
+      final listing = Listing.fromJson({
+        'id': 'listing-unknown-policy',
+        'title': 'Unknown policy',
+        'category': 'other',
+        'brand': 'NCU',
+        'condition_score': 8,
+        'suggested_price_cny': 20,
+        'status': 'active',
+        'restriction_state': 42,
+        'available_actions': 'delete',
+        'available_admin_actions': {'restore': true},
+      });
+
+      expect(listing.restrictionState, 'unknown');
+      expect(listing.isRestricted, isTrue);
+      expect(listing.availableActions, isEmpty);
+      expect(listing.availableAdminActions, isEmpty);
+      expect(listing.allowsAction(Listing.actionDelete), isFalse);
+      expect(listing.allowsAdminAction(Listing.adminActionRestore), isFalse);
+    });
+
+    test('parses deployed flat restriction fields and action aliases', () {
+      final listing = Listing.fromJson({
+        'id': 'listing-flat-policy',
+        'title': 'Flat policy',
+        'category': 'other',
+        'brand': 'NCU',
+        'condition_score': 8,
+        'suggested_price_cny': 20,
+        'status': 'active',
+        'restricted': false,
+        'restriction_reason': null,
+        'available_actions': ['contact', 'create_order'],
+      });
+
+      expect(listing.restrictionState, 'clear');
+      expect(listing.isRestricted, isFalse);
+      expect(listing.allowsAction(Listing.actionContact), isTrue);
+      expect(listing.allowsAction(Listing.actionBuy), isTrue);
+      expect(listing.allowsAction(Listing.actionDelete), isFalse);
+    });
+
+    test('legacy action fallback is lifecycle-safe', () {
+      final wanted = Listing.fromJson({
+        'id': 'wanted-deleted',
+        'title': 'Deleted request',
+        'category': 'other',
+        'brand': 'NCU',
+        'direction': 'wanted',
+        'condition_score': 8,
+        'suggested_price_cny': 20,
+        'status': 'deleted',
+      });
+      final offer = Listing.fromJson({
+        'id': 'offer-deleted',
+        'title': 'Deleted offer',
+        'category': 'other',
+        'brand': 'NCU',
+        'condition_score': 8,
+        'suggested_price_cny': 20,
+        'status': 'deleted',
+      });
+
+      expect(wanted.allowsAction(Listing.actionRelist), isTrue);
+      expect(wanted.allowsAction(Listing.actionFulfill), isFalse);
+      expect(wanted.allowsAction(Listing.actionRecommendOffer), isFalse);
+      expect(offer.allowsAction(Listing.actionBuy), isFalse);
+      expect(offer.allowsAction(Listing.actionContact), isFalse);
+    });
+
     test('fromJson handles integer price', () {
       final json = {
         'id': 'listing-123',

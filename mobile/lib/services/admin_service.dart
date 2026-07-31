@@ -163,6 +163,21 @@ class AdminService extends BaseService {
     handleResponse(response, (_) {});
   }
 
+  /// Restore an administratively restricted listing without changing its
+  /// underlying sold/deleted/fulfilled lifecycle state.
+  /// POST /api/admin/listings/{id}/restore
+  Future<void> restoreListing(
+    String listingId, {
+    required String reason,
+  }) async {
+    final headers = await authHeaders();
+    final uri = Uri.parse(
+      '$baseUrl/api/admin/listings/$listingId/restore',
+    ).replace(queryParameters: {'reason': reason.trim()});
+    final response = await post(uri, headers, '{}');
+    handleResponse(response, (_) {});
+  }
+
   /// Get paginated orders (admin view).
   /// GET /api/admin/orders
   Future<Map<String, dynamic>> getAdminOrders({

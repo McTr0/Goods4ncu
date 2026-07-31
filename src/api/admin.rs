@@ -13,12 +13,12 @@ use crate::api::auth::{
 };
 use crate::api::error::ApiError;
 use crate::api::AppState;
-use crate::repositories::traits::{AuthRepository, ListingRepository, UserRepository};
+use crate::repositories::traits::{AuthRepository, UserRepository};
 use crate::services::admin::NewAuditLog;
 use crate::services::campus::CampusService;
 use crate::services::moderation_case::{
     AppealDecision, CaseReviewAction, ModerationAppealRecord, ModerationCaseRecord,
-    ModerationCaseService,
+    ModerationCaseService, TransactionalAdminAudit,
 };
 use crate::services::order::OrderStatus;
 
@@ -391,7 +391,8 @@ pub async fn get_admin_stats(
     let row = sqlx::query(
         "SELECT
             (SELECT COUNT(*) FROM inventory WHERE campus_id = $1) AS total_listings,
-            (SELECT COUNT(*) FROM inventory WHERE campus_id = $1 AND status = 'active') AS active_listings,
+            (SELECT COUNT(*) FROM inventory WHERE campus_id = $1 AND status = 'active'
+                AND NOT listing_has_active_restriction(id)) AS active_listings,
             (SELECT COUNT(*) FROM campus_memberships WHERE campus_id = $1 AND status <> 'revoked') AS total_users,
             (SELECT COUNT(*) FROM orders WHERE campus_id = $1) AS total_orders,
             (SELECT COUNT(*) FROM campus_memberships membership
@@ -562,8 +563,22 @@ pub struct ListingInfo {
     pub suggested_price_cny: f64,
     pub description: Option<String>,
     pub status: String,
+    pub restricted: bool,
+    pub restriction_state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restriction: Option<AdminListingRestriction>,
+    pub active_restriction_count: i64,
+    pub available_admin_actions: Vec<&'static str>,
     pub owner_id: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+pub struct AdminListingRestriction {
+    pub public_reason: String,
+    pub restricted_at: chrono::DateTime<chrono::Utc>,
+    pub moderation_case_id: Uuid,
+    pub can_appeal: bool,
 }
 
 /// GET /api/admin/listings - listings owned by the selected campus.
@@ -583,8 +598,37 @@ pub async fn get_admin_listings(
     record_cross_campus_read(&state, &scope, "listings").await;
     let listings = sqlx::query(
         "SELECT id, title, category, COALESCE(brand, '') AS brand, direction, condition_score,
-                suggested_price_cny, description, status, owner_id, created_at
+                suggested_price_cny, description, status, owner_id, created_at,
+                (SELECT COUNT(*) FROM listing_restriction_effects effect
+                 WHERE effect.listing_id = inventory.id
+                   AND effect.released_at IS NULL) AS active_restriction_count,
+                EXISTS(
+                    SELECT 1 FROM listing_restriction_effects effect
+                    WHERE effect.listing_id = inventory.id
+                      AND effect.released_at IS NULL
+                      AND effect.source_kind IN ('admin_takedown', 'legacy_admin_takedown')
+                ) AS has_admin_restriction,
+                latest_effect.case_id AS restriction_case_id,
+                latest_effect.imposed_at AS restricted_at,
+                latest_effect.public_reason AS restriction_public_reason,
+                latest_effect.can_appeal AS restriction_can_appeal
          FROM inventory
+         LEFT JOIN LATERAL (
+             SELECT effect.case_id, effect.imposed_at,
+                    moderation_case.public_reason,
+                    moderation_case.status IN ('actioned', 'resolved')
+                        AND moderation_case.resolution = 'content_restricted'
+                        AND NOT EXISTS (
+                            SELECT 1 FROM moderation_appeals appeal
+                            WHERE appeal.case_id = moderation_case.id
+                              AND appeal.appellant_id = moderation_case.subject_user_id
+                        ) AS can_appeal
+             FROM listing_restriction_effects effect
+             JOIN moderation_cases moderation_case ON moderation_case.id = effect.case_id
+             WHERE effect.listing_id = inventory.id AND effect.released_at IS NULL
+             ORDER BY effect.imposed_at DESC
+             LIMIT 1
+         ) latest_effect ON TRUE
          WHERE campus_id = $1 AND ($2::text IS NULL OR status = $2)
          ORDER BY created_at DESC LIMIT $3 OFFSET $4",
     )
@@ -611,6 +655,26 @@ pub async fn get_admin_listings(
         listings: listings
             .into_iter()
             .map(|row| ListingInfo {
+                restricted: row.get::<i64, _>("active_restriction_count") > 0,
+                restriction_state: if row.get::<i64, _>("active_restriction_count") > 0 {
+                    "restricted"
+                } else {
+                    "clear"
+                },
+                restriction: row
+                    .get::<Option<Uuid>, _>("restriction_case_id")
+                    .map(|case_id| AdminListingRestriction {
+                        public_reason: row.get("restriction_public_reason"),
+                        restricted_at: row.get("restricted_at"),
+                        moderation_case_id: case_id,
+                        can_appeal: row.get("restriction_can_appeal"),
+                    }),
+                active_restriction_count: row.get("active_restriction_count"),
+                available_admin_actions: if row.get::<bool, _>("has_admin_restriction") {
+                    vec!["restore"]
+                } else {
+                    vec!["takedown"]
+                },
                 id: row.get("id"),
                 title: row.get("title"),
                 category: row.get("category"),
@@ -837,37 +901,22 @@ pub async fn review_moderation_case(
         "restore" => CaseReviewAction::Restore,
         _ => return Err(ApiError::BadRequest("无效的案件处置动作".to_string())),
     };
-    let old_status = sqlx::query_scalar::<_, String>(
-        "SELECT status FROM moderation_cases WHERE id = $1 AND campus_id = $2",
-    )
-    .bind(case_id)
-    .bind(scope.campus_id)
-    .fetch_optional(&state.infra.db)
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?
-    .ok_or(ApiError::NotFound)?;
+    let audit = TransactionalAdminAudit {
+        action: format!("moderation_case_{}", body.action),
+        scope_reason: scope.scope_reason.clone(),
+        memo: body.note.clone(),
+    };
     let moderation_case = ModerationCaseService::new(state.infra.db.clone())
-        .review_case(
+        .review_case_with_audit(
             case_id,
             scope.campus_id,
             &scope.actor_id,
             action,
             body.note.as_deref(),
             body.public_reason.as_deref(),
+            Some(&audit),
         )
         .await?;
-    let case_target = case_id.to_string();
-    let audit_action = format!("moderation_case_{}", body.action);
-    record_audit(
-        &state,
-        &scope,
-        &audit_action,
-        Some(&case_target),
-        Some(&old_status),
-        Some(&moderation_case.status),
-        body.note.as_deref(),
-    )
-    .await;
     Ok(Json(moderation_case))
 }
 
@@ -898,27 +947,21 @@ pub async fn review_moderation_appeal(
         "overturn" => AppealDecision::Overturn,
         _ => return Err(ApiError::BadRequest("无效的申诉决定".to_string())),
     };
+    let audit = TransactionalAdminAudit {
+        action: format!("moderation_appeal_{}", body.decision),
+        scope_reason: scope.scope_reason.clone(),
+        memo: Some(body.note.clone()),
+    };
     let appeal = ModerationCaseService::new(state.infra.db.clone())
-        .review_appeal(
+        .review_appeal_with_audit(
             appeal_id,
             scope.campus_id,
             &scope.actor_id,
             decision,
             &body.note,
+            Some(&audit),
         )
         .await?;
-    let appeal_target = appeal_id.to_string();
-    let audit_action = format!("moderation_appeal_{}", body.decision);
-    record_audit(
-        &state,
-        &scope,
-        &audit_action,
-        Some(&appeal_target),
-        Some("pending"),
-        Some(&appeal.status),
-        Some(&body.note),
-    )
-    .await;
     Ok(Json(appeal))
 }
 
@@ -1168,27 +1211,63 @@ pub async fn takedown_listing(
         true,
     )
     .await?;
-    let listing = state
-        .listing_repo
-        .find_by_id(&listing_id)
-        .await?
-        .filter(|listing| listing.campus_id == scope.campus_id)
-        .ok_or(ApiError::NotFound)?;
-    state
-        .listing_repo
-        .delete(&listing_id, &listing.owner_id, scope.campus_id)
+    // `query.reason` is an internal cross-campus scope justification and must
+    // never be copied into the owner-visible moderation explanation.
+    let public_reason = "该发布因平台安全审核被限制展示";
+    let case_id = ModerationCaseService::new(state.infra.db.clone())
+        .impose_manual_listing_takedown(
+            &listing_id,
+            scope.campus_id,
+            &scope.actor_id,
+            public_reason,
+            scope.scope_reason.as_deref(),
+        )
         .await?;
-    record_audit(
+    Ok(Json(serde_json::json!({
+        "message": "商品已限制展示",
+        "case_id": case_id,
+        "restricted": true
+    })))
+}
+
+pub async fn restore_listing(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(listing_id): Path<String>,
+    Query(query): Query<AdminScopeQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let scope = require_admin_scope(
         &state,
-        &scope,
-        "takedown_listing",
-        Some(&listing_id),
-        Some(&listing.status),
-        Some("deleted"),
-        None,
+        &headers,
+        query.campus_id,
+        query.reason.as_deref(),
+        true,
     )
-    .await;
-    Ok(Json(serde_json::json!({ "message": "商品已下架" })))
+    .await?;
+    let reason = query
+        .reason
+        .as_deref()
+        .ok_or_else(|| ApiError::BadRequest("恢复发布必须提供原因".to_string()))?;
+    let case_id = ModerationCaseService::new(state.infra.db.clone())
+        .restore_manual_listing_takedown(
+            &listing_id,
+            scope.campus_id,
+            &scope.actor_id,
+            reason,
+            scope.scope_reason.as_deref(),
+        )
+        .await?;
+    Ok(Json(serde_json::json!({
+        "message": "管理员下架效果已解除，发布生命周期状态保持不变",
+        "case_id": case_id,
+        "restricted": sqlx::query_scalar::<_, bool>(
+            "SELECT listing_has_active_restriction($1)"
+        )
+        .bind(&listing_id)
+        .fetch_one(&state.infra.db)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?
+    })))
 }
 
 pub async fn impersonate_user(

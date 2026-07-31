@@ -37,6 +37,8 @@ Map<String, dynamic> _listing({
   required String title,
   required String status,
   String direction = 'offer',
+  String? restrictionState,
+  List<String>? availableActions,
 }) {
   return {
     'id': id,
@@ -47,6 +49,8 @@ Map<String, dynamic> _listing({
     'condition_score': 8,
     'suggested_price_cny': 25,
     'status': status,
+    'restriction_state': ?restrictionState,
+    'available_actions': ?availableActions,
   };
 }
 
@@ -103,7 +107,8 @@ void main() {
       find.byKey(const ValueKey('listing-status-wanted-fulfilled')),
       findsOneWidget,
     );
-    expect(find.textContaining('重新开启需求'), findsOneWidget);
+    expect(find.text('已完成'), findsOneWidget);
+    expect(find.textContaining('重新开启需求'), findsNothing);
 
     await tester.tap(find.text('想收一辆自行车'));
     await tester.pumpAndSettle();
@@ -124,6 +129,35 @@ void main() {
     await tester.tap(action);
     await tester.pumpAndSettle();
     expect(find.text('structured-create'), findsOneWidget);
+  });
+
+  testWidgets('renders lifecycle and moderation as separate badges', (
+    tester,
+  ) async {
+    final service = _RecordingUserService([
+      _listing(
+        id: 'restricted-deleted',
+        title: '受限发布',
+        status: 'deleted',
+        restrictionState: 'restricted',
+        availableActions: const [],
+      ),
+    ]);
+
+    await tester.pumpWidget(_app(service));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('listing-status-restricted-deleted')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('listing-restriction-restricted-deleted')),
+      findsOneWidget,
+    );
+    expect(find.text('已由你删除'), findsOneWidget);
+    expect(find.text('已被审核限制'), findsOneWidget);
+    expect(find.textContaining('重新'), findsNothing);
   });
 
   testWidgets('app bar always exposes the structured listing form', (

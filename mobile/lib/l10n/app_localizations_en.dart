@@ -2862,4 +2862,68 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get warning => 'Warning';
+
+  @override
+  String get listingLifecycleActive => 'Active';
+
+  @override
+  String get listingLifecycleFulfilled => 'Fulfilled';
+
+  @override
+  String get listingLifecycleSold => 'Sold';
+
+  @override
+  String get listingLifecycleOwnerDeleted => 'Deleted by you';
+
+  @override
+  String get listingLifecycleUnknown => 'Status unavailable';
+
+  @override
+  String get listingRestrictedBadge => 'Restricted by moderation';
+
+  @override
+  String get listingRestrictionTitle => 'This listing is restricted';
+
+  @override
+  String get listingRestrictionGeneric =>
+      'It is hidden from marketplace activity until an administrator restores it.';
+
+  @override
+  String get viewModerationCase => 'View moderation case';
+
+  @override
+  String get deleteListingAction => 'Delete listing';
+
+  @override
+  String get relistListingAction => 'Relist';
+
+  @override
+  String get listingDeletedToast => 'Listing deleted';
+
+  @override
+  String get listingRelistedToast => 'Listing relisted';
+
+  @override
+  String get deleteListingConfirmTitle => 'Delete this listing?';
+
+  @override
+  String get listingPolicyChangedToast =>
+      'The listing changed. Actions have been refreshed.';
+
+  @override
+  String get adminRestoreListing => 'Restore listing';
+
+  @override
+  String get adminRestoreListingConfirm => 'Restore this listing?';
+
+  @override
+  String get adminRestoreReasonHint =>
+      'Explain why this administrative restriction should be removed.';
+
+  @override
+  String get adminRestoreListingSuccess => 'Listing restriction removed';
+
+  @override
+  String get adminListingNoActions =>
+      'No administrative action is available for this listing.';
 }

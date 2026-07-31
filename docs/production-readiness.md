@@ -30,6 +30,7 @@
 | API 层媒体隔离：pending/rejected/failed 不经任何公开接口输出 | `migrations/0041` + `tests/api_regressions.rs::unapproved_media_is_not_served_publicly` |
 | 存储层媒体隔离：私有 bucket + presigned serving（匿名 403/篡改拒绝/过期拒绝，对真实 S3 验证） | `src/services/storage.rs` + `tests/storage_acl_integration.rs` + 生产演练 check 2b |
 | 提交审核与资源置 pending 同事务（崩溃不产生“永不审核却公开”） | `tests/api_regressions.rs::image_submission_quarantines_resource_with_job` |
+| listing case-owned 组合限制：紧急 manual case、案件 restrict/restore、申诉单 case 释放、owner relist 门禁、全公开/交易面 fail-closed、并发与跨校园隔离 | `0056_listing_restriction_effects.sql`；`tests/admin_auth_regression.rs::{listing_restrictions_compose_and_never_overwrite_owner_lifecycle,listing_appeal_releases_only_the_appealed_case_effect,admin_listing_restriction_http_contract_gates_public_and_commercial_paths,restricted_wanted_keeps_its_current_epoch_pending_response_frozen,concurrent_manual_restore_and_appeal_review_release_once_without_deadlock}`；`tests/rls_integration.rs::armed_tenant_context_isolates_listing_restriction_effects` |
 | Secret Chat 弃用（默认 403 新建、移动端入口移除、历史可读） | `tests/api_regressions.rs::secret_chat_creation_is_disabled_by_default_but_history_stays_readable` |
 
 ### Agent 行动系统（Phase 3）

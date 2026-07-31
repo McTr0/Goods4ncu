@@ -49,12 +49,15 @@ async fn create_confirmed_offline_order_in_tx(
         .await
         .map_err(map_order_creation_error)?;
 
-    let updated =
-        sqlx::query("UPDATE inventory SET status = 'sold' WHERE id = $1 AND status = 'active'")
-            .bind(listing_id)
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    let updated = sqlx::query(
+        "UPDATE inventory SET status = 'sold'
+             WHERE id = $1 AND status = 'active'
+               AND NOT listing_has_active_restriction(id)",
+    )
+    .bind(listing_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
     if updated.rows_affected() == 0 {
         return Err(ApiError::Conflict("此商品已经不可售".to_string()));
@@ -187,7 +190,61 @@ pub async fn respond_negotiation(
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
-    // Fetch the request and verify ownership while locking the HITL row.
+    let requires_eligible_listing = match payload.action.as_str() {
+        "approve" | "counter" => true,
+        "reject" => false,
+        _ => {
+            return Err(ApiError::BadRequest(
+                "action 必须是 approve/reject/counter".to_string(),
+            ))
+        }
+    };
+    if requires_eligible_listing {
+        let link = sqlx::query(
+            "SELECT listing_id, campus_id FROM hitl_requests
+             WHERE id = $1 AND seller_id = $2",
+        )
+        .bind(&id)
+        .bind(&user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
+        .ok_or(ApiError::NotFound)?;
+        let listing_id: String = link.get("listing_id");
+        let campus_id: uuid::Uuid = link.get("campus_id");
+        let listing_status = sqlx::query_scalar::<_, String>(
+            "SELECT status FROM inventory
+             WHERE id = $1 AND campus_id = $2 FOR UPDATE",
+        )
+        .bind(&listing_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
+        .ok_or(ApiError::NotFound)?;
+        let listing_restricted: bool =
+            sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+                .bind(&listing_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        if listing_restricted {
+            return Err(ApiError::CodedConflict {
+                code: "listing_restricted",
+                message: "该商品当前不可继续议价".to_string(),
+            });
+        }
+        if listing_status != "active" {
+            return Err(ApiError::CodedConflict {
+                code: "listing_action_stale",
+                message: "商品状态已变化，无法继续议价".to_string(),
+            });
+        }
+    }
+
+    // For approve/counter the listing is already locked first, matching the
+    // global inventory-before-commercial-session order. Reject may close
+    // historical state without reopening commerce.
     let row = sqlx::query(
         "SELECT id, campus_id, seller_id, listing_id, buyer_id, status, proposed_price
          FROM hitl_requests WHERE id = $1 FOR UPDATE",

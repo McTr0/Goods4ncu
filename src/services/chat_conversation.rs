@@ -366,18 +366,21 @@ impl ChatConversationService {
             return Err(ApiError::CampusScopeMismatch);
         }
         if let Some(listing_id) = input.listing_id.as_deref() {
-            let listing_in_campus: bool = sqlx::query_scalar(
-                "SELECT EXISTS(
-                    SELECT 1 FROM inventory
-                    WHERE id = $1 AND campus_id = $2 AND status = 'active'
-                 )",
+            let listing_status = sqlx::query_scalar::<_, String>(
+                "SELECT status FROM inventory
+                 WHERE id = $1 AND campus_id = $2 FOR UPDATE",
             )
             .bind(listing_id)
             .bind(input.campus_id)
-            .fetch_one(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(db_error)?;
-            if !listing_in_campus {
+            let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+                .bind(listing_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db_error)?;
+            if listing_status.as_deref() != Some("active") || restricted {
                 return Err(ApiError::CampusScopeMismatch);
             }
         }
@@ -1961,12 +1964,18 @@ async fn resolve_structured_quote(
     let snapshot = match input.kind {
         StructuredQuoteKind::Listing => {
             let row = sqlx::query(
-                "SELECT id, title, suggested_price_cny, condition_score, image_url,
-                        owner_id, status
-                 FROM inventory
-                 WHERE id = $1",
+                "SELECT listing.id, listing.title, listing.suggested_price_cny,
+                        listing.condition_score, listing.image_url,
+                        listing.owner_id, listing.status
+                 FROM inventory listing
+                 WHERE listing.id = $1
+                   AND listing.campus_id = (
+                       SELECT campus_id FROM chat_conversations WHERE id = $2
+                   )
+                 FOR SHARE",
             )
             .bind(ref_id)
+            .bind(conversation.id)
             .fetch_optional(&mut **tx)
             .await
             .map_err(db_error)?
@@ -1974,6 +1983,17 @@ async fn resolve_structured_quote(
             let listing_id: String = row.get("id");
             let owner_id: String = row.get("owner_id");
             let status: String = row.get("status");
+            let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+                .bind(&listing_id)
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(db_error)?;
+            if restricted {
+                return Err(ApiError::CodedConflict {
+                    code: "listing_restricted",
+                    message: "该发布受平台限制，不能引用".to_string(),
+                });
+            }
             let visible = status == "active"
                 || conversation.listing_id.as_deref() == Some(&listing_id)
                 || owner_id == sender_id;

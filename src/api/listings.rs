@@ -111,7 +111,22 @@ pub struct ListingDetail {
     pub owner_id: Option<String>,
     pub owner_username: Option<String>,
     pub status: String,
+    pub restricted: bool,
+    pub restriction_state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restriction: Option<ListingRestrictionDetail>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restriction_reason: Option<String>,
+    pub available_actions: Vec<&'static str>,
     pub created_at: String,
+}
+
+#[derive(Serialize)]
+pub struct ListingRestrictionDetail {
+    pub public_reason: String,
+    pub restricted_at: chrono::DateTime<chrono::Utc>,
+    pub moderation_case_id: uuid::Uuid,
+    pub can_appeal: bool,
 }
 
 /// Request body for POST /api/listings
@@ -340,6 +355,93 @@ pub async fn get_listing(
         .unwrap_or_default();
 
     let created_at = listing.created_at.to_rfc3339();
+    let is_owner = viewer_id.as_deref() == Some(listing.owner_id.as_str());
+    let restriction = sqlx::query(
+        "SELECT COUNT(*) AS count,
+                (ARRAY_AGG(moderation_case.public_reason ORDER BY effect.imposed_at DESC))[1]
+                    AS public_reason,
+                (ARRAY_AGG(effect.imposed_at ORDER BY effect.imposed_at DESC))[1]
+                    AS restricted_at,
+                (ARRAY_AGG(effect.case_id ORDER BY effect.imposed_at DESC))[1]
+                    AS moderation_case_id,
+                (ARRAY_AGG(
+                    moderation_case.status IN ('actioned', 'resolved')
+                    AND moderation_case.resolution = 'content_restricted'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM moderation_appeals appeal
+                        WHERE appeal.case_id = moderation_case.id
+                          AND appeal.appellant_id = moderation_case.subject_user_id
+                    )
+                    ORDER BY effect.imposed_at DESC
+                ))[1] AS can_appeal
+         FROM listing_restriction_effects effect
+         JOIN moderation_cases moderation_case ON moderation_case.id = effect.case_id
+         WHERE effect.listing_id = $1 AND effect.campus_id = $2
+           AND effect.released_at IS NULL",
+    )
+    .bind(&listing.id)
+    .bind(campus_id)
+    .fetch_one(&state.infra.db)
+    .await
+    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+    let restriction_count: i64 = restriction.get("count");
+    let restricted = restriction_count > 0;
+    if restricted && !is_owner {
+        return Err(ApiError::NotFound);
+    }
+    let restriction_reason = if is_owner && restricted {
+        restriction
+            .try_get::<Option<String>, _>("public_reason")
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+    let restriction = if is_owner && restricted {
+        Some(ListingRestrictionDetail {
+            public_reason: restriction_reason
+                .clone()
+                .unwrap_or_else(|| "该发布受平台限制".to_string()),
+            restricted_at: restriction.get("restricted_at"),
+            moderation_case_id: restriction.get("moderation_case_id"),
+            can_appeal: restriction.get("can_appeal"),
+        })
+    } else {
+        None
+    };
+    let available_actions = if is_owner {
+        match (listing.status.as_str(), restricted) {
+            (status, true) => {
+                let mut actions = if matches!(status, "active" | "fulfilled") {
+                    vec!["delete"]
+                } else {
+                    Vec::new()
+                };
+                if restriction.as_ref().is_some_and(|item| item.can_appeal) {
+                    actions.push("appeal");
+                }
+                actions
+            }
+            ("active", false) if listing.direction == "wanted" => {
+                vec!["edit", "delete", "fulfill"]
+            }
+            ("active", false) => vec!["edit", "delete"],
+            ("sold" | "deleted" | "fulfilled", false) => vec!["relist"],
+            _ => Vec::new(),
+        }
+    } else if listing.status == "active" && listing.direction == "wanted" {
+        vec!["contact", "recommend_offer", "report"]
+    } else if listing.status == "active" {
+        vec![
+            "contact",
+            "buy",
+            "create_order",
+            "start_price_discovery",
+            "report",
+        ]
+    } else {
+        vec!["report"]
+    };
 
     Ok(Json(ListingDetail {
         id: listing.id,
@@ -356,6 +458,11 @@ pub async fn get_listing(
         owner_id: viewer_id.as_ref().map(|_| listing.owner_id.clone()),
         owner_username,
         status: listing.status,
+        restricted,
+        restriction_state: if restricted { "restricted" } else { "clear" },
+        restriction,
+        restriction_reason,
+        available_actions,
         created_at,
     }))
 }
@@ -623,7 +730,18 @@ pub async fn respond_to_wanted(
     let wanted_status: String = wanted.get("status");
     let wanted_direction: String = wanted.get("direction");
     let lifecycle_epoch: i64 = wanted.get("lifecycle_epoch");
+    let wanted_restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+        .bind(&wanted_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
+    if wanted_restricted {
+        return Err(ApiError::CodedConflict {
+            code: "wanted_response_round_closed",
+            message: "该收物需求已受平台限制，当前轮次不可响应".to_string(),
+        });
+    }
     if wanted_direction != "wanted" || wanted_status != "active" {
         return Err(ApiError::BadRequest("这不是可响应的收物需求".to_string()));
     }
@@ -671,7 +789,18 @@ pub async fn respond_to_wanted(
     let offer_owner_id: String = offer.get("owner_id");
     let offer_status: String = offer.get("status");
     let offer_direction: String = offer.get("direction");
+    let offer_restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+        .bind(&offer_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
+    if offer_restricted {
+        return Err(ApiError::CodedConflict {
+            code: "listing_restricted",
+            message: "推荐商品已受平台限制".to_string(),
+        });
+    }
     if offer_direction != "offer" || offer_status != "active" {
         return Err(ApiError::BadRequest("只能推荐正在出的商品".to_string()));
     }
@@ -846,6 +975,11 @@ pub async fn fulfill_wanted(
     let status: String = listing.get("status");
     let direction: String = listing.get("direction");
     let lifecycle_epoch: i64 = listing.get("lifecycle_epoch");
+    let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
     if owner_id != *user_id {
         return Err(ApiError::Forbidden);
@@ -854,6 +988,12 @@ pub async fn fulfill_wanted(
         return Err(ApiError::BadRequest(
             "只有收物需求可以标记为已完成".to_string(),
         ));
+    }
+    if restricted {
+        return Err(ApiError::CodedConflict {
+            code: "listing_restricted",
+            message: "该发布受平台限制，不能标记完成".to_string(),
+        });
     }
     if status != "active" {
         return Err(ApiError::Conflict(format!(
@@ -949,7 +1089,6 @@ pub async fn update_listing(
     Json(payload): Json<UpdateListingRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user_id = session.user_id.clone();
-
     // Validate individual fields before building update input
     if let Some(ref title) = payload.title {
         if title.is_empty() {
@@ -1041,8 +1180,7 @@ pub async fn update_listing(
                 status: None, // status updates should go through specific endpoints
             },
         )
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        .await?;
 
     tracing::info!(listing_id = %id, updated_by = %user_id, "Listing updated");
 
@@ -1536,6 +1674,11 @@ mod tests {
             owner_id: Some("user-owner".to_string()),
             owner_username: Some("seller1".to_string()),
             status: "active".to_string(),
+            restricted: false,
+            restriction_state: "clear",
+            restriction: None,
+            restriction_reason: None,
+            available_actions: vec!["contact", "buy"],
             created_at: "2024-01-01T00:00:00Z".to_string(),
         };
         let json = serde_json::to_string(&detail).unwrap();

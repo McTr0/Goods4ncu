@@ -1,7 +1,7 @@
 //! Admin service for platform-wide management.
 
 use anyhow::Result;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -73,6 +73,18 @@ impl AdminService {
 
     /// Log an administrative action to the audit trail.
     pub async fn log_action(&self, entry: NewAuditLog<'_>) -> Result<()> {
+        let mut tx = self.db.begin().await?;
+        Self::log_action_in_tx(&mut tx, entry).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Persist an audit record in the caller's business transaction. Sensitive
+    /// enforcement must never commit while its audit record silently fails.
+    pub async fn log_action_in_tx(
+        tx: &mut Transaction<'_, Postgres>,
+        entry: NewAuditLog<'_>,
+    ) -> Result<String> {
         let audit_id = Uuid::new_v4().to_string();
         sqlx::query(
             r#"
@@ -92,9 +104,9 @@ impl AdminService {
         .bind(entry.new_value)
         .bind(entry.memo)
         .bind(entry.scope_reason)
-        .execute(&self.db)
+        .execute(&mut **tx)
         .await?;
 
-        Ok(())
+        Ok(audit_id)
     }
 }

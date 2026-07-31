@@ -479,6 +479,10 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             post(admin::takedown_listing),
         )
         .route(
+            "/api/admin/listings/{id}/restore",
+            post(admin::restore_listing),
+        )
+        .route(
             "/api/recommendations/feed",
             get(recommendations::get_recommendation_feed),
         )

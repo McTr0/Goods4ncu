@@ -18,7 +18,7 @@ use uuid::Uuid;
 use crate::api::error::ApiError;
 use crate::api::session::VerifiedTenant;
 use crate::api::AppState;
-use crate::services::price_discovery::{Outcome, PriceDiscoveryService};
+use crate::services::price_discovery::{ListingUnavailable, Outcome, PriceDiscoveryService};
 
 /// The rule, in the words a user should be able to repeat back.
 const RULE_ZH: &str = "双方各自私下说出自己的价格底线：买家最多愿意付多少，卖家最少愿意收多少。\
@@ -41,7 +41,8 @@ pub async fn propose(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let owner: Option<String> = sqlx::query_scalar(
         "SELECT owner_id FROM inventory
-         WHERE id = $1 AND campus_id = $2 AND status = 'active'",
+         WHERE id = $1 AND campus_id = $2 AND status = 'active'
+           AND NOT listing_has_active_restriction(id)",
     )
     .bind(&payload.listing_id)
     .bind(tenant.campus_id)
@@ -67,7 +68,7 @@ pub async fn propose(
             &tenant.session.user_id,
         )
         .await
-        .map_err(ApiError::Internal)?;
+        .map_err(map_mutation_error)?;
 
     Ok(Json(
         serde_json::json!({ "session_id": id, "rule": RULE_ZH }),
@@ -82,9 +83,9 @@ pub async fn accept(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let service = PriceDiscoveryService::new(state.infra.db.clone());
     if !service
-        .accept(session_id, &tenant.session.user_id)
+        .accept_in_campus(session_id, tenant.campus_id, &tenant.session.user_id)
         .await
-        .map_err(ApiError::Internal)?
+        .map_err(map_mutation_error)?
     {
         return Err(ApiError::NotFound);
     }
@@ -131,9 +132,14 @@ pub async fn state_limit(
 
     let service = PriceDiscoveryService::new(state.infra.db.clone());
     let outcome = service
-        .state_limit(session_id, &tenant.session.user_id, payload.cents)
+        .state_limit_in_campus(
+            session_id,
+            tenant.campus_id,
+            &tenant.session.user_id,
+            payload.cents,
+        )
         .await
-        .map_err(ApiError::Internal)?
+        .map_err(map_mutation_error)?
         // Not a participant, not open, or unknown — one answer for all three, so
         // this cannot be used to learn a session's state without being in it.
         .ok_or(ApiError::NotFound)?;
@@ -150,6 +156,16 @@ pub async fn state_limit(
         object.insert("outcome".to_string(), outcome_label.into());
     }
     Ok(Json(body))
+}
+
+fn map_mutation_error(error: anyhow::Error) -> ApiError {
+    if error.downcast_ref::<ListingUnavailable>().is_some() {
+        // Inactive, restricted, cross-campus and missing listings are one
+        // privacy-preserving shape to callers.
+        ApiError::NotFound
+    } else {
+        ApiError::Internal(error)
+    }
 }
 
 /// GET /api/price-discovery/{id} — what the caller may know.

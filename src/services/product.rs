@@ -16,10 +16,14 @@ impl ProductService {
     #[allow(dead_code)]
     pub async fn mark_as_sold(&self, listing_id: &str) -> Result<()> {
         tracing::info!(listing_id, "Marking listing as sold");
-        sqlx::query("UPDATE inventory SET status = 'sold' WHERE id = $1")
-            .bind(listing_id)
-            .execute(&self.db)
-            .await?;
+        sqlx::query(
+            "UPDATE inventory SET status = 'sold'
+             WHERE id = $1 AND status = 'active'
+               AND NOT listing_has_active_restriction(id)",
+        )
+        .bind(listing_id)
+        .execute(&self.db)
+        .await?;
 
         // Delete vector embeddings so sold items don't appear in RAG results.
         // pgvector stores documents in the same 'documents' table as relational data.

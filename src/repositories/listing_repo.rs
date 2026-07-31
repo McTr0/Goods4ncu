@@ -230,7 +230,7 @@ impl PostgresListingRepository {
             param_idx + 1
         );
         if require_active {
-            query.push_str(" AND status = 'active'");
+            query.push_str(" AND status = 'active' AND NOT listing_has_active_restriction(id)");
         }
 
         Ok(query)
@@ -276,12 +276,15 @@ impl PostgresListingRepository {
         tx: &mut Transaction<'_, Postgres>,
         id: &str,
     ) -> Result<bool, ApiError> {
-        let updated =
-            sqlx::query("UPDATE inventory SET status = 'sold' WHERE id = $1 AND status = 'active'")
-                .bind(id)
-                .execute(&mut **tx)
-                .await
-                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        let updated = sqlx::query(
+            "UPDATE inventory SET status = 'sold'
+             WHERE id = $1 AND status = 'active'
+               AND NOT listing_has_active_restriction(id)",
+        )
+        .bind(id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
         Ok(updated.rows_affected() > 0)
     }
@@ -304,6 +307,7 @@ impl PostgresListingRepository {
             SET status = 'active'
             WHERE id = $1
               AND status = 'sold'
+              AND NOT listing_has_active_restriction(id)
               AND NOT EXISTS (
                 SELECT 1
                 FROM orders o
@@ -327,7 +331,35 @@ impl PostgresListingRepository {
         owner_id: &str,
         input: &UpdateListingInput,
     ) -> Result<bool, ApiError> {
-        let query = Self::update_query_for_owner(input, true)?;
+        let status = sqlx::query_scalar::<_, String>(
+            "SELECT status FROM inventory
+             WHERE id = $1 AND owner_id = $2
+             FOR UPDATE",
+        )
+        .bind(id)
+        .bind(owner_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        let Some(status) = status else {
+            return Ok(false);
+        };
+        let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+            .bind(id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        if restricted {
+            return Err(ApiError::CodedConflict {
+                code: "listing_restricted",
+                message: "该发布受平台限制，不能编辑".to_string(),
+            });
+        }
+        if status != "active" {
+            return Ok(false);
+        }
+
+        let query = Self::update_query_for_owner(input, false)?;
         let result = Self::bind_update_query(sqlx::query(&query), input)?
             .bind(id)
             .bind(owner_id)
@@ -344,15 +376,18 @@ impl PostgresListingRepository {
         owner_id: &str,
         input: &UpdateListingInput,
     ) -> Result<bool, ApiError> {
-        let query = Self::update_query_for_owner(input, true)?;
-        let result = Self::bind_update_query(sqlx::query(&query), input)?
-            .bind(id)
-            .bind(owner_id)
-            .execute(&self.pool)
+        let mut tx = self
+            .pool
+            .begin()
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-        Ok(result.rows_affected() > 0)
+        let updated = self
+            .update_owned_active_in_tx(&mut tx, id, owner_id, input)
+            .await?;
+        tx.commit()
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        Ok(updated)
     }
 
     pub async fn soft_delete_active_owned_in_tx(
@@ -391,11 +426,13 @@ impl ListingRepository for PostgresListingRepository {
         let mut query = format!(
             "SELECT id, campus_id, title, category, brand, direction, condition_score, suggested_price_cny, \
              defects, description, CASE WHEN images_moderation_status = 'approved' THEN image_url ELSE NULL END AS image_url, owner_id, status, created_at \
-             FROM inventory WHERE status = 'active' AND campus_id = '{}'",
+             FROM inventory WHERE status = 'active' AND campus_id = '{}'
+               AND NOT listing_has_active_restriction(id)",
             campus_id
         );
         let mut count_query = format!(
-            "SELECT COUNT(*) FROM inventory WHERE status = 'active' AND campus_id = '{}'",
+            "SELECT COUNT(*) FROM inventory WHERE status = 'active' AND campus_id = '{}'
+               AND NOT listing_has_active_restriction(id)",
             campus_id
         );
 
@@ -587,15 +624,25 @@ impl ListingRepository for PostgresListingRepository {
         owner_id: &str,
         input: UpdateListingInput,
     ) -> Result<(), ApiError> {
-        let row = sqlx::query("SELECT owner_id, status FROM inventory WHERE id = $1")
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        let row = sqlx::query("SELECT owner_id, status FROM inventory WHERE id = $1 FOR UPDATE")
             .bind(id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
             .ok_or(ApiError::NotFound)?;
 
         let current_owner: String = row.get("owner_id");
         let current_status: String = row.get("status");
+        let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
         if current_owner != owner_id {
             return Err(ApiError::Forbidden);
@@ -603,13 +650,22 @@ impl ListingRepository for PostgresListingRepository {
         if current_status == "sold" {
             return Err(ApiError::BadRequest("无法修改已售出的商品".to_string()));
         }
+        if restricted {
+            return Err(ApiError::CodedConflict {
+                code: "listing_restricted",
+                message: "该发布受平台限制，不能编辑".to_string(),
+            });
+        }
 
         let query = Self::update_query_for_owner(&input, false)?;
         let q = Self::bind_update_query(sqlx::query(&query), &input)?
             .bind(id)
             .bind(owner_id);
 
-        q.execute(&self.pool)
+        q.execute(&mut *tx)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        tx.commit()
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
@@ -702,6 +758,17 @@ impl ListingRepository for PostgresListingRepository {
         .ok_or(ApiError::NotFound)?;
 
         let status: String = row.get("status");
+        let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        if restricted {
+            return Err(ApiError::CodedConflict {
+                code: "listing_restricted",
+                message: "该发布仍受平台限制，不能重新上架".to_string(),
+            });
+        }
         // 'fulfilled' is the wanted-side counterpart of 'sold': reopening a
         // fulfilled wanted resumes matching without recreating the item.
         if status != "sold" && status != "deleted" && status != "fulfilled" {
@@ -738,12 +805,16 @@ impl ListingRepository for PostgresListingRepository {
     }
 
     async fn mark_sold(&self, id: &str, owner_id: &str) -> Result<(), ApiError> {
-        sqlx::query("UPDATE inventory SET status = 'sold' WHERE id = $1 AND owner_id = $2")
-            .bind(id)
-            .bind(owner_id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        sqlx::query(
+            "UPDATE inventory SET status = 'sold'
+             WHERE id = $1 AND owner_id = $2 AND status = 'active'
+               AND NOT listing_has_active_restriction(id)",
+        )
+        .bind(id)
+        .bind(owner_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
         Ok(())
     }
 

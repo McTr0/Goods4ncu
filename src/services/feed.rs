@@ -84,7 +84,8 @@ impl FeedService {
                     "SELECT id, category
                      FROM inventory
                      WHERE id = $1 AND campus_id = $2 AND owner_id <> $3
-                       AND status = 'active'",
+                       AND status = 'active'
+                       AND NOT listing_has_active_restriction(id)",
                 )
                 .bind(resource_id)
                 .bind(campus_id)

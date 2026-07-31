@@ -198,7 +198,7 @@ async fn duplicate_report_updates_one_report_and_one_case() {
                 .expect("reviewing report");
         assert_eq!(report_status, "reviewing");
 
-        let unsupported = moderation
+        moderation
             .review_case(
                 case_id,
                 campus_id,
@@ -207,8 +207,8 @@ async fn duplicate_report_updates_one_report_and_one_case() {
                 None,
                 None,
             )
-            .await;
-        assert!(matches!(unsupported, Err(ApiError::Conflict(_))));
+            .await
+            .expect("restrict reported listing");
         let (case_status, report_status): (String, String) = sqlx::query_as(
             "SELECT moderation_case.status, report.status
              FROM moderation_cases moderation_case
@@ -218,28 +218,42 @@ async fn duplicate_report_updates_one_report_and_one_case() {
         .bind(case_id)
         .fetch_one(&pool)
         .await
-        .expect("unchanged review state");
-        assert_eq!(case_status, "reviewing");
-        assert_eq!(report_status, "reviewing");
+        .expect("restricted review state");
+        assert_eq!(case_status, "actioned");
+        assert_eq!(report_status, "resolved");
+        assert!(
+            sqlx::query_scalar::<_, bool>("SELECT listing_has_active_restriction($1)")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("listing restriction")
+        );
 
         moderation
             .review_case(
                 case_id,
                 campus_id,
                 &reviewer_id,
-                CaseReviewAction::Dismiss,
-                None,
-                None,
+                CaseReviewAction::Restore,
+                Some("复核后恢复该发布"),
+                Some("复核后恢复该发布"),
             )
             .await
-            .expect("dismiss report");
+            .expect("restore reported listing");
         let report_status: String =
             sqlx::query_scalar("SELECT status FROM content_reports WHERE id = $1")
                 .bind(report_id)
                 .fetch_one(&pool)
                 .await
-                .expect("dismissed report");
+                .expect("restored report");
         assert_eq!(report_status, "dismissed");
+        assert!(
+            !sqlx::query_scalar::<_, bool>("SELECT listing_has_active_restriction($1)")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("released listing restriction")
+        );
 
         let new_report_id = service
             .report_listing(campus_id, &reporter_id, &listing_id, "出现了新的问题", None)

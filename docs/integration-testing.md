@@ -308,7 +308,7 @@ node scripts/codex_browser_api_driver.mjs call-secret
 
 每个 ActionPlan 断言 plan/user/tenant/过期时间/资源版本/idempotency，不能只看最终页面 toast。
 
-## 审核与申诉测试 [目标态]
+## 审核与申诉测试
 
 | 场景 | 期望 |
 | --- | --- |
@@ -318,7 +318,18 @@ node scripts/codex_browser_api_driver.mjs call-secret
 | Provider 不可用 | 媒体保持 pending，队列重试，不自动公开。 |
 | 人工复核 | 操作只影响授权 campus，写入 actor/reason/trace。 |
 | 用户申诉 | 用户看到类别和进度，不看到举报人或审核员。 |
-| 申诉改判 | 内容恢复、审计完整、误伤指标更新。 |
+| 紧急 listing 下架重试 | 创建/复用一个 manual case 和一个 effect，不改 lifecycle status；重试不重复 effect/audit/通知。 |
+| 公开与交易门禁 | restricted listing 从 feed、搜索、推荐、非 owner detail、收藏结果中消失；联系、议价、成交、wanted response 创建/动作全部 fail closed。 |
+| owner 删除/重上架 | 删除不释放 effect；任一 active effect 下 relist 返回 `409 listing_restricted`。 |
+| case restrict/restore | restrict 只创建该 case 的 effect；restore 只释放该行。重复请求不创建第二 effect，已完成动作返回稳定冲突或同一结果。 |
+| 申诉改判 | 只释放被申诉 case 的 effect；另一 case 仍 active 时内容继续隐藏，审计完整。 |
+| 组合限制 | 两个 case 同时限制时，释放第一个仍 restricted，释放第二个后才 clear。 |
+| 生命周期正交 | deleted/sold/fulfilled 在 effect 全部释放后仍保持原 status，审核动作不自动 relist。 |
+| 并发线性化 | takedown/relist、restrict/restore、商业动作并发只能产生串行等价结果；不能短暂恢复、丢 effect 或重复 case。 |
+| 申诉复核 vs manual restore | 两个事务都按 inventory→case→effect 顺序取锁；限时测试不得死锁，恰好一个释放路径成功且只释放一次。 |
+| wanted 冻结 | wanted 或推荐 offer restricted 时当前 response 无动作；释放 effect 不改变 epoch 或历史 response status。 |
+| 跨校园/RLS | 另一校园按不存在处理；武装 `app.campus_id` 后 effect 读隐藏、写拒绝。 |
+| manual restore | 只释放 manual emergency effect；举报 case effect 保留，生命周期不变。 |
 | 收款码 | 默认私有；公开前通过文件校验、审核和风险提示。 |
 
 ## 负载、恢复与发布演练 [目标态]

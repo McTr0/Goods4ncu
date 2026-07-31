@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../../models/models.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/category_utils.dart';
@@ -21,7 +22,7 @@ class AdminListingsTab extends StatefulWidget {
 
 class _AdminListingsTabState extends State<AdminListingsTab> {
   final ScrollController _scrollController = ScrollController();
-  List<dynamic>? _listings;
+  List<Listing>? _listings;
   bool _loading = true;
   bool _loadingMore = false;
   String? _error;
@@ -62,7 +63,14 @@ class _AdminListingsTabState extends State<AdminListingsTab> {
         limit: 20,
         offset: 0,
       );
-      final listings = (data['listings'] as List?) ?? [];
+      final listings = (data['listings'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) => Listing.fromJson(
+              item.map((key, value) => MapEntry(key.toString(), value)),
+            ),
+          )
+          .toList(growable: false);
       setState(() {
         _listings = listings;
         _loading = false;
@@ -90,7 +98,14 @@ class _AdminListingsTabState extends State<AdminListingsTab> {
         limit: 20,
         offset: _offset,
       );
-      final listings = (data['listings'] as List?) ?? [];
+      final listings = (data['listings'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) => Listing.fromJson(
+              item.map((key, value) => MapEntry(key.toString(), value)),
+            ),
+          )
+          .toList(growable: false);
       setState(() {
         _listings = [...?_listings, ...listings];
         _loadingMore = false;
@@ -129,9 +144,8 @@ class _AdminListingsTabState extends State<AdminListingsTab> {
               ),
             );
           }
-          final item = listings[i] as Map<String, dynamic>;
-          final isTakedown = item['status'] == 'takedown';
-          final isActive = item['status'] == 'active';
+          final item = listings[i];
+          final isActive = item.status == 'active' && !item.isRestricted;
           return ListTile(
             leading: CircleAvatar(
               backgroundColor: isActive
@@ -143,152 +157,230 @@ class _AdminListingsTabState extends State<AdminListingsTab> {
                 size: 18,
               ),
             ),
-            title: Text(item['title'] ?? ''),
+            title: Text(item.title),
             subtitle: Text(
-              '${localizedCategoryLabel(context, item['category']?.toString())} · ¥${item['suggested_price_cny'] ?? 0} · ${item['status']}',
+              '${localizedCategoryLabel(context, item.category)} · '
+              '¥${item.suggestedPriceCny.toStringAsFixed(2)} · '
+              '${_lifecycleLabel(l, item.status)}'
+              '${item.isRestricted ? ' · ${l.listingRestrictedBadge}' : ''}',
             ),
-            trailing: isTakedown
-                ? Chip(
-                    label: Text(
-                      l.adminTakedown,
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                    backgroundColor: AppTheme.error,
-                  )
-                : const Icon(
-                    Icons.chevron_right,
-                    color: AppTheme.textSecondary,
-                  ),
-            onTap: isTakedown ? null : () => _showListingDetail(context, item),
+            trailing: const Icon(
+              Icons.chevron_right,
+              color: AppTheme.textSecondary,
+            ),
+            onTap: () => _showListingDetail(context, item),
           );
         },
       ),
     );
   }
 
-  void _showListingDetail(BuildContext context, Map<String, dynamic> item) {
+  Future<void> _showListingDetail(BuildContext context, Listing item) async {
     final l = AppLocalizations.of(context)!;
-    showModalBottomSheet(
+    var operating = false;
+    String? actionError;
+    await showModalBottomSheet<void>(
       context: context,
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(AppTheme.sp16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              item['title'] ?? '',
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text('${l.idLabel} ${item['id']}'),
-            Text(
-              '${l.categoryLabel}: ${localizedCategoryLabel(context, item['category']?.toString())}',
-            ),
-            Text('${l.brandLabel}: ${item['brand'] ?? l.unknown}'),
-            Text('${l.priceLabel}: ¥${item['suggested_price_cny'] ?? 0}'),
-            Text('${l.conditionLabel}: ${item['condition_score'] ?? 0}'),
-            Text('${l.status}: ${item['status']}'),
-            Text('${l.ownerIdLabel} ${item['owner_id']}'),
-            const SizedBox(height: AppTheme.sp16),
-            if (widget.canManage)
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: () async {
-                    final confirmed = await showDialog<bool>(
-                      context: ctx,
-                      builder: (dialogCtx) => AlertDialog(
-                        title: Text(l.adminTakedownConfirm),
-                        content: Text(
-                          l.adminTakedownConfirmMessage(item['title'] ?? ''),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(dialogCtx, false),
-                            child: Text(l.cancel),
-                          ),
-                          FilledButton(
-                            onPressed: () => Navigator.pop(dialogCtx, true),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: AppTheme.error,
-                            ),
-                            child: Text(l.adminTakedown),
-                          ),
-                        ],
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) {
+          Future<void> runAction(String action) async {
+            if (operating) return;
+            final takedown = action == Listing.adminActionTakedown;
+            String? restoreReason;
+            if (takedown) {
+              final confirmed = await showDialog<bool>(
+                context: sheetContext,
+                builder: (dialogContext) => AlertDialog(
+                  title: Text(l.adminTakedownConfirm),
+                  content: Text(l.adminTakedownConfirmMessage(item.title)),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      child: Text(l.cancel),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(dialogContext, true),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.error,
                       ),
-                    );
-                    if (confirmed != true) return;
-                    if (ctx.mounted) {
-                      Navigator.pop(ctx);
-                      try {
-                        await widget.apiService.takedownListing(
-                          item['id'] as String,
-                        );
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(l.adminTakedownSuccess),
-                              backgroundColor: AppTheme.success,
-                            ),
-                          );
-                        }
-                        _load();
-                      } catch (e) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(l.operationFailed(e.toString())),
-                              backgroundColor: AppTheme.error,
-                            ),
-                          );
-                        }
-                      }
-                    }
-                  },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.error,
-                  ),
-                  icon: const Icon(Icons.archive),
-                  label: Text(l.adminTakedown),
+                      child: Text(l.adminTakedown),
+                    ),
+                  ],
                 ),
-              ),
-            if (widget.canManage) const SizedBox(height: AppTheme.sp8),
-            if (widget.canManage)
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () async {
-                    try {
-                      await widget.apiService.updateListing(
-                        item['id'] as String,
-                        {
-                          'status': item['status'] == 'active'
-                              ? 'sold'
-                              : 'active',
-                        },
-                      );
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      _load();
-                    } catch (e) {
-                      if (ctx.mounted) {
-                        ScaffoldMessenger.of(ctx).showSnackBar(
-                          SnackBar(
-                            content: Text(l.operationFailed(e.toString())),
-                          ),
-                        );
-                      }
-                    }
-                  },
-                  icon: const Icon(Icons.toggle_on),
-                  label: Text(
-                    item['status'] == 'active' ? l.sold : l.adminUnban,
+              );
+              if (confirmed != true) return;
+            } else {
+              var input = '';
+              restoreReason = await showDialog<String>(
+                context: sheetContext,
+                builder: (dialogContext) => StatefulBuilder(
+                  builder: (dialogContext, setDialogState) => AlertDialog(
+                    title: Text(l.adminRestoreListingConfirm),
+                    content: TextField(
+                      key: const Key('admin-listing-restore-reason'),
+                      autofocus: true,
+                      minLines: 2,
+                      maxLines: 5,
+                      maxLength: 2000,
+                      onChanged: (value) => setDialogState(() => input = value),
+                      decoration: InputDecoration(
+                        hintText: l.adminRestoreReasonHint,
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        child: Text(l.cancel),
+                      ),
+                      FilledButton(
+                        onPressed: input.trim().isEmpty
+                            ? null
+                            : () => Navigator.pop(dialogContext, input.trim()),
+                        child: Text(l.adminRestoreListing),
+                      ),
+                    ],
                   ),
                 ),
+              );
+              if (restoreReason == null) return;
+            }
+            if (!sheetContext.mounted) return;
+            setSheetState(() {
+              operating = true;
+              actionError = null;
+            });
+            try {
+              if (takedown) {
+                await widget.apiService.takedownListing(item.id);
+              } else {
+                await widget.apiService.restoreListing(
+                  item.id,
+                  reason: restoreReason!,
+                );
+              }
+              if (!sheetContext.mounted) return;
+              Navigator.pop(sheetContext);
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    takedown
+                        ? l.adminTakedownSuccess
+                        : l.adminRestoreListingSuccess,
+                  ),
+                  backgroundColor: AppTheme.success,
+                ),
+              );
+              await _load();
+            } catch (error) {
+              if (!sheetContext.mounted) return;
+              setSheetState(() {
+                operating = false;
+                actionError = l.operationFailed(error.toString());
+              });
+            }
+          }
+
+          final canTakedown = item.allowsAdminAction(
+            Listing.adminActionTakedown,
+          );
+          final canRestore = item.allowsAdminAction(Listing.adminActionRestore);
+          return SafeArea(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                AppTheme.sp16,
+                0,
+                AppTheme.sp16,
+                AppTheme.sp24 + MediaQuery.viewInsetsOf(sheetContext).bottom,
               ),
-          ],
-        ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.title,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.sp8),
+                  Text('${l.idLabel} ${item.id}'),
+                  Text(
+                    '${l.categoryLabel}: '
+                    '${localizedCategoryLabel(context, item.category)}',
+                  ),
+                  Text('${l.brandLabel}: ${item.brand}'),
+                  Text(
+                    '${l.priceLabel}: '
+                    '¥${item.suggestedPriceCny.toStringAsFixed(2)}',
+                  ),
+                  Text('${l.conditionLabel}: ${item.conditionScore}'),
+                  Text('${l.status}: ${_lifecycleLabel(l, item.status)}'),
+                  if (item.isRestricted)
+                    Text(
+                      l.listingRestrictedBadge,
+                      style: const TextStyle(
+                        color: AppTheme.error,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  Text('${l.ownerIdLabel} ${item.ownerId ?? l.unknown}'),
+                  const SizedBox(height: AppTheme.sp16),
+                  if (actionError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: AppTheme.sp12),
+                      child: Text(
+                        actionError!,
+                        key: const Key('admin-listing-action-error'),
+                        style: const TextStyle(color: AppTheme.error),
+                      ),
+                    ),
+                  if (operating)
+                    const Center(child: CircularProgressIndicator())
+                  else if (!widget.canManage)
+                    Text(l.adminSensitiveActionsLockedSubtitle)
+                  else if (canTakedown)
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        key: const Key('admin-listing-takedown-action'),
+                        onPressed: () => runAction(Listing.adminActionTakedown),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.error,
+                        ),
+                        icon: const Icon(Icons.archive_outlined),
+                        label: Text(l.adminTakedown),
+                      ),
+                    )
+                  else if (canRestore)
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        key: const Key('admin-listing-restore-action'),
+                        onPressed: () => runAction(Listing.adminActionRestore),
+                        icon: const Icon(Icons.restore),
+                        label: Text(l.adminRestoreListing),
+                      ),
+                    )
+                  else
+                    Text(l.adminListingNoActions),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
 }
+
+String _lifecycleLabel(AppLocalizations l, String status) => switch (status) {
+  'active' => l.listingLifecycleActive,
+  'fulfilled' => l.listingLifecycleFulfilled,
+  'sold' => l.listingLifecycleSold,
+  'deleted' => l.listingLifecycleOwnerDeleted,
+  _ => l.listingLifecycleUnknown,
+};

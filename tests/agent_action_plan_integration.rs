@@ -3,9 +3,11 @@
 
 use async_trait::async_trait;
 use goods4ncu::agents::tools::{
-    CreateListingArgs, CreateListingTool, EmbedUpdater, ToolContext, ToolError,
+    CreateListingArgs, CreateListingTool, EmbedUpdater, NegotiateItemArgs, NegotiateItemTool,
+    ToolContext, ToolError,
 };
 use goods4ncu::services::agent_plan::{AgentPlanService, ConfirmOutcome};
+use goods4ncu::services::moderation_case::ModerationCaseService;
 use goods4ncu::services::notification::NotificationService;
 use goods4ncu::test_infra::with_test_pool;
 use rig::tool::Tool;
@@ -339,6 +341,75 @@ async fn confirmed_plan_still_fails_when_state_changed_since_proposal() {
             .await
             .expect("orders count");
         assert_eq!(orders, 0, "no deal intent may exist for a sold listing");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn confirmed_negotiation_plan_cannot_create_side_facts_after_restriction() {
+    with_test_pool(|pool| async move {
+        let buyer_id = format!("plan-restricted-buyer-{}", Uuid::new_v4().simple());
+        let seller_id = format!("plan-restricted-seller-{}", Uuid::new_v4().simple());
+        seed_verified_user(&pool, &buyer_id).await;
+        seed_verified_user(&pool, &seller_id).await;
+        let listing_id = seed_listing(&pool, &seller_id).await;
+        let ctx = tool_ctx(pool.clone(), &buyer_id);
+        NegotiateItemTool { ctx: ctx.clone() }
+            .call(NegotiateItemArgs {
+                listing_id: listing_id.clone(),
+                offered_price: 9_000,
+                reason: "confirmed before restriction".to_string(),
+            })
+            .await
+            .expect("propose negotiation plan");
+
+        let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("ncu campus");
+        ModerationCaseService::new(pool.clone())
+            .impose_manual_listing_takedown(
+                &listing_id,
+                campus_id,
+                &seller_id,
+                "测试发布受平台限制",
+                None,
+            )
+            .await
+            .expect("restrict listing");
+
+        let service = AgentPlanService::new(pool.clone());
+        let plan = &service.list_pending(&buyer_id).await.expect("list plan")[0];
+        let (plan_id, token) = (plan.id, plan.confirmation_token.clone());
+        assert!(matches!(
+            service
+                .confirm(&ctx, &buyer_id, plan_id, &token)
+                .await
+                .expect("arm plan"),
+            ConfirmOutcome::NeedsSecondConfirmation
+        ));
+        let outcome = service
+            .confirm(&ctx, &buyer_id, plan_id, &token)
+            .await
+            .expect("execute restricted plan");
+        match outcome {
+            ConfirmOutcome::Failed(_) => {}
+            other => panic!("unexpected restricted-plan outcome: {other:?}"),
+        }
+
+        let hitl_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM hitl_requests WHERE listing_id = $1")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("hitl side facts");
+        let notification_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE related_listing_id = $1")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("notification side facts");
+        assert_eq!((hitl_count, notification_count), (0, 0));
     })
     .await;
 }

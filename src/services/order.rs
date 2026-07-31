@@ -68,6 +68,8 @@ pub enum OrderError {
     Forbidden,
     #[error("Listing already sold")]
     AlreadySold,
+    #[error("Listing is restricted by moderation")]
+    ListingRestricted,
     #[error("Idempotency key was reused with different confirmation data")]
     IdempotencyConflict,
     #[error("Database error: {0}")]
@@ -122,10 +124,19 @@ impl OrderService {
                 .await
                 .map_err(OrderError::Db)?;
 
-        match listing_status.as_deref() {
-            Some("active") => {}
-            Some(_) => return Err(OrderError::AlreadySold),
-            None => return Err(OrderError::NotFound),
+        let Some(listing_status) = listing_status else {
+            return Err(OrderError::NotFound);
+        };
+        let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+            .bind(listing_id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(OrderError::Db)?;
+        if restricted {
+            return Err(OrderError::ListingRestricted);
+        }
+        if listing_status != "active" {
+            return Err(OrderError::AlreadySold);
         }
 
         if let Some(existing_id) = sqlx::query_scalar::<_, String>(
@@ -245,17 +256,32 @@ impl OrderService {
         }
 
         if auto_delist {
-            let updated = sqlx::query(
-                "UPDATE inventory SET status = 'sold' WHERE id = $1 AND status = 'active'",
-            )
-            .bind(&listing_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(OrderError::Db)?;
-
-            if updated.rows_affected() == 0 {
+            let listing_status: Option<String> =
+                sqlx::query_scalar("SELECT status FROM inventory WHERE id = $1 FOR UPDATE")
+                    .bind(&listing_id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(OrderError::Db)?;
+            let Some(listing_status) = listing_status else {
+                return Err(OrderError::NotFound);
+            };
+            let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+                .bind(&listing_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(OrderError::Db)?;
+            if restricted {
+                return Err(OrderError::ListingRestricted);
+            }
+            if listing_status != "active" {
                 return Err(OrderError::AlreadySold);
             }
+
+            sqlx::query("UPDATE inventory SET status = 'sold' WHERE id = $1")
+                .bind(&listing_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(OrderError::Db)?;
         }
 
         let confirmed_by = if actor_id.is_empty() {

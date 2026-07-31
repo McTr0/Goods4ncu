@@ -214,7 +214,9 @@ pub async fn create_order(
     Json(payload): Json<CreateOrderRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let listing_row = sqlx::query(
-        "SELECT owner_id, suggested_price_cny, status, campus_id FROM inventory WHERE id = $1",
+        "SELECT owner_id, suggested_price_cny, status, campus_id,
+                listing_has_active_restriction(id) AS restricted
+         FROM inventory WHERE id = $1",
     )
     .bind(&payload.listing_id)
     .fetch_optional(&state.infra.db)
@@ -224,16 +226,22 @@ pub async fn create_order(
         ApiError::Internal(anyhow::anyhow!("Failed to fetch listing"))
     })?;
 
-    let (seller_id, suggested_price, listing_status, campus_id): (String, i64, String, uuid::Uuid) =
-        match listing_row {
-            Some(row) => (
-                row.get("owner_id"),
-                row.get("suggested_price_cny"),
-                row.get("status"),
-                row.get("campus_id"),
-            ),
-            None => return Err(ApiError::NotFound),
-        };
+    let (seller_id, suggested_price, listing_status, campus_id, restricted): (
+        String,
+        i64,
+        String,
+        uuid::Uuid,
+        bool,
+    ) = match listing_row {
+        Some(row) => (
+            row.get("owner_id"),
+            row.get("suggested_price_cny"),
+            row.get("status"),
+            row.get("campus_id"),
+            row.get("restricted"),
+        ),
+        None => return Err(ApiError::NotFound),
+    };
 
     let tenant = CampusService::new(state.infra.db.clone())
         .require_shared_verified_campus_for_session(&session.user_id, &seller_id, session.campus_id)
@@ -249,6 +257,12 @@ pub async fn create_order(
     }
     if listing_status != "active" {
         return Err(ApiError::Conflict("此商品暂不可发起成交意向".to_string()));
+    }
+    if restricted {
+        return Err(ApiError::CodedConflict {
+            code: "listing_restricted",
+            message: "此商品受平台限制，暂不可发起成交意向".to_string(),
+        });
     }
     if let Some(message) = payload.message.as_deref() {
         if message.len() > 1000 {
@@ -282,6 +296,10 @@ pub async fn create_order(
         .await
         .map_err(|e| match e {
             OrderError::AlreadySold => ApiError::Conflict("此商品暂不可发起成交意向".to_string()),
+            OrderError::ListingRestricted => ApiError::CodedConflict {
+                code: "listing_restricted",
+                message: "此商品受平台限制，暂不可发起成交意向".to_string(),
+            },
             OrderError::NotFound => ApiError::NotFound,
             other => {
                 tracing::error!("create_order error: {}", other);
@@ -367,6 +385,10 @@ pub async fn confirm_order(
             OrderError::NotFound => ApiError::NotFound,
             OrderError::Forbidden => ApiError::Forbidden,
             OrderError::AlreadySold => ApiError::Conflict("此商品已经不可售".to_string()),
+            OrderError::ListingRestricted => ApiError::CodedConflict {
+                code: "listing_restricted",
+                message: "此商品受平台限制，无法确认成交".to_string(),
+            },
             OrderError::IdempotencyConflict => {
                 ApiError::Conflict("Idempotency-Key 已用于不同的确认内容".to_string())
             }

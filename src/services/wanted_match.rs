@@ -70,7 +70,13 @@ impl WantedMatchService {
                 "只有收物需求可以查看匹配商品".to_string(),
             ));
         }
-        if wanted.status != "active" {
+        if wanted.status != "active"
+            || sqlx::query_scalar::<_, bool>("SELECT listing_has_active_restriction($1)")
+                .bind(wanted_id)
+                .fetch_one(&self.db)
+                .await
+                .map_err(db_error)?
+        {
             return Ok(Vec::new());
         }
 
@@ -117,6 +123,7 @@ impl WantedMatchService {
             LEFT JOIN documents wanted_doc ON wanted_doc.id = $1
             LEFT JOIN documents offer_doc ON offer_doc.id = i.id
             WHERE i.status = 'active'
+              AND NOT listing_has_active_restriction(i.id)
               AND i.direction = 'offer'
               AND i.owner_id <> $2
               AND ($8::text IS NULL OR i.owner_id <> $8)

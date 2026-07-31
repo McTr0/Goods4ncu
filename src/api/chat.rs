@@ -139,30 +139,97 @@ async fn resolve_listing_context(
     db: &sqlx::PgPool,
     listing_id: Option<&str>,
     current_user_id: &str,
+    session_campus_id: Option<Uuid>,
 ) -> Result<(String, Option<String>), ApiError> {
     match listing_id {
         Some(lid) if !lid.is_empty() => {
-            let row = sqlx::query("SELECT owner_id, status FROM inventory WHERE id = $1")
-                .bind(lid)
-                .fetch_optional(db)
-                .await
-                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+            let row = sqlx::query(
+                "SELECT listing.owner_id
+                 FROM inventory listing
+                 JOIN campuses campus
+                   ON campus.id = listing.campus_id AND campus.status = 'active'
+                 WHERE listing.id = $1
+                   AND listing.status = 'active'
+                   AND NOT listing_has_active_restriction(listing.id)
+                   AND ($2::uuid IS NULL OR listing.campus_id = $2)
+                   AND EXISTS (
+                       SELECT 1 FROM campus_memberships membership
+                       WHERE membership.campus_id = listing.campus_id
+                         AND membership.user_id = $3
+                         AND membership.status = 'verified'
+                   )",
+            )
+            .bind(lid)
+            .bind(session_campus_id)
+            .bind(current_user_id)
+            .fetch_optional(db)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
             match row {
                 Some(r) => {
                     let owner_id: String = r.get("owner_id");
-                    let status: String = r.get("status");
-                    if status == "active" && owner_id != current_user_id {
+                    if owner_id != current_user_id {
                         Ok((lid.to_string(), Some(owner_id)))
                     } else {
                         Ok(("global".to_string(), None))
                     }
                 }
-                None => Ok(("global".to_string(), None)),
+                None => Err(ApiError::NotFound),
             }
         }
         _ => Ok(("global".to_string(), None)),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn persist_context_message(
+    chat_svc: &ChatService,
+    conversation_id: &str,
+    listing_id: &str,
+    sender: &str,
+    receiver: Option<&str>,
+    is_agent: bool,
+    content: &str,
+    image_data: Option<&str>,
+    audio_data: Option<&str>,
+    image_url: Option<&str>,
+    audio_url: Option<&str>,
+    session_campus_id: Option<Uuid>,
+) -> anyhow::Result<bool> {
+    if listing_id == "global" {
+        chat_svc
+            .log_message(
+                conversation_id,
+                listing_id,
+                sender,
+                receiver,
+                is_agent,
+                content,
+                image_data,
+                audio_data,
+                image_url,
+                audio_url,
+            )
+            .await?;
+        return Ok(true);
+    }
+
+    chat_svc
+        .log_listing_message_if_eligible(
+            conversation_id,
+            listing_id,
+            sender,
+            receiver,
+            is_agent,
+            content,
+            image_data,
+            audio_data,
+            image_url,
+            audio_url,
+            session_campus_id,
+        )
+        .await
 }
 
 fn history_to_rig_messages(entries: &[crate::services::chat::ChatHistoryEntry]) -> Vec<Message> {
@@ -232,10 +299,20 @@ pub(crate) async fn handle_chat(
         tracing::debug!(client_ip = %proxy_ip, peer = %addr, "Chat request");
     }
 
+    let session_campus_id = session.campus_id;
     let current_user_id = session.user_id;
     let (conversation_id, response_conversation_id, is_assistant_conversation) =
         resolve_chat_conversation_id(conversation_id, &current_user_id);
     let chat_svc = ChatService::new(state.infra.db.clone());
+    // Validate an explicit listing before greeting/blocked-intent shortcuts so
+    // those fast paths cannot turn an ineligible id into a successful request.
+    let (resolved_listing_id, receiver) = resolve_listing_context(
+        &state.infra.db,
+        listing_id.as_deref(),
+        &current_user_id,
+        session_campus_id,
+    )
+    .await?;
 
     // Lightweight intent classification — blocked content and greetings short-circuit here.
     let intent_result = state.agents.router.classify(&message);
@@ -280,9 +357,6 @@ pub(crate) async fn handle_chat(
         }));
     }
 
-    let (resolved_listing_id, receiver) =
-        resolve_listing_context(&state.infra.db, listing_id.as_deref(), &current_user_id).await?;
-
     let history = chat_svc
         .get_conversation_history(&conversation_id)
         .await
@@ -290,24 +364,28 @@ pub(crate) async fn handle_chat(
     let chat_history = history_to_rig_messages(&history);
 
     // Persist before LLM execution to avoid message loss on timeout or abort.
-    chat_svc
-        .log_message(
-            &conversation_id,
-            &resolved_listing_id,
-            &current_user_id,
-            receiver.as_deref(),
-            false,
-            &message,
-            image.as_deref(),
-            audio.as_deref(),
-            normalized_image_url.as_deref(),
-            normalized_audio_url.as_deref(),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(%e, "Failed to persist user message");
-            ApiError::Internal(anyhow::anyhow!("Failed to persist user message"))
-        })?;
+    let persisted = persist_context_message(
+        &chat_svc,
+        &conversation_id,
+        &resolved_listing_id,
+        &current_user_id,
+        receiver.as_deref(),
+        false,
+        &message,
+        image.as_deref(),
+        audio.as_deref(),
+        normalized_image_url.as_deref(),
+        normalized_audio_url.as_deref(),
+        session_campus_id,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(%e, "Failed to persist user message");
+        ApiError::Internal(anyhow::anyhow!("Failed to persist user message"))
+    })?;
+    if !persisted {
+        return Err(ApiError::NotFound);
+    }
 
     state.infra.metrics.record_chat_message();
 
@@ -335,20 +413,21 @@ pub(crate) async fn handle_chat(
     state.infra.metrics.record_llm_call();
 
     // Fire-and-forget: agent reply persistence — errors are non-fatal.
-    if let Err(e) = chat_svc
-        .log_message(
-            &conversation_id,
-            &resolved_listing_id,
-            &current_user_id,
-            None,
-            true,
-            &reply,
-            None,
-            None,
-            None,
-            None,
-        )
-        .await
+    if let Err(e) = persist_context_message(
+        &chat_svc,
+        &conversation_id,
+        &resolved_listing_id,
+        &current_user_id,
+        None,
+        true,
+        &reply,
+        None,
+        None,
+        None,
+        None,
+        session_campus_id,
+    )
+    .await
     {
         tracing::warn!(%e, "Failed to log agent reply");
     }
@@ -423,11 +502,19 @@ async fn handle_chat_stream_request(
         state.secrets.jwt_secret_old.as_deref(),
     )
     .map_err(|_| ApiError::Unauthorized)?;
+    let session_campus_id = session.campus_id;
     let current_user_id = session.user_id;
     auth::ensure_user_not_banned(&state, &current_user_id).await?;
     let (conversation_id, response_conversation_id, is_assistant_conversation) =
         resolve_chat_conversation_id(conversation_id, &current_user_id);
     let chat_svc = ChatService::new(state.infra.db.clone());
+    let (resolved_listing_id, receiver) = resolve_listing_context(
+        &state.infra.db,
+        listing_id.as_deref(),
+        &current_user_id,
+        session_campus_id,
+    )
+    .await?;
 
     let intent_result = state.agents.router.classify(&message);
     tracing::debug!(intent = ?intent_result.intent.as_str(), confidence = %intent_result.confidence, "SSE Router classification");
@@ -474,9 +561,6 @@ async fn handle_chat_stream_request(
         return build_sse_response(&response_conversation_id, body);
     }
 
-    let (resolved_listing_id, receiver) =
-        resolve_listing_context(&state.infra.db, listing_id.as_deref(), &current_user_id).await?;
-
     let history = chat_svc
         .get_conversation_history(&conversation_id)
         .await
@@ -484,24 +568,28 @@ async fn handle_chat_stream_request(
     let chat_history = history_to_rig_messages(&history);
 
     // Persist user turn before streaming — aborted streams must not lose the message.
-    chat_svc
-        .log_message(
-            &conversation_id,
-            &resolved_listing_id,
-            &current_user_id,
-            receiver.as_deref(),
-            false,
-            &message,
-            None,
-            None,
-            normalized_image_url.as_deref(),
-            normalized_audio_url.as_deref(),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(%e, "Failed to persist user message for SSE stream");
-            ApiError::Internal(anyhow::anyhow!("Failed to persist user message"))
-        })?;
+    let persisted = persist_context_message(
+        &chat_svc,
+        &conversation_id,
+        &resolved_listing_id,
+        &current_user_id,
+        receiver.as_deref(),
+        false,
+        &message,
+        None,
+        None,
+        normalized_image_url.as_deref(),
+        normalized_audio_url.as_deref(),
+        session_campus_id,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(%e, "Failed to persist user message for SSE stream");
+        ApiError::Internal(anyhow::anyhow!("Failed to persist user message"))
+    })?;
+    if !persisted {
+        return Err(ApiError::NotFound);
+    }
 
     let agent: Box<dyn MarketplaceAgent> = state
         .agents
@@ -520,6 +608,7 @@ async fn handle_chat_stream_request(
     let public_conversation_id = response_conversation_id.clone();
     let persisted_listing_id = resolved_listing_id.clone();
     let persisted_user_id = current_user_id.clone();
+    let persisted_campus_id = session_campus_id;
     let persist_service = chat_svc.clone();
     let sse_stream = async_stream::stream! {
         let mut full_reply = String::new();
@@ -547,8 +636,8 @@ async fn handle_chat_stream_request(
         }
 
         if completed && !full_reply.trim().is_empty() {
-            if let Err(error) = persist_service
-                .log_message(
+            if let Err(error) = persist_context_message(
+                    &persist_service,
                     &persisted_conversation_id,
                     &persisted_listing_id,
                     &persisted_user_id,
@@ -559,6 +648,7 @@ async fn handle_chat_stream_request(
                     None,
                     None,
                     None,
+                    persisted_campus_id,
                 )
                 .await
             {

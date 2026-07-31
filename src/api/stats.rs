@@ -40,14 +40,17 @@ pub async fn get_stats(
         count_query(&state.infra.db, "SELECT COUNT(*) as cnt FROM inventory"),
         count_query(
             &state.infra.db,
-            "SELECT COUNT(*) as cnt FROM inventory WHERE status = 'active'"
+            "SELECT COUNT(*) as cnt FROM inventory WHERE status = 'active'
+               AND NOT listing_has_active_restriction(id)"
         ),
         count_query(&state.infra.db, "SELECT COUNT(*) as cnt FROM users"),
         count_query(&state.infra.db, "SELECT COUNT(*) as cnt FROM orders"),
     )?;
 
     let category_rows = sqlx::query(
-        "SELECT category, COUNT(*) as cnt FROM inventory WHERE status = 'active' GROUP BY category ORDER BY cnt DESC",
+        "SELECT category, COUNT(*) as cnt FROM inventory
+         WHERE status = 'active' AND NOT listing_has_active_restriction(id)
+         GROUP BY category ORDER BY cnt DESC",
     )
     .fetch_all(&state.infra.db)
     .await

@@ -79,7 +79,9 @@ pub async fn list_wanted_responses(
                 r.message, r.status, r.created_at, r.responded_at, r.lifecycle_epoch,
                 w.title AS wanted_title, w.status AS wanted_status,
                 w.lifecycle_epoch AS current_lifecycle_epoch,
-                o.title AS offer_title, o.status AS offer_status
+                listing_has_active_restriction(w.id) AS wanted_restricted,
+                o.title AS offer_title, o.status AS offer_status,
+                listing_has_active_restriction(o.id) AS offer_restricted
          FROM wanted_responses r
          JOIN inventory w ON w.id = r.wanted_listing_id
          JOIN inventory o ON o.id = r.offer_listing_id
@@ -108,18 +110,24 @@ pub async fn list_wanted_responses(
             let offer_status = row.get::<String, _>("offer_status");
             let lifecycle_epoch = row.get::<Option<i64>, _>("lifecycle_epoch");
             let current_lifecycle_epoch = row.get::<i64, _>("current_lifecycle_epoch");
-            let round_is_current =
-                lifecycle_epoch == Some(current_lifecycle_epoch) && wanted_status == "active";
+            let wanted_restricted = row.get::<bool, _>("wanted_restricted");
+            let offer_restricted = row.get::<bool, _>("offer_restricted");
+            let round_is_current = lifecycle_epoch == Some(current_lifecycle_epoch)
+                && wanted_status == "active"
+                && !wanted_restricted;
             let available_actions: Vec<&str> = if response_status == "pending" && round_is_current {
                 match role {
                     "requester" => {
-                        if offer_status == "active" {
+                        if offer_status == "active" && !offer_restricted {
                             vec!["accept", "dismiss"]
                         } else {
                             vec!["dismiss"]
                         }
                     }
-                    "responder" => vec!["withdraw"],
+                    "responder" if offer_status == "active" && !offer_restricted => {
+                        vec!["withdraw"]
+                    }
+                    "responder" => Vec::new(),
                     _ => Vec::new(),
                 }
             } else {
@@ -217,6 +225,11 @@ async fn act_on_response(
     .ok_or(ApiError::NotFound)?;
     let wanted_status: String = wanted.get("status");
     let current_lifecycle_epoch: i64 = wanted.get("lifecycle_epoch");
+    let wanted_restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+        .bind(&wanted_listing_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
     let offer = sqlx::query(
         "SELECT status, title
@@ -232,6 +245,11 @@ async fn act_on_response(
     .ok_or(ApiError::NotFound)?;
     let offer_status: String = offer.get("status");
     let offer_title: String = offer.get("title");
+    let offer_restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+        .bind(&offer_listing_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
     let row = sqlx::query(&format!(
         "SELECT responder_id, requester_id, status, lifecycle_epoch,
@@ -264,10 +282,18 @@ async fn act_on_response(
         Some(ApiError::Conflict(format!(
             "该推荐当前状态为 {status}，无法操作"
         )))
-    } else if lifecycle_epoch != Some(current_lifecycle_epoch) || wanted_status != "active" {
+    } else if lifecycle_epoch != Some(current_lifecycle_epoch)
+        || wanted_status != "active"
+        || wanted_restricted
+    {
         Some(ApiError::CodedConflict {
             code: "wanted_response_round_closed",
             message: "该推荐属于已结束的收物轮次，请刷新后查看历史".to_string(),
+        })
+    } else if offer_restricted && action.to_status != "dismissed" {
+        Some(ApiError::CodedConflict {
+            code: "listing_restricted",
+            message: "推荐商品已受平台限制，无法操作".to_string(),
         })
     } else if action.require_offer_active && offer_status != "active" {
         Some(ApiError::Conflict(format!(
@@ -296,6 +322,7 @@ async fn act_on_response(
                WHERE w.id = r.wanted_listing_id
                  AND w.campus_id = r.campus_id
                  AND w.status = 'active'
+                 AND NOT listing_has_active_restriction(w.id)
                  AND w.lifecycle_epoch = r.lifecycle_epoch
            )
            AND (
@@ -306,6 +333,7 @@ async fn act_on_response(
                    WHERE o.id = r.offer_listing_id
                      AND o.campus_id = r.campus_id
                      AND o.status = 'active'
+                     AND NOT listing_has_active_restriction(o.id)
                )
            )",
         action.actor_column

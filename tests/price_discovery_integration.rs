@@ -16,7 +16,10 @@
 //! learn it by running the mechanism has been given a tool rather than a
 //! service.
 
-use goods4ncu::services::price_discovery::{status, Outcome, PriceDiscoveryService};
+use goods4ncu::services::moderation_case::ModerationCaseService;
+use goods4ncu::services::price_discovery::{
+    status, ListingUnavailable, Outcome, PriceDiscoveryService,
+};
 use goods4ncu::test_infra::with_test_pool;
 use uuid::Uuid;
 
@@ -62,6 +65,14 @@ async fn listing(pool: &sqlx::PgPool, campus_id: Uuid, owner: &str) -> String {
     .await
     .expect("insert listing");
     id
+}
+
+async fn restrict_listing(pool: &sqlx::PgPool, listing_id: &str, actor_id: &str) {
+    let campus_id = campus(pool).await;
+    ModerationCaseService::new(pool.clone())
+        .impose_manual_listing_takedown(listing_id, campus_id, actor_id, "测试发布受平台限制", None)
+        .await
+        .expect("restrict listing");
 }
 
 /// Open a session both sides have agreed to.
@@ -266,6 +277,75 @@ async fn both_sides_have_to_opt_in() {
             .expect("view")
             .expect("participant");
         assert_eq!(view.status, status::DECLINED);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn restriction_freezes_existing_sessions_but_still_allows_decline() {
+    with_test_pool(|pool| async move {
+        let campus_id = campus(&pool).await;
+        let seller = member(&pool, campus_id, "restricted-seller").await;
+        let buyer = member(&pool, campus_id, "restricted-buyer").await;
+        let actor = member(&pool, campus_id, "restricted-admin").await;
+        let service = PriceDiscoveryService::new(pool.clone());
+
+        let accept_item = listing(&pool, campus_id, &seller).await;
+        let accept_session = service
+            .propose(campus_id, &accept_item, &seller, &buyer)
+            .await
+            .expect("propose before restriction");
+        restrict_listing(&pool, &accept_item, &actor).await;
+        let accept_err = service
+            .accept(accept_session, &buyer)
+            .await
+            .expect_err("restriction must freeze opt-in");
+        assert!(accept_err.downcast_ref::<ListingUnavailable>().is_some());
+        let accept_status: String =
+            sqlx::query_scalar("SELECT status FROM price_discovery_sessions WHERE id = $1")
+                .bind(accept_session)
+                .fetch_one(&pool)
+                .await
+                .expect("accept session status");
+        assert_eq!(accept_status, status::PROPOSED);
+
+        let limit_item = listing(&pool, campus_id, &seller).await;
+        let limit_session = open_session(&pool, campus_id, &limit_item, &seller, &buyer).await;
+        restrict_listing(&pool, &limit_item, &actor).await;
+        let limit_err = service
+            .state_limit(limit_session, &buyer, 28_000)
+            .await
+            .expect_err("restriction must freeze reservations");
+        assert!(limit_err.downcast_ref::<ListingUnavailable>().is_some());
+        let (limit_status, reservations): (String, i64) = sqlx::query_as(
+            "SELECT s.status,
+                    (SELECT COUNT(*) FROM price_reservations r WHERE r.session_id = s.id)
+             FROM price_discovery_sessions s WHERE s.id = $1",
+        )
+        .bind(limit_session)
+        .fetch_one(&pool)
+        .await
+        .expect("limit side facts");
+        assert_eq!(limit_status, status::OPEN);
+        assert_eq!(reservations, 0);
+
+        let decline_item = listing(&pool, campus_id, &seller).await;
+        let decline_session = service
+            .propose(campus_id, &decline_item, &seller, &buyer)
+            .await
+            .expect("decline session");
+        restrict_listing(&pool, &decline_item, &actor).await;
+        assert!(service
+            .decline(decline_session, &buyer)
+            .await
+            .expect("decline stays available"));
+        let decline_status: String =
+            sqlx::query_scalar("SELECT status FROM price_discovery_sessions WHERE id = $1")
+                .bind(decline_session)
+                .fetch_one(&pool)
+                .await
+                .expect("decline status");
+        assert_eq!(decline_status, status::DECLINED);
     })
     .await;
 }

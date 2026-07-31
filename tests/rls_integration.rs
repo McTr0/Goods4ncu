@@ -266,6 +266,96 @@ async fn armed_tenant_context_isolates_feed_controls() {
     .await;
 }
 
+#[tokio::test]
+async fn armed_tenant_context_isolates_listing_restriction_effects() {
+    with_test_pool(|pool| async move {
+        let (ncu_id, other_id, ncu_listing, other_listing) = seed_two_campus_listings(&pool).await;
+        let owner_id: String = sqlx::query_scalar("SELECT owner_id FROM inventory WHERE id = $1")
+            .bind(&ncu_listing)
+            .fetch_one(&pool)
+            .await
+            .expect("owner");
+        let mut case_ids = Vec::new();
+        for (campus_id, listing_id) in [
+            (ncu_id, ncu_listing.as_str()),
+            (other_id, other_listing.as_str()),
+        ] {
+            let case_id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO moderation_cases (
+                     id, campus_id, subject_user_id, resource_type, resource_id,
+                     source_type, source_ref_id, status, reason_category, public_reason
+                 ) VALUES (
+                     $1, $2, $3, 'listing', $4, 'manual', $5, 'actioned',
+                     'admin_takedown', 'RLS restriction fixture'
+                 )",
+            )
+            .bind(case_id)
+            .bind(campus_id)
+            .bind(&owner_id)
+            .bind(listing_id)
+            .bind(format!("rls-effect:{case_id}"))
+            .execute(&pool)
+            .await
+            .expect("insert restriction case");
+            sqlx::query(
+                "INSERT INTO listing_restriction_effects (
+                     campus_id, listing_id, case_id, source_kind
+                 ) VALUES ($1, $2, $3, 'moderation_case')",
+            )
+            .bind(campus_id)
+            .bind(listing_id)
+            .bind(case_id)
+            .execute(&pool)
+            .await
+            .expect("insert restriction effect");
+            case_ids.push(case_id);
+        }
+        ensure_probe_role(&pool).await;
+
+        let mut tx = pool.begin().await.expect("begin");
+        arm(&mut tx, ncu_id).await;
+        let visible: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM listing_restriction_effects
+             WHERE case_id = ANY($1)",
+        )
+        .bind(&case_ids)
+        .fetch_one(&mut *tx)
+        .await
+        .expect("visible effects");
+        assert_eq!(visible, 1, "another campus's effect must be invisible");
+        let visible_case: Uuid = sqlx::query_scalar(
+            "SELECT case_id FROM listing_restriction_effects WHERE case_id = ANY($1)",
+        )
+        .bind(&case_ids)
+        .fetch_one(&mut *tx)
+        .await
+        .expect("visible case");
+        assert_eq!(visible_case, case_ids[0]);
+
+        let updated = sqlx::query(
+            "UPDATE listing_restriction_effects SET released_at = NOW()
+             WHERE case_id = $1",
+        )
+        .bind(case_ids[1])
+        .execute(&mut *tx)
+        .await
+        .expect("cross-campus update is invisibly filtered");
+        assert_eq!(updated.rows_affected(), 0);
+        tx.rollback().await.expect("rollback");
+
+        let other_still_active: bool = sqlx::query_scalar(
+            "SELECT released_at IS NULL FROM listing_restriction_effects WHERE case_id = $1",
+        )
+        .bind(case_ids[1])
+        .fetch_one(&pool)
+        .await
+        .expect("other effect after probe");
+        assert!(other_still_active);
+    })
+    .await;
+}
+
 /// The policies cover every tenant-scoped table, not just inventory.
 #[tokio::test]
 async fn rls_policies_exist_on_all_tenant_tables() {

@@ -5225,6 +5225,126 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Warning'**
   String get warning;
+
+  /// No description provided for @listingLifecycleActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get listingLifecycleActive;
+
+  /// No description provided for @listingLifecycleFulfilled.
+  ///
+  /// In en, this message translates to:
+  /// **'Fulfilled'**
+  String get listingLifecycleFulfilled;
+
+  /// No description provided for @listingLifecycleSold.
+  ///
+  /// In en, this message translates to:
+  /// **'Sold'**
+  String get listingLifecycleSold;
+
+  /// No description provided for @listingLifecycleOwnerDeleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted by you'**
+  String get listingLifecycleOwnerDeleted;
+
+  /// No description provided for @listingLifecycleUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Status unavailable'**
+  String get listingLifecycleUnknown;
+
+  /// No description provided for @listingRestrictedBadge.
+  ///
+  /// In en, this message translates to:
+  /// **'Restricted by moderation'**
+  String get listingRestrictedBadge;
+
+  /// No description provided for @listingRestrictionTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'This listing is restricted'**
+  String get listingRestrictionTitle;
+
+  /// No description provided for @listingRestrictionGeneric.
+  ///
+  /// In en, this message translates to:
+  /// **'It is hidden from marketplace activity until an administrator restores it.'**
+  String get listingRestrictionGeneric;
+
+  /// No description provided for @viewModerationCase.
+  ///
+  /// In en, this message translates to:
+  /// **'View moderation case'**
+  String get viewModerationCase;
+
+  /// No description provided for @deleteListingAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete listing'**
+  String get deleteListingAction;
+
+  /// No description provided for @relistListingAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Relist'**
+  String get relistListingAction;
+
+  /// No description provided for @listingDeletedToast.
+  ///
+  /// In en, this message translates to:
+  /// **'Listing deleted'**
+  String get listingDeletedToast;
+
+  /// No description provided for @listingRelistedToast.
+  ///
+  /// In en, this message translates to:
+  /// **'Listing relisted'**
+  String get listingRelistedToast;
+
+  /// No description provided for @deleteListingConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete this listing?'**
+  String get deleteListingConfirmTitle;
+
+  /// No description provided for @listingPolicyChangedToast.
+  ///
+  /// In en, this message translates to:
+  /// **'The listing changed. Actions have been refreshed.'**
+  String get listingPolicyChangedToast;
+
+  /// No description provided for @adminRestoreListing.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore listing'**
+  String get adminRestoreListing;
+
+  /// No description provided for @adminRestoreListingConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore this listing?'**
+  String get adminRestoreListingConfirm;
+
+  /// No description provided for @adminRestoreReasonHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Explain why this administrative restriction should be removed.'**
+  String get adminRestoreReasonHint;
+
+  /// No description provided for @adminRestoreListingSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Listing restriction removed'**
+  String get adminRestoreListingSuccess;
+
+  /// No description provided for @adminListingNoActions.
+  ///
+  /// In en, this message translates to:
+  /// **'No administrative action is available for this listing.'**
+  String get adminListingNoActions;
 }
 
 class _AppLocalizationsDelegate

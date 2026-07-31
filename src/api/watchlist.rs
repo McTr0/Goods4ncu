@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
 use crate::api::error::ApiError;
-use crate::api::session::Session;
+use crate::api::session::{Session, VerifiedTenant};
 use crate::api::AppState;
 use crate::utils::cents_to_yuan;
 
@@ -51,7 +51,8 @@ pub async fn get_watchlist(
     let count_row = sqlx::query(
         "SELECT COUNT(*) as cnt FROM watchlist w \
          JOIN inventory i ON w.listing_id = i.id \
-         WHERE w.user_id = $1 AND i.status = 'active'",
+         WHERE w.user_id = $1 AND i.status = 'active'
+           AND NOT listing_has_active_restriction(i.id)",
     )
     .bind(&user_id)
     .fetch_one(&state.infra.db)
@@ -66,6 +67,7 @@ pub async fn get_watchlist(
         FROM watchlist w
         JOIN inventory i ON w.listing_id = i.id
         WHERE w.user_id = $1 AND i.status = 'active'
+          AND NOT listing_has_active_restriction(i.id)
         ORDER BY w.created_at DESC
         LIMIT $2 OFFSET $3
         "#,
@@ -109,21 +111,39 @@ pub async fn get_watchlist(
 /// POST /api/watchlist/:listing_id - add listing to watchlist
 pub async fn add_to_watchlist(
     State(state): State<AppState>,
-    Session(session): Session,
+    tenant: VerifiedTenant,
     Path(listing_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = session.user_id;
-
-    // Verify listing exists and reject self-watchlisting.
-    let owner_id = sqlx::query_scalar::<_, String>("SELECT owner_id FROM inventory WHERE id = $1")
-        .bind(&listing_id)
-        .fetch_optional(&state.infra.db)
+    let user_id = tenant.session.user_id;
+    let mut tx = state
+        .infra
+        .db
+        .begin()
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
-    let Some(owner_id) = owner_id else {
+    // Lock the target so a concurrent restriction cannot commit between the
+    // eligibility decision and insertion of the side fact.
+    let listing = sqlx::query(
+        "SELECT owner_id, status FROM inventory
+         WHERE id = $1 AND campus_id = $2 FOR UPDATE",
+    )
+    .bind(&listing_id)
+    .bind(tenant.campus_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
+    .ok_or(ApiError::NotFound)?;
+    let owner_id: String = listing.get("owner_id");
+    let status: String = listing.get("status");
+    let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+        .bind(&listing_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    if status != "active" || restricted {
         return Err(ApiError::NotFound);
-    };
+    }
     if owner_id == user_id {
         return Err(ApiError::BadRequest("不能收藏自己的商品".to_string()));
     }
@@ -134,9 +154,12 @@ pub async fn add_to_watchlist(
     )
     .bind(&user_id)
     .bind(&listing_id)
-    .execute(&state.infra.db)
+    .execute(&mut *tx)
     .await
     .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
     Ok(Json(serde_json::json!({
         "message": "已添加到关注列表",

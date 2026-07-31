@@ -144,6 +144,7 @@ async fn fetch_recency_feed(
                defects
         FROM inventory
         WHERE status = 'active'
+          AND NOT listing_has_active_restriction(id)
           AND campus_id = $3
           AND ($4 = 'all' OR direction = $4)
         ORDER BY created_at DESC
@@ -229,6 +230,7 @@ async fn fetch_personalized_feed(
         LEFT JOIN less_like downrank
           ON downrank.signal_key = 'listing:category:' || LOWER(BTRIM(inv.category))
         WHERE inv.status = 'active'
+          AND NOT listing_has_active_restriction(inv.id)
           AND inv.campus_id = $5
           AND inv.owner_id <> $1
           AND ($4 = 'all' OR inv.direction = $4)
@@ -325,6 +327,7 @@ async fn fetch_similar_recency(
           ON downrank.signal_key = 'listing:category:' || LOWER(BTRIM(inv.category))
         WHERE inv.id <> $1
           AND inv.status = 'active'
+          AND NOT listing_has_active_restriction(inv.id)
           AND inv.direction = 'offer'
           AND inv.campus_id = $2
           AND ($3::text IS NULL OR inv.owner_id <> $3)
@@ -404,6 +407,7 @@ async fn fetch_vector_similar(
             JOIN inventory inv ON inv.id = doc.id
             WHERE inv.id <> $1
               AND inv.status = 'active'
+              AND NOT listing_has_active_restriction(inv.id)
               AND inv.direction = 'offer'
               AND inv.campus_id = $4
               AND doc.embedding IS NOT NULL
@@ -500,6 +504,7 @@ pub async fn get_similar_listings(
          WHERE i.id = $1
            AND i.campus_id = $2
            AND i.status = 'active'
+           AND NOT listing_has_active_restriction(i.id)
            AND i.direction = 'offer'",
     )
     .bind(&params.listing_id)

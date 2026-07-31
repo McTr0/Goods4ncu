@@ -5,6 +5,7 @@ use sqlx::{FromRow, PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
+use crate::services::admin::{AdminService, NewAuditLog};
 
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct ModerationCaseRecord {
@@ -56,6 +57,13 @@ pub enum CaseReviewAction {
 pub enum AppealDecision {
     Uphold,
     Overturn,
+}
+
+#[derive(Debug, Clone)]
+pub struct TransactionalAdminAudit {
+    pub action: String,
+    pub scope_reason: Option<String>,
+    pub memo: Option<String>,
 }
 
 #[derive(Clone)]
@@ -183,8 +191,30 @@ impl ModerationCaseService {
         }
 
         let mut tx = self.pool.begin().await.map_err(db_error)?;
+        let expected_target = sqlx::query(
+            "SELECT resource_type, resource_id FROM moderation_cases
+             WHERE id = $1 AND subject_user_id = $2 AND campus_id = $3",
+        )
+        .bind(case_id)
+        .bind(subject_user_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?
+        .ok_or(ApiError::NotFound)?;
+        let expected_resource_type: String = expected_target.get("resource_type");
+        let expected_resource_id: String = expected_target.get("resource_id");
+        if expected_resource_type == "listing" {
+            sqlx::query("SELECT id FROM inventory WHERE id = $1 AND campus_id = $2 FOR UPDATE")
+                .bind(&expected_resource_id)
+                .bind(campus_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_error)?
+                .ok_or(ApiError::NotFound)?;
+        }
         let moderation_case = sqlx::query(
-            "SELECT status, resolution, resource_type FROM moderation_cases
+            "SELECT status, resolution, resource_type, resource_id FROM moderation_cases
              WHERE id = $1 AND subject_user_id = $2 AND campus_id = $3
              FOR UPDATE",
         )
@@ -198,6 +228,12 @@ impl ModerationCaseService {
         let current_status: String = moderation_case.get("status");
         let resolution: Option<String> = moderation_case.get("resolution");
         let resource_type: String = moderation_case.get("resource_type");
+        let resource_id: String = moderation_case.get("resource_id");
+        if resource_type != expected_resource_type || resource_id != expected_resource_id {
+            return Err(ApiError::Conflict(
+                "案件目标已发生变化，请刷新后重试".to_string(),
+            ));
+        }
         let can_appeal = matches!(current_status.as_str(), "actioned" | "resolved")
             && matches!(
                 resolution.as_deref(),
@@ -206,10 +242,28 @@ impl ModerationCaseService {
         if !can_appeal {
             return Err(ApiError::Conflict("当前案件状态不可申诉".to_string()));
         }
-        if matches!(resource_type.as_str(), "listing" | "user") {
+        if resource_type == "user" {
             return Err(ApiError::Conflict(
                 "该举报类型尚未定义限制或恢复动作".to_string(),
             ));
+        }
+        if resource_type == "listing" {
+            let active_effect = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(
+                    SELECT 1 FROM listing_restriction_effects
+                    WHERE case_id = $1 AND effect_type = 'visibility_restriction'
+                      AND released_at IS NULL
+                 )",
+            )
+            .bind(case_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_error)?;
+            if !active_effect {
+                return Err(ApiError::Conflict(
+                    "案件缺少有效的发布限制，当前不可申诉".to_string(),
+                ));
+            }
         }
 
         let existing = sqlx::query_scalar::<_, bool>(
@@ -264,6 +318,7 @@ impl ModerationCaseService {
         Ok(appeal)
     }
 
+    #[allow(dead_code)]
     pub async fn review_case(
         &self,
         case_id: Uuid,
@@ -272,6 +327,29 @@ impl ModerationCaseService {
         action: CaseReviewAction,
         note: Option<&str>,
         public_reason: Option<&str>,
+    ) -> Result<ModerationCaseRecord, ApiError> {
+        self.review_case_with_audit(
+            case_id,
+            campus_id,
+            actor_id,
+            action,
+            note,
+            public_reason,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn review_case_with_audit(
+        &self,
+        case_id: Uuid,
+        campus_id: Uuid,
+        actor_id: &str,
+        action: CaseReviewAction,
+        note: Option<&str>,
+        public_reason: Option<&str>,
+        audit: Option<&TransactionalAdminAudit>,
     ) -> Result<ModerationCaseRecord, ApiError> {
         let note = normalize_optional(note, 2000, "处置说明最多 2000 字")?;
         let public_reason = normalize_optional(public_reason, 500, "公开原因最多 500 字")?;
@@ -283,6 +361,27 @@ impl ModerationCaseService {
         }
 
         let mut tx = self.pool.begin().await.map_err(db_error)?;
+        let resource = sqlx::query(
+            "SELECT resource_type, resource_id FROM moderation_cases
+             WHERE id = $1 AND campus_id = $2",
+        )
+        .bind(case_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?
+        .ok_or(ApiError::NotFound)?;
+        let expected_resource_type: String = resource.get("resource_type");
+        let expected_resource_id: String = resource.get("resource_id");
+        if expected_resource_type == "listing" {
+            sqlx::query("SELECT id FROM inventory WHERE id = $1 AND campus_id = $2 FOR UPDATE")
+                .bind(&expected_resource_id)
+                .bind(campus_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_error)?
+                .ok_or(ApiError::NotFound)?;
+        }
         let row = sqlx::query(
             "SELECT status, subject_user_id, source_type, source_ref_id,
                     resource_type, resource_id
@@ -305,13 +404,14 @@ impl ModerationCaseService {
         let source_ref_id: String = row.get("source_ref_id");
         let resource_type: String = row.get("resource_type");
         let resource_id: String = row.get("resource_id");
+        if resource_type != expected_resource_type || resource_id != expected_resource_id {
+            return Err(ApiError::Conflict(
+                "案件目标已发生变化，请刷新后重试".to_string(),
+            ));
+        }
 
-        // Reporting a listing or account creates a review case, but this
-        // feature does not define what a reversible listing takedown or account
-        // sanction means. Refuse those transitions instead of marking a case
-        // actioned while silently leaving the resource unchanged. Dismissal is
-        // safe: it intentionally makes no change to the reported resource.
-        if matches!(resource_type.as_str(), "listing" | "user")
+        // Account sanctions still need their own composable effect model.
+        if resource_type == "user"
             && matches!(
                 action,
                 CaseReviewAction::Restrict | CaseReviewAction::Restore
@@ -376,7 +476,32 @@ impl ModerationCaseService {
             .map_err(db_error)?;
         }
 
-        if let Some(status) = resource_status {
+        if resource_type == "listing" {
+            match action {
+                CaseReviewAction::Restrict => {
+                    impose_listing_effect(
+                        &mut tx,
+                        case_id,
+                        campus_id,
+                        &resource_id,
+                        actor_id,
+                        "moderation_case",
+                    )
+                    .await?;
+                }
+                CaseReviewAction::Restore => {
+                    release_listing_effect(
+                        &mut tx,
+                        case_id,
+                        actor_id,
+                        note.as_deref(),
+                        "case_restore",
+                    )
+                    .await?;
+                }
+                _ => {}
+            }
+        } else if let Some(status) = resource_status {
             update_resource_status(&mut tx, &resource_type, &resource_id, status).await?;
         }
         sync_report_status(
@@ -397,10 +522,29 @@ impl ModerationCaseService {
             note.as_deref(),
         )
         .await?;
+        if let Some(audit) = audit {
+            let target = case_id.to_string();
+            AdminService::log_action_in_tx(
+                &mut tx,
+                NewAuditLog {
+                    campus_id,
+                    admin_id: actor_id,
+                    action: &audit.action,
+                    target_id: Some(&target),
+                    old_value: Some(&current_status),
+                    new_value: Some(new_status),
+                    memo: audit.memo.as_deref().or(note.as_deref()),
+                    scope_reason: audit.scope_reason.as_deref(),
+                },
+            )
+            .await
+            .map_err(|error| ApiError::Internal(anyhow::anyhow!("audit error: {}", error)))?;
+        }
         tx.commit().await.map_err(db_error)?;
         self.get_for_admin(case_id, campus_id).await
     }
 
+    #[allow(dead_code)]
     pub async fn review_appeal(
         &self,
         appeal_id: Uuid,
@@ -409,6 +553,19 @@ impl ModerationCaseService {
         decision: AppealDecision,
         note: &str,
     ) -> Result<ModerationAppealRecord, ApiError> {
+        self.review_appeal_with_audit(appeal_id, campus_id, actor_id, decision, note, None)
+            .await
+    }
+
+    pub async fn review_appeal_with_audit(
+        &self,
+        appeal_id: Uuid,
+        campus_id: Uuid,
+        actor_id: &str,
+        decision: AppealDecision,
+        note: &str,
+        audit: Option<&TransactionalAdminAudit>,
+    ) -> Result<ModerationAppealRecord, ApiError> {
         let note = note.trim();
         if !(3..=2000).contains(&note.chars().count()) {
             return Err(ApiError::BadRequest(
@@ -416,6 +573,44 @@ impl ModerationCaseService {
             ));
         }
         let mut tx = self.pool.begin().await.map_err(db_error)?;
+        let target = sqlx::query(
+            "SELECT appeal.case_id, moderation_case.resource_type,
+                    moderation_case.resource_id
+             FROM moderation_appeals appeal
+             JOIN moderation_cases moderation_case ON moderation_case.id = appeal.case_id
+             WHERE appeal.id = $1 AND appeal.campus_id = $2",
+        )
+        .bind(appeal_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?
+        .ok_or(ApiError::NotFound)?;
+        let expected_case_id: Uuid = target.get("case_id");
+        let expected_resource_type: String = target.get("resource_type");
+        let expected_resource_id: String = target.get("resource_id");
+        if expected_resource_type == "listing" {
+            sqlx::query("SELECT id FROM inventory WHERE id = $1 AND campus_id = $2 FOR UPDATE")
+                .bind(&expected_resource_id)
+                .bind(campus_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db_error)?
+                .ok_or(ApiError::NotFound)?;
+        }
+        sqlx::query("SELECT id FROM moderation_cases WHERE id = $1 AND campus_id = $2 FOR UPDATE")
+            .bind(expected_case_id)
+            .bind(campus_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_error)?
+            .ok_or(ApiError::NotFound)?;
+        sqlx::query("SELECT id FROM moderation_appeals WHERE id = $1 FOR UPDATE")
+            .bind(appeal_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_error)?
+            .ok_or(ApiError::NotFound)?;
         let row = sqlx::query(
             "SELECT appeal.case_id, appeal.appellant_id, appeal.status,
                     moderation_case.status AS case_status,
@@ -424,8 +619,7 @@ impl ModerationCaseService {
                     moderation_case.source_ref_id
              FROM moderation_appeals appeal
              JOIN moderation_cases moderation_case ON moderation_case.id = appeal.case_id
-             WHERE appeal.id = $1 AND appeal.campus_id = $2
-             FOR UPDATE OF appeal, moderation_case",
+             WHERE appeal.id = $1 AND appeal.campus_id = $2",
         )
         .bind(appeal_id)
         .bind(campus_id)
@@ -443,6 +637,11 @@ impl ModerationCaseService {
             return Err(ApiError::Forbidden);
         }
         let case_id: Uuid = row.get("case_id");
+        if case_id != expected_case_id {
+            return Err(ApiError::Conflict(
+                "申诉目标已发生变化，请刷新后重试".to_string(),
+            ));
+        }
         let case_status: String = row.get("case_status");
         if case_status != "appealed" {
             return Err(ApiError::Conflict("案件不在申诉复核状态".to_string()));
@@ -451,7 +650,7 @@ impl ModerationCaseService {
         let resource_id: String = row.get("resource_id");
         let source_type: String = row.get("source_type");
         let source_ref_id: String = row.get("source_ref_id");
-        if matches!(resource_type.as_str(), "listing" | "user") {
+        if resource_type == "user" {
             return Err(ApiError::Conflict(
                 "该举报类型尚未定义限制或恢复动作".to_string(),
             ));
@@ -494,7 +693,34 @@ impl ModerationCaseService {
         .execute(&mut *tx)
         .await
         .map_err(db_error)?;
-        if let Some(status) = resource_status {
+        if resource_type == "listing" {
+            match decision {
+                AppealDecision::Uphold => {
+                    // The case already owns this effect. Requiring it here
+                    // fails closed if legacy/corrupt state says restricted but
+                    // has no enforceable effect.
+                    impose_listing_effect(
+                        &mut tx,
+                        case_id,
+                        campus_id,
+                        &resource_id,
+                        actor_id,
+                        "moderation_case",
+                    )
+                    .await?;
+                }
+                AppealDecision::Overturn => {
+                    release_listing_effect(
+                        &mut tx,
+                        case_id,
+                        actor_id,
+                        Some(note),
+                        "appeal_overturn",
+                    )
+                    .await?;
+                }
+            }
+        } else if let Some(status) = resource_status {
             update_resource_status(&mut tx, &resource_type, &resource_id, status).await?;
         }
         sync_report_status(
@@ -515,6 +741,24 @@ impl ModerationCaseService {
             Some(note),
         )
         .await?;
+        if let Some(audit) = audit {
+            let target = appeal_id.to_string();
+            AdminService::log_action_in_tx(
+                &mut tx,
+                NewAuditLog {
+                    campus_id,
+                    admin_id: actor_id,
+                    action: &audit.action,
+                    target_id: Some(&target),
+                    old_value: Some("pending"),
+                    new_value: Some(appeal_status),
+                    memo: audit.memo.as_deref().or(Some(note)),
+                    scope_reason: audit.scope_reason.as_deref(),
+                },
+            )
+            .await
+            .map_err(|error| ApiError::Internal(anyhow::anyhow!("audit error: {}", error)))?;
+        }
         let appeal = sqlx::query_as::<_, ModerationAppealRecord>(
             "SELECT id, case_id, campus_id, appellant_id, reason, status,
                     reviewed_by, decision_note, created_at, decided_at
@@ -526,6 +770,241 @@ impl ModerationCaseService {
         .map_err(db_error)?;
         tx.commit().await.map_err(db_error)?;
         Ok(appeal)
+    }
+
+    pub async fn impose_manual_listing_takedown(
+        &self,
+        listing_id: &str,
+        campus_id: Uuid,
+        actor_id: &str,
+        public_reason: &str,
+        scope_reason: Option<&str>,
+    ) -> Result<Uuid, ApiError> {
+        let public_reason = public_reason.trim();
+        if !(3..=500).contains(&public_reason.chars().count()) {
+            return Err(ApiError::BadRequest(
+                "下架原因必须为 3 到 500 字".to_string(),
+            ));
+        }
+        let mut tx = self.pool.begin().await.map_err(db_error)?;
+        let listing = sqlx::query(
+            "SELECT owner_id, status FROM inventory
+             WHERE id = $1 AND campus_id = $2 FOR UPDATE",
+        )
+        .bind(listing_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?
+        .ok_or(ApiError::NotFound)?;
+        let owner_id: String = listing.get("owner_id");
+        let lifecycle_status: String = listing.get("status");
+
+        if let Some(existing_case) = sqlx::query_scalar::<_, Uuid>(
+            "SELECT case_id FROM listing_restriction_effects
+             WHERE campus_id = $1 AND listing_id = $2
+               AND source_kind IN ('admin_takedown', 'legacy_admin_takedown')
+               AND released_at IS NULL",
+        )
+        .bind(campus_id)
+        .bind(listing_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?
+        {
+            sqlx::query("SELECT id FROM moderation_cases WHERE id = $1 FOR UPDATE")
+                .bind(existing_case)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db_error)?;
+            sqlx::query(
+                "SELECT id FROM listing_restriction_effects
+                 WHERE case_id = $1 AND released_at IS NULL FOR UPDATE",
+            )
+            .bind(existing_case)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_error)?;
+            tx.commit().await.map_err(db_error)?;
+            return Ok(existing_case);
+        }
+
+        let case_id = Uuid::new_v4();
+        let source_ref = format!("admin_takedown:{case_id}");
+        sqlx::query(
+            "INSERT INTO moderation_cases (
+                 id, campus_id, subject_user_id, resource_type, resource_id,
+                 source_type, source_ref_id, status, reason_category,
+                 public_reason, internal_details, resolution, opened_by,
+                 assigned_to, decided_by, decided_at
+             ) VALUES (
+                 $1, $2, $3, 'listing', $4, 'manual', $5, 'actioned',
+                 'admin_takedown', $6,
+                 jsonb_build_object('lifecycle_status_at_imposition', $7),
+                 'content_restricted', $8, $8, $8, NOW()
+             )",
+        )
+        .bind(case_id)
+        .bind(campus_id)
+        .bind(&owner_id)
+        .bind(listing_id)
+        .bind(&source_ref)
+        .bind(public_reason)
+        .bind(&lifecycle_status)
+        .bind(actor_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        impose_listing_effect(
+            &mut tx,
+            case_id,
+            campus_id,
+            listing_id,
+            actor_id,
+            "admin_takedown",
+        )
+        .await?;
+        insert_event(
+            &mut tx,
+            case_id,
+            Some(actor_id),
+            "content_restricted",
+            Some("open"),
+            Some("actioned"),
+            Some(public_reason),
+        )
+        .await?;
+        let target = listing_id.to_string();
+        AdminService::log_action_in_tx(
+            &mut tx,
+            NewAuditLog {
+                campus_id,
+                admin_id: actor_id,
+                action: "takedown_listing",
+                target_id: Some(&target),
+                old_value: Some(&lifecycle_status),
+                new_value: Some("restricted"),
+                memo: Some(public_reason),
+                scope_reason,
+            },
+        )
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("audit error: {}", error)))?;
+        tx.commit().await.map_err(db_error)?;
+        Ok(case_id)
+    }
+
+    pub async fn restore_manual_listing_takedown(
+        &self,
+        listing_id: &str,
+        campus_id: Uuid,
+        actor_id: &str,
+        reason: &str,
+        scope_reason: Option<&str>,
+    ) -> Result<Uuid, ApiError> {
+        let reason = reason.trim();
+        if !(3..=2000).contains(&reason.chars().count()) {
+            return Err(ApiError::BadRequest(
+                "恢复原因必须为 3 到 2000 字".to_string(),
+            ));
+        }
+        let mut tx = self.pool.begin().await.map_err(db_error)?;
+        sqlx::query("SELECT id FROM inventory WHERE id = $1 AND campus_id = $2 FOR UPDATE")
+            .bind(listing_id)
+            .bind(campus_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_error)?
+            .ok_or(ApiError::NotFound)?;
+        let case_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT case_id FROM listing_restriction_effects
+             WHERE campus_id = $1 AND listing_id = $2
+               AND source_kind IN ('admin_takedown', 'legacy_admin_takedown')
+             ORDER BY imposed_at DESC
+             LIMIT 1",
+        )
+        .bind(campus_id)
+        .bind(listing_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?
+        .ok_or_else(|| ApiError::CodedConflict {
+            code: "listing_admin_restriction_not_active",
+            message: "该发布没有可恢复的管理员下架效果".to_string(),
+        })?;
+        sqlx::query("SELECT id FROM moderation_cases WHERE id = $1 FOR UPDATE")
+            .bind(case_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        let current = sqlx::query(
+            "SELECT effect.released_at, effect.metadata->>'release_source' AS release_source,
+                    moderation_case.status AS case_status, moderation_case.resolution
+             FROM listing_restriction_effects effect
+             JOIN moderation_cases moderation_case ON moderation_case.id = effect.case_id
+             WHERE effect.case_id = $1
+             FOR UPDATE OF effect",
+        )
+        .bind(case_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        let released_at: Option<DateTime<Utc>> = current.get("released_at");
+        let release_source: Option<String> = current.get("release_source");
+        let case_status: String = current.get("case_status");
+        let resolution: Option<String> = current.get("resolution");
+        if released_at.is_some() {
+            if case_status == "resolved"
+                && resolution.as_deref() == Some("restored")
+                && release_source.as_deref() == Some("manual_restore")
+            {
+                tx.commit().await.map_err(db_error)?;
+                return Ok(case_id);
+            }
+            return Err(ApiError::CodedConflict {
+                code: "listing_admin_restriction_not_active",
+                message: "最近一次管理员下架未处于可恢复状态".to_string(),
+            });
+        }
+        sqlx::query(
+            "UPDATE moderation_cases
+             SET status = 'resolved', resolution = 'restored', decided_by = $2,
+                 decided_at = NOW(), updated_at = NOW()
+             WHERE id = $1",
+        )
+        .bind(case_id)
+        .bind(actor_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        release_listing_effect(&mut tx, case_id, actor_id, Some(reason), "manual_restore").await?;
+        insert_event(
+            &mut tx,
+            case_id,
+            Some(actor_id),
+            "content_restored",
+            Some("actioned"),
+            Some("resolved"),
+            Some(reason),
+        )
+        .await?;
+        AdminService::log_action_in_tx(
+            &mut tx,
+            NewAuditLog {
+                campus_id,
+                admin_id: actor_id,
+                action: "restore_listing",
+                target_id: Some(listing_id),
+                old_value: Some("restricted"),
+                new_value: Some("lifecycle_unchanged"),
+                memo: Some(reason),
+                scope_reason,
+            },
+        )
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("audit error: {}", error)))?;
+        tx.commit().await.map_err(db_error)?;
+        Ok(case_id)
     }
 
     pub async fn get_appeal_for_subject(
@@ -809,6 +1288,78 @@ async fn insert_event(
     .bind(from_status)
     .bind(to_status)
     .bind(note)
+    .execute(&mut **tx)
+    .await
+    .map_err(db_error)?;
+    Ok(())
+}
+
+async fn impose_listing_effect(
+    tx: &mut Transaction<'_, Postgres>,
+    case_id: Uuid,
+    campus_id: Uuid,
+    listing_id: &str,
+    actor_id: &str,
+    source_kind: &str,
+) -> Result<Uuid, ApiError> {
+    let effect_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO listing_restriction_effects (
+             campus_id, listing_id, case_id, source_kind, imposed_by
+         ) VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (case_id, effect_type) DO UPDATE
+         SET released_by = NULL, released_at = NULL, release_reason = NULL
+         RETURNING id",
+    )
+    .bind(campus_id)
+    .bind(listing_id)
+    .bind(case_id)
+    .bind(source_kind)
+    .bind(actor_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(db_error)?;
+    Ok(effect_id)
+}
+
+async fn release_listing_effect(
+    tx: &mut Transaction<'_, Postgres>,
+    case_id: Uuid,
+    actor_id: &str,
+    reason: Option<&str>,
+    release_source: &str,
+) -> Result<(), ApiError> {
+    let effect = sqlx::query(
+        "SELECT listing_id, released_at
+         FROM listing_restriction_effects
+         WHERE case_id = $1 AND effect_type = 'visibility_restriction'
+         FOR UPDATE",
+    )
+    .bind(case_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(db_error)?
+    .ok_or_else(|| ApiError::CodedConflict {
+        code: "listing_restriction_effect_missing",
+        message: "案件没有可恢复的发布限制效果".to_string(),
+    })?;
+    let released_at: Option<DateTime<Utc>> = effect.get("released_at");
+    if released_at.is_some() {
+        return Err(ApiError::CodedConflict {
+            code: "listing_restriction_already_released",
+            message: "该案件的发布限制已经解除".to_string(),
+        });
+    }
+    sqlx::query(
+        "UPDATE listing_restriction_effects
+         SET released_by = $2, released_at = NOW(),
+             release_reason = COALESCE($3, 'moderation decision'),
+             metadata = metadata || jsonb_build_object('release_source', $4::text)
+         WHERE case_id = $1 AND released_at IS NULL",
+    )
+    .bind(case_id)
+    .bind(actor_id)
+    .bind(reason)
+    .bind(release_source)
     .execute(&mut **tx)
     .await
     .map_err(db_error)?;

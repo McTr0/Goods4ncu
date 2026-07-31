@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::Serialize;
 use sqlx::{PgPool, Row};
+use uuid::Uuid;
 
 /// Maximum number of historical message pairs to include in conversation context
 const CONVERSATION_HISTORY_LIMIT: usize = 10;
@@ -80,6 +81,89 @@ impl ChatService {
         .execute(&self.db)
         .await?;
         Ok(())
+    }
+
+    /// Persist a listing-associated message only while the listing is still
+    /// eligible. The inventory lock is held through the insert so moderation
+    /// cannot activate a restriction between validation and persistence.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn log_listing_message_if_eligible(
+        &self,
+        conversation_id: &str,
+        listing_id: &str,
+        sender: &str,
+        receiver: Option<&str>,
+        is_agent: bool,
+        content: &str,
+        image_data: Option<&str>,
+        audio_data: Option<&str>,
+        image_url: Option<&str>,
+        audio_url: Option<&str>,
+        session_campus_id: Option<Uuid>,
+    ) -> Result<bool> {
+        let mut tx = self.db.begin().await?;
+        let listing = sqlx::query(
+            "SELECT owner_id, status, campus_id
+             FROM inventory WHERE id = $1 FOR SHARE",
+        )
+        .bind(listing_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(listing) = listing else {
+            return Ok(false);
+        };
+        let owner_id: String = listing.get("owner_id");
+        let status: String = listing.get("status");
+        let campus_id: Uuid = listing.get("campus_id");
+
+        let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+            .bind(listing_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        let campus_access: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                 SELECT 1
+                 FROM campuses campus
+                 JOIN campus_memberships membership
+                   ON membership.campus_id = campus.id
+                 WHERE campus.id = $1
+                   AND campus.status = 'active'
+                   AND membership.user_id = $2
+                   AND membership.status = 'verified'
+             )",
+        )
+        .bind(campus_id)
+        .bind(sender)
+        .fetch_one(&mut *tx)
+        .await?;
+        if status != "active"
+            || restricted
+            || !campus_access
+            || session_campus_id.is_some_and(|session_campus| session_campus != campus_id)
+            || owner_id == sender
+            || (!is_agent && receiver != Some(owner_id.as_str()))
+        {
+            return Ok(false);
+        }
+
+        sqlx::query(
+            "INSERT INTO chat_messages (conversation_id, listing_id, sender, receiver, is_agent, content, image_data, audio_data, image_url, audio_url)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+        )
+        .bind(conversation_id)
+        .bind(listing_id)
+        .bind(sender)
+        .bind(receiver)
+        .bind(is_agent)
+        .bind(content)
+        .bind(image_data)
+        .bind(audio_data)
+        .bind(image_url)
+        .bind(audio_url)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(true)
     }
 
     /// Fetch the most recent conversation history for a given conversation_id.

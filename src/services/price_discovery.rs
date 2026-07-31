@@ -38,6 +38,10 @@ use anyhow::Result;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+#[derive(Debug, thiserror::Error)]
+#[error("listing is unavailable for price discovery")]
+pub struct ListingUnavailable;
+
 pub mod status {
     /// One side asked; the other has not agreed to the mechanism.
     pub const PROPOSED: &str = "proposed";
@@ -111,6 +115,28 @@ impl PriceDiscoveryService {
         if seller_id == buyer_id {
             anyhow::bail!("a price cannot be discovered with oneself");
         }
+        let mut tx = self.db.begin().await?;
+        let listing = sqlx::query(
+            "SELECT owner_id, status FROM inventory
+             WHERE id = $1 AND campus_id = $2 FOR UPDATE",
+        )
+        .bind(listing_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(ListingUnavailable)?;
+        let actual_owner: String = listing.get("owner_id");
+        let status: String = listing.get("status");
+        let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+            .bind(listing_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        if status != "active" || restricted {
+            return Err(ListingUnavailable.into());
+        }
+        if actual_owner != seller_id {
+            return Err(ListingUnavailable.into());
+        }
         let id: Uuid = sqlx::query_scalar(
             "INSERT INTO price_discovery_sessions (campus_id, listing_id, seller_id, buyer_id)
              VALUES ($1, $2, $3, $4)
@@ -122,13 +148,65 @@ impl PriceDiscoveryService {
         .bind(listing_id)
         .bind(seller_id)
         .bind(buyer_id)
-        .fetch_one(&self.db)
+        .fetch_one(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(id)
     }
 
     /// Agree to settle this way. Only the party who did not propose can accept.
+    #[allow(dead_code)]
     pub async fn accept(&self, session_id: Uuid, user_id: &str) -> Result<bool> {
+        let campus_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT campus_id FROM price_discovery_sessions
+             WHERE id = $1 AND (seller_id = $2 OR buyer_id = $2)",
+        )
+        .bind(session_id)
+        .bind(user_id)
+        .fetch_optional(&self.db)
+        .await?;
+        let Some(campus_id) = campus_id else {
+            return Ok(false);
+        };
+        self.accept_in_campus(session_id, campus_id, user_id).await
+    }
+
+    pub async fn accept_in_campus(
+        &self,
+        session_id: Uuid,
+        campus_id: Uuid,
+        user_id: &str,
+    ) -> Result<bool> {
+        let mut tx = self.db.begin().await?;
+        let listing_id = sqlx::query_scalar::<_, String>(
+            "SELECT listing_id FROM price_discovery_sessions
+             WHERE id = $1 AND campus_id = $2
+               AND (seller_id = $3 OR buyer_id = $3)",
+        )
+        .bind(session_id)
+        .bind(campus_id)
+        .bind(user_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(listing_id) = listing_id else {
+            return Ok(false);
+        };
+        let listing_status = sqlx::query_scalar::<_, String>(
+            "SELECT status FROM inventory
+             WHERE id = $1 AND campus_id = $2 FOR UPDATE",
+        )
+        .bind(&listing_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(ListingUnavailable)?;
+        let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+            .bind(&listing_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        if listing_status != "active" || restricted {
+            return Err(ListingUnavailable.into());
+        }
         let updated = sqlx::query(
             "UPDATE price_discovery_sessions
              SET status = $3
@@ -140,8 +218,9 @@ impl PriceDiscoveryService {
         .bind(user_id)
         .bind(status::OPEN)
         .bind(status::PROPOSED)
-        .execute(&self.db)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(updated.rows_affected() > 0)
     }
 
@@ -169,9 +248,32 @@ impl PriceDiscoveryService {
     /// The whole check-and-clear runs in one transaction with the session row
     /// locked, so two simultaneous submissions cannot both see "the other hasn't
     /// answered yet" and leave a session that never resolves.
+    #[allow(dead_code)]
     pub async fn state_limit(
         &self,
         session_id: Uuid,
+        user_id: &str,
+        cents: i64,
+    ) -> Result<Option<Outcome>> {
+        let campus_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT campus_id FROM price_discovery_sessions
+             WHERE id = $1 AND (seller_id = $2 OR buyer_id = $2)",
+        )
+        .bind(session_id)
+        .bind(user_id)
+        .fetch_optional(&self.db)
+        .await?;
+        let Some(campus_id) = campus_id else {
+            return Ok(None);
+        };
+        self.state_limit_in_campus(session_id, campus_id, user_id, cents)
+            .await
+    }
+
+    pub async fn state_limit_in_campus(
+        &self,
+        session_id: Uuid,
+        campus_id: Uuid,
         user_id: &str,
         cents: i64,
     ) -> Result<Option<Outcome>> {
@@ -180,11 +282,43 @@ impl PriceDiscoveryService {
         }
         let mut tx = self.db.begin().await?;
 
-        let session = sqlx::query(
-            "SELECT seller_id, buyer_id, status FROM price_discovery_sessions
-             WHERE id = $1 FOR UPDATE",
+        let listing_id = sqlx::query_scalar::<_, String>(
+            "SELECT listing_id FROM price_discovery_sessions
+             WHERE id = $1 AND campus_id = $2
+               AND (seller_id = $3 OR buyer_id = $3)",
         )
         .bind(session_id)
+        .bind(campus_id)
+        .bind(user_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(listing_id) = listing_id else {
+            tx.rollback().await?;
+            return Ok(None);
+        };
+        let listing_status = sqlx::query_scalar::<_, String>(
+            "SELECT status FROM inventory
+             WHERE id = $1 AND campus_id = $2 FOR UPDATE",
+        )
+        .bind(&listing_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(ListingUnavailable)?;
+        let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+            .bind(&listing_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        if listing_status != "active" || restricted {
+            return Err(ListingUnavailable.into());
+        }
+
+        let session = sqlx::query(
+            "SELECT seller_id, buyer_id, status FROM price_discovery_sessions
+             WHERE id = $1 AND campus_id = $2 FOR UPDATE",
+        )
+        .bind(session_id)
+        .bind(campus_id)
         .fetch_optional(&mut *tx)
         .await?;
         let Some(session) = session else {

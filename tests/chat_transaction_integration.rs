@@ -593,6 +593,76 @@ async fn structured_quotes_are_server_snapshots_and_permission_scoped() {
 }
 
 #[tokio::test]
+async fn new_listing_quote_rejects_restricted_listing_without_persisting_message() {
+    with_test_pool(|pool| async move {
+        insert_user(&pool, "quote-restriction-sender", "quote_sender").await;
+        insert_user(&pool, "quote-restriction-owner", "quote_owner").await;
+        insert_user(&pool, "quote-restriction-admin", "quote_admin").await;
+        insert_listing(
+            &pool,
+            "quote-restricted-listing",
+            "quote-restriction-owner",
+            "受限制引用商品",
+        )
+        .await;
+        let service = ChatConversationService::new(pool.clone());
+        let conversation_id = create_active_realtime(
+            &service,
+            "quote-restriction-sender",
+            "quote-restriction-owner",
+        )
+        .await;
+        goods4ncu::services::moderation_case::ModerationCaseService::new(pool.clone())
+            .impose_manual_listing_takedown(
+                "quote-restricted-listing",
+                Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap(),
+                "quote-restriction-admin",
+                "结构化引用限制测试",
+                None,
+            )
+            .await
+            .expect("restrict listing");
+        let before: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM chat_messages WHERE direct_conversation_id = $1",
+        )
+        .bind(conversation_id)
+        .fetch_one(&pool)
+        .await
+        .expect("message count before");
+
+        let mut message = send_input(
+            conversation_id,
+            "quote-restriction-sender",
+            "尝试引用受限制发布",
+        );
+        message.quote = Some(StructuredQuoteInput {
+            kind: StructuredQuoteKind::Listing,
+            ref_id: "quote-restricted-listing".to_string(),
+        });
+        let error = service
+            .send_message(message)
+            .await
+            .expect_err("restricted listing quote must fail closed");
+        assert!(matches!(
+            error,
+            ApiError::CodedConflict {
+                code: "listing_restricted",
+                ..
+            }
+        ));
+        let after: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM chat_messages WHERE direct_conversation_id = $1",
+        )
+        .bind(conversation_id)
+        .fetch_one(&pool)
+        .await
+        .expect("message count after");
+        assert_eq!(after, before, "failed quote must not persist a message");
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn block_user_closes_live_realtime_and_prevents_new_or_continued_contact() {
     with_test_pool(|pool| async move {
         insert_user(&pool, "user-a", "alice").await;

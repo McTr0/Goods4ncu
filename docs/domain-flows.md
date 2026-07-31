@@ -323,6 +323,8 @@ sync text screening
 
 举报消息和管理员动作进入统一 ModerationCase/AuditEvent。用户只看到原因类别和可行动步骤，不看到举报人、具体规则或内部阈值。
 
+listing 的 lifecycle 与 restriction 分开保存。`inventory.status` 只表达 active/sold/deleted/fulfilled；每个会限制 listing 的 ModerationCase 拥有自己的 `listing_restriction_effects` 行。存在任一未释放 effect 即为 restricted：公开读取、推荐、联系、议价、成交和 wanted 动作都关闭，owner/admin 仍能看到安全摘要。恢复案件、申诉改判和紧急人工恢复只释放各自拥有的 effect；两个 effect 不能被一次恢复清空。owner delete 保留 effect，owner relist 在任一 effect 仍有效时返回 `listing_restricted`，因此审核恢复永远不会把 deleted/sold/fulfilled 自动改成 active。
+
 ## 通知与实时提示
 
 通知先写数据库，再尝试 WebSocket 推送。WebSocket 成功不等于已读，推送失败也不等于通知丢失。
@@ -337,7 +339,7 @@ sync text screening
 
 当前校园 operator/admin 可以查看自己当前校园的统计、用户、listing、成交记录、审计日志和媒体审核队列。平台管理员执行封禁、解封、角色修改、token 撤销、下架和成交状态操作；校园运营不能执行这些全局账号或业务事实写操作。
 
-管理动作必须同时验证受影响普通路径：封禁后登录/refresh/WebSocket 失败，下架后 Feed/收藏/匹配不可见，撤销 token 后接口拒绝。
+管理动作必须同时验证受影响普通路径：封禁后登录/refresh/WebSocket 失败，下架后 Feed/详情/收藏/匹配/联系/议价/成交不可用，wanted 当前轮冻结，撤销 token 后接口拒绝。
 
 [已实现] 校园运营读取限定本 campus；平台管理员跨校园读取/操作需要理由并写审计。目标用户或资源不属于所选校园时按不存在处理，避免枚举另一校园数据。
 

@@ -2,6 +2,16 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
 class Listing {
+  static const String actionDelete = 'delete';
+  static const String actionRelist = 'relist';
+  static const String actionFulfill = 'fulfill';
+  static const String actionContact = 'contact';
+  static const String actionBuy = 'buy';
+  static const String actionPriceDiscovery = 'start_price_discovery';
+  static const String actionRecommendOffer = 'recommend_offer';
+  static const String adminActionTakedown = 'takedown';
+  static const String adminActionRestore = 'restore';
+
   final String id;
   final String title;
   final String category;
@@ -17,6 +27,17 @@ class Listing {
   final String? ownerId;
   final String? ownerUsername;
   final String? createdAt;
+
+  /// Enforcement is deliberately separate from the listing lifecycle. A sold
+  /// or owner-deleted listing is not the same thing as content restricted by
+  /// an administrator.
+  final String? restrictionState;
+  final ListingRestriction? restriction;
+
+  /// Viewer-specific, server-authoritative actions. Missing fields mean a
+  /// legacy server; present-but-malformed fields fail closed to an empty set.
+  final Set<String>? availableActions;
+  final Set<String>? availableAdminActions;
 
   /// Why the feed ranked this item here (server-provided, personalized feeds).
   final String? rankReason;
@@ -40,6 +61,10 @@ class Listing {
     this.ownerId,
     this.ownerUsername,
     this.createdAt,
+    this.restrictionState,
+    this.restriction,
+    this.availableActions,
+    this.availableAdminActions,
     this.rankReason,
     this.matchSummary = const [],
     this.source,
@@ -47,6 +72,43 @@ class Listing {
   });
 
   factory Listing.fromJson(Map<String, dynamic> json) {
+    final hasRestrictionState =
+        json.containsKey('restriction_state') || json.containsKey('restricted');
+    final rawRestrictionState = json.containsKey('restriction_state')
+        ? _nullableJsonString(json['restriction_state'])?.toLowerCase()
+        : switch (json['restricted']) {
+            true => 'restricted',
+            false => 'clear',
+            _ => null,
+          };
+    var normalizedRestrictionState = !hasRestrictionState
+        ? null
+        : switch (rawRestrictionState) {
+            'clear' || 'none' || 'unrestricted' => 'clear',
+            'restricted' || 'takedown' || 'taken_down' => 'restricted',
+            _ => 'unknown',
+          };
+    if (json.containsKey('restriction_state') &&
+        json.containsKey('restricted')) {
+      final restrictedFlag = json['restricted'];
+      if (restrictedFlag is! bool ||
+          (restrictedFlag && normalizedRestrictionState != 'restricted') ||
+          (!restrictedFlag && normalizedRestrictionState != 'clear')) {
+        normalizedRestrictionState = 'unknown';
+      }
+    }
+    final restriction = json.containsKey('restriction')
+        ? ListingRestriction.fromJson(json['restriction'])
+        : normalizedRestrictionState == 'restricted'
+        ? ListingRestriction(
+            reason: _nullableJsonString(json['restriction_reason']),
+            moderationCaseId: _firstNullableJsonString([
+              json['restriction_case_id'],
+              json['moderation_case_id'],
+            ]),
+            canAppeal: json['can_appeal'] == true,
+          )
+        : null;
     return Listing(
       id: json['id'] ?? '',
       title: json['title'] ?? '',
@@ -67,6 +129,14 @@ class Listing {
       ownerId: json['owner_id'],
       ownerUsername: json['owner_username'],
       createdAt: json['created_at'],
+      restrictionState: normalizedRestrictionState,
+      restriction: restriction,
+      availableActions: json.containsKey('available_actions')
+          ? _jsonStringSet(json['available_actions']) ?? const <String>{}
+          : null,
+      availableAdminActions: json.containsKey('available_admin_actions')
+          ? _jsonStringSet(json['available_admin_actions']) ?? const <String>{}
+          : null,
       rankReason: json['rank_reason']?.toString(),
       matchSummary: (json['match_summary'] as List<dynamic>? ?? const [])
           .map((value) => value.toString())
@@ -84,11 +154,89 @@ class Listing {
 
   bool get isOffer => !isWanted;
 
+  /// Unknown or contradictory enforcement metadata is treated as restricted.
+  bool get isRestricted {
+    if (restriction != null) return true;
+    final state = restrictionState;
+    return state != null && state != 'clear';
+  }
+
+  bool allowsAction(String action) {
+    final normalized = action.trim().toLowerCase();
+    final actions = availableActions;
+    if (restrictionState == 'unknown') return false;
+    if (isRestricted) {
+      // Enforcement blocks marketplace interaction, but an owner may still
+      // delete their own content when the server explicitly authorizes it.
+      if (actions == null) return false;
+      return normalized == actionDelete && actions.contains(actionDelete);
+    }
+    if (actions != null) {
+      if (normalized == actionBuy) {
+        return actions.contains(actionBuy) || actions.contains('create_order');
+      }
+      return actions.contains(normalized);
+    }
+
+    // Rolling-upgrade compatibility for responses from servers that predate
+    // action metadata. Restrictive metadata never takes this path.
+    return switch (normalized) {
+      actionDelete => status == 'active',
+      actionRelist =>
+        status == 'sold' ||
+            status == 'deleted' ||
+            (isWanted && status == 'fulfilled'),
+      actionFulfill => isWanted && status == 'active',
+      actionContact => status == 'active',
+      actionBuy || actionPriceDiscovery => isOffer && status == 'active',
+      actionRecommendOffer => isWanted && status == 'active',
+      _ => false,
+    };
+  }
+
+  bool allowsAdminAction(String action) {
+    final actions = availableAdminActions;
+    if (actions == null) return false;
+    return actions.contains(action.trim().toLowerCase());
+  }
+
   String get directionLabelZh => isWanted ? '收' : '出';
 
   String get priceSemanticLabelZh => isWanted ? '预算上限' : '价格';
 
   String get conditionSemanticLabelZh => isWanted ? '最低成色' : '成色';
+}
+
+class ListingRestriction {
+  final String? reason;
+  final String? moderationCaseId;
+  final String? restrictedAt;
+  final bool canAppeal;
+
+  const ListingRestriction({
+    this.reason,
+    this.moderationCaseId,
+    this.restrictedAt,
+    this.canAppeal = false,
+  });
+
+  static ListingRestriction? fromJson(dynamic value) {
+    if (value == null) return null;
+    if (value is! Map) {
+      // Presence of malformed restriction metadata must still fail closed.
+      return const ListingRestriction();
+    }
+    final json = _jsonObject(value);
+    return ListingRestriction(
+      reason: _firstNullableJsonString([json['public_reason'], json['reason']]),
+      moderationCaseId: _firstNullableJsonString([
+        json['moderation_case_id'],
+        json['case_id'],
+      ]),
+      restrictedAt: _nullableJsonString(json['restricted_at']),
+      canAppeal: json['can_appeal'] == true,
+    );
+  }
 }
 
 class ListingsResponse {
@@ -374,6 +522,14 @@ String _firstJsonString(Iterable<dynamic> values, {String fallback = ''}) {
 String? _nullableJsonString(dynamic value) {
   final normalized = _jsonString(value);
   return normalized.isEmpty ? null : normalized;
+}
+
+String? _firstNullableJsonString(Iterable<dynamic> values) {
+  for (final value in values) {
+    final normalized = _nullableJsonString(value);
+    if (normalized != null) return normalized;
+  }
+  return null;
 }
 
 int _jsonInt(dynamic value, {int fallback = 0}) {

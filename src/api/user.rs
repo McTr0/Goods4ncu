@@ -50,6 +50,21 @@ pub struct ListingItem {
     pub description: Option<String>,
     pub image_url: Option<String>,
     pub status: String,
+    pub restricted: bool,
+    pub restriction_state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restriction: Option<ListingRestrictionSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restriction_reason: Option<String>,
+    pub available_actions: Vec<&'static str>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct ListingRestrictionSummary {
+    pub public_reason: String,
+    pub restricted_at: chrono::DateTime<chrono::Utc>,
+    pub moderation_case_id: Uuid,
+    pub can_appeal: bool,
 }
 
 #[derive(Deserialize)]
@@ -367,6 +382,49 @@ pub async fn get_user_listings(
         )
         .await?;
 
+    let listing_ids: Vec<String> = listings.iter().map(|listing| listing.id.clone()).collect();
+    let restriction_rows = if listing_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query(
+            "SELECT DISTINCT ON (effect.listing_id)
+                    effect.listing_id, effect.imposed_at, effect.case_id,
+                    moderation_case.public_reason,
+                    moderation_case.status IN ('actioned', 'resolved')
+                        AND moderation_case.resolution = 'content_restricted'
+                        AND NOT EXISTS (
+                            SELECT 1 FROM moderation_appeals appeal
+                            WHERE appeal.case_id = moderation_case.id
+                              AND appeal.appellant_id = $2
+                        ) AS can_appeal
+             FROM listing_restriction_effects effect
+             JOIN moderation_cases moderation_case ON moderation_case.id = effect.case_id
+             WHERE effect.listing_id = ANY($1::text[])
+               AND effect.released_at IS NULL
+             ORDER BY effect.listing_id, effect.imposed_at DESC",
+        )
+        .bind(&listing_ids)
+        .bind(&session.user_id)
+        .fetch_all(&state.infra.db)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?
+    };
+    let restrictions: std::collections::HashMap<String, ListingRestrictionSummary> =
+        restriction_rows
+            .into_iter()
+            .map(|row| {
+                (
+                    row.get("listing_id"),
+                    ListingRestrictionSummary {
+                        public_reason: row.get("public_reason"),
+                        restricted_at: row.get("imposed_at"),
+                        moderation_case_id: row.get("case_id"),
+                        can_appeal: row.get("can_appeal"),
+                    },
+                )
+            })
+            .collect();
+
     let items: Vec<ListingItem> = listings
         .into_iter()
         .map(|listing: Listing| {
@@ -381,6 +439,26 @@ pub async fn get_user_listings(
                         defects.join(", ")
                     }
                 });
+            let restriction = restrictions.get(&listing.id).cloned();
+            let restricted = restriction.is_some();
+            let available_actions = if restricted {
+                let mut actions = if matches!(listing.status.as_str(), "active" | "fulfilled") {
+                    vec!["delete"]
+                } else {
+                    Vec::new()
+                };
+                if restriction.as_ref().is_some_and(|item| item.can_appeal) {
+                    actions.push("appeal");
+                }
+                actions
+            } else {
+                match (listing.status.as_str(), listing.direction.as_str()) {
+                    ("active", "wanted") => vec!["edit", "delete", "fulfill"],
+                    ("active", _) => vec!["edit", "delete"],
+                    ("sold" | "deleted" | "fulfilled", _) => vec!["relist"],
+                    _ => Vec::new(),
+                }
+            };
             ListingItem {
                 id: listing.id,
                 title: listing.title,
@@ -392,6 +470,11 @@ pub async fn get_user_listings(
                 description,
                 image_url: listing.image_url,
                 status: listing.status,
+                restricted,
+                restriction_state: if restricted { "restricted" } else { "clear" },
+                restriction_reason: restriction.as_ref().map(|item| item.public_reason.clone()),
+                restriction,
+                available_actions,
             }
         })
         .collect();
@@ -571,6 +654,7 @@ pub async fn get_user_profile(
          AND membership.status = 'verified'
         LEFT JOIN inventory i ON u.id = i.owner_id
          AND i.status = 'active' AND i.campus_id = $2
+         AND NOT listing_has_active_restriction(i.id)
         WHERE u.id = $1
         GROUP BY u.id, u.username, u.created_at, u.avatar_url,
                  u.show_wechat_pay_qr, u.wechat_pay_qr_url,
@@ -624,6 +708,17 @@ pub async fn get_public_user_listings(
                 .defects
                 .and_then(|d| serde_json::from_str::<Vec<String>>(&d).ok())
                 .map(|defects| defects.join(", "));
+            let available_actions = if listing.direction == "wanted" {
+                vec!["contact", "recommend_offer", "report"]
+            } else {
+                vec![
+                    "contact",
+                    "buy",
+                    "create_order",
+                    "start_price_discovery",
+                    "report",
+                ]
+            };
             ListingItem {
                 id: listing.id,
                 title: listing.title,
@@ -635,6 +730,11 @@ pub async fn get_public_user_listings(
                 description,
                 image_url: listing.image_url,
                 status: listing.status,
+                restricted: false,
+                restriction_state: "clear",
+                restriction: None,
+                restriction_reason: None,
+                available_actions,
             }
         })
         .collect();
@@ -723,6 +823,11 @@ mod tests {
             description: Some("Good condition".to_string()),
             image_url: Some("https://cdn.example.test/item.jpg".to_string()),
             status: "active".to_string(),
+            restricted: false,
+            restriction_state: "clear",
+            restriction: None,
+            restriction_reason: None,
+            available_actions: vec!["edit", "delete"],
         };
         let json = serde_json::to_string(&item).unwrap();
         assert!(json.contains("iPhone 13"));
@@ -743,6 +848,11 @@ mod tests {
             description: None,
             image_url: None,
             status: "active".to_string(),
+            restricted: false,
+            restriction_state: "clear",
+            restriction: None,
+            restriction_reason: None,
+            available_actions: vec!["edit", "delete"],
         };
         let json = serde_json::to_string(&item).unwrap();
         assert!(json.contains("Book"));

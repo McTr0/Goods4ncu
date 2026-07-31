@@ -915,6 +915,18 @@ async fn insert_listing(pool: &sqlx::PgPool, listing_id: &str, owner_id: &str, s
     .expect("insert listing");
 }
 
+async fn restrict_listing_for_test(pool: &sqlx::PgPool, listing_id: &str, actor_id: &str) -> Uuid {
+    let campus_id: Uuid = sqlx::query_scalar("SELECT campus_id FROM inventory WHERE id = $1")
+        .bind(listing_id)
+        .fetch_one(pool)
+        .await
+        .expect("listing campus");
+    goods4ncu::services::moderation_case::ModerationCaseService::new(pool.clone())
+        .impose_manual_listing_takedown(listing_id, campus_id, actor_id, "测试发布受平台限制", None)
+        .await
+        .expect("restrict listing")
+}
+
 struct HitlRequestFixture<'a> {
     id: &'a str,
     listing_id: &'a str,
@@ -1319,6 +1331,173 @@ async fn watchlist_rejects_own_listing() {
 }
 
 #[tokio::test]
+async fn watchlist_add_rejects_restricted_and_cross_campus_listings_without_side_facts() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let viewer_id = Uuid::new_v4().to_string();
+        let owner_id = Uuid::new_v4().to_string();
+        let admin_id = Uuid::new_v4().to_string();
+        for (id, username, role) in [
+            (
+                &viewer_id,
+                format!("watch_viewer_{}", Uuid::new_v4()),
+                "user",
+            ),
+            (&owner_id, format!("watch_owner_{}", Uuid::new_v4()), "user"),
+            (
+                &admin_id,
+                format!("watch_admin_{}", Uuid::new_v4()),
+                "admin",
+            ),
+        ] {
+            insert_user(&pool, id, &username, &password_hash, role, "active").await;
+        }
+        let ncu_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("ncu campus");
+        let restricted_id = Uuid::new_v4().to_string();
+        insert_listing(&pool, &restricted_id, &owner_id, "active").await;
+        restrict_listing_for_test(&pool, &restricted_id, &admin_id).await;
+
+        let other_campus = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO campuses (id, slug, name_zh, name_en, email_domains)
+             VALUES ($1, $2, '收藏隔离测试校区', 'Watch Scope Campus', ARRAY[]::TEXT[])",
+        )
+        .bind(other_campus)
+        .bind(format!("watch-scope-{}", other_campus.simple()))
+        .execute(&pool)
+        .await
+        .expect("other campus");
+        let cross_campus_id = Uuid::new_v4().to_string();
+        insert_listing(&pool, &cross_campus_id, &owner_id, "active").await;
+        sqlx::query("UPDATE inventory SET campus_id = $1 WHERE id = $2")
+            .bind(other_campus)
+            .bind(&cross_campus_id)
+            .execute(&pool)
+            .await
+            .expect("move listing to other campus");
+
+        let (token, _, _) = generate_access_token_for_campus(
+            &viewer_id,
+            "user",
+            Some(ncu_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("viewer token");
+        let app = create_router(build_state(pool.clone()), &[]);
+        for listing_id in [&restricted_id, &cross_campus_id] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/api/watchlist/{listing_id}"))
+                        .header("Authorization", bearer(&token))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .expect("watchlist response");
+            assert_eq!(
+                response.status(),
+                StatusCode::NOT_FOUND,
+                "restricted and cross-campus listings share a fail-closed response"
+            );
+        }
+        let side_facts: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM watchlist WHERE user_id = $1")
+                .bind(&viewer_id)
+                .fetch_one(&pool)
+                .await
+                .expect("watchlist side facts");
+        assert_eq!(side_facts, 0);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn assistant_chat_rejects_restricted_listing_context_before_persisting_a_turn() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let viewer_id = Uuid::new_v4().to_string();
+        let owner_id = Uuid::new_v4().to_string();
+        let admin_id = Uuid::new_v4().to_string();
+        for (id, username, role) in [
+            (
+                &viewer_id,
+                format!("assistant_viewer_{}", Uuid::new_v4()),
+                "user",
+            ),
+            (
+                &owner_id,
+                format!("assistant_owner_{}", Uuid::new_v4()),
+                "user",
+            ),
+            (
+                &admin_id,
+                format!("assistant_admin_{}", Uuid::new_v4()),
+                "admin",
+            ),
+        ] {
+            insert_user(&pool, id, &username, &password_hash, role, "active").await;
+        }
+        let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("ncu campus");
+        let listing_id = Uuid::new_v4().to_string();
+        insert_listing(&pool, &listing_id, &owner_id, "active").await;
+        restrict_listing_for_test(&pool, &listing_id, &admin_id).await;
+        let (token, _, _) = generate_access_token_for_campus(
+            &viewer_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("viewer token");
+        let app = create_router(build_state(pool.clone()), &[]);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/chat")
+                    .header("Authorization", bearer(&token))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "message": "你好",
+                            "conversation_id": "__agent__",
+                            "listing_id": listing_id
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .expect("assistant response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let persisted: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM chat_messages
+             WHERE sender = $1 OR receiver = $1 OR listing_id = $2",
+        )
+        .bind(&viewer_id)
+        .bind(&listing_id)
+        .fetch_one(&pool)
+        .await
+        .expect("assistant side facts");
+        assert_eq!(
+            persisted, 0,
+            "rejected context must not log either chat turn"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn seller_approval_creates_order_before_reporting_success() {
     with_test_pool(|pool| async move {
         insert_user(
@@ -1500,6 +1679,160 @@ async fn seller_approval_rolls_back_when_order_cannot_be_created() {
                 .await
                 .expect("count system messages");
         assert_eq!(system_messages, 0);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn restricted_pending_negotiation_only_allows_seller_rejection() {
+    with_test_pool(|pool| async move {
+        let seller = format!("nego-restricted-seller-{}", Uuid::new_v4().simple());
+        let buyer = format!("nego-restricted-buyer-{}", Uuid::new_v4().simple());
+        let admin = format!("nego-restricted-admin-{}", Uuid::new_v4().simple());
+        insert_user(
+            &pool,
+            &seller,
+            "nego_restricted_seller",
+            "hash",
+            "user",
+            "active",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &buyer,
+            "nego_restricted_buyer",
+            "hash",
+            "user",
+            "active",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &admin,
+            "nego_restricted_admin",
+            "hash",
+            "admin",
+            "active",
+        )
+        .await;
+        let listing_id = format!("nego-restricted-listing-{}", Uuid::new_v4().simple());
+        insert_listing(&pool, &listing_id, &seller, "active").await;
+
+        let approve_id = format!("nego-restricted-approve-{}", Uuid::new_v4().simple());
+        let counter_id = format!("nego-restricted-counter-{}", Uuid::new_v4().simple());
+        let reject_id = format!("nego-restricted-reject-{}", Uuid::new_v4().simple());
+        for id in [&approve_id, &counter_id, &reject_id] {
+            insert_hitl_request(
+                &pool,
+                HitlRequestFixture {
+                    id,
+                    listing_id: &listing_id,
+                    buyer_id: &buyer,
+                    seller_id: &seller,
+                    proposed_price: 9_000,
+                    status: "pending",
+                    counter_price: None,
+                },
+            )
+            .await;
+        }
+        restrict_listing_for_test(&pool, &listing_id, &admin).await;
+
+        let (token, _, _) = generate_access_token(
+            &seller,
+            "user",
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("seller token");
+        let app = create_router(build_state(pool.clone()), &[]);
+
+        for (id, body) in [
+            (&approve_id, json!({ "action": "approve" })),
+            (
+                &counter_id,
+                json!({ "action": "counter", "counter_price": 10_000 }),
+            ),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("PATCH")
+                        .uri(format!("/api/negotiations/{id}/respond"))
+                        .header("Authorization", bearer(&token))
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .expect("restricted negotiation response");
+            assert_eq!(response.status(), StatusCode::CONFLICT);
+        }
+
+        let rejected = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/negotiations/{reject_id}/respond"))
+                    .header("Authorization", bearer(&token))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(json!({ "action": "reject" }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .expect("seller rejection");
+        assert_eq!(rejected.status(), StatusCode::OK);
+
+        let statuses: Vec<(String, String)> =
+            sqlx::query_as("SELECT id, status FROM hitl_requests WHERE id = ANY($1) ORDER BY id")
+                .bind(vec![
+                    approve_id.clone(),
+                    counter_id.clone(),
+                    reject_id.clone(),
+                ])
+                .fetch_all(&pool)
+                .await
+                .expect("negotiation statuses");
+        assert_eq!(
+            statuses
+                .iter()
+                .find(|(id, _)| id == &approve_id)
+                .map(|(_, status)| status.as_str()),
+            Some("pending")
+        );
+        assert_eq!(
+            statuses
+                .iter()
+                .find(|(id, _)| id == &counter_id)
+                .map(|(_, status)| status.as_str()),
+            Some("pending")
+        );
+        assert_eq!(
+            statuses
+                .iter()
+                .find(|(id, _)| id == &reject_id)
+                .map(|(_, status)| status.as_str()),
+            Some("rejected")
+        );
+        let order_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM orders WHERE listing_id = $1")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("order side facts");
+        assert_eq!(order_count, 0);
+        let message_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM chat_messages WHERE listing_id = $1")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("message side facts");
+        assert_eq!(
+            message_count, 1,
+            "only the explicitly allowed rejection may create a closing message"
+        );
     })
     .await;
 }

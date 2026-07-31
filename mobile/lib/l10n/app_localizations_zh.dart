@@ -2732,4 +2732,64 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get warning => '警告';
+
+  @override
+  String get listingLifecycleActive => '发布中';
+
+  @override
+  String get listingLifecycleFulfilled => '已完成';
+
+  @override
+  String get listingLifecycleSold => '已售出';
+
+  @override
+  String get listingLifecycleOwnerDeleted => '已由你删除';
+
+  @override
+  String get listingLifecycleUnknown => '状态不可用';
+
+  @override
+  String get listingRestrictedBadge => '已被审核限制';
+
+  @override
+  String get listingRestrictionTitle => '该发布已被限制';
+
+  @override
+  String get listingRestrictionGeneric => '管理员恢复前，它不会参与市场展示或交易互动。';
+
+  @override
+  String get viewModerationCase => '查看审核记录';
+
+  @override
+  String get deleteListingAction => '删除发布';
+
+  @override
+  String get relistListingAction => '重新发布';
+
+  @override
+  String get listingDeletedToast => '发布已删除';
+
+  @override
+  String get listingRelistedToast => '发布已重新上架';
+
+  @override
+  String get deleteListingConfirmTitle => '删除这条发布？';
+
+  @override
+  String get listingPolicyChangedToast => '发布状态已变化，操作已刷新。';
+
+  @override
+  String get adminRestoreListing => '恢复发布';
+
+  @override
+  String get adminRestoreListingConfirm => '恢复这条发布？';
+
+  @override
+  String get adminRestoreReasonHint => '请说明解除这项管理限制的原因。';
+
+  @override
+  String get adminRestoreListingSuccess => '发布限制已解除';
+
+  @override
+  String get adminListingNoActions => '当前没有可执行的管理操作。';
 }

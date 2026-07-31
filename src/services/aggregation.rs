@@ -115,6 +115,10 @@ impl AggregationService {
                AND i.kind = $2
                AND i.status = 'active'
                AND i.visibility = 'campus'
+               AND (
+                   i.projected_listing_id IS NULL
+                   OR NOT listing_has_active_restriction(i.projected_listing_id)
+               )
                AND (i.valid_until IS NULL OR i.valid_until > NOW())
                AND i.created_at >= NOW() - make_interval(hours => $3::int)
                AND NOT EXISTS (

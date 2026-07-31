@@ -184,7 +184,7 @@ class _MyListingsPageState extends State<MyListingsPage> {
                       listing: listing,
                       onTap: () => context.push('/listing/${listing.id}'),
                     ),
-                    if (listing.status != 'active')
+                    if (listing.status != 'active' || listing.isRestricted)
                       Positioned(
                         top: 44,
                         left: AppTheme.sp8,
@@ -192,10 +192,30 @@ class _MyListingsPageState extends State<MyListingsPage> {
                         child: IgnorePointer(
                           child: Align(
                             alignment: Alignment.centerLeft,
-                            child: _ListingStatusBadge(
-                              key: ValueKey('listing-status-${listing.id}'),
-                              label: _statusLabel(l, listing),
-                              status: listing.status,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (listing.status != 'active')
+                                  _ListingStatusBadge(
+                                    key: ValueKey(
+                                      'listing-status-${listing.id}',
+                                    ),
+                                    label: _statusLabel(l, listing),
+                                    status: listing.status,
+                                  ),
+                                if (listing.status != 'active' &&
+                                    listing.isRestricted)
+                                  const SizedBox(height: AppTheme.sp4),
+                                if (listing.isRestricted)
+                                  _ListingStatusBadge(
+                                    key: ValueKey(
+                                      'listing-restriction-${listing.id}',
+                                    ),
+                                    label: l.listingRestrictedBadge,
+                                    status: 'restricted',
+                                  ),
+                              ],
                             ),
                           ),
                         ),
@@ -212,12 +232,11 @@ class _MyListingsPageState extends State<MyListingsPage> {
 
   String _statusLabel(AppLocalizations l, Listing listing) {
     return switch (listing.status) {
-      'fulfilled' when listing.isWanted =>
-        '${l.wantedResponseListingStatusFulfilled} · ${l.reopenWantedAction}',
-      'fulfilled' => l.wantedResponseListingStatusFulfilled,
-      'sold' => l.wantedResponseListingStatusSold,
-      'deleted' => l.wantedResponseListingStatusDeleted,
-      _ => l.wantedResponseListingStatusUnknown,
+      'active' => l.listingLifecycleActive,
+      'fulfilled' => l.listingLifecycleFulfilled,
+      'sold' => l.listingLifecycleSold,
+      'deleted' => l.listingLifecycleOwnerDeleted,
+      _ => l.listingLifecycleUnknown,
     };
   }
 }
@@ -238,6 +257,7 @@ class _ListingStatusBadge extends StatelessWidget {
       'fulfilled' => AppTheme.info,
       'sold' => AppTheme.success,
       'deleted' => AppTheme.textSecondary,
+      'restricted' => AppTheme.error,
       _ => AppTheme.warning,
     };
     return Semantics(

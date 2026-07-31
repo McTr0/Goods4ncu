@@ -251,7 +251,7 @@ DB_NAME=goods4ncu APP_PASSWORD=<secret> ./scripts/provision_app_role.sh
 | `refresh_tokens` | refresh token 是否过期、revoked_at 是否被设置、campus_id 是否与 access claim 和用户 membership 一致。 |
 | `revoked_access_tokens` | logout 或管理员撤销后的 JTI 是否存在。 |
 | `campuses` / `campus_memberships` | Campus status、用户资格、verification_method、verified_at；pending/suspended 不能执行受保护写操作。 |
-| `inventory` | 商品 campus_id、status、owner_id、价格、分类、更新时间；重复发布时检查 `idempotency_key/idempotency_hash`；wanted 重开异常时检查 `lifecycle_epoch` 是否只增加一次。 |
+| `inventory` | 商品 campus_id、生命周期 status、owner_id、价格、分类、更新时间；重复发布时检查 `idempotency_key/idempotency_hash`；wanted 重开异常时检查 `lifecycle_epoch` 是否只增加一次。审核限制不写入 status。 |
 | `documents` | RAG 文档是否存在，embedding 是否非空，维度是否匹配。 |
 | `wanted_responses` | campus_id 与 wanted/offer 是否一致，responder/requester 是否同校园；`lifecycle_epoch` 为 NULL 的 legacy 行必须只读；同 wanted/epoch/offer 是否唯一；重试问题检查 `idempotency_key/idempotency_hash`。 |
 | `orders` | campus_id、状态、buyer/seller、listing、金额和时间戳。 |
@@ -270,6 +270,7 @@ DB_NAME=goods4ncu APP_PASSWORD=<secret> ./scripts/provision_app_role.sh
 | `moderation_cases` | campus_id、subject、来源、状态、公开原因、resolution 和 pending appeal；普通用户接口不得返回 internal_details。 |
 | `moderation_case_events` | 案件创建、复核、处置、恢复和申诉状态转换的时间线。 |
 | `moderation_appeals` | 每个案件每个当事人一次申诉、独立复核者、决定和公开说明。 |
+| `listing_restriction_effects` | 每个 listing/case 的独立限制；`released_at IS NULL` 表示 active。排查时核对 campus、case、创建/释放 actor，不能只看 `inventory.status`。 |
 
 [已实现] `0029_core_tenant_scope.sql` 给核心市场与通信事实增加 `campus_id` 和关联约束，`0031_active_campus_sessions.sql` 给 refresh session 增加活动校园并回填旧会话，`0032_notification_tenant_scope.sql` 给通知建立校园归属，`0033_admin_moderation_tenant_scope.sql` 给管理审计和媒体审核任务建立校园归属并修正 Worker 的 `processing` 状态约束。当前 NCU default 仅为单校园兼容；第二校园接入前仍必须移除数据库默认值、完成空库/升级库隔离演练并评估 RLS。
 
@@ -323,7 +324,11 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 
 先确认当前校园，再检查 `moderation_jobs` 的 `campus_id/status/retry_count` 和 `moderation_cases` 的 `status/source_type/source_ref_id`。图片 provider 超时进入重试或 failed，不应自动创建违规案件；只有 rejected 会创建 `source_type=machine` 的 actioned 案件。聊天举报应同时存在 `chat_message_reports.case_id` 和对应的 `source_type=user_report` 案件。商品或用户举报还应存在 `content_reports.case_id`，对应案件的 `source_ref_id` 必须使用 `content_report:<report_id>` 前缀；缺少前缀会和聊天举报的 UUID 命名空间混淆。
 
-如果案件已经处置但资源仍不可见，检查 `moderation_case_events` 的最后事件、资源的 `images_moderation_status`/`moderation_status`/`avatar_moderation_status`，以及管理员审计中的 `campus_id` 和 `scope_reason`。申诉只能由案件当事人提交一次，复核必须由不同于原决定者的管理员完成；不要通过数据库直接改状态绕过事件和审计。
+如果 listing 案件已经恢复但资源仍不可见，先查该 listing 是否还有其它 `listing_restriction_effects.released_at IS NULL`，再查 lifecycle status；任一 effect 或非 active status 都足以保持隐藏。case restore/appeal 只能释放自己的 effect，manual emergency restore 也不能清除举报案件 effect。若 lifecycle 是 deleted/sold/fulfilled，释放全部 effect 仍不会重新上架，必须由 owner 在规则允许时显式 relist。
+
+紧急下架重试应复用同一个 manual case/effect，不应增加重复 active effect 或重复通知。若 takedown、case event、effect 与 audit 数量不一致，按事务完整性事故处理：保留现场、停止手工改表，先核对同一 target/case 的时间线。跨校园记录必须与 listing campus 一致；RLS 武装测试下另一校园既看不到也写不了 effect。
+
+其它媒体/账号案件仍检查 `moderation_case_events` 的最后事件、资源的 `images_moderation_status`/`moderation_status`/`avatar_moderation_status`，以及管理员审计中的 `campus_id` 和 `scope_reason`。申诉只能由案件当事人提交一次，复核必须由不同于原决定者的管理员完成；不要通过数据库直接改状态绕过事件和审计。
 
 ### 订单状态不对
 

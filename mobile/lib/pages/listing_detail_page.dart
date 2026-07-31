@@ -164,10 +164,16 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
           _loading = false;
         });
         if (listing.isWanted) {
-          _loadWantedMatches(listingId, generation);
+          if (!listing.isRestricted && listing.status == 'active') {
+            _loadWantedMatches(listingId, generation);
+          } else {
+            setState(() => _wantedMatchesLoading = false);
+          }
           await _loadWantedResponsesIfReady();
-        } else {
+        } else if (!listing.isRestricted && listing.status == 'active') {
           _loadSimilarListings(listingId, generation);
+        } else {
+          setState(() => _similarLoading = false);
         }
       }
     } catch (e) {
@@ -317,6 +323,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
 
   /// Open the private-limit price sheet for this listing.
   Future<void> _handlePriceDiscovery() async {
+    if (_listing?.allowsAction(Listing.actionPriceDiscovery) != true) return;
     final id = widget.listingId;
     await showModalBottomSheet<void>(
       context: context,
@@ -337,7 +344,9 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     final router = GoRouter.of(context);
     if (_isOperating) return;
     final listing = _listing;
-    if (listing == null || listing.ownerId == null) {
+    if (listing == null ||
+        listing.ownerId == null ||
+        !listing.allowsAction(Listing.actionContact)) {
       messenger.showSnackBar(
         SnackBar(
           content: Text(l.cannotContactSeller),
@@ -439,7 +448,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     final router = GoRouter.of(context);
     if (_isOperating) return;
     final listing = _listing;
-    if (listing == null) return;
+    if (listing == null || !listing.allowsAction(Listing.actionBuy)) return;
 
     setState(() => _isOperating = true);
     try {
@@ -530,7 +539,11 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     final l = AppLocalizations.of(context)!;
     final messenger = ScaffoldMessenger.of(context);
     final listing = _listing;
-    if (_isOperating || listing == null) return;
+    if (_isOperating ||
+        listing == null ||
+        !listing.allowsAction(Listing.actionRecommendOffer)) {
+      return;
+    }
 
     setState(() => _isOperating = true);
     try {
@@ -545,7 +558,10 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
       final rawItems = myListings['items'] as List<dynamic>? ?? [];
       final myOffers = rawItems
           .map((item) => Listing.fromJson(item as Map<String, dynamic>))
-          .where((item) => item.isOffer && item.status == 'active')
+          .where(
+            (item) =>
+                item.isOffer && item.status == 'active' && !item.isRestricted,
+          )
           .toList();
       if (!mounted) return;
       if (myOffers.isEmpty) {
@@ -794,6 +810,27 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
             fontWeight: FontWeight.w900,
           ),
         ),
+        if (listing.status != 'active' || listing.isRestricted) ...[
+          const SizedBox(height: AppTheme.sp8),
+          Wrap(
+            spacing: AppTheme.sp8,
+            runSpacing: AppTheme.sp8,
+            children: [
+              if (listing.status != 'active')
+                _ListingStateChip(
+                  key: const Key('listing-lifecycle-status'),
+                  label: _listingLifecycleLabel(l, listing.status),
+                  color: AppTheme.textSecondary,
+                ),
+              if (listing.isRestricted)
+                _ListingStateChip(
+                  key: const Key('listing-restriction-status'),
+                  label: l.listingRestrictedBadge,
+                  color: AppTheme.error,
+                ),
+            ],
+          ),
+        ],
         const SizedBox(height: AppTheme.sp8),
         Text(
           listing.title,
@@ -993,7 +1030,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     }
 
     final isOwner = listing.ownerId == currentUserId;
-    final wantedIsActive = listing.status == 'active';
+    final wantedIsActive = listing.status == 'active' && !listing.isRestricted;
     return WantedResponseSection(
       key: ValueKey('wanted-responses-${listing.id}'),
       role: isOwner
@@ -1227,11 +1264,8 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         context,
       ).showSnackBar(SnackBar(content: Text(l.wantedFulfilledToast)));
       await _loadDetail();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(l.operationFailed(e.toString()))));
+    } catch (error) {
+      await _handleListingMutationError(error);
     } finally {
       if (mounted) setState(() => _isOperating = false);
     }
@@ -1247,14 +1281,137 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         context,
       ).showSnackBar(SnackBar(content: Text(l.wantedReopenedToast)));
       await _loadDetail();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(l.operationFailed(e.toString()))));
+    } catch (error) {
+      await _handleListingMutationError(error);
     } finally {
       if (mounted) setState(() => _isOperating = false);
     }
+  }
+
+  Future<void> _handleRelistListing() async {
+    final l = AppLocalizations.of(context)!;
+    if (_isOperating || _listing == null) return;
+    setState(() => _isOperating = true);
+    try {
+      await _apiService.relistListing(_listing!.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.listingRelistedToast)));
+      await _loadDetail();
+    } catch (error) {
+      await _handleListingMutationError(error);
+    } finally {
+      if (mounted) setState(() => _isOperating = false);
+    }
+  }
+
+  Future<void> _handleDeleteListing() async {
+    final l = AppLocalizations.of(context)!;
+    final listing = _listing;
+    if (_isOperating || listing == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l.deleteListingConfirmTitle),
+        content: Text(l.deleteConfirm),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(l.cancel),
+          ),
+          FilledButton(
+            key: const Key('listing-delete-confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            child: Text(l.deleteListingAction),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _isOperating = true);
+    try {
+      await _apiService.deleteListing(listing.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.listingDeletedToast)));
+      await _loadDetail();
+    } catch (error) {
+      await _handleListingMutationError(error);
+    } finally {
+      if (mounted) setState(() => _isOperating = false);
+    }
+  }
+
+  Future<void> _handleListingMutationError(Object error) async {
+    if (!mounted) return;
+    final l = AppLocalizations.of(context)!;
+    final conflictCode = error is ConflictException ? error.serverCode : null;
+    if (conflictCode == 'listing_restricted' ||
+        conflictCode == 'listing_action_stale') {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.listingPolicyChangedToast)));
+      await _loadDetail();
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(l.operationFailed(error.toString()))),
+    );
+  }
+
+  Widget _buildRestrictionNotice(Listing listing, AppLocalizations l) {
+    final reason = listing.restriction?.reason;
+    final canOpenCase =
+        listing.restriction?.canAppeal == true &&
+        listing.restriction?.moderationCaseId?.isNotEmpty == true;
+    return Container(
+      key: const Key('listing-restriction-notice'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppTheme.sp14),
+      decoration: BoxDecoration(
+        color: AppTheme.error.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        border: Border.all(color: AppTheme.error.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.gpp_maybe_outlined, color: AppTheme.error),
+              const SizedBox(width: AppTheme.sp8),
+              Expanded(
+                child: Text(
+                  l.listingRestrictionTitle,
+                  style: const TextStyle(
+                    color: AppTheme.error,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppTheme.sp8),
+          Text(
+            reason == null || reason.isEmpty
+                ? l.listingRestrictionGeneric
+                : reason,
+          ),
+          if (canOpenCase) ...[
+            const SizedBox(height: AppTheme.sp8),
+            OutlinedButton.icon(
+              key: const Key('listing-view-moderation-case'),
+              onPressed: () => context.push('/moderation'),
+              icon: const Icon(Icons.policy_outlined),
+              label: Text(l.viewModerationCase),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   Widget _buildActionButtons() {
@@ -1265,9 +1422,32 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     }
     final isOwner =
         listing?.ownerId != null && listing?.ownerId == _currentUserId;
-    if (listing?.isWanted == true) {
+    if (listing == null) return const SizedBox.shrink();
+    if (listing.isRestricted) {
+      final canDelete = isOwner && listing.allowsAction(Listing.actionDelete);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildRestrictionNotice(listing, l),
+          if (canDelete) ...[
+            const SizedBox(height: AppTheme.sp8),
+            OutlinedButton.icon(
+              key: const Key('listing-delete-action'),
+              onPressed: _isOperating ? null : _handleDeleteListing,
+              icon: const Icon(Icons.delete_outline),
+              label: Text(l.deleteListingAction),
+              style: OutlinedButton.styleFrom(foregroundColor: AppTheme.error),
+            ),
+          ],
+        ],
+      );
+    }
+    if (listing.isWanted) {
       if (isOwner) {
-        final isFulfilled = listing?.status == 'fulfilled';
+        final canFulfill = listing.allowsAction(Listing.actionFulfill);
+        final canRelist = listing.allowsAction(Listing.actionRelist);
+        final canDelete = listing.allowsAction(Listing.actionDelete);
         return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1291,7 +1471,9 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      isFulfilled ? l.wantedFulfilledHint : l.wantedOwnerHint,
+                      listing.status == 'fulfilled'
+                          ? l.wantedFulfilledHint
+                          : l.wantedOwnerHint,
                       style: const TextStyle(
                         color: AppTheme.primary,
                         fontWeight: FontWeight.w800,
@@ -1302,24 +1484,37 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
               ),
             ),
             const SizedBox(height: 10),
-            ElevatedButton.icon(
-              onPressed: _isOperating
-                  ? null
-                  : (isFulfilled ? _handleReopenWanted : _handleFulfillWanted),
-              icon: Icon(isFulfilled ? Icons.replay : Icons.task_alt),
-              label: Text(
-                isFulfilled ? l.reopenWantedAction : l.fulfillWantedAction,
+            if (canFulfill)
+              ElevatedButton.icon(
+                key: const Key('listing-fulfill-action'),
+                onPressed: _isOperating ? null : _handleFulfillWanted,
+                icon: const Icon(Icons.task_alt),
+                label: Text(l.fulfillWantedAction),
               ),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                backgroundColor: AppTheme.primary,
-                foregroundColor: Colors.white,
+            if (canRelist)
+              ElevatedButton.icon(
+                key: const Key('listing-relist-action'),
+                onPressed: _isOperating ? null : _handleReopenWanted,
+                icon: const Icon(Icons.replay),
+                label: Text(l.reopenWantedAction),
               ),
-            ),
+            if ((canFulfill || canRelist) && canDelete)
+              const SizedBox(height: AppTheme.sp8),
+            if (canDelete)
+              OutlinedButton.icon(
+                key: const Key('listing-delete-action'),
+                onPressed: _isOperating ? null : _handleDeleteListing,
+                icon: const Icon(Icons.delete_outline),
+                label: Text(l.deleteListingAction),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.error,
+                ),
+              ),
           ],
         );
       }
-      if (listing?.status != 'active') {
+      if (!listing.allowsAction(Listing.actionContact) &&
+          !listing.allowsAction(Listing.actionRecommendOffer)) {
         return Container(
           width: double.infinity,
           padding: const EdgeInsets.all(AppTheme.sp14),
@@ -1355,7 +1550,9 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
             child: OutlinedButton.icon(
               onPressed: _isOperating
                   ? null
-                  : () => _handleContactSeller(context),
+                  : (listing.allowsAction(Listing.actionContact)
+                        ? () => _handleContactSeller(context)
+                        : null),
               icon: const Icon(Icons.chat_bubble_outline),
               label: Text(l.contactRequester),
               style: OutlinedButton.styleFrom(
@@ -1366,7 +1563,11 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
           const SizedBox(width: 12),
           Expanded(
             child: ElevatedButton.icon(
-              onPressed: _isOperating ? null : _handleRecommendMyOffer,
+              onPressed:
+                  _isOperating ||
+                      !listing.allowsAction(Listing.actionRecommendOffer)
+                  ? null
+                  : _handleRecommendMyOffer,
               icon: const Icon(Icons.inventory_2_outlined),
               label: Text(l.recommendMyOffer),
               style: ElevatedButton.styleFrom(
@@ -1380,26 +1581,50 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
       );
     }
     if (isOwner) {
-      return SizedBox(
-        width: double.infinity,
-        child: ElevatedButton.icon(
-          onPressed: () => context.push('/my-listings'),
-          icon: const Icon(Icons.edit_note_outlined),
-          label: Text(l.myListings),
-          style: ElevatedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            backgroundColor: AppTheme.primary,
-            foregroundColor: Colors.white,
+      final canDelete = listing.allowsAction(Listing.actionDelete);
+      final canRelist = listing.allowsAction(Listing.actionRelist);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (canRelist)
+            ElevatedButton.icon(
+              key: const Key('listing-relist-action'),
+              onPressed: _isOperating ? null : _handleRelistListing,
+              icon: const Icon(Icons.replay),
+              label: Text(l.relistListingAction),
+            ),
+          if (canDelete)
+            OutlinedButton.icon(
+              key: const Key('listing-delete-action'),
+              onPressed: _isOperating ? null : _handleDeleteListing,
+              icon: const Icon(Icons.delete_outline),
+              label: Text(l.deleteListingAction),
+              style: OutlinedButton.styleFrom(foregroundColor: AppTheme.error),
+            ),
+          OutlinedButton.icon(
+            onPressed: () => context.push('/my-listings'),
+            icon: const Icon(Icons.edit_note_outlined),
+            label: Text(l.myListings),
           ),
-        ),
+        ],
       );
     }
-    final isSold = _listing?.status == 'sold';
+    final canContact = listing.allowsAction(Listing.actionContact);
+    final canDiscover = listing.allowsAction(Listing.actionPriceDiscovery);
+    final canBuy = listing.allowsAction(Listing.actionBuy);
+    if (!canContact && !canDiscover && !canBuy) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppTheme.sp14),
+        child: Text(l.wantedClosedResponderHint),
+      );
+    }
     return Row(
       children: [
         Expanded(
           child: OutlinedButton.icon(
-            onPressed: _isOperating
+            onPressed: _isOperating || !canContact
                 ? null
                 : () => _handleContactSeller(context),
             icon: const Icon(Icons.chat_bubble_outline),
@@ -1414,7 +1639,9 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         // choose this mechanism, and someone who would rather talk keeps that.
         Expanded(
           child: OutlinedButton.icon(
-            onPressed: (isSold || _isOperating) ? null : _handlePriceDiscovery,
+            onPressed: (!canDiscover || _isOperating)
+                ? null
+                : _handlePriceDiscovery,
             icon: const Icon(Icons.balance_outlined),
             label: Text(l.priceDiscoveryStart, softWrap: false),
             style: OutlinedButton.styleFrom(
@@ -1425,17 +1652,47 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         const SizedBox(width: 12),
         Expanded(
           child: ElevatedButton.icon(
-            onPressed: (isSold || _isOperating) ? null : _handleBuyNow,
-            icon: Icon(isSold ? Icons.done : Icons.handshake_outlined),
-            label: Text(isSold ? l.sold : l.buyNow),
+            onPressed: (!canBuy || _isOperating) ? null : _handleBuyNow,
+            icon: Icon(canBuy ? Icons.handshake_outlined : Icons.done),
+            label: Text(canBuy ? l.buyNow : l.sold),
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 14),
-              backgroundColor: isSold ? Colors.grey : AppTheme.primary,
+              backgroundColor: canBuy ? AppTheme.primary : Colors.grey,
               foregroundColor: Colors.white,
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+String _listingLifecycleLabel(AppLocalizations l, String status) =>
+    switch (status) {
+      'active' => l.listingLifecycleActive,
+      'fulfilled' => l.listingLifecycleFulfilled,
+      'sold' => l.listingLifecycleSold,
+      'deleted' => l.listingLifecycleOwnerDeleted,
+      _ => l.listingLifecycleUnknown,
+    };
+
+class _ListingStateChip extends StatelessWidget {
+  const _ListingStateChip({
+    super.key,
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Chip(
+      label: Text(label),
+      backgroundColor: color.withValues(alpha: 0.12),
+      side: BorderSide(color: color.withValues(alpha: 0.25)),
+      labelStyle: TextStyle(color: color, fontWeight: FontWeight.w800),
     );
   }
 }

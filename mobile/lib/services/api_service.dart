@@ -238,6 +238,8 @@ class ApiService extends BaseService {
 
   Future<void> relistListing(String id) => _listingService.relistListing(id);
 
+  Future<void> deleteListing(String id) => _listingService.deleteListing(id);
+
   Future<ListingsResponse> getWantedMatches(String wantedId) =>
       _listingService.getWantedMatches(wantedId);
 
@@ -337,6 +339,9 @@ class ApiService extends BaseService {
 
   Future<void> takedownListing(String listingId) =>
       _adminService.takedownListing(listingId);
+
+  Future<void> restoreListing(String listingId, {required String reason}) =>
+      _adminService.restoreListing(listingId, reason: reason);
 
   Future<Map<String, dynamic>> getAdminOrders({
     String? status,

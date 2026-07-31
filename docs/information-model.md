@@ -190,7 +190,7 @@ appealed -> resolved
 
 Case 保存校园、资源引用、来源引用、机器或人工判断、公开理由、受限的内部证据、处置结果和事件时间线。`moderation_appeals` 保存一次性申诉和独立复核结果；普通用户接口不返回举报人身份或 `internal_details`。`content_reports` 承载商品/用户举报，`chat_message_reports` 承载消息举报，两者都在同一事务中关联统一案件，并在案件流转时同步举报状态。
 
-当前 intake、开始复核和 dismiss 已统一；机器拒绝也可在案件复核后恢复对应媒体状态。商品/用户案件尚未拥有通用、可逆的 restrict/restore effect，紧急下架或封禁仍走独立的近期认证与管理员审计流程。
+listing 已使用 case-owned、可组合的 `listing_restriction_effects`：effect 保存 campus、listing、唯一 case、创建人/时间和释放人/时间；有效性由 `released_at IS NULL` 表示。`inventory.status` 不承载审核含义。一个 case 的 restore 或 appeal overturn 只能释放自己的 effect，所有 active effect 都释放后 listing 才解除限制。紧急下架先建立 manual case 再建立其 effect，显式管理员恢复也只释放该 manual case。user 多来源限制仍是后续工作。
 
 ### AgentRun 与 AgentActionPlan
 

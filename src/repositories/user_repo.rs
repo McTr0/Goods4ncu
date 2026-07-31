@@ -257,6 +257,11 @@ impl UserRepository for PostgresUserRepository {
         } else {
             format!("AND status = '{}'", status_filter.replace('\'', "''"))
         };
+        let visibility_clause = if only_approved_media {
+            "AND NOT listing_has_active_restriction(id)"
+        } else {
+            ""
+        };
 
         // Public viewers never see unreviewed media; owners see their own
         // uploads regardless of moderation state.
@@ -269,9 +274,9 @@ impl UserRepository for PostgresUserRepository {
         let query = format!(
             "SELECT id, campus_id, title, category, brand, direction, condition_score, suggested_price_cny, \
              defects, description, {image_column}, owner_id, status, created_at \
-             FROM inventory WHERE owner_id = $1 AND campus_id = $2 {} \
+             FROM inventory WHERE owner_id = $1 AND campus_id = $2 {} {} \
              ORDER BY created_at DESC LIMIT {} OFFSET {}",
-            status_clause, limit, offset
+            status_clause, visibility_clause, limit, offset
         );
 
         let rows = sqlx::query_as::<_, Listing>(&query)
@@ -282,8 +287,8 @@ impl UserRepository for PostgresUserRepository {
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
         let count_query = format!(
-            "SELECT COUNT(*) FROM inventory WHERE owner_id = $1 AND campus_id = $2 {}",
-            status_clause
+            "SELECT COUNT(*) FROM inventory WHERE owner_id = $1 AND campus_id = $2 {} {}",
+            status_clause, visibility_clause
         );
         let count_row = sqlx::query(&count_query)
             .bind(user_id)
@@ -364,6 +369,7 @@ impl UserRepository for PostgresUserRepository {
                  AND membership.status = 'verified'
                 LEFT JOIN inventory i ON u.id = i.owner_id
                  AND i.status = 'active' AND i.campus_id = $1
+                 AND NOT listing_has_active_restriction(i.id)
                 WHERE u.discover_by_username = TRUE
                   AND u.status = 'active'
                   AND u.username ILIKE $2
@@ -416,6 +422,7 @@ impl UserRepository for PostgresUserRepository {
                  AND membership.status = 'verified'
                 LEFT JOIN inventory i ON u.id = i.owner_id
                  AND i.status = 'active' AND i.campus_id = $1
+                 AND NOT listing_has_active_restriction(i.id)
                 WHERE u.discover_by_username = TRUE
                   AND u.status = 'active'
                 GROUP BY u.id, u.username, u.email, u.student_id,
@@ -476,6 +483,7 @@ impl UserRepository for PostgresUserRepository {
                      AND membership.status = 'verified'
                     LEFT JOIN inventory i ON u.id = i.owner_id
                      AND i.status = 'active' AND i.campus_id = $2
+                     AND NOT listing_has_active_restriction(i.id)
                     WHERE u.id != $1
                       AND u.status = 'active'
                       AND u.discover_by_username = TRUE
@@ -518,6 +526,7 @@ impl UserRepository for PostgresUserRepository {
                      AND membership.status = 'verified'
                     LEFT JOIN inventory i ON u.id = i.owner_id
                      AND i.status = 'active' AND i.campus_id = $2
+                     AND NOT listing_has_active_restriction(i.id)
                     WHERE u.id != $1
                       AND u.status = 'active'
                       AND u.discover_by_email = TRUE
@@ -549,6 +558,7 @@ impl UserRepository for PostgresUserRepository {
                      AND membership.status = 'verified'
                     LEFT JOIN inventory i ON u.id = i.owner_id
                      AND i.status = 'active' AND i.campus_id = $2
+                     AND NOT listing_has_active_restriction(i.id)
                     WHERE u.id != $1
                       AND u.status = 'active'
                       AND u.discover_by_student_id = TRUE

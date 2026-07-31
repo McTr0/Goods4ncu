@@ -44,6 +44,7 @@ class _ListingApiService extends ApiService {
   int wantedResponseListCalls = 0;
   int fulfillCalls = 0;
   int relistCalls = 0;
+  int deleteCalls = 0;
 
   @override
   Future<String?> getToken() async => currentUserId == null ? null : 'token';
@@ -133,6 +134,11 @@ class _ListingApiService extends ApiService {
   @override
   Future<void> relistListing(String id) async {
     relistCalls += 1;
+  }
+
+  @override
+  Future<void> deleteListing(String id) async {
+    deleteCalls += 1;
   }
 
   @override
@@ -350,6 +356,134 @@ void main() {
     expect(find.text('联系卖家'), findsNothing);
     expect(find.text('发起成交意向'), findsNothing);
     expect(find.byKey(const Key('listing-report-action')), findsNothing);
+  });
+
+  testWidgets(
+    'restricted offer exposes no marketplace actions and shows appeal',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final listing = Listing(
+        id: 'listing-restricted',
+        title: 'Restricted listing',
+        category: 'electronics',
+        brand: 'NCU',
+        conditionScore: 7,
+        suggestedPriceCny: 12.34,
+        status: 'active',
+        ownerId: 'owner-2',
+        restrictionState: 'restricted',
+        restriction: const ListingRestriction(
+          reason: '等待人工复核',
+          moderationCaseId: 'case-1',
+          canAppeal: true,
+        ),
+        availableActions: const {
+          Listing.actionContact,
+          Listing.actionBuy,
+          Listing.actionPriceDiscovery,
+        },
+      );
+
+      await tester.pumpWidget(
+        _buildDetail(listing: listing, currentUserId: 'viewer-1'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('listing-restriction-status')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('listing-restriction-notice')),
+        findsOneWidget,
+      );
+      expect(find.text('等待人工复核'), findsOneWidget);
+      expect(
+        find.byKey(const Key('listing-view-moderation-case')),
+        findsOneWidget,
+      );
+      expect(find.text('联系卖家'), findsNothing);
+      expect(find.text('让小帮定价'), findsNothing);
+      expect(find.text('发起成交意向'), findsNothing);
+    },
+  );
+
+  testWidgets('restricted wanted owner cannot mutate lifecycle or responses', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final listing = Listing(
+      id: 'wanted-response-source',
+      title: 'Restricted wanted',
+      category: 'other',
+      brand: 'NCU',
+      direction: 'wanted',
+      conditionScore: 6,
+      suggestedPriceCny: 30,
+      status: 'active',
+      ownerId: 'requester-1',
+      restrictionState: 'restricted',
+      restriction: const ListingRestriction(reason: 'policy'),
+      availableActions: const {Listing.actionFulfill, Listing.actionDelete},
+    );
+    final api = _ListingApiService(
+      listing: listing,
+      currentUserId: 'requester-1',
+      wantedResponses: [
+        _wantedResponse(availableActions: const {'accept', 'dismiss'}),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _buildDetail(
+        listing: listing,
+        currentUserId: 'requester-1',
+        apiService: api,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('listing-fulfill-action')), findsNothing);
+    expect(find.byKey(const Key('listing-delete-action')), findsOneWidget);
+    expect(find.byKey(const Key('listing-relist-action')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('wanted-response-accept-response-1')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('wanted-response-dismiss-response-1')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('owner delete is shown only when authorized by the server', (
+    tester,
+  ) async {
+    final listing = Listing(
+      id: 'listing-owner-delete',
+      title: 'Owner listing',
+      category: 'other',
+      brand: 'NCU',
+      conditionScore: 7,
+      suggestedPriceCny: 12,
+      status: 'active',
+      ownerId: 'owner-1',
+      availableActions: const {Listing.actionDelete},
+    );
+    final api = _ListingApiService(listing: listing, currentUserId: 'owner-1');
+    await tester.pumpWidget(
+      _buildDetail(listing: listing, currentUserId: 'owner-1', apiService: api),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('listing-delete-action')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('listing-delete-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(api.deleteCalls, 1);
   });
 
   testWidgets(
