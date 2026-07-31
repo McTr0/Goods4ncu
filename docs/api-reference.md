@@ -366,11 +366,11 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 ### DELETE `/api/listings/{id}`
 
-需要登录且必须是 owner。删除或标记商品不可用，返回商品 id 和消息。
+需要活动校园的 verified membership 且必须是 owner。事务先按校园和 owner 锁定 listing，再把非 sold 条目标记为 `deleted`；重复删除保持幂等。删除 active wanted 会立即关闭当前响应轮次，已有 Response 继续作为只读历史保留。
 
 ### POST `/api/listings/{id}/relist`
 
-需要登录且必须是 owner。把已售或已删除商品重新上架，返回 `status: active`。
+需要活动校园的 verified membership 且必须是 owner。把 `sold`、`deleted` 或 `fulfilled` 条目重新设为 `active`，返回 `status: active`。普通 offer 不改变轮次；wanted 每次从非 active 重新开启时，`lifecycle_epoch` 必须在同一事务中恰好加一，因此此前轮次的 Response 不会重新获得操作权限。
 
 ### GET `/api/listings/{id}/matches`
 
@@ -380,7 +380,7 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 ### POST `/api/listings/{id}/responses`
 
-需要登录。提供方选择自己的 active offer 响应一条 wanted：
+需要活动校园的 verified membership。提供方选择自己的 active offer 响应一条 active wanted：
 
 ```json
 {
@@ -389,7 +389,19 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 }
 ```
 
-不能推荐别人的商品、wanted、sold 或 deleted 内容。同一 responder/offer/wanted 不会产生重复 pending response；成功后写入通知。Response 不自动创建聊天或成交记录。
+接口支持 `Idempotency-Key` header，格式与 listing 发布相同。服务端在同一事务中按 `wanted -> offer` 顺序锁行，重新验证双方校园、owner、direction、active 状态，并从锁定的 wanted 派生当前 `lifecycle_epoch`；客户端不能在 body 中指定轮次。成功返回：
+
+```json
+{
+  "id": "response-uuid",
+  "message": "已推荐给需求方",
+  "replayed": false
+}
+```
+
+同一 responder 在同一校园用相同 key 重试相同 wanted、offer 和规范化留言时，返回首次 response id 且 `replayed=true`，不重复写 response 或通知；即使 wanted 后来关闭或重开，该 key 仍重放原结果。同一 key 搭配不同内容返回 `409 conflict`。
+
+不能推荐别人的商品、wanted、sold 或 deleted 内容。一个 offer 在同一 wanted `lifecycle_epoch` 最多响应一次，不因先前 response 已 accepted、dismissed 或 withdrawn 而重新开放；wanted 进入新轮次后，同一 offer 可以再次响应一次。Response 不自动创建聊天或成交记录。
 
 ### POST `/api/listings/recognize`
 
@@ -654,11 +666,28 @@ Group 成员按角色发言；Channel 只有 owner/admin 发言，成员可读�
 
 [已实现] Phase 2 信息流闭环接口：
 
-- `POST /api/listings/{id}/fulfill` — 所有者把收物需求标记为 `fulfilled`；非所有者 403，offer 400，非 active 409。完成后 feed/匹配/新响应全部停止，历史 Thread/Response/成交保留，pending 响应者收到 `wanted_fulfilled` 通知。`POST /api/listings/{id}/relist` 可重新开启（同样适用于 sold/deleted）。
-- `GET /api/wanted-responses?role=requester|responder&status=&wanted_listing_id=&limit=&offset=` — 按角色和指定 wanted 列出自己的推荐。响应 envelope 为 `{items,total,limit,offset}`；条目包含 wanted/offer 的 id、标题、当前状态、双方用户 id、留言和 response 生命周期状态。接口每次重新校验活动校园 verified membership，并只读取该校园数据。
-- `POST /api/wanted-responses/{id}/accept|dismiss`（requester）与 `/withdraw`（responder）— 事务内锁定 response、wanted 和 offer 后从 `pending` 单赢转移。accept 还要求 wanted 与 offer 都为 active；dismiss 要求 wanted active；withdraw 只要求 response pending。非本人或跨校园响应统一 404，重复/失效状态为 409，活动校园资格 suspended/revoked 后为 403。对方收到带 wanted `related_listing_id` 的 `wanted_response_accepted|dismissed|withdrawn` 通知，可直接回到需求详情。
+- `POST /api/listings/{id}/fulfill` — 所有者把 active wanted 标记为 `fulfilled`；非所有者 403，offer 400，非 active 409。完成后 feed、匹配和新响应全部停止，当前轮次立即变为只读，历史 Thread/Response/成交保留，当前轮 pending 响应者收到 `wanted_fulfilled` 通知。Response 的事实状态仍可保持 `pending`，不能把它误解为仍可操作。
+- `DELETE /api/listings/{id}` 与 `POST /api/listings/{id}/relist` — 删除 wanted 同样关闭当前轮次；从 `fulfilled/deleted` 重新开启 wanted 时，服务端原子增加 `inventory.lifecycle_epoch`。旧轮次保持历史，新轮次允许同一 offer 再响应一次。
+- `GET /api/wanted-responses?role=requester|responder&status=&wanted_listing_id=&limit=&offset=` — 按角色和指定 wanted 列出自己的推荐。响应 envelope 为 `{items,total,limit,offset}`；接口每次重新校验活动校园 verified membership，并只读取该校园数据。每项除 wanted/offer、双方用户、留言、`status` 和时间外，还返回：
 
-Flutter 在 wanted 详情按当前用户身份展示“收到的推荐”或“我发出的推荐”，提供 accept/dismiss/withdraw 与查看 offer 操作；动作成功后先更新本地确定状态再刷新服务端事实，失败则保留原卡片。完成 wanted 前有确认弹窗，非 active wanted 不再向 responder 展示新的推荐操作。
+```json
+{
+  "lifecycle_epoch": 1,
+  "current_lifecycle_epoch": 2,
+  "round_state": "closed",
+  "available_actions": []
+}
+```
+
+`round_state=current` 仅在 wanted 为 active、response 的非空 `lifecycle_epoch` 等于 wanted 当前 epoch 时成立；其他情况一律为 `closed`。升级前无法证明轮次的 legacy Response 返回 `lifecycle_epoch: null`，始终只读。`available_actions` 是按本次 `role`、response 状态、轮次状态和 offer 状态计算的服务端权威能力：requester 最多获得 `accept/dismiss`，responder 最多获得 `withdraw`；closed 或非 pending 行必须返回空数组。
+
+- `POST /api/wanted-responses/{id}/accept|dismiss`（requester）与 `/withdraw`（responder）— 三种动作都只允许当前 active 轮次的 pending Response。accept 还要求 offer active；offer 已非 active 时 requester 仍可 dismiss；withdraw 不要求 offer active，但绝不允许在 wanted fulfilled/deleted 或旧 epoch 上执行。非本人或跨校园响应统一 404，重复/终态转换为 409，活动校园资格 suspended/revoked 后为 403；关闭轮次统一返回 `409 wanted_response_round_closed`，客户端应冻结该行并刷新 listing/response。对方收到带 wanted `related_listing_id` 的 `wanted_response_accepted|dismissed|withdrawn` 通知，可直接回到需求详情。
+
+所有创建和动作事务使用一致锁序：先 wanted，再按需要锁 offer，最后锁 response；fulfill、delete 和 relist 也先锁 wanted。这样 respond/accept 与 fulfill/relist 并发时只能线性化为一个完整轮次结果，不会把验证发生在旧轮、写入落在新轮。
+
+Flutter 在 wanted 详情按当前用户身份展示“收到的推荐”或“我发出的推荐”，以 `available_actions` 控制 accept/dismiss/withdraw；缺少新字段的旧响应才使用保守兼容逻辑。关闭轮次显示只读提示，`wanted_response_round_closed` 会触发 listing 与 response 刷新，不保留过期按钮。完成 wanted 前有确认弹窗。
+
+`0055_wanted_response_lifecycle_epoch.sql` 使用前向兼容迁移：`inventory.lifecycle_epoch` 非空，`wanted_responses.lifecycle_epoch` 对无法可靠重建轮次的 legacy history 保持 nullable；只有能证明属于当前 active 轮次的旧行才回填。数据库 INSERT trigger 为未写 epoch 的旧应用锁定并派生当前轮次，reopen trigger 让只更新 status 的旧应用也恰好增加一个 epoch。应用 rollback 不要求回滚 migration。
 
 新推荐与匹配接口的每个条目携带稳定的 `rank_reason` 与 `source` code，客户端负责本地化为人话；响应携带 `ranking_version`。兼容中的首页商品 feed 仍可能返回服务端人话 `rank_reason`，其 `source` 保持稳定 code。listing wanted matches 还返回只来自已执行硬约束的 `match_summary`，不返回作者、距离、权重或反馈信号。
 
@@ -934,7 +963,7 @@ POST 写接口仍只允许平台管理员，并且 access token 必须带 10 分
 
 `code` 是客户端稳定判断依据，`message` 可本地化，`details` 只包含安全的字段级信息。不得返回 SQL、provider 原始错误、屏蔽关系或审核规则。
 
-发布和成交确认已实现 `Idempotency-Key`。聊天创建/消息发送使用请求体中的客户端 UUID 幂等；wanted response、其他关键写接口和 Agent confirm 的统一幂等契约仍属于目标态。同一资源、key 和请求内容的重试应返回首次结果；相同 key 配不同 body 必须冲突。
+发布、wanted response 和成交确认已实现 `Idempotency-Key`。聊天创建/消息发送使用请求体中的客户端 UUID 幂等；其他关键写接口和 Agent confirm 的统一幂等契约仍属于目标态。同一作用域、key 和请求内容的重试返回首次结果；相同 key 配不同 body 必须冲突。已返回 `replayed` 的接口用该字段区分首次执行和结果重放。
 
 列表统一使用：
 

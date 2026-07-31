@@ -464,6 +464,8 @@
       }
     }
   },
+  "wantedResponseRoundClosedToast": "This recommendation belongs to a closed request round and is now read-only.",
+  "wantedResponseClosedRoundLabel": "Closed request round · Read-only",
   "wantedResponseAcceptedToast": "Recommendation accepted",
   "wantedResponseDismissedToast": "Recommendation dismissed",
   "wantedResponseWithdrawnToast": "Recommendation withdrawn",

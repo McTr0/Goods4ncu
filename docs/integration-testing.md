@@ -158,7 +158,11 @@ node scripts/codex_browser_api_driver.mjs p0-chat
 | wanted 匹配 | 打开 wanted 详情 | 只显示满足预算/成色的 active offer，不显示自己的 offer。 |
 | 推荐我的商品 | seller 选择自己的 active offer 响应 wanted | 需求方收到通知；不自动创建聊天或成交。 |
 | wanted 双角色闭环 | buyer 发布 wanted；seller 推荐三件 offer 并撤回一件；buyer 从通知接受/忽略 | 两侧详情分别显示 received/sent history；状态动作只在合法阶段出现，动作通知可回到 wanted。 |
-| wanted 完成与重开 | 需求方确认关闭为 fulfilled，离开详情后经“个人→我的发布”找回并重开 | 停止新匹配并保留 response/thread；fulfilled 状态清晰，重开后 feed 与匹配恢复。 |
+| wanted response 超时重试 | 同一 responder 用同一 `Idempotency-Key` 重试相同 wanted/offer/message | 两次返回同一 response id，第二次 `replayed=true`，只写一行且只通知一次。 |
+| wanted response key 误用 | 同一 responder 用同一 key 改变 offer 或留言 | 返回 `409 conflict`，原 response 不改写。 |
+| wanted 完成与冻结 | 留一条 pending response 后将 wanted 设为 fulfilled | 停止新匹配；该行仍可显示 pending 历史，但 `round_state=closed`、`available_actions=[]`，accept/dismiss/withdraw 均返回 `409 wanted_response_round_closed`。 |
+| wanted 删除与重开 | 删除 active wanted，再经“个人→我的发布”找回并 relist | delete 关闭当前轮；relist 将 epoch 恰好加一，feed 与匹配恢复，旧轮仍只读。 |
+| 新轮再次响应 | wanted 重开后使用旧轮同一 offer 再响应 | 新 epoch 可成功一次；同轮即使先 accept/dismiss/withdraw，也不能再次响应。 |
 | 商品图片 | 打开多个商品详情 | URL 图片显示，失败时有占位，不出现大片空白。 |
 | 收藏 | 收藏、取消收藏、刷新 | 状态持久化，不能收藏自己的商品。 |
 | 发布商品 | 填表发布商品 | 必填校验明确，价格单位正确，提交成功后可在“我的发布”看到。 |
@@ -173,13 +177,29 @@ node scripts/codex_browser_api_driver.mjs p0-chat
 ### Wanted 双角色浏览器验收
 
 1. `buyer1` 从“我的发布”的“发布商品”入口进入结构化表单，切到“我要收”，填写唯一标题、预算、最低成色和要求并提交。
-2. 切换到 `seller1`，从首页收物 feed 打开该需求，连续推荐三件自己的 active offer；在“我发出的推荐”中撤回第三件。
-3. 切回 `buyer1`，从推荐通知进入 wanted 详情；接受第一件、忽略第二件，确认失败或重复操作不会提前移除卡片。
+2. 切换到 `seller1`，从首页收物 feed 打开该需求，连续推荐四件自己的 active offer；在“我发出的推荐”中撤回第四件。
+3. 切回 `buyer1`，从推荐通知进入 wanted 详情；接受第一件、忽略第二件，保留第三件 pending，确认失败或重复操作不会提前移除卡片。
 4. 从 accepted response 打开 offer，确认联系卖家入口存在；回到 wanted，经过确认弹窗标记 fulfilled。
-5. 离开详情，经“个人→我的发布”找到带 fulfilled/reopen 标识的 wanted，打开并重新开启。
-6. 切回 `seller1`，从 accepted/dismissed 状态通知进入 wanted，确认 sent history 与三种最终状态一致。
+5. 切回 `seller1`，确认第三件仍显示 pending 历史但标记“需求轮次已关闭 · 仅供查看”，没有 withdraw；直接调用动作得到 `wanted_response_round_closed` 后页面刷新且不恢复按钮。
+6. 离开详情，经“个人→我的发布”找到带 fulfilled/reopen 标识的 wanted，打开并重新开启；确认 wanted epoch 增加，第三件旧 response 仍 closed。
+7. 切回 `seller1`，用第三件 offer 在新轮次重新推荐：网络失败重试复用同一 key 和 response id，不重复通知；换新 key 在同轮重复提交仍被拒绝。
+8. 切回 `buyer1`，确认新轮 response 为 current 且有合法动作，旧轮 accepted/dismissed/withdrawn/pending 历史状态均未改变。
 
 每一步同时检查后端请求无 4xx/5xx、页面无 Flutter assertion/白屏。组件回归还应覆盖 `390x844` 与 200% 文字缩放。
+
+### Wanted lifecycle epoch 自动化矩阵
+
+| 层级 | 场景 | 必须断言 |
+| --- | --- | --- |
+| Migration | 升级库含重复 terminal、active/inactive pending 与无法证明轮次的历史 | migration 成功；不确定行 epoch 为 NULL 且只读；每个 wanted/epoch/offer 最多一条非空 epoch。 |
+| Backend | fulfill/delete/relist 完整路径 | fulfill/delete 立即关闭当前轮，relist 只增加一个 epoch，旧 pending 的事实 status 不被伪改。 |
+| Backend | 同轮唯一性 | 同一 offer 在 accepted/dismissed/withdrawn 后仍不能在同 epoch 重建；下一 epoch 可以一次。 |
+| Backend | 幂等 | 同 key 同 body 重放相同 id 和 `replayed=true`；不同 body 409；重放不产生第二条通知。 |
+| Concurrency | respond vs fulfill/delete/relist | 只能得到“先写入旧轮后被关闭”或“关闭先发生而创建失败”；不能产生跨 epoch 可操作行。 |
+| Concurrency | accept/dismiss/withdraw vs fulfill | 一个事务先完成；关闭先发生时动作稳定返回 `wanted_response_round_closed`。 |
+| Concurrency | 两个 respond 同 wanted/epoch/offer | 恰好一行成功，另一请求重放或冲突。 |
+| Authorization | cross-campus、非本人、membership revoked | 不泄露目标；保持 404/403 契约，任何失败都不改变 response。 |
+| Flutter | current/closed、nullable legacy、显式空 actions、coded 409 | 服务端 `available_actions` 优先；NULL/closed fail-closed；409 冻结旧行并刷新 listing 与 responses。 |
 
 ## 用户、隐私和主页测试
 
@@ -320,6 +340,8 @@ node scripts/codex_browser_api_driver.mjs call-secret
 ### 灰度与回滚
 
 - 新 schema 兼容旧应用，新应用也能读取迁移期数据。
+- wanted epoch migration 中，ambiguous legacy response 保持 nullable/read-only；旧应用省略 response epoch 时由数据库 trigger 从锁定 wanted 派生，旧应用只更新 status 进行 relist 时也由 trigger 增加一个 epoch。
+- wanted 新旧版本混跑时检查统一的 `wanted -> offer -> response` 锁序、deadlock 数量和 `wanted_response_round_closed` 比例；应用 rollback 不删除 epoch、幂等列、索引或 trigger。
 - canary 对比错误率、延迟、outbox、Feed 和 Agent guardrail。
 - 应用 rollback 不回滚 migration，feature flag 可以关闭新排序和 Agent 写动作。
 - 任一 API replica 下线后，持久消息和通知不丢，客户端可补偿读取。

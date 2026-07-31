@@ -1137,6 +1137,12 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get wantedResponseRoundClosedToast => '这条推荐所属的需求轮次已关闭，现仅供查看。';
+
+  @override
+  String get wantedResponseClosedRoundLabel => '需求轮次已关闭 · 仅供查看';
+
+  @override
   String get wantedResponseAcceptedToast => '已接受这条推荐';
 
   @override

@@ -113,8 +113,10 @@ class ListingService extends BaseService {
     required String wantedId,
     required String offerListingId,
     String? message,
+    String? idempotencyKey,
   }) async {
     final headers = await authHeaders();
+    headers['Idempotency-Key'] = idempotencyKey ?? const Uuid().v4();
     final response = await post(
       Uri.parse('$baseUrl/api/listings/$wantedId/responses'),
       headers,

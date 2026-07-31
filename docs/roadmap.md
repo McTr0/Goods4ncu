@@ -33,7 +33,7 @@
 - Agent 写工具已接入统一 ActionPlan 确认协议（模型只能提出、用户确认才执行，L3 需二次确认）；资源版本快照仍待补。
 - WebSocket 跨副本投递已具备（Redis fan-out，双实例端到端验证）；typing/call signaling 多副本化与压测仍待做。outbox 基础与通知推送已持久化，其余事件消费者仍在进程内。
 - 媒体隔离、审核公开门槛、缩略图和 Base64 退出不完整；案件事实层已具备，但对象存储隔离仍需生产化。
-- API 缺少统一版本和 cursor；[已实现] 未版本化接口已有兼容旧客户端的稳定错误字段、服务端 request ID，以及 listing 发布幂等，其他写接口仍需收敛。
+- API 缺少统一版本和 cursor；[已实现] 未版本化接口已有兼容旧客户端的稳定错误字段、服务端 request ID，以及 listing 发布、wanted response 和成交确认幂等，其他写接口仍需收敛。
 - 首页商品 feed、相似商品、listing wanted matches 与意图撮合均已有统一解释和显式反馈控制；离线质量评估、公平性指标与跨表达软排序仍不足。
 - Secret Chat 与服务器可治理通信目标冲突。
 - 备份恢复、密钥管理、SLO、告警和事故演练未闭环。
@@ -82,6 +82,7 @@
 
 - [已实现] 当前 `/api/*` 响应提供 `X-Request-ID`，业务错误和框架拒绝提供稳定 `code/message/trace_id`，同时保留旧 `error` 字符串。
 - [已实现] `POST /api/listings` 支持 `Idempotency-Key`，同用户同 key 同内容只创建一次，不同内容返回冲突。
+- [已实现] `POST /api/listings/{id}/responses` 支持 responder 范围 `Idempotency-Key` 与 `replayed`；同 key 同内容重放原 response，同 key 改内容冲突且不重复通知。
 - [已实现] `POST /api/orders/{id}/confirm` 支持卖家范围内的 `Idempotency-Key`；重复确认不会重复下架，同 key 改变确认参数会安全冲突。
 - [目标态] 定义 `/api/v1` 嵌套错误对象和 cursor pagination，并把幂等扩展到联系、成交和 Agent confirm 等其余关键写接口。
 - 兼容未版本化接口，记录使用量并制定弃用窗口。
@@ -124,10 +125,12 @@
 
 ### 信息生命周期
 
-- [已实现] wanted fulfilled/reopen：`POST /api/listings/{id}/fulfill` 由所有者把收物需求置为 `fulfilled`（条件状态转移，`0040` 同时为 `inventory.status` 建立 CHECK 并归一化旧 `takedown` 值）；`relist` 可重新开启。移动端详情页在确认后完成需求，“我的发布”读取 `status=all`、标记非 active 状态，使用户离开详情后仍能找回并重开。
-- [已实现] Response 用户动作：requester 可在 wanted 详情查看并 accept/dismiss，responder 可查看 sent history 并 withdraw（`/api/wanted-responses/{id}/*`）。动作事务内锁定 response/wanted/offer 并从 `pending` 单赢转移；accept 要求 wanted+offer active，dismiss 要求 wanted active，withdraw 保持 pending-only。列表和动作都由 `VerifiedTenant` 限定活动校园；动作通知携带 wanted 目标，可从通知回到详情。
-- [已实现] wanted 完成后停止新匹配（feed/匹配/响应均按 `active` 过滤），已有 Thread、Response 和 DealRecord 保留并有回归覆盖；pending 响应者会收到完成通知。
-- [下一步] 给 wanted reopen 引入 lifecycle epoch：关闭时冻结旧 pending response，重开后旧轮次只读，同时允许同一 offer 在新轮次重新响应；response 创建加入幂等 key，并与 wanted active 校验在同一事务完成。
+- [已实现] wanted fulfilled/delete/reopen：`POST /api/listings/{id}/fulfill` 与 owner delete 在事务中锁定 wanted 并关闭当前轮；`relist` 可重新开启，同时把 `inventory.lifecycle_epoch` 恰好增加一。移动端详情页在确认后完成需求，“我的发布”读取 `status=all`、标记非 active 状态，使用户离开详情后仍能找回并重开。
+- [已实现] Response 轮次隔离：`wanted_responses.lifecycle_epoch` 捕获创建轮次，`NULL` 保留无法证明轮次的 legacy history；列表返回派生的 `round_state=current|closed` 与服务端权威 `available_actions`。wanted 非 active、epoch 不匹配或 NULL 时，即使 response 事实状态仍为 pending 也只读；旧轮动作稳定返回 `409 wanted_response_round_closed`。
+- [已实现] Response 用户动作：requester 可在当前 active 轮 accept/dismiss，responder 可在当前 active 轮 withdraw（`/api/wanted-responses/{id}/*`）。统一锁序为 `wanted -> offer -> response`；accept 要求 offer active，dismiss/withdraw 可处理 inactive offer，但三者都不能越过 wanted/epoch 边界。列表和动作由 `VerifiedTenant` 限定活动校园，动作通知携带 wanted 目标。
+- [已实现] 同一 offer 在同一 wanted epoch 只能响应一次，终态后也不能重建；新 epoch 可再次响应。创建接口支持 `Idempotency-Key/replayed`，并在同一事务锁定 wanted/offer、验证 active 与校园后由服务端派生 epoch。
+- [已实现] `0055` 保持滚动兼容：ambiguous legacy response 维持 nullable/read-only，数据库 trigger 为旧应用 INSERT 派生 epoch，并为只更新 status 的旧 relist 增加 epoch；应用 rollback 不回滚 migration。
+- [已实现] wanted 完成后停止新匹配（feed/匹配/响应均按 `active` 过滤），已有 Thread、Response 和 DealRecord 保留；当前轮 pending 响应者收到完成通知，但完成后不能继续 withdraw。
 - 品牌“不限”改为结构化空值/偏好，不把展示词当数据事实。
 
 ### 召回与排序
@@ -148,7 +151,7 @@
 
 ### 退出门槛
 
-- [已实现] wanted/offer 的创建、匹配、响应（含 accept/dismiss/withdraw）、完成和重新开启已有后端端到端回归。真实双账号浏览器已完成：结构化创建 wanted → seller 从校园 feed 发现 → 推荐三件 active offer → withdraw → requester 从通知进入并 accept/dismiss → 打开 accepted offer → 确认 fulfill → 从“个人→我的发布”找回 fulfilled wanted → reopen → seller 从状态通知回到详情。Flutter 组件另以 `390x844`、200% 文字缩放覆盖动作换行，无溢出。
+- [已实现] wanted/offer 的创建、匹配、幂等响应、accept/dismiss/withdraw、完成、删除、轮次冻结和重新开启已有后端/Flutter 自动回归；覆盖 nullable legacy、显式空 `available_actions`、coded 409 刷新与同轮唯一性。真实双账号浏览器基线路径已完成；epoch 增量验收矩阵还要求保留一条 pending 至 fulfill、确认旧轮无 withdraw，再用同一 offer 在新轮响应一次，并继续覆盖 `390x844`、200% 文字缩放和无溢出。
 - 硬约束违反率为零；没有 embedding 时关键词和条件 fallback 可用。
 - [已实现] 商品首页、相似商品、listing wanted matches 与意图 feed/matches 的当前移动端路径都有用户可理解原因和反馈入口；未知机器 code 不直接展示。
 - 新排序在质量、信任和公平 guardrail 上不劣于基线。

@@ -6,6 +6,7 @@ import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/pages/listing_detail_page.dart';
 import 'package:goods4ncu_mobile/services/api_service.dart';
+import 'package:goods4ncu_mobile/services/base_service.dart';
 import 'package:goods4ncu_mobile/services/chat_service.dart';
 import 'package:goods4ncu_mobile/services/content_report_service.dart';
 import 'package:goods4ncu_mobile/services/feed_feedback_service.dart';
@@ -20,16 +21,27 @@ class _ListingApiService extends ApiService {
     this.wantedMatches = const [],
     List<WantedResponse> wantedResponses = const [],
     this.failWantedAction = false,
+    this.wantedActionConflictCode,
+    this.listingAfterWantedActionConflict,
+    this.userListingItems = const [],
+    this.wantedRecommendationFailuresRemaining = 0,
   }) : wantedResponses = List.of(wantedResponses);
 
-  final Listing listing;
+  Listing listing;
   final String? currentUserId;
   final List<Listing> wantedMatches;
   final List<WantedResponse> wantedResponses;
   final bool failWantedAction;
+  final String? wantedActionConflictCode;
+  final Listing? listingAfterWantedActionConflict;
+  final List<Map<String, dynamic>> userListingItems;
+  int wantedRecommendationFailuresRemaining;
   final List<String> wantedResponseActions = [];
+  final List<String?> wantedRecommendationIdempotencyKeys = [];
   String? wantedResponseRole;
   String? wantedResponseListingId;
+  int listingDetailCalls = 0;
+  int wantedResponseListCalls = 0;
   int fulfillCalls = 0;
   int relistCalls = 0;
 
@@ -37,7 +49,10 @@ class _ListingApiService extends ApiService {
   Future<String?> getToken() async => currentUserId == null ? null : 'token';
 
   @override
-  Future<Listing> getListingDetail(String id) async => listing;
+  Future<Listing> getListingDetail(String id) async {
+    listingDetailCalls += 1;
+    return listing;
+  }
 
   @override
   Future<ListingsResponse> getWantedMatches(String wantedId) async =>
@@ -57,10 +72,11 @@ class _ListingApiService extends ApiService {
     int limit = 20,
     int offset = 0,
   }) async {
+    wantedResponseListCalls += 1;
     wantedResponseRole = role;
     wantedResponseListingId = wantedListingId;
     return WantedResponsesResponse(
-      items: wantedResponses,
+      items: List<WantedResponse>.of(wantedResponses),
       total: wantedResponses.length,
       limit: limit,
       offset: offset,
@@ -86,21 +102,23 @@ class _ListingApiService extends ApiService {
     wantedResponseActions.add('$status:$id');
     if (failWantedAction) throw Exception('offline');
     final index = wantedResponses.indexWhere((response) => response.id == id);
+    final conflictCode = wantedActionConflictCode;
+    if (conflictCode != null) {
+      if (index >= 0) {
+        wantedResponses[index] = wantedResponses[index].copyWith(
+          roundState: 'closed',
+          availableActions: const <String>{},
+        );
+      }
+      if (listingAfterWantedActionConflict != null) {
+        listing = listingAfterWantedActionConflict!;
+      }
+      throw ConflictException('round closed', conflictCode);
+    }
     if (index >= 0) {
       final response = wantedResponses[index];
-      wantedResponses[index] = WantedResponse(
-        id: response.id,
-        wantedListingId: response.wantedListingId,
-        wantedTitle: response.wantedTitle,
-        wantedStatus: response.wantedStatus,
-        offerListingId: response.offerListingId,
-        offerTitle: response.offerTitle,
-        offerStatus: response.offerStatus,
-        responderId: response.responderId,
-        requesterId: response.requesterId,
-        message: response.message,
+      wantedResponses[index] = response.copyWith(
         status: status,
-        createdAt: response.createdAt,
         respondedAt: DateTime.utc(2026, 7, 30),
       );
     }
@@ -121,6 +139,35 @@ class _ListingApiService extends ApiService {
   Future<Map<String, dynamic>> getUserProfile() async {
     if (currentUserId == null) throw StateError('guest has no profile');
     return {'user_id': currentUserId, 'username': 'owner'};
+  }
+
+  @override
+  Future<Map<String, dynamic>> getUserListings({
+    int limit = 20,
+    int offset = 0,
+    String? status,
+  }) async {
+    return {
+      'items': userListingItems,
+      'total': userListingItems.length,
+      'limit': limit,
+      'offset': offset,
+    };
+  }
+
+  @override
+  Future<String> recommendOfferForWanted({
+    required String wantedId,
+    required String offerListingId,
+    String? message,
+    String? idempotencyKey,
+  }) async {
+    wantedRecommendationIdempotencyKeys.add(idempotencyKey);
+    if (wantedRecommendationFailuresRemaining > 0) {
+      wantedRecommendationFailuresRemaining -= 1;
+      throw Exception('offline');
+    }
+    return 'recommended';
   }
 }
 
@@ -253,6 +300,10 @@ Listing _wantedListing({
 WantedResponse _wantedResponse({
   String status = 'pending',
   String wantedStatus = 'active',
+  int? lifecycleEpoch,
+  int? currentLifecycleEpoch,
+  String? roundState,
+  Set<String>? availableActions,
 }) {
   return WantedResponse(
     id: 'response-1',
@@ -267,6 +318,10 @@ WantedResponse _wantedResponse({
     message: '可以在前湖校区当面试键',
     status: status,
     createdAt: DateTime.utc(2026, 7, 30),
+    lifecycleEpoch: lifecycleEpoch,
+    currentLifecycleEpoch: currentLifecycleEpoch,
+    roundState: roundState,
+    availableActions: availableActions,
   );
 }
 
@@ -550,7 +605,12 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(390, 1600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final wanted = _wantedListing();
-    final response = _wantedResponse();
+    final response = _wantedResponse(
+      lifecycleEpoch: 1,
+      currentLifecycleEpoch: 1,
+      roundState: 'current',
+      availableActions: const {'accept', 'dismiss'},
+    );
     final api = _ListingApiService(
       listing: wanted,
       currentUserId: 'requester-1',
@@ -634,12 +694,18 @@ void main() {
   });
 
   testWidgets(
-    'responder can withdraw history while a fulfilled wanted hides recommend',
+    'fulfilled wanted keeps closed-round response history read-only',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(390, 1600));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final wanted = _wantedListing(status: 'fulfilled');
-      final response = _wantedResponse(wantedStatus: 'fulfilled');
+      final response = _wantedResponse(
+        wantedStatus: 'fulfilled',
+        lifecycleEpoch: 1,
+        currentLifecycleEpoch: 1,
+        roundState: 'closed',
+        availableActions: const <String>{},
+      );
       final api = _ListingApiService(
         listing: wanted,
         currentUserId: 'responder-1',
@@ -661,19 +727,210 @@ void main() {
       expect(api.wantedResponseRole, 'responder');
       expect(find.text(l.recommendMyOffer), findsNothing);
       expect(find.text(l.wantedClosedResponderHint), findsOneWidget);
-      final withdraw = find.byKey(
-        const ValueKey('wanted-response-withdraw-response-1'),
+      expect(find.text(l.wantedResponseClosedRoundLabel), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('wanted-response-withdraw-response-1')),
+        findsNothing,
+      );
+      expect(api.wantedResponseActions, isEmpty);
+    },
+  );
+
+  testWidgets('current-round responder can withdraw a sent recommendation', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final wanted = _wantedListing();
+    final response = _wantedResponse(
+      lifecycleEpoch: 2,
+      currentLifecycleEpoch: 2,
+      roundState: 'current',
+      availableActions: const {'withdraw'},
+    );
+    final api = _ListingApiService(
+      listing: wanted,
+      currentUserId: 'responder-1',
+      wantedResponses: [response],
+    );
+
+    await tester.pumpWidget(
+      _buildDetail(
+        listing: wanted,
+        currentUserId: 'responder-1',
+        apiService: api,
+      ),
+    );
+    await tester.pumpAndSettle();
+    final withdraw = find.byKey(
+      const ValueKey('wanted-response-withdraw-response-1'),
+    );
+    await tester.scrollUntilVisible(
+      withdraw,
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(withdraw);
+    await tester.pumpAndSettle();
+
+    expect(api.wantedResponseActions, ['withdrawn:response-1']);
+    final l = AppLocalizations.of(
+      tester.element(find.byType(ListingDetailPage)),
+    )!;
+    expect(find.text(l.wantedResponseStatusWithdrawn), findsOneWidget);
+  });
+
+  testWidgets(
+    'reopened wanted keeps the previous response read-only but allows a new recommendation',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final wanted = _wantedListing();
+      final response = _wantedResponse(
+        lifecycleEpoch: 1,
+        currentLifecycleEpoch: 2,
+        roundState: 'closed',
+        availableActions: const <String>{},
+      );
+      final api = _ListingApiService(
+        listing: wanted,
+        currentUserId: 'responder-1',
+        wantedResponses: [response],
+      );
+
+      await tester.pumpWidget(
+        _buildDetail(
+          listing: wanted,
+          currentUserId: 'responder-1',
+          apiService: api,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final l = AppLocalizations.of(
+        tester.element(find.byType(ListingDetailPage)),
+      )!;
+
+      expect(find.text(l.wantedResponseClosedRoundLabel), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('wanted-response-withdraw-response-1')),
+        findsNothing,
+      );
+      expect(find.text(l.recommendMyOffer), findsOneWidget);
+    },
+  );
+
+  testWidgets('wanted recommendation retry reuses its idempotency key', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final wanted = _wantedListing();
+    final api = _ListingApiService(
+      listing: wanted,
+      currentUserId: 'responder-1',
+      wantedRecommendationFailuresRemaining: 1,
+      userListingItems: const [
+        {
+          'id': 'offer-retry',
+          'title': '可重试的机械键盘',
+          'category': 'electronics',
+          'brand': 'NCU',
+          'direction': 'offer',
+          'condition_score': 8,
+          'suggested_price_cny': 120,
+          'status': 'active',
+          'owner_id': 'responder-1',
+        },
+      ],
+    );
+
+    await tester.pumpWidget(
+      _buildDetail(
+        listing: wanted,
+        currentUserId: 'responder-1',
+        apiService: api,
+      ),
+    );
+    await tester.pumpAndSettle();
+    final l = AppLocalizations.of(
+      tester.element(find.byType(ListingDetailPage)),
+    )!;
+
+    Future<void> recommendOnce() async {
+      await tester.tap(find.text(l.recommendMyOffer));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('可重试的机械键盘'));
+      await tester.pumpAndSettle();
+    }
+
+    await recommendOnce();
+    expect(find.textContaining('offline'), findsOneWidget);
+    expect(api.wantedRecommendationIdempotencyKeys, hasLength(1));
+    final firstKey = api.wantedRecommendationIdempotencyKeys.single;
+    expect(firstKey, isNotNull);
+    expect(firstKey, isNotEmpty);
+
+    await recommendOnce();
+    expect(api.wantedRecommendationIdempotencyKeys, hasLength(2));
+    expect(api.wantedRecommendationIdempotencyKeys.last, firstKey);
+  });
+
+  testWidgets(
+    'closed-round conflict refreshes detail and leaves the row read-only',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final wanted = _wantedListing();
+      final response = _wantedResponse(
+        lifecycleEpoch: 2,
+        currentLifecycleEpoch: 2,
+        roundState: 'current',
+        availableActions: const {'accept', 'dismiss'},
+      );
+      final api = _ListingApiService(
+        listing: wanted,
+        currentUserId: 'requester-1',
+        wantedResponses: [response],
+        wantedActionConflictCode: 'wanted_response_round_closed',
+        listingAfterWantedActionConflict: _wantedListing(status: 'fulfilled'),
+      );
+
+      await tester.pumpWidget(
+        _buildDetail(
+          listing: wanted,
+          currentUserId: 'requester-1',
+          apiService: api,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final l = AppLocalizations.of(
+        tester.element(find.byType(ListingDetailPage)),
+      )!;
+      final accept = find.byKey(
+        const ValueKey('wanted-response-accept-response-1'),
       );
       await tester.scrollUntilVisible(
-        withdraw,
+        accept,
         250,
         scrollable: find.byType(Scrollable).first,
       );
-      await tester.tap(withdraw);
+      await tester.tap(accept);
       await tester.pumpAndSettle();
 
-      expect(api.wantedResponseActions, ['withdrawn:response-1']);
-      expect(find.text(l.wantedResponseStatusWithdrawn), findsOneWidget);
+      expect(api.wantedResponseActions, ['accepted:response-1']);
+      expect(api.listingDetailCalls, 2);
+      expect(api.wantedResponseListCalls, 2);
+      expect(find.text(l.wantedResponseRoundClosedToast), findsOneWidget);
+      expect(find.text(l.wantedResponseClosedRoundLabel), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('wanted-response-accept-response-1')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('wanted-response-dismiss-response-1')),
+        findsNothing,
+      );
+      expect(find.text(l.reopenWantedAction), findsOneWidget);
     },
   );
 

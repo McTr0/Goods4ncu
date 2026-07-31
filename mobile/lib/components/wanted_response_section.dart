@@ -199,6 +199,34 @@ class _WantedResponseCard extends StatelessWidget {
                 fontWeight: FontWeight.w600,
               ),
             ),
+            if (response.isPending && response.isClosedRound) ...[
+              const SizedBox(height: AppTheme.sp12),
+              Container(
+                key: ValueKey('wanted-response-closed-round-${response.id}'),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppTheme.sp12,
+                  vertical: AppTheme.sp8,
+                ),
+                decoration: BoxDecoration(
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.65),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                  border: Border.all(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.outline.withValues(alpha: 0.25),
+                  ),
+                ),
+                child: Text(
+                  l.wantedResponseClosedRoundLabel,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
             if (response.message != null) ...[
               const SizedBox(height: AppTheme.sp12),
               Container(
@@ -244,7 +272,7 @@ class _WantedResponseCard extends StatelessWidget {
                       icon: const Icon(Icons.open_in_new, size: 18),
                       label: Text(l.wantedResponseOpenOfferAction),
                     ),
-                  if (response.isPending &&
+                  if (response.canAccept &&
                       role == WantedResponseRole.requester &&
                       onAccept != null)
                     FilledButton.tonalIcon(
@@ -253,7 +281,7 @@ class _WantedResponseCard extends StatelessWidget {
                       icon: const Icon(Icons.check_rounded, size: 18),
                       label: Text(l.wantedResponseAcceptAction),
                     ),
-                  if (response.isPending &&
+                  if (response.canDismiss &&
                       role == WantedResponseRole.requester &&
                       onDismiss != null)
                     OutlinedButton.icon(
@@ -262,7 +290,7 @@ class _WantedResponseCard extends StatelessWidget {
                       icon: const Icon(Icons.close_rounded, size: 18),
                       label: Text(l.wantedResponseDismissAction),
                     ),
-                  if (response.isPending &&
+                  if (response.canWithdraw &&
                       role == WantedResponseRole.responder &&
                       onWithdraw != null)
                     OutlinedButton.icon(
@@ -288,10 +316,12 @@ class _WantedResponseCard extends StatelessWidget {
 
   bool _hasActions(bool canOpenOffer) {
     if (canOpenOffer) return true;
-    if (!response.isPending) return false;
     return switch (role) {
-      WantedResponseRole.requester => onAccept != null || onDismiss != null,
-      WantedResponseRole.responder => onWithdraw != null,
+      WantedResponseRole.requester =>
+        (response.canAccept && onAccept != null) ||
+            (response.canDismiss && onDismiss != null),
+      WantedResponseRole.responder =>
+        response.canWithdraw && onWithdraw != null,
     };
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:goods4ncu_mobile/services/base_service.dart';
 import 'package:goods4ncu_mobile/services/listing_service.dart';
 import 'package:http/http.dart' as http;
 
@@ -9,6 +10,7 @@ class _FakeListingService extends ListingService {
   Uri? lastUri;
   String? lastBody;
   String? lastMethod;
+  Map<String, String>? lastHeaders;
 
   @override
   String get baseUrl => 'https://api.test';
@@ -36,6 +38,7 @@ class _FakeListingService extends ListingService {
     lastMethod = 'POST';
     lastUri = url;
     lastBody = body;
+    lastHeaders = Map<String, String>.from(headers);
     return response;
   }
 }
@@ -57,6 +60,10 @@ void main() {
                 'offer_title': '高数教材',
                 'offer_status': 'active',
                 'status': 'pending',
+                'lifecycle_epoch': '2',
+                'current_lifecycle_epoch': 3,
+                'round_state': 'closed',
+                'available_actions': <String>[],
               },
             ],
             'total': 6,
@@ -85,6 +92,10 @@ void main() {
         'status': 'pending',
       });
       expect(result.items.single.offerTitle, '高数教材');
+      expect(result.items.single.lifecycleEpoch, 2);
+      expect(result.items.single.currentLifecycleEpoch, 3);
+      expect(result.items.single.isClosedRound, isTrue);
+      expect(result.items.single.availableActions, isEmpty);
       expect(result.total, 6);
       expect(result.limit, 5);
       expect(result.offset, 5);
@@ -125,4 +136,77 @@ void main() {
       expect(withdrawn.status, 'withdrawn');
     },
   );
+
+  test('wanted recommendation sends a stable idempotency key', () async {
+    final service = _FakeListingService()
+      ..response = http.Response(
+        jsonEncode({'message': '已推荐给需求方'}),
+        200,
+        headers: {'content-type': 'application/json; charset=utf-8'},
+      );
+
+    final result = await service.recommendOfferForWanted(
+      wantedId: 'wanted-1',
+      offerListingId: 'offer-1',
+      message: '  可以看看  ',
+      idempotencyKey: 'wanted-response-attempt-1',
+    );
+
+    expect(result, '已推荐给需求方');
+    expect(service.lastMethod, 'POST');
+    expect(service.lastUri?.path, '/api/listings/wanted-1/responses');
+    expect(
+      service.lastHeaders?['Idempotency-Key'],
+      'wanted-response-attempt-1',
+    );
+    expect(jsonDecode(service.lastBody!), {
+      'offer_listing_id': 'offer-1',
+      'message': '可以看看',
+    });
+
+    await service.recommendOfferForWanted(
+      wantedId: 'wanted-1',
+      offerListingId: 'offer-1',
+    );
+    expect(service.lastHeaders?['Idempotency-Key'], isNotEmpty);
+  });
+
+  test('wanted action conflict preserves the stable server code', () async {
+    final service = _FakeListingService()
+      ..response = http.Response(
+        jsonEncode({
+          'code': 'wanted_response_round_closed',
+          'message': 'round closed',
+        }),
+        409,
+      );
+
+    await expectLater(
+      service.acceptWantedResponse('response-1'),
+      throwsA(
+        isA<ConflictException>()
+            .having(
+              (error) => error.serverCode,
+              'serverCode',
+              'wanted_response_round_closed',
+            )
+            .having((error) => error.message, 'message', 'round closed'),
+      ),
+    );
+
+    service.response = http.Response(
+      jsonEncode({'message': 'legacy conflict'}),
+      409,
+    );
+    await expectLater(
+      service.dismissWantedResponse('response-1'),
+      throwsA(
+        isA<ConflictException>().having(
+          (error) => error.serverCode,
+          'serverCode',
+          isNull,
+        ),
+      ),
+    );
+  });
 }

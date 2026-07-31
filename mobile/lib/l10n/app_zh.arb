@@ -437,6 +437,8 @@
       }
     }
   },
+  "wantedResponseRoundClosedToast": "这条推荐所属的需求轮次已关闭，现仅供查看。",
+  "wantedResponseClosedRoundLabel": "需求轮次已关闭 · 仅供查看",
   "wantedResponseAcceptedToast": "已接受这条推荐",
   "wantedResponseDismissedToast": "已忽略这条推荐",
   "wantedResponseWithdrawnToast": "已撤回这条推荐",

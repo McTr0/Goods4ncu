@@ -1179,6 +1179,14 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get wantedResponseRoundClosedToast =>
+      'This recommendation belongs to a closed request round and is now read-only.';
+
+  @override
+  String get wantedResponseClosedRoundLabel =>
+      'Closed request round · Read-only';
+
+  @override
   String get wantedResponseAcceptedToast => 'Recommendation accepted';
 
   @override

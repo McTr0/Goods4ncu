@@ -1176,7 +1176,7 @@ pub async fn takedown_listing(
         .ok_or(ApiError::NotFound)?;
     state
         .listing_repo
-        .delete(&listing_id, &listing.owner_id)
+        .delete(&listing_id, &listing.owner_id, scope.campus_id)
         .await?;
     record_audit(
         &state,

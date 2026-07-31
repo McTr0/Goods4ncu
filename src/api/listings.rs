@@ -5,6 +5,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use sqlx::Row;
 
 use crate::api::error::ApiError;
 use crate::api::request_context::idempotency_key_from_headers;
@@ -144,6 +145,7 @@ pub struct WantedResponseRequest {
 pub struct WantedResponseResult {
     pub id: String,
     pub message: String,
+    pub replayed: bool,
 }
 
 #[derive(Deserialize)]
@@ -175,6 +177,25 @@ fn create_listing_request_hash(input: &CreateListingInput) -> Result<String, Api
     let canonical = serde_json::to_vec(input).map_err(|e| {
         ApiError::Internal(anyhow::anyhow!(
             "Failed to serialize normalized listing input: {}",
+            e
+        ))
+    })?;
+    Ok(hex::encode(Sha256::digest(canonical)))
+}
+
+fn wanted_response_request_hash(
+    wanted_listing_id: &str,
+    offer_listing_id: &str,
+    message: Option<&str>,
+) -> Result<String, ApiError> {
+    let canonical = serde_json::to_vec(&serde_json::json!({
+        "wanted_listing_id": wanted_listing_id,
+        "offer_listing_id": offer_listing_id,
+        "message": message,
+    }))
+    .map_err(|e| {
+        ApiError::Internal(anyhow::anyhow!(
+            "Failed to serialize normalized wanted response input: {}",
             e
         ))
     })?;
@@ -516,48 +537,11 @@ pub async fn get_wanted_matches(
 /// POST /api/listings/:id/responses — recommend one of my active offers to a wanted listing.
 pub async fn respond_to_wanted(
     State(state): State<AppState>,
-    Session(session): Session,
+    headers: HeaderMap,
+    tenant: VerifiedTenant,
     Path(id): Path<String>,
     Json(payload): Json<WantedResponseRequest>,
 ) -> Result<Json<WantedResponseResult>, ApiError> {
-    let wanted = state
-        .listing_repo
-        .find_by_id(&id)
-        .await?
-        .ok_or(ApiError::NotFound)?;
-
-    let tenant = CampusService::new(state.infra.db.clone())
-        .require_shared_verified_campus_for_session(
-            &session.user_id,
-            &wanted.owner_id,
-            session.campus_id,
-        )
-        .await?;
-    if tenant.campus_id != wanted.campus_id {
-        return Err(ApiError::CampusScopeMismatch);
-    }
-    let offer = state
-        .listing_repo
-        .find_by_id(&payload.offer_listing_id)
-        .await?
-        .ok_or(ApiError::NotFound)?;
-
-    if wanted.direction != "wanted" || wanted.status != "active" {
-        return Err(ApiError::BadRequest("这不是可响应的收物需求".to_string()));
-    }
-    if offer.direction != "offer" || offer.status != "active" {
-        return Err(ApiError::BadRequest("只能推荐正在出的商品".to_string()));
-    }
-    if offer.campus_id != wanted.campus_id {
-        return Err(ApiError::CampusScopeMismatch);
-    }
-    if offer.owner_id != session.user_id {
-        return Err(ApiError::Forbidden);
-    }
-    if wanted.owner_id == session.user_id {
-        return Err(ApiError::BadRequest("不能给自己的需求推荐商品".to_string()));
-    }
-
     let message = payload
         .message
         .as_deref()
@@ -569,44 +553,209 @@ pub async fn respond_to_wanted(
             "推荐留言不能超过500个字符".to_string(),
         ));
     }
+    let idempotency_key = idempotency_key_from_headers(&headers)?;
+    let request_hash = idempotency_key
+        .as_ref()
+        .map(|_| {
+            wanted_response_request_hash(&id, payload.offer_listing_id.trim(), message.as_deref())
+        })
+        .transpose()?;
+    let user_id = &tenant.session.user_id;
+
+    let mut tx = state
+        .infra
+        .db
+        .begin()
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+    // A completed attempt replays even if the wanted has since closed or
+    // reopened. Idempotency describes the original mutation, not today's
+    // eligibility. The request hash prevents a key from changing meaning.
+    if let Some(key) = idempotency_key.as_deref() {
+        if let Some((existing_id, existing_hash)) =
+            sqlx::query_as::<_, (uuid::Uuid, Option<String>)>(
+                "SELECT id, idempotency_hash
+                 FROM wanted_responses
+                 WHERE campus_id = $1 AND responder_id = $2 AND idempotency_key = $3",
+            )
+            .bind(tenant.campus_id)
+            .bind(user_id)
+            .bind(key)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
+        {
+            if existing_hash.as_deref() != request_hash.as_deref() {
+                return Err(ApiError::Conflict(
+                    "Idempotency-Key 已用于不同的推荐内容".to_string(),
+                ));
+            }
+            tx.commit()
+                .await
+                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+            return Ok(Json(WantedResponseResult {
+                id: existing_id.to_string(),
+                message: "已推荐给需求方".to_string(),
+                replayed: true,
+            }));
+        }
+    }
+
+    // All lifecycle mutations lock the wanted row first. Response actions use
+    // the same wanted -> offer -> response order, preventing a create/fulfill/
+    // reopen race from validating one round and writing into another.
+    let wanted = sqlx::query(
+        "SELECT id, title, owner_id, status, direction, lifecycle_epoch
+         FROM inventory
+         WHERE id = $1 AND campus_id = $2
+         FOR UPDATE",
+    )
+    .bind(&id)
+    .bind(tenant.campus_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
+    .ok_or(ApiError::NotFound)?;
+    let wanted_id: String = wanted.get("id");
+    let wanted_title: String = wanted.get("title");
+    let wanted_owner_id: String = wanted.get("owner_id");
+    let wanted_status: String = wanted.get("status");
+    let wanted_direction: String = wanted.get("direction");
+    let lifecycle_epoch: i64 = wanted.get("lifecycle_epoch");
+
+    if wanted_direction != "wanted" || wanted_status != "active" {
+        return Err(ApiError::BadRequest("这不是可响应的收物需求".to_string()));
+    }
+    if wanted_owner_id == *user_id {
+        return Err(ApiError::BadRequest("不能给自己的需求推荐商品".to_string()));
+    }
+
+    // Preserve the existing "both people are verified in the same active
+    // campus" trust boundary while keeping the listing state decision inside
+    // this transaction.
+    let requester_is_verified: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1
+            FROM campus_memberships AS membership
+            JOIN campuses AS campus
+              ON campus.id = membership.campus_id AND campus.status = 'active'
+            WHERE membership.campus_id = $1
+              AND membership.user_id = $2
+              AND membership.status = 'verified'
+         )",
+    )
+    .bind(tenant.campus_id)
+    .bind(&wanted_owner_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    if !requester_is_verified {
+        return Err(ApiError::CampusScopeMismatch);
+    }
+
+    let offer = sqlx::query(
+        "SELECT id, title, owner_id, status, direction
+         FROM inventory
+         WHERE id = $1 AND campus_id = $2
+         FOR UPDATE",
+    )
+    .bind(payload.offer_listing_id.trim())
+    .bind(tenant.campus_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
+    .ok_or(ApiError::NotFound)?;
+    let offer_id: String = offer.get("id");
+    let offer_title: String = offer.get("title");
+    let offer_owner_id: String = offer.get("owner_id");
+    let offer_status: String = offer.get("status");
+    let offer_direction: String = offer.get("direction");
+
+    if offer_direction != "offer" || offer_status != "active" {
+        return Err(ApiError::BadRequest("只能推荐正在出的商品".to_string()));
+    }
+    if offer_owner_id != *user_id {
+        return Err(ApiError::Forbidden);
+    }
 
     let inserted = sqlx::query_scalar::<_, uuid::Uuid>(
         r#"
         INSERT INTO wanted_responses (
-            campus_id, wanted_listing_id, offer_listing_id, responder_id, requester_id, message
+            campus_id, wanted_listing_id, offer_listing_id, responder_id,
+            requester_id, message, lifecycle_epoch,
+            idempotency_key, idempotency_hash
         )
-        VALUES ($1, $2, $3, $4, $5, $6)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT DO NOTHING
         RETURNING id
         "#,
     )
-    .bind(wanted.campus_id)
-    .bind(&wanted.id)
-    .bind(&offer.id)
-    .bind(&session.user_id)
-    .bind(&wanted.owner_id)
+    .bind(tenant.campus_id)
+    .bind(&wanted_id)
+    .bind(&offer_id)
+    .bind(user_id)
+    .bind(&wanted_owner_id)
     .bind(&message)
-    .fetch_one(&state.infra.db)
+    .bind(lifecycle_epoch)
+    .bind(idempotency_key.as_deref())
+    .bind(request_hash.as_deref())
+    .fetch_optional(&mut *tx)
     .await
-    .map_err(|e| {
-        if e.as_database_error()
-            .and_then(|db| db.code())
-            .is_some_and(|code| code == "23505")
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+    let (response_id, replayed) = if let Some(response_id) = inserted {
+        (response_id, false)
+    } else if let Some(key) = idempotency_key.as_deref() {
+        match sqlx::query_as::<_, (uuid::Uuid, Option<String>)>(
+            "SELECT id, idempotency_hash
+             FROM wanted_responses
+             WHERE campus_id = $1 AND responder_id = $2 AND idempotency_key = $3",
+        )
+        .bind(tenant.campus_id)
+        .bind(user_id)
+        .bind(key)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
         {
-            ApiError::BadRequest("已经推荐过这件商品".to_string())
-        } else {
-            ApiError::Internal(anyhow::anyhow!("DB error: {}", e))
+            Some((existing_id, existing_hash))
+                if existing_hash.as_deref() == request_hash.as_deref() =>
+            {
+                (existing_id, true)
+            }
+            Some(_) => {
+                return Err(ApiError::Conflict(
+                    "Idempotency-Key 已用于不同的推荐内容".to_string(),
+                ))
+            }
+            None => return Err(ApiError::BadRequest("本轮已经推荐过这件商品".to_string())),
         }
-    })?;
+    } else {
+        return Err(ApiError::BadRequest("本轮已经推荐过这件商品".to_string()));
+    };
+
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+    if replayed {
+        return Ok(Json(WantedResponseResult {
+            id: response_id.to_string(),
+            message: "已推荐给需求方".to_string(),
+            replayed: true,
+        }));
+    }
 
     // Discretionary: posting a wanted listing invites answers, but nothing
     // stops one person recommending fifty different items to it, so the push
     // is budgeted. Over budget the recommendation still lands in the inbox —
     // it is the interruption that is rationed, not the message.
-    let reason = format!("你在找“{}”，有人推荐了“{}”", wanted.title, offer.title);
+    let reason = format!("你在找“{}”，有人推荐了“{}”", wanted_title, offer_title);
     let decision = crate::services::interruption::InterruptionService::new(state.infra.db.clone())
         .request(crate::services::interruption::InterruptionRequest {
-            campus_id: wanted.campus_id,
-            user_id: &wanted.owner_id,
+            campus_id: tenant.campus_id,
+            user_id: &wanted_owner_id,
             channel: "in_app",
             topic: crate::services::interruption::topics::WANTED_RESPONSE,
             reason: &reason,
@@ -620,7 +769,7 @@ pub async fn respond_to_wanted(
         Ok(decision) => {
             if let crate::services::interruption::Decision::Withheld { reason, .. } = &decision {
                 tracing::debug!(
-                    ?reason, wanted_id = %wanted.id,
+                    ?reason, wanted_id = %wanted_id,
                     "wanted response held back from push",
                 );
             }
@@ -629,7 +778,7 @@ pub async fn respond_to_wanted(
         Err(e) => {
             // Budget bookkeeping must never cost the user their
             // recommendation, and must never fail open into a spam vector.
-            tracing::warn!(%e, wanted_id = %wanted.id, "interruption budget check failed");
+            tracing::warn!(%e, wanted_id = %wanted_id, "interruption budget check failed");
             crate::services::interruption::Decision::Unavailable
         }
     };
@@ -640,25 +789,26 @@ pub async fn respond_to_wanted(
         .create_budgeted(
             &decision,
             NewNotification {
-                campus_id: wanted.campus_id,
-                user_id: &wanted.owner_id,
+                campus_id: tenant.campus_id,
+                user_id: &wanted_owner_id,
                 event_type: crate::services::interruption::topics::WANTED_RESPONSE,
                 title: "有人给你的收物需求推荐了商品",
-                body: &format!("“{}”收到一个匹配推荐：{}", wanted.title, offer.title),
+                body: &format!("“{}”收到一个匹配推荐：{}", wanted_title, offer_title),
                 related_order_id: None,
-                related_listing_id: Some(&wanted.id),
+                related_listing_id: Some(&wanted_id),
                 related_conversation_id: None,
                 related_space_id: None,
             },
         )
         .await
     {
-        tracing::warn!(%e, wanted_id = %wanted.id, offer_id = %offer.id, "Failed to create wanted response notification");
+        tracing::warn!(%e, wanted_id = %wanted_id, offer_id = %offer_id, "Failed to create wanted response notification");
     }
 
     Ok(Json(WantedResponseResult {
-        id: inserted.to_string(),
+        id: response_id.to_string(),
         message: "已推荐给需求方".to_string(),
+        replayed: false,
     }))
 }
 
@@ -669,61 +819,104 @@ pub async fn respond_to_wanted(
 /// records are preserved. `POST /api/listings/:id/relist` reopens it.
 pub async fn fulfill_wanted(
     State(state): State<AppState>,
-    Session(session): Session,
+    tenant: VerifiedTenant,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let listing = state
-        .listing_repo
-        .find_by_id(&id)
-        .await?
-        .ok_or(ApiError::NotFound)?;
-    if listing.owner_id != session.user_id {
+    let user_id = &tenant.session.user_id;
+    let mut tx = state
+        .infra
+        .db
+        .begin()
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    let listing = sqlx::query(
+        "SELECT owner_id, title, status, direction, lifecycle_epoch
+         FROM inventory
+         WHERE id = $1 AND campus_id = $2
+         FOR UPDATE",
+    )
+    .bind(&id)
+    .bind(tenant.campus_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
+    .ok_or(ApiError::NotFound)?;
+    let owner_id: String = listing.get("owner_id");
+    let title: String = listing.get("title");
+    let status: String = listing.get("status");
+    let direction: String = listing.get("direction");
+    let lifecycle_epoch: i64 = listing.get("lifecycle_epoch");
+
+    if owner_id != *user_id {
         return Err(ApiError::Forbidden);
     }
-    if listing.direction != "wanted" {
+    if direction != "wanted" {
         return Err(ApiError::BadRequest(
             "只有收物需求可以标记为已完成".to_string(),
         ));
     }
-
-    // Conditional transition: only an active wanted can become fulfilled, so a
-    // concurrent delete/fulfill cannot produce a lost update.
-    let updated = sqlx::query(
-        "UPDATE inventory SET status = 'fulfilled'
-         WHERE id = $1 AND owner_id = $2 AND direction = 'wanted' AND status = 'active'",
-    )
-    .bind(&id)
-    .bind(&session.user_id)
-    .execute(&state.infra.db)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-    if updated.rows_affected() == 0 {
+    if status != "active" {
         return Err(ApiError::Conflict(format!(
             "当前状态为'{}'，无法标记完成",
-            listing.status
+            status
         )));
     }
 
-    // Tell pending responders their recommendation is no longer needed. The
-    // responses themselves stay untouched (roadmap: history is preserved).
-    let pending_responders: Vec<String> = sqlx::query_scalar(
-        "SELECT DISTINCT responder_id FROM wanted_responses
-         WHERE wanted_listing_id = $1 AND status = 'pending'",
+    // The row lock is shared with response creation/actions/reopen. Once this
+    // transition commits, no response can be inserted or acted on in this
+    // round using an eligibility decision made before fulfillment.
+    let updated = sqlx::query(
+        "UPDATE inventory SET status = 'fulfilled'
+         WHERE id = $1
+           AND campus_id = $2
+           AND owner_id = $3
+           AND direction = 'wanted'
+           AND status = 'active'
+           AND lifecycle_epoch = $4",
     )
     .bind(&id)
-    .fetch_all(&state.infra.db)
+    .bind(tenant.campus_id)
+    .bind(user_id)
+    .bind(lifecycle_epoch)
+    .execute(&mut *tx)
     .await
     .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    if updated.rows_affected() == 0 {
+        return Err(ApiError::Conflict(
+            "收物需求状态已发生变化，无法标记完成".to_string(),
+        ));
+    }
+
+    // Tell only this round's pending responders. The response status remains
+    // truthful history (`pending`); list/action APIs derive that the round is
+    // now closed from the parent state and epoch.
+    let pending_responders: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT responder_id FROM wanted_responses
+         WHERE wanted_listing_id = $1
+           AND campus_id = $2
+           AND lifecycle_epoch = $3
+           AND status = 'pending'",
+    )
+    .bind(&id)
+    .bind(tenant.campus_id)
+    .bind(lifecycle_epoch)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
     for responder in pending_responders {
         if let Err(e) = state
             .infra
             .notification
             .create(NewNotification {
-                campus_id: listing.campus_id,
+                campus_id: tenant.campus_id,
                 user_id: &responder,
                 event_type: "wanted_fulfilled",
                 title: "对方的收物需求已完成",
-                body: &format!("“{}”已标记完成，感谢你的推荐", listing.title),
+                body: &format!("“{}”已标记完成，感谢你的推荐", title),
                 related_order_id: None,
                 related_listing_id: Some(&id),
                 related_conversation_id: None,
@@ -735,7 +928,12 @@ pub async fn fulfill_wanted(
         }
     }
 
-    tracing::info!(listing_id = %id, owner_id = %session.user_id, "Wanted marked fulfilled");
+    tracing::info!(
+        listing_id = %id,
+        owner_id = %user_id,
+        lifecycle_epoch,
+        "Wanted marked fulfilled"
+    );
     Ok(Json(serde_json::json!({
         "message": "收物需求已标记完成",
         "id": id,
@@ -857,16 +1055,15 @@ pub async fn update_listing(
 /// DELETE /api/listings/:id - delete a listing (owner only)
 pub async fn delete_listing(
     State(state): State<AppState>,
-    Session(session): Session,
+    tenant: VerifiedTenant,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = session.user_id.clone();
+    let user_id = tenant.session.user_id.clone();
 
     state
         .listing_repo
-        .delete(&id, &user_id)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        .delete(&id, &user_id, tenant.campus_id)
+        .await?;
 
     tracing::info!(listing_id = %id, deleted_by = %user_id, "Listing deleted");
 
@@ -879,16 +1076,15 @@ pub async fn delete_listing(
 /// POST /api/listings/:id/relist — reactivate a sold or deleted listing (seller only)
 pub async fn relist_listing(
     State(state): State<AppState>,
-    Session(session): Session,
+    tenant: VerifiedTenant,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = session.user_id.clone();
+    let user_id = tenant.session.user_id.clone();
 
     state
         .listing_repo
-        .relist(&id, &user_id)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        .relist(&id, &user_id, tenant.campus_id)
+        .await?;
 
     tracing::info!(listing_id = %id, relisted_by = %user_id, "Listing relisted");
 

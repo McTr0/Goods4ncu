@@ -245,10 +245,12 @@ class ApiService extends BaseService {
     required String wantedId,
     required String offerListingId,
     String? message,
+    String? idempotencyKey,
   }) => _listingService.recommendOfferForWanted(
     wantedId: wantedId,
     offerListingId: offerListingId,
     message: message,
+    idempotencyKey: idempotencyKey,
   );
 
   Future<WantedResponsesResponse> getWantedResponses({

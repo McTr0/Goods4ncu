@@ -251,9 +251,9 @@ DB_NAME=goods4ncu APP_PASSWORD=<secret> ./scripts/provision_app_role.sh
 | `refresh_tokens` | refresh token 是否过期、revoked_at 是否被设置、campus_id 是否与 access claim 和用户 membership 一致。 |
 | `revoked_access_tokens` | logout 或管理员撤销后的 JTI 是否存在。 |
 | `campuses` / `campus_memberships` | Campus status、用户资格、verification_method、verified_at；pending/suspended 不能执行受保护写操作。 |
-| `inventory` | 商品 campus_id、status、owner_id、价格、分类、更新时间；重复发布时检查 `idempotency_key/idempotency_hash`。 |
+| `inventory` | 商品 campus_id、status、owner_id、价格、分类、更新时间；重复发布时检查 `idempotency_key/idempotency_hash`；wanted 重开异常时检查 `lifecycle_epoch` 是否只增加一次。 |
 | `documents` | RAG 文档是否存在，embedding 是否非空，维度是否匹配。 |
-| `wanted_responses` | campus_id 与 wanted/offer 是否一致，responder/requester 是否同校园，pending 是否重复。 |
+| `wanted_responses` | campus_id 与 wanted/offer 是否一致，responder/requester 是否同校园；`lifecycle_epoch` 为 NULL 的 legacy 行必须只读；同 wanted/epoch/offer 是否唯一；重试问题检查 `idempotency_key/idempotency_hash`。 |
 | `orders` | campus_id、状态、buyer/seller、listing、金额和时间戳。 |
 | `hitl_requests` | campus_id、pending/countered/expired 状态、counter_price、expires_at。 |
 | `chat_conversations` | campus_id、mode、state、initiator/recipient、listing、subject、过期时间、close_reason。 |

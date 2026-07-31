@@ -152,6 +152,16 @@ class WantedResponse {
   final String status;
   final DateTime? createdAt;
   final DateTime? respondedAt;
+  final int? lifecycleEpoch;
+  final int? currentLifecycleEpoch;
+  final String? roundState;
+
+  /// Server-authoritative actions for this response.
+  ///
+  /// `null` means the server predates lifecycle action metadata, so callers
+  /// should preserve the legacy status-based behavior. An empty set is an
+  /// explicit instruction that the response is read-only.
+  final Set<String>? availableActions;
 
   const WantedResponse({
     required this.id,
@@ -167,6 +177,10 @@ class WantedResponse {
     required this.status,
     this.createdAt,
     this.respondedAt,
+    this.lifecycleEpoch,
+    this.currentLifecycleEpoch,
+    this.roundState,
+    this.availableActions,
   });
 
   factory WantedResponse.fromJson(Map<String, dynamic> json) {
@@ -197,6 +211,12 @@ class WantedResponse {
       status: _jsonString(json['status'], fallback: 'pending'),
       createdAt: _jsonDateTime(json['created_at']),
       respondedAt: _jsonDateTime(json['responded_at']),
+      lifecycleEpoch: _nullableJsonInt(json['lifecycle_epoch']),
+      currentLifecycleEpoch: _nullableJsonInt(json['current_lifecycle_epoch']),
+      roundState: _nullableJsonString(json['round_state'])?.toLowerCase(),
+      availableActions: json.containsKey('available_actions')
+          ? _jsonStringSet(json['available_actions']) ?? const <String>{}
+          : null,
     );
   }
 
@@ -208,7 +228,59 @@ class WantedResponse {
 
   bool get isWithdrawn => status == 'withdrawn';
 
-  WantedResponse copyWith({String? status, DateTime? respondedAt}) {
+  /// Whether this response belongs to a completed lifecycle of the wanted
+  /// listing. An epoch mismatch or known inactive parent always fails closed;
+  /// otherwise explicit server state wins, supporting partial-rollout servers.
+  bool get isClosedRound {
+    final responseEpoch = lifecycleEpoch;
+    final currentEpoch = currentLifecycleEpoch;
+    if (responseEpoch != null &&
+        currentEpoch != null &&
+        responseEpoch != currentEpoch) {
+      // Contradictory metadata must fail closed: a stale epoch can never
+      // become actionable merely because a replica mislabeled its state.
+      return true;
+    }
+    if (wantedStatus != 'active' && wantedStatus != 'unknown') {
+      return true;
+    }
+    switch (roundState?.trim().toLowerCase()) {
+      case 'closed':
+      case 'previous':
+      case 'stale':
+        return true;
+      case 'current':
+      case 'open':
+        return false;
+    }
+    return false;
+  }
+
+  bool allowsAction(String action) {
+    if (!isPending || isClosedRound) return false;
+    final normalized = action.trim().toLowerCase();
+    final actions = availableActions;
+    if (actions != null) return actions.contains(normalized);
+
+    // Compatibility with older servers: page ownership and listing state still
+    // gate the callbacks, while a pending response retains its previous UI.
+    return true;
+  }
+
+  bool get canAccept => allowsAction('accept');
+
+  bool get canDismiss => allowsAction('dismiss');
+
+  bool get canWithdraw => allowsAction('withdraw');
+
+  WantedResponse copyWith({
+    String? status,
+    DateTime? respondedAt,
+    int? lifecycleEpoch,
+    int? currentLifecycleEpoch,
+    String? roundState,
+    Set<String>? availableActions,
+  }) {
     return WantedResponse(
       id: id,
       wantedListingId: wantedListingId,
@@ -223,6 +295,11 @@ class WantedResponse {
       status: status ?? this.status,
       createdAt: createdAt,
       respondedAt: respondedAt ?? this.respondedAt,
+      lifecycleEpoch: lifecycleEpoch ?? this.lifecycleEpoch,
+      currentLifecycleEpoch:
+          currentLifecycleEpoch ?? this.currentLifecycleEpoch,
+      roundState: roundState ?? this.roundState,
+      availableActions: availableActions ?? this.availableActions,
     );
   }
 }
@@ -302,6 +379,20 @@ String? _nullableJsonString(dynamic value) {
 int _jsonInt(dynamic value, {int fallback = 0}) {
   if (value is num) return value.toInt();
   return int.tryParse(value?.toString() ?? '') ?? fallback;
+}
+
+int? _nullableJsonInt(dynamic value) {
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString().trim() ?? '');
+}
+
+Set<String>? _jsonStringSet(dynamic value) {
+  if (value is! List) return null;
+  return Set<String>.unmodifiable(
+    value
+        .map((item) => _jsonString(item).toLowerCase())
+        .where((item) => item.isNotEmpty),
+  );
 }
 
 DateTime? _jsonDateTime(dynamic value) {

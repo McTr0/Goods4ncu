@@ -11,6 +11,10 @@ WantedResponse _response({
   String wantedStatus = 'active',
   String offerStatus = 'active',
   String? message = '上下册都在，可以看看',
+  int? lifecycleEpoch,
+  int? currentLifecycleEpoch,
+  String? roundState,
+  Set<String>? availableActions,
 }) {
   return WantedResponse(
     id: id,
@@ -24,6 +28,10 @@ WantedResponse _response({
     requesterId: 'buyer-1',
     message: message,
     status: status,
+    lifecycleEpoch: lifecycleEpoch,
+    currentLifecycleEpoch: currentLifecycleEpoch,
+    roundState: roundState,
+    availableActions: availableActions,
   );
 }
 
@@ -199,6 +207,96 @@ void main() {
     expect(
       find.byKey(const ValueKey('wanted-response-open-offer-response-1')),
       findsNothing,
+    );
+  });
+
+  testWidgets(
+    'closed pending response stays pending but is read-only for both roles',
+    (tester) async {
+      final response = _response(
+        lifecycleEpoch: 1,
+        currentLifecycleEpoch: 2,
+        availableActions: const {'accept', 'dismiss', 'withdraw'},
+      );
+
+      await tester.pumpWidget(
+        _app(
+          WantedResponseSection(
+            role: WantedResponseRole.requester,
+            responses: [response],
+            onOpenOffer: (_) {},
+            onAccept: (_) {},
+            onDismiss: (_) {},
+            onWithdraw: (_) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('等待处理'), findsOneWidget);
+      expect(find.text('需求轮次已关闭 · 仅供查看'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('wanted-response-closed-round-response-1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('wanted-response-accept-response-1')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('wanted-response-dismiss-response-1')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('wanted-response-open-offer-response-1')),
+        findsOneWidget,
+      );
+
+      await tester.pumpWidget(
+        _app(
+          WantedResponseSection(
+            role: WantedResponseRole.responder,
+            responses: [response],
+            onWithdraw: (_) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('wanted-response-withdraw-response-1')),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets('explicit available actions override legacy pending controls', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        WantedResponseSection(
+          role: WantedResponseRole.requester,
+          responses: [
+            _response(
+              roundState: 'current',
+              availableActions: const {'dismiss'},
+            ),
+          ],
+          onAccept: (_) {},
+          onDismiss: (_) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('wanted-response-accept-response-1')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('wanted-response-dismiss-response-1')),
+      findsOneWidget,
     );
   });
 

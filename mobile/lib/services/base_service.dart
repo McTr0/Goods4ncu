@@ -37,7 +37,10 @@ class RecentAuthenticationException implements Exception {
 /// Thrown when API returns 409 Conflict
 class ConflictException implements Exception {
   final String message;
-  ConflictException([this.message = 'Resource conflict.']);
+  final String? serverCode;
+
+  ConflictException([this.message = 'Resource conflict.', this.serverCode]);
+
   @override
   String toString() => message;
 }
@@ -123,7 +126,10 @@ class BaseService {
       throw AuthException(serverMsg.isNotEmpty ? serverMsg : '您没有权限执行此操作');
     }
     if (response.statusCode == 409) {
-      throw ConflictException(serverMsg.isNotEmpty ? serverMsg : '资源冲突');
+      throw ConflictException(
+        serverMsg.isNotEmpty ? serverMsg : '资源冲突',
+        serverCode.isEmpty ? null : serverCode,
+      );
     }
     if (response.statusCode >= 500) {
       throw ServerException(

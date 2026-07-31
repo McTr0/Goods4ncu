@@ -5,7 +5,7 @@
 | 适用读者 | 产品经理、后端工程师、数据工程师、测试工程师和需要理解状态机的移动端工程师 |
 | 当前状态 | 统一意图、活动校园 session、审核案件/申诉、管理员 MFA、RLS 与显式信息流反馈均已实现；全请求 fail-closed tenant context 和真实用户质量评估仍待完成 |
 | 事实来源 | `migrations/`、repository 查询、service 状态转换和 API JSON 模型 |
-| 最后核对范围 | 迁移 `0001` 至 `0054`，商品、意图、信息流、聊天、成交、通知、审核、管理和 Agent 相关代码 |
+| 最后核对范围 | 迁移 `0001` 至 `0055`，商品、意图、信息流、聊天、成交、通知、审核、管理和 Agent 相关代码 |
 
 这篇文档定义平台中“什么是事实、事实如何变化、哪些对象可以互相引用”。API 字段见 [API 参考](api-reference.md)，用户流程见 [业务流程](domain-flows.md)。
 
@@ -117,15 +117,37 @@ expires_at
 
 `Response` 是用户对 Match 或 IntentItem 的明确动作。当前 `wanted_responses` 表保存提供方把自己的 offer 推荐给 wanted 的事实。
 
-状态为：
+核心字段与约束为：
 
 ```text
+status = pending | accepted | dismissed | withdrawn
+lifecycle_epoch = positive bigint | NULL(ambiguous legacy history)
+idempotency_key/idempotency_hash = both NULL or both present
+
 pending -> accepted
 pending -> dismissed
 pending -> withdrawn
 ```
 
-同一提供方不能把同一 offer 对同一 wanted 重复创建 pending response。接受 response 不自动创建成交记录，也不自动发送消息；它只代表需求方认可这条候选信息。
+`inventory.lifecycle_epoch` 是 wanted 当前轮次，初始为 1，并在 wanted 每次从非 active 重新开启时原子加一。Response 创建时从锁定的 wanted 捕获 epoch，不能由客户端指定。数据库对所有非空 epoch 强制 `(wanted_listing_id, lifecycle_epoch, offer_listing_id)` 唯一，因此同一 offer 在一个轮次中终态后也不能再次响应，只能在下一轮重新创建。
+
+Response 的 `status` 与所属轮次的可操作性是两个维度：
+
+```text
+round_state = current
+  iff wanted.status = active
+      AND response.lifecycle_epoch IS NOT NULL
+      AND response.lifecycle_epoch = wanted.lifecycle_epoch
+
+round_state = closed
+  otherwise
+```
+
+`status=pending, round_state=closed` 是合法且必要的历史状态：它表示 wanted 已关闭、重开到下一轮，或 legacy 轮次无法证明，而不是仍可 withdraw。API 根据调用角色和当前事实返回 `available_actions`；closed 或非 pending Response 必须为空。旧轮动作返回稳定的 `409 wanted_response_round_closed`。
+
+升级前可能存在同一 wanted/offer 的多条终态历史，且没有 reopen 事件可重建轮次。因此 `wanted_responses.lifecycle_epoch` 有意保持 nullable：迁移只回填能证明属于当前 active 轮次且满足唯一性的行，其他 legacy history 保持 NULL/read-only。这个 NULL 不是“当前轮未知”，而是明确的保守关闭标记。
+
+创建接口支持 `(campus_id, responder_id, idempotency_key)` 作用域内的幂等。相同 key 和规范化 wanted/offer/message 重试返回原 response id 与 `replayed=true`；key 改变含义时冲突。接受 response 不自动创建成交记录，也不自动发送消息；它只代表需求方认可这条候选信息。
 
 ### Conversation 与 Thread
 
@@ -241,7 +263,8 @@ wanted(active) + offer(active)
 ### 删除、关闭与保留
 
 - listing 删除应从公开检索和向量召回中移除，但审计和法定保留数据按策略处理。
-- wanted fulfilled 后停止新匹配，已有 response 和 conversation 保留历史。
+- wanted fulfilled 或 deleted 后停止新匹配并立即关闭当前 response 轮次；已有 response 和 conversation 保留历史，旧 pending 不可继续 accept/dismiss/withdraw。
+- wanted relist 开启新 `lifecycle_epoch`；旧轮始终只读，同一 offer 在新轮最多重新响应一次。
 - 用户对消息“删除”当前只对自己隐藏，举报和审核记录仍保留。
 - 账号删除、内容保留和安全事件保全的冲突由[信任与安全](trust-safety.md)定义。
 

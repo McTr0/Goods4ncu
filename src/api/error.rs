@@ -53,6 +53,14 @@ pub enum ApiError {
     #[error("冲突: {0}")]
     Conflict(String),
 
+    /// A conflict whose machine-readable reason changes client behaviour.
+    ///
+    /// Keep ordinary state races on `Conflict`; use this only when a client
+    /// must refresh or replace an affordance instead of parsing localized
+    /// prose.
+    #[error("冲突: {message}")]
+    CodedConflict { code: &'static str, message: String },
+
     /// A capability this deployment does not have, as opposed to a fault.
     ///
     /// Distinct from [`ApiError::ServiceUnavailable`], which means "try again".
@@ -135,6 +143,9 @@ impl IntoResponse for ApiError {
                 "该操作仅限同一校园的已认证用户".to_string(),
             ),
             ApiError::Conflict(m) => (StatusCode::CONFLICT, "conflict", format!("冲突: {}", m)),
+            ApiError::CodedConflict { code, message } => {
+                (StatusCode::CONFLICT, *code, format!("冲突: {}", message))
+            }
             ApiError::NotImplemented(m) => {
                 (StatusCode::NOT_IMPLEMENTED, "not_enabled", m.to_string())
             }
@@ -192,6 +203,10 @@ mod tests {
             ApiError::CampusVerificationRequired => "需要先完成校园身份验证".to_string(),
             ApiError::CampusScopeMismatch => "该操作仅限同一校园的已认证用户".to_string(),
             ApiError::Conflict(ref m) => format!("冲突: {}", m),
+            ApiError::CodedConflict {
+                code: _,
+                ref message,
+            } => format!("冲突: {}", message),
             ApiError::NotImplemented(ref m) => m.clone(),
             ApiError::RateLimitExceeded => "请求过于频繁，请稍后再试".to_string(),
             ApiError::ContentViolation(ref m) => format!("内容包含违规信息: {}", m),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
+import 'package:uuid/uuid.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
 import '../services/base_service.dart';
@@ -71,6 +72,8 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
   String? _wantedResponseOperatingId;
   String? _wantedResponsesRequestKey;
   int _wantedResponsesRequestSerial = 0;
+  String? _wantedRecommendationFingerprint;
+  String? _wantedRecommendationIdempotencyKey;
   String? _currentUserId;
   bool _currentUserLoaded = false;
   int _loadGeneration = 0;
@@ -145,6 +148,8 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
       _wantedResponseOperatingId = null;
       _wantedResponsesRequestKey = null;
       _wantedResponsesRequestSerial += 1;
+      _wantedRecommendationFingerprint = null;
+      _wantedRecommendationIdempotencyKey = null;
       _isOperating = false;
       _reportFlowActive = false;
       _isReporting = false;
@@ -578,11 +583,19 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
       );
       if (selected == null || !mounted) return;
 
+      final fingerprint = '${listing.id}\u0000${selected.id}\u0000';
+      if (_wantedRecommendationFingerprint != fingerprint) {
+        _wantedRecommendationFingerprint = fingerprint;
+        _wantedRecommendationIdempotencyKey = const Uuid().v4();
+      }
       final message = await _apiService.recommendOfferForWanted(
         wantedId: listing.id,
         offerListingId: selected.id,
+        idempotencyKey: _wantedRecommendationIdempotencyKey,
       );
       if (!mounted) return;
+      _wantedRecommendationFingerprint = null;
+      _wantedRecommendationIdempotencyKey = null;
       messenger.showSnackBar(
         SnackBar(
           content: Text(message.isEmpty ? l.wantedRecommendSuccess : message),
@@ -1003,7 +1016,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
       onDismiss: isOwner && wantedIsActive
           ? (response) => _handleWantedResponseAction(response, 'dismiss')
           : null,
-      onWithdraw: !isOwner
+      onWithdraw: !isOwner && wantedIsActive
           ? (response) => _handleWantedResponseAction(response, 'withdraw')
           : null,
     );
@@ -1064,12 +1077,29 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         await _loadWantedResponsesIfReady(force: true);
       }
     } catch (error) {
+      final roundClosed =
+          error is ConflictException &&
+          error.serverCode == 'wanted_response_round_closed';
+      if (roundClosed &&
+          mounted &&
+          generation == _loadGeneration &&
+          listingId == widget.listingId) {
+        await _refreshAfterWantedRoundClosed(
+          response.id,
+          generation,
+          listingId,
+        );
+      }
       if (mounted &&
           generation == _loadGeneration &&
           listingId == widget.listingId) {
         messenger.showSnackBar(
           SnackBar(
-            content: Text(l.wantedResponseActionFailed(error.toString())),
+            content: Text(
+              roundClosed
+                  ? l.wantedResponseRoundClosedToast
+                  : l.wantedResponseActionFailed(error.toString()),
+            ),
             backgroundColor: AppTheme.error,
           ),
         );
@@ -1078,6 +1108,60 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
       if (mounted && _wantedResponseOperatingId == response.id) {
         setState(() => _wantedResponseOperatingId = null);
       }
+    }
+  }
+
+  Future<void> _refreshAfterWantedRoundClosed(
+    String responseId,
+    int generation,
+    String listingId,
+  ) async {
+    void markResponseReadOnly() {
+      if (!mounted ||
+          generation != _loadGeneration ||
+          listingId != widget.listingId) {
+        return;
+      }
+      setState(() {
+        _wantedResponses = _wantedResponses
+            .map(
+              (item) => item.id == responseId && item.isPending
+                  ? item.copyWith(
+                      roundState: 'closed',
+                      availableActions: const <String>{},
+                    )
+                  : item,
+            )
+            .toList(growable: false);
+      });
+    }
+
+    // The conflict is authoritative even if either refresh fails or a replica
+    // briefly returns the older row.
+    markResponseReadOnly();
+
+    try {
+      final refreshedListing = await _apiService.getListingDetail(listingId);
+      if (mounted &&
+          generation == _loadGeneration &&
+          listingId == widget.listingId) {
+        setState(() {
+          _listing = refreshedListing;
+          if (refreshedListing.status != 'active') {
+            _wantedMatches = [];
+            _wantedMatchesLoading = false;
+          }
+        });
+      }
+    } catch (_) {
+      // Keep the current detail visible and still refresh the response list.
+    }
+
+    if (mounted &&
+        generation == _loadGeneration &&
+        listingId == widget.listingId) {
+      await _loadWantedResponsesIfReady(force: true);
+      markResponseReadOnly();
     }
   }
 

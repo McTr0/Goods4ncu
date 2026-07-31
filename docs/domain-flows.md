@@ -88,10 +88,10 @@ offer:  active -> sold | deleted
         sold/deleted -> relisted/active（满足权限和规则时）
 
 wanted: active -> fulfilled | deleted
-        fulfilled -> active（用户重新开启）
+        fulfilled/deleted -> active（用户重新开启，lifecycle_epoch + 1）
 ```
 
-任何非 active 条目都要从普通 Feed、匹配和新联系入口排除；历史 Conversation、Response 和 DealRecord 仍保留。
+每条 wanted 在 `inventory.lifecycle_epoch` 中保存当前轮次，初始为 1；fulfill/delete 关闭当前轮但不改 epoch，relist 在同一事务中恰好加一。任何非 active 条目都要从普通 Feed、匹配和新联系入口排除；历史 Conversation、Response 和 DealRecord 仍保留。
 
 ## Wanted 匹配与响应
 
@@ -110,16 +110,25 @@ active wanted
 
 [已实现] 所有召回先限定活动校园和生命周期；首页商品 feed、相似商品、listing wanted matches 与 intent feed/matches 均返回排序原因、稳定来源和排序版本，并提供精确隐藏、泛化降权、非个性化排序和清除旧信号。新撮合入口使用稳定 reason code；兼容中的首页商品 feed 仍可返回服务端人话原因。listing wanted matches 的解释只陈述实际执行的分类、预算和成色约束，不公开作者、距离、权重或反馈事实。
 
-提供方调用 responses API 时只能选择自己的 active offer，不能推荐 wanted、sold 或 deleted 条目。重复 pending response 返回明确冲突，不重复通知。response 列表和动作在每次请求时重新验证活动校园 verified membership，并按 `campus_id` 隔离；跨校园 response id 与非本人 response id 一样返回 404。
+提供方调用 responses API 时只能选择自己的 active offer，不能推荐 wanted、sold 或 deleted 条目。response 创建支持 responder 范围的 `Idempotency-Key`：同 key 同规范化内容返回同一 id 和 `replayed=true`，不重复通知；同 key 不同内容冲突。每个 wanted 轮次内，同一 offer 无论此前 response 是否已经终态都只能创建一次；relist 开启新 epoch 后才可再次响应。response 列表和动作在每次请求时重新验证活动校园 verified membership，并按 `campus_id` 隔离；跨校园 response id 与非本人 response id 一样返回 404。
 
 ```text
-pending response
+pending response + active wanted + response epoch == current epoch
   -> requester accepts（wanted + offer 均为 active）
   -> requester dismisses（wanted 为 active）
-  -> responder withdraws（wanted 关闭后仍可撤回）
+  -> responder withdraws（wanted 为 active；offer 可已关闭）
+
+wanted fulfilled/deleted 或 response epoch != current epoch
+  -> round_state=closed
+  -> available_actions=[]
+  -> 历史只读，三种动作均拒绝
 ```
 
-三种动作都在同一事务中锁定 response、wanted 与 offer，避免资格检查和状态写入之间的竞态；动作通知关联 wanted，移动端从通知进入详情即可看到本地化状态和操作。Response 不自动创建 Conversation 或 DealRecord。接受后界面提供查看 offer，由用户决定是否实时沟通或留言。fulfilled wanted 保留 response 历史；“我的发布”包含非 active 条目，因此用户离开详情后仍可找回并重新开启。
+`status=pending` 只描述 response 尚未被任何一方终结，不代表它仍可操作。列表用 wanted active 状态和 epoch 相等性派生 `round_state=current|closed`，并返回服务端权威的 `available_actions`；无法证明轮次的 legacy `lifecycle_epoch=NULL` 永远 closed。
+
+response 创建和动作统一按 `wanted -> offer -> response` 顺序锁行；fulfill、delete 和 relist 也先锁 wanted，避免资格检查和状态写入之间的竞态。动作通知关联 wanted，移动端从通知进入详情即可看到本地化状态和操作。Response 不自动创建 Conversation 或 DealRecord。接受后界面提供查看 offer，由用户决定是否实时沟通或留言。fulfilled/deleted wanted 保留 response 历史；“我的发布”包含非 active 条目，因此用户离开详情后仍可找回并重新开启。
+
+迁移期允许 `wanted_responses.lifecycle_epoch` 为 NULL，只对能证明属于当前 active 轮次的 legacy 行回填。INSERT trigger 让省略 epoch 的旧应用仍从锁定 wanted 派生正确轮次，reopen trigger 让旧应用只更新 status 时也自动增加 epoch；因此滚动部署和应用 rollback 不依赖回滚已执行 migration。
 
 ## Feed、搜索与收藏
 

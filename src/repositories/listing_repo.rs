@@ -616,38 +616,90 @@ impl ListingRepository for PostgresListingRepository {
         Ok(())
     }
 
-    async fn delete(&self, id: &str, owner_id: &str) -> Result<(), ApiError> {
-        let row = sqlx::query("SELECT status FROM inventory WHERE id = $1 AND owner_id = $2")
-            .bind(id)
-            .bind(owner_id)
-            .fetch_optional(&self.pool)
+    async fn delete(
+        &self,
+        id: &str,
+        owner_id: &str,
+        campus_id: uuid::Uuid,
+    ) -> Result<(), ApiError> {
+        let mut tx = self
+            .pool
+            .begin()
             .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-            .ok_or(ApiError::NotFound)?;
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        let row = sqlx::query(
+            "SELECT status
+             FROM inventory
+             WHERE id = $1 AND owner_id = $2 AND campus_id = $3
+             FOR UPDATE",
+        )
+        .bind(id)
+        .bind(owner_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
+        .ok_or(ApiError::NotFound)?;
 
         let status: String = row.get("status");
         if status == "sold" {
             return Err(ApiError::BadRequest("无法删除已售出的商品".to_string()));
         }
+        if status == "deleted" {
+            tx.commit()
+                .await
+                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+            return Ok(());
+        }
 
-        sqlx::query("UPDATE inventory SET status = 'deleted' WHERE id = $1 AND owner_id = $2")
-            .bind(id)
-            .bind(owner_id)
-            .execute(&self.pool)
+        let updated = sqlx::query(
+            "UPDATE inventory
+             SET status = 'deleted'
+             WHERE id = $1 AND owner_id = $2 AND campus_id = $3 AND status = $4",
+        )
+        .bind(id)
+        .bind(owner_id)
+        .bind(campus_id)
+        .bind(&status)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        if updated.rows_affected() != 1 {
+            return Err(ApiError::Conflict(
+                "商品状态已发生变化，无法删除".to_string(),
+            ));
+        }
+        tx.commit()
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
         Ok(())
     }
 
-    async fn relist(&self, id: &str, owner_id: &str) -> Result<(), ApiError> {
-        let row = sqlx::query("SELECT status FROM inventory WHERE id = $1 AND owner_id = $2")
-            .bind(id)
-            .bind(owner_id)
-            .fetch_optional(&self.pool)
+    async fn relist(
+        &self,
+        id: &str,
+        owner_id: &str,
+        campus_id: uuid::Uuid,
+    ) -> Result<(), ApiError> {
+        let mut tx = self
+            .pool
+            .begin()
             .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-            .ok_or(ApiError::NotFound)?;
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        let row = sqlx::query(
+            "SELECT status, direction
+             FROM inventory
+             WHERE id = $1 AND owner_id = $2 AND campus_id = $3
+             FOR UPDATE",
+        )
+        .bind(id)
+        .bind(owner_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
+        .ok_or(ApiError::NotFound)?;
 
         let status: String = row.get("status");
         // 'fulfilled' is the wanted-side counterpart of 'sold': reopening a
@@ -659,13 +711,29 @@ impl ListingRepository for PostgresListingRepository {
             )));
         }
 
-        sqlx::query("UPDATE inventory SET status = 'active' WHERE id = $1 AND owner_id = $2")
-            .bind(id)
-            .bind(owner_id)
-            .execute(&self.pool)
+        let direction: String = row.get("direction");
+        sqlx::query(
+            "UPDATE inventory
+             SET status = 'active',
+                 lifecycle_epoch = lifecycle_epoch
+                     + CASE WHEN direction = 'wanted' THEN 1 ELSE 0 END
+             WHERE id = $1 AND owner_id = $2 AND campus_id = $3",
+        )
+        .bind(id)
+        .bind(owner_id)
+        .bind(campus_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        tx.commit()
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
+        tracing::debug!(
+            listing_id = %id,
+            %direction,
+            "listing reopened in a serialized lifecycle transition"
+        );
         Ok(())
     }
 

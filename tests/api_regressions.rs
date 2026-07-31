@@ -14,7 +14,7 @@ use goods4ncu::repositories::{
 use goods4ncu::services::intent::slots::{PriceSlot, Slots};
 use goods4ncu::services::intent::{kinds, status, IntentService, NewIntent};
 use goods4ncu::services::{self, notification::NotificationService};
-use goods4ncu::test_infra::with_test_pool;
+use goods4ncu::test_infra::{concurrent_test_pool, with_test_pool};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
@@ -1850,16 +1850,17 @@ async fn wanted_fulfill_and_reopen_lifecycle() {
             .expect("insert listing");
         }
         // A pending response exists before fulfillment.
-        sqlx::query(
+        let first_response_id = sqlx::query_scalar::<_, Uuid>(
             "INSERT INTO wanted_responses (campus_id, wanted_listing_id, offer_listing_id,
                                            responder_id, requester_id)
-             SELECT id, $1, $2, $3, $4 FROM campuses WHERE slug = 'ncu'",
+             SELECT id, $1, $2, $3, $4 FROM campuses WHERE slug = 'ncu'
+             RETURNING id",
         )
         .bind(&wanted_id)
         .bind(&offer_id)
         .bind(&responder_id)
         .bind(&requester_id)
-        .execute(&pool)
+        .fetch_one(&pool)
         .await
         .expect("insert response");
 
@@ -1995,6 +1996,34 @@ async fn wanted_fulfill_and_reopen_lifecycle() {
         .expect("notified");
         assert_eq!(notified, 1);
 
+        // Closing a round immediately makes its still-pending history
+        // read-only for both parties.
+        let (status, listed) = authenticated_json(
+            &app,
+            Method::GET,
+            &format!("/api/wanted-responses?role=requester&wanted_listing_id={wanted_id}"),
+            &owner_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(listed["items"][0]["status"], "pending");
+        assert_eq!(listed["items"][0]["round_state"], "closed");
+        assert_eq!(listed["items"][0]["lifecycle_epoch"], 1);
+        assert_eq!(listed["items"][0]["current_lifecycle_epoch"], 1);
+        assert_eq!(listed["items"][0]["available_actions"], json!([]));
+
+        let (status, error) = authenticated_json(
+            &app,
+            Method::POST,
+            &format!("/api/wanted-responses/{first_response_id}/withdraw"),
+            &outsider_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(error["code"], "wanted_response_round_closed");
+
         // Relist reopens the wanted.
         let response = app
             .clone()
@@ -2005,12 +2034,489 @@ async fn wanted_fulfill_and_reopen_lifecycle() {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let status: String = sqlx::query_scalar("SELECT status FROM inventory WHERE id = $1")
-            .bind(&wanted_id)
+        let (status, lifecycle_epoch): (String, i64) =
+            sqlx::query_as("SELECT status, lifecycle_epoch FROM inventory WHERE id = $1")
+                .bind(&wanted_id)
+                .fetch_one(&pool)
+                .await
+                .expect("status after reopen");
+        assert_eq!(status, "active");
+        assert_eq!(lifecycle_epoch, 2);
+
+        // The old pending row remains truthful history after reopen and every
+        // old-round action returns a stable refresh signal.
+        for (action, token) in [
+            ("accept", &owner_token),
+            ("dismiss", &owner_token),
+            ("withdraw", &outsider_token),
+        ] {
+            let (status, error) = authenticated_json(
+                &app,
+                Method::POST,
+                &format!("/api/wanted-responses/{first_response_id}/{action}"),
+                token,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::CONFLICT);
+            assert_eq!(error["code"], "wanted_response_round_closed");
+        }
+
+        let (status, listed) = authenticated_json(
+            &app,
+            Method::GET,
+            &format!("/api/wanted-responses?role=requester&wanted_listing_id={wanted_id}"),
+            &owner_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(listed["items"][0]["round_state"], "closed");
+        assert_eq!(listed["items"][0]["current_lifecycle_epoch"], 2);
+        assert_eq!(listed["items"][0]["available_actions"], json!([]));
+
+        // The same offer may be recommended exactly once in the new round.
+        let request_body = json!({ "offer_listing_id": offer_id }).to_string();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/listings/{wanted_id}/responses"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", bearer(&outsider_token))
+                    .header("Idempotency-Key", "wanted-reopen-attempt-1")
+                    .body(Body::from(request_body.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let created = response_json(response).await;
+        assert_eq!(created["replayed"], false);
+        let second_response_id = created["id"].as_str().expect("response id").to_string();
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/listings/{wanted_id}/responses"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", bearer(&outsider_token))
+                    .header("Idempotency-Key", "wanted-reopen-attempt-1")
+                    .body(Body::from(request_body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let replayed = response_json(response).await;
+        assert_eq!(replayed["id"], second_response_id);
+        assert_eq!(replayed["replayed"], true);
+        let creation_notices: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)
+             FROM notifications
+             WHERE user_id = $1
+               AND related_listing_id = $2
+               AND event_type = 'wanted_response'",
+        )
+        .bind(&requester_id)
+        .bind(&wanted_id)
+        .fetch_one(&pool)
+        .await
+        .expect("idempotent response notification count");
+        assert_eq!(creation_notices, 1);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/listings/{wanted_id}/responses"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", bearer(&outsider_token))
+                    .header("Idempotency-Key", "wanted-reopen-attempt-1")
+                    .body(Body::from(
+                        json!({
+                            "offer_listing_id": offer_id,
+                            "message": "同一个 key 不能改内容"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+
+        let rows: Vec<(Uuid, i64)> = sqlx::query_as(
+            "SELECT id, lifecycle_epoch
+             FROM wanted_responses
+             WHERE wanted_listing_id = $1
+             ORDER BY lifecycle_epoch",
+        )
+        .bind(&wanted_id)
+        .fetch_all(&pool)
+        .await
+        .expect("response rounds");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], (first_response_id, 1));
+        assert_eq!(rows[1].0.to_string(), second_response_id);
+        assert_eq!(rows[1].1, 2);
+
+        let (status, listed) = authenticated_json(
+            &app,
+            Method::GET,
+            &format!("/api/wanted-responses?role=requester&wanted_listing_id={wanted_id}"),
+            &owner_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(listed["total"], 2);
+        assert_eq!(listed["items"][0]["round_state"], "current");
+        assert_eq!(
+            listed["items"][0]["available_actions"],
+            json!(["accept", "dismiss"])
+        );
+        assert_eq!(listed["items"][1]["round_state"], "closed");
+
+        // Full-round uniqueness survives a terminal transition: withdrawing
+        // does not allow the same offer to be submitted again until another
+        // reopen advances the epoch.
+        let (status, _) = authenticated_json(
+            &app,
+            Method::POST,
+            &format!("/api/wanted-responses/{second_response_id}/withdraw"),
+            &outsider_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/listings/{wanted_id}/responses"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", bearer(&outsider_token))
+                    .header("Idempotency-Key", "wanted-reopen-attempt-2")
+                    .body(Body::from(
+                        json!({ "offer_listing_id": offer_id }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        // Owner deletion is another lifecycle close path. It freezes a
+        // different current-round pending response, and reopening from deleted
+        // advances exactly one more epoch.
+        let delete_offer_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO inventory (
+                id, campus_id, title, category, brand, condition_score,
+                suggested_price_cny, defects, owner_id, status, direction
+             ) SELECT $1, id, 'Delete-round offer', 'misc', 'Brand', 8,
+                      10000, '[]', $2, 'active', 'offer'
+               FROM campuses WHERE slug = 'ncu'",
+        )
+        .bind(&delete_offer_id)
+        .bind(&responder_id)
+        .execute(&pool)
+        .await
+        .expect("insert delete-round offer");
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/listings/{wanted_id}/responses"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", bearer(&outsider_token))
+                    .header("Idempotency-Key", "wanted-delete-round")
+                    .body(Body::from(
+                        json!({ "offer_listing_id": delete_offer_id }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let delete_round_response = response_json(response).await;
+        let delete_round_response_id = delete_round_response["id"]
+            .as_str()
+            .expect("delete-round response id")
+            .to_string();
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/api/listings/{wanted_id}"))
+                    .header("Authorization", bearer(&owner_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let (deleted_status, deleted_epoch): (String, i64) =
+            sqlx::query_as("SELECT status, lifecycle_epoch FROM inventory WHERE id = $1")
+                .bind(&wanted_id)
+                .fetch_one(&pool)
+                .await
+                .expect("deleted wanted state");
+        assert_eq!(deleted_status, "deleted");
+        assert_eq!(deleted_epoch, 2);
+
+        let (status, error) = authenticated_json(
+            &app,
+            Method::POST,
+            &format!("/api/wanted-responses/{delete_round_response_id}/withdraw"),
+            &outsider_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(error["code"], "wanted_response_round_closed");
+
+        let response = app
+            .clone()
+            .oneshot(post_empty(
+                format!("/api/listings/{wanted_id}/relist"),
+                &owner_token,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let reopened_epoch: i64 =
+            sqlx::query_scalar("SELECT lifecycle_epoch FROM inventory WHERE id = $1")
+                .bind(&wanted_id)
+                .fetch_one(&pool)
+                .await
+                .expect("epoch after deleted reopen");
+        assert_eq!(reopened_epoch, 3);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn wanted_response_creation_serializes_with_close_and_same_round_duplicates() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let requester_id = Uuid::new_v4().to_string();
+        let responder_id = Uuid::new_v4().to_string();
+        insert_user(
+            &pool,
+            &requester_id,
+            &format!("race_requester_{}", Uuid::new_v4().simple()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &responder_id,
+            &format!("race_responder_{}", Uuid::new_v4().simple()),
+            &password_hash,
+            "user",
+            "active",
+        )
+        .await;
+
+        let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
             .fetch_one(&pool)
             .await
-            .expect("status after reopen");
-        assert_eq!(status, "active");
+            .expect("ncu campus");
+        let wanted_id = Uuid::new_v4().to_string();
+        let offer_id = Uuid::new_v4().to_string();
+        for (id, owner, direction) in [
+            (&wanted_id, &requester_id, "wanted"),
+            (&offer_id, &responder_id, "offer"),
+        ] {
+            sqlx::query(
+                "INSERT INTO inventory (
+                    id, campus_id, title, category, brand, condition_score,
+                    suggested_price_cny, defects, owner_id, status, direction
+                 ) VALUES ($1, $2, 'Lifecycle race item', 'misc', 'Test',
+                           8, 10000, '[]', $3, 'active', $4)",
+            )
+            .bind(id)
+            .bind(campus_id)
+            .bind(owner)
+            .bind(direction)
+            .execute(&pool)
+            .await
+            .expect("insert race listing");
+        }
+
+        let (requester_token, _, _) = generate_access_token(
+            &requester_id,
+            "user",
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("requester token");
+        let (responder_token, _, _) = generate_access_token(
+            &responder_id,
+            "user",
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("responder token");
+
+        let concurrent_pool = concurrent_test_pool(6).await;
+        let app = create_router(build_state(concurrent_pool.clone()), &[]);
+        let mut closing = concurrent_pool.begin().await.expect("closing tx");
+        sqlx::query("SELECT 1 FROM inventory WHERE id = $1 FOR UPDATE")
+            .bind(&wanted_id)
+            .fetch_one(&mut *closing)
+            .await
+            .expect("lock wanted");
+        sqlx::query("UPDATE inventory SET status = 'fulfilled' WHERE id = $1")
+            .bind(&wanted_id)
+            .execute(&mut *closing)
+            .await
+            .expect("stage fulfillment");
+
+        let mut response_task = tokio::spawn({
+            let app = app.clone();
+            let wanted_id = wanted_id.clone();
+            let offer_id = offer_id.clone();
+            let responder_token = responder_token.clone();
+            async move {
+                app.oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/api/listings/{wanted_id}/responses"))
+                        .header("Content-Type", "application/json")
+                        .header("Authorization", bearer(&responder_token))
+                        .header("Idempotency-Key", "wanted-close-race")
+                        .body(Body::from(
+                            json!({ "offer_listing_id": offer_id }).to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        });
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(150), &mut response_task)
+                .await
+                .is_err(),
+            "response creation must wait on the wanted lifecycle row"
+        );
+        closing.commit().await.expect("commit fulfillment");
+        let response = response_task.await.expect("response task");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM wanted_responses WHERE wanted_listing_id = $1",
+        )
+        .bind(&wanted_id)
+        .fetch_one(&pool)
+        .await
+        .expect("response count after close race");
+        assert_eq!(count, 0);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/listings/{wanted_id}/relist"))
+                    .header("Authorization", bearer(&requester_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let request = |key: &'static str| {
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/listings/{wanted_id}/responses"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", bearer(&responder_token))
+                .header("Idempotency-Key", key)
+                .body(Body::from(
+                    json!({ "offer_listing_id": offer_id }).to_string(),
+                ))
+                .unwrap()
+        };
+        let (first, second) = tokio::join!(
+            app.clone().oneshot(request("wanted-duplicate-race-a")),
+            app.clone().oneshot(request("wanted-duplicate-race-b")),
+        );
+        let statuses = [
+            first.expect("first response").status(),
+            second.expect("second response").status(),
+        ];
+        assert_eq!(
+            statuses
+                .iter()
+                .filter(|status| **status == StatusCode::OK)
+                .count(),
+            1
+        );
+        assert_eq!(
+            statuses
+                .iter()
+                .filter(|status| **status == StatusCode::BAD_REQUEST)
+                .count(),
+            1
+        );
+
+        let rows: Vec<(Uuid, i64)> = sqlx::query_as(
+            "SELECT id, lifecycle_epoch
+             FROM wanted_responses
+             WHERE wanted_listing_id = $1",
+        )
+        .bind(&wanted_id)
+        .fetch_all(&pool)
+        .await
+        .expect("serialized response rows");
+        assert_eq!(rows.len(), 1);
+        let (response_id, response_epoch) = rows[0];
+        assert_eq!(response_epoch, 2);
+
+        // Ambiguous rows from a rolling upgrade remain visible but fail
+        // closed; NULL must never be interpreted as the current epoch.
+        sqlx::query("UPDATE wanted_responses SET lifecycle_epoch = NULL WHERE id = $1")
+            .bind(response_id)
+            .execute(&pool)
+            .await
+            .expect("simulate ambiguous legacy history");
+        let (status, listed) = authenticated_json(
+            &app,
+            Method::GET,
+            &format!("/api/wanted-responses?role=responder&wanted_listing_id={wanted_id}"),
+            &responder_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(listed["items"][0]["lifecycle_epoch"].is_null());
+        assert_eq!(listed["items"][0]["round_state"], "closed");
+        assert_eq!(listed["items"][0]["available_actions"], json!([]));
+        let (status, error) = authenticated_json(
+            &app,
+            Method::POST,
+            &format!("/api/wanted-responses/{response_id}/withdraw"),
+            &responder_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(error["code"], "wanted_response_round_closed");
     })
     .await;
 }
@@ -2437,9 +2943,8 @@ async fn wanted_response_http_journey_lists_statuses_and_gates_actions() {
             Some(wanted_id.as_str())
         );
 
-        // Once the wanted listing is no longer active, neither positive nor
-        // negative requester decisions may rewrite the response. The responder
-        // may still retract their own pending recommendation.
+        // Once the wanted listing is no longer active, the round is frozen for
+        // both parties and remains pending, read-only history.
         let (status, withdrawn_created) = authenticated_json(
             &app,
             Method::POST,
@@ -2457,41 +2962,38 @@ async fn wanted_response_http_journey_lists_statuses_and_gates_actions() {
             .execute(&pool)
             .await
             .expect("fulfill wanted");
-        for action in ["accept", "dismiss"] {
+        for (action, token) in [
+            ("accept", &requester_token),
+            ("dismiss", &requester_token),
+            ("withdraw", &responder_token),
+        ] {
             let (status, error) = authenticated_json(
                 &app,
                 Method::POST,
                 &format!("/api/wanted-responses/{withdrawn_response_id}/{action}"),
-                &requester_token,
+                token,
                 None,
             )
             .await;
             assert_eq!(status, StatusCode::CONFLICT, "{action}");
-            assert_eq!(error["code"], "conflict");
+            assert_eq!(error["code"], "wanted_response_round_closed");
         }
-        let (status, withdrawn) = authenticated_json(
-            &app,
-            Method::POST,
-            &format!("/api/wanted-responses/{withdrawn_response_id}/withdraw"),
-            &responder_token,
-            None,
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(withdrawn["status"], "withdrawn");
-        let withdrawn_notice_target: Option<String> = sqlx::query_scalar(
-            "SELECT related_listing_id FROM notifications
-             WHERE user_id = $1 AND event_type = 'wanted_response_withdrawn'
-             ORDER BY created_at DESC LIMIT 1",
+        let frozen_status: String =
+            sqlx::query_scalar("SELECT status FROM wanted_responses WHERE id = $1")
+                .bind(Uuid::parse_str(withdrawn_response_id).expect("response UUID"))
+                .fetch_one(&pool)
+                .await
+                .expect("frozen response status");
+        assert_eq!(frozen_status, "pending");
+        let withdrawn_notices: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM notifications
+             WHERE user_id = $1 AND event_type = 'wanted_response_withdrawn'",
         )
         .bind(&requester_id)
         .fetch_one(&pool)
         .await
-        .expect("withdrawn notification");
-        assert_eq!(
-            withdrawn_notice_target.as_deref(),
-            Some(wanted_id.as_str())
-        );
+        .expect("withdrawn notification count");
+        assert_eq!(withdrawn_notices, 0);
     })
     .await;
 }

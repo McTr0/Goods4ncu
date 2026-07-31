@@ -107,10 +107,15 @@ pub trait ListingRepository: Send + Sync {
     ) -> Result<(), ApiError>;
 
     /// Delete a listing (soft delete by setting status to 'deleted').
-    async fn delete(&self, id: &str, owner_id: &str) -> Result<(), ApiError>;
+    async fn delete(&self, id: &str, owner_id: &str, campus_id: uuid::Uuid)
+        -> Result<(), ApiError>;
 
-    /// Relist a sold/deleted item.
-    async fn relist(&self, id: &str, owner_id: &str) -> Result<(), ApiError>;
+    /// Relist a sold/deleted/fulfilled item inside the owner's active campus.
+    ///
+    /// Wanted listings start a new lifecycle epoch when reopened so responses
+    /// from the previous round remain read-only history.
+    async fn relist(&self, id: &str, owner_id: &str, campus_id: uuid::Uuid)
+        -> Result<(), ApiError>;
 
     /// Mark a listing as sold.
     async fn mark_sold(&self, id: &str, owner_id: &str) -> Result<(), ApiError>;

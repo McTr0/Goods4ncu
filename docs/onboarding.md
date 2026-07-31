@@ -85,9 +85,9 @@ offer 仍然 active
 - 这条 wanted 存在且 active。
 - offer 属于小周且 active。
 - offer 不是另一条 wanted。
-- 同一 offer 对同一需求没有重复 pending response。
+- 同一 offer 在这条需求的当前 `lifecycle_epoch` 尚未响应过，即使上一条已是终态也不能在同轮重复创建。
 
-成功后写入 `wanted_responses` 并通知需求方。Response 只代表“我有这个候选”，不会自动创建聊天或成交记录。
+成功后写入带当前 epoch 的 `wanted_responses` 并通知需求方。请求支持 `Idempotency-Key`，网络重试返回同一 response id 和 `replayed=true`，不会重复通知。Response 只代表“我有这个候选”，不会自动创建聊天或成交记录。
 
 ### 5. 双方开始沟通
 
@@ -114,9 +114,11 @@ offer 仍然 active
 
 这条记录不是支付订单。收款码即使在用户主页公开，也只是一项用户自愿展示的信息，不能证明收款人身份或付款状态。
 
-### 8. 需求关闭
+### 8. 需求关闭与重开
 
-[目标态] 小林完成需求后把 wanted 标为 fulfilled。系统停止新的匹配和 response，但保留已有会话、成交和审核历史。
+[已实现] 小林完成需求后把 wanted 标为 fulfilled。系统停止新的匹配和 response，但保留已有会话、成交和审核历史。当前轮尚为 pending 的推荐显示为 closed/read-only，不能再 accept、dismiss 或 withdraw。
+
+小林重新开启 wanted 时，服务端把 `lifecycle_epoch` 加一。旧轮仍只读；小周可以用同一 offer 在新轮重新响应一次。
 
 这一步说明状态机为什么重要：删除需求、完成需求、下架 offer 和取消成交记录是不同事实，不能都写成一个 `deleted=true`。
 

@@ -18,6 +18,10 @@ void main() {
         'status': 'accepted',
         'created_at': '2026-07-30T10:00:00Z',
         'responded_at': '2026-07-30T10:05:00Z',
+        'lifecycle_epoch': '3',
+        'current_lifecycle_epoch': 3,
+        'round_state': 'current',
+        'available_actions': <String>[],
       });
 
       expect(response.id, 'response-1');
@@ -34,6 +38,11 @@ void main() {
       expect(response.respondedAt, DateTime.parse('2026-07-30T10:05:00Z'));
       expect(response.isAccepted, isTrue);
       expect(response.isPending, isFalse);
+      expect(response.lifecycleEpoch, 3);
+      expect(response.currentLifecycleEpoch, 3);
+      expect(response.roundState, 'current');
+      expect(response.availableActions, isEmpty);
+      expect(response.isClosedRound, isFalse);
     });
 
     test(
@@ -65,8 +74,85 @@ void main() {
         expect(response.isPending, isTrue);
         expect(response.createdAt, isNull);
         expect(response.respondedAt, isNull);
+        expect(response.lifecycleEpoch, isNull);
+        expect(response.currentLifecycleEpoch, isNull);
+        expect(response.availableActions, isNull);
+        expect(response.isClosedRound, isTrue);
+        expect(response.canAccept, isFalse);
+        expect(response.canDismiss, isFalse);
+        expect(response.canWithdraw, isFalse);
       },
     );
+
+    test('server actions take priority and closed rounds are read-only', () {
+      final current = WantedResponse.fromJson({
+        'id': 'response-current',
+        'wanted_listing_id': 'wanted-1',
+        'offer_listing_id': 'offer-1',
+        'status': 'pending',
+        'lifecycle_epoch': 4,
+        'current_lifecycle_epoch': '4',
+        'round_state': 'CURRENT',
+        'available_actions': ['dismiss', ' dismiss ', 'unknown'],
+      });
+
+      expect(current.isClosedRound, isFalse);
+      expect(current.canAccept, isFalse);
+      expect(current.canDismiss, isTrue);
+      expect(current.canWithdraw, isFalse);
+      expect(current.availableActions, {'dismiss', 'unknown'});
+
+      final explicitCurrent = WantedResponse.fromJson({
+        'id': 'response-current-state-wins',
+        'wanted_listing_id': 'wanted-1',
+        'offer_listing_id': 'offer-1',
+        'status': 'pending',
+        'lifecycle_epoch': 1,
+        'current_lifecycle_epoch': 2,
+        'round_state': 'current',
+        'available_actions': <String>[],
+      });
+      expect(explicitCurrent.isClosedRound, isTrue);
+      expect(explicitCurrent.canAccept, isFalse);
+
+      final closed = WantedResponse.fromJson({
+        'id': 'response-closed',
+        'wanted_listing_id': 'wanted-1',
+        'offer_listing_id': 'offer-1',
+        'status': 'pending',
+        'lifecycle_epoch': 3,
+        'current_lifecycle_epoch': 4,
+        'available_actions': ['accept', 'dismiss', 'withdraw'],
+      });
+
+      expect(closed.isClosedRound, isTrue);
+      expect(closed.canAccept, isFalse);
+      expect(closed.canDismiss, isFalse);
+      expect(closed.canWithdraw, isFalse);
+
+      final copied = closed.copyWith(status: 'accepted');
+      expect(copied.lifecycleEpoch, 3);
+      expect(copied.currentLifecycleEpoch, 4);
+      expect(copied.availableActions, closed.availableActions);
+      expect(copied.isClosedRound, isTrue);
+    });
+
+    test('present malformed action metadata fails closed', () {
+      for (final malformed in <dynamic>[null, 'accept', 42, const {}]) {
+        final response = WantedResponse.fromJson({
+          'id': 'response-malformed',
+          'wanted_listing_id': 'wanted-1',
+          'offer_listing_id': 'offer-1',
+          'status': 'pending',
+          'available_actions': malformed,
+        });
+
+        expect(response.availableActions, isEmpty);
+        expect(response.canAccept, isFalse);
+        expect(response.canDismiss, isFalse);
+        expect(response.canWithdraw, isFalse);
+      }
+    });
   });
 
   group('WantedResponsesResponse', () {

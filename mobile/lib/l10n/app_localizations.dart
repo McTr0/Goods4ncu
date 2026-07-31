@@ -2294,6 +2294,18 @@ abstract class AppLocalizations {
   /// **'The recommendation could not be updated: {error}'**
   String wantedResponseActionFailed(String error);
 
+  /// No description provided for @wantedResponseRoundClosedToast.
+  ///
+  /// In en, this message translates to:
+  /// **'This recommendation belongs to a closed request round and is now read-only.'**
+  String get wantedResponseRoundClosedToast;
+
+  /// No description provided for @wantedResponseClosedRoundLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Closed request round · Read-only'**
+  String get wantedResponseClosedRoundLabel;
+
   /// No description provided for @wantedResponseAcceptedToast.
   ///
   /// In en, this message translates to:
