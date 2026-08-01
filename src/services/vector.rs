@@ -7,4 +7,7 @@
 /// table fails to decode the moment a single row exists — and returns cleanly
 /// while the table is empty, which is exactly how that mismatch stayed hidden.
 /// Migration 0046 defines this view and explains the choice.
+/// The regression suite imports this contract directly; current production
+/// retrieval builds its relation name internally.
+#[allow(dead_code)]
 pub const DOCUMENTS_VECTOR_VIEW: &str = "documents_vector";

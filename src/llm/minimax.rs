@@ -1,9 +1,9 @@
 use super::{
-    CircuitBreaker, MarketplaceAgent, NegotiateAgent, ReplyAssistant, LLM_CIRCUIT_BREAKER,
-    NEGOTIATION_PREAMBLE, PREAMBLE, REPLY_ASSISTANT_PREAMBLE,
+    CircuitBreaker, EmbeddingGenerator, EmbeddingModelMetadata, MarketplaceAgent, NegotiateAgent,
+    ReplyAssistant, LLM_CIRCUIT_BREAKER, NEGOTIATION_PREAMBLE, PREAMBLE, REPLY_ASSISTANT_PREAMBLE,
 };
 use crate::agents::models::Document;
-use crate::agents::tools::{EmbedUpdater, ToolContext, ToolError};
+use crate::agents::tools::ToolContext;
 use crate::services::BusinessEvent;
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -14,8 +14,6 @@ use rig::embeddings::EmbeddingsBuilder;
 use rig::providers::gemini;
 use rig::providers::openai;
 use rig::streaming::{StreamedAssistantContent, StreamingCompletion};
-use rig_postgres::{PgVectorDistanceFunction, PostgresVectorStore};
-use sqlx::{PgConnection, PgPool};
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -73,95 +71,41 @@ impl MiniMaxProvider {
         })
     }
 
-    /// Build the RAG index for dynamic_context and the embed_updater for atomic
-    /// listing/vector writes inside tool-owned transactions.
-    pub fn build_vector_store(
-        &self,
-        db_pool: &PgPool,
-    ) -> (
-        PostgresVectorStore<gemini::embedding::EmbeddingModel>,
-        Arc<dyn EmbedUpdater>,
-    ) {
-        let embedding_model = gemini::embedding::EmbeddingModel::new(
-            self.embedding_client.clone(),
-            gemini::EMBEDDING_001,
-            self.embedding_dim,
-        );
-        // RAG store: owned by dynamic_context (consumed at agent build time).
-        // Retrieval reads through `documents_vector`, a UUID-typed view over
-        // `documents`. rig-postgres decodes result ids as `Uuid` while our
-        // `documents.id` is TEXT (it mirrors `inventory.id`), so pointing the
-        // store at the base table fails to decode as soon as a single row
-        // exists. See migration 0046.
-        let rag_store = PostgresVectorStore::new(
-            embedding_model.clone(),
-            db_pool.clone(),
-            Some(crate::services::vector::DOCUMENTS_VECTOR_VIEW.to_string()),
-            PgVectorDistanceFunction::Cosine,
-        );
-
-        // embed_updater: for atomic re-embedding within a transaction (UpdateListingTool).
-        let embedding_client_for_updater = self.embedding_client.clone();
-        let dim_for_updater = self.embedding_dim;
-        let embed_updater: Arc<dyn EmbedUpdater> = Arc::new(MiniMaxEmbedUpdater {
-            embedding_client: embedding_client_for_updater,
-            embedding_dim: dim_for_updater,
-        });
-
-        (rag_store, embed_updater)
+    pub fn build_embedding_generator(&self) -> Arc<dyn EmbeddingGenerator> {
+        Arc::new(MiniMaxEmbeddingGenerator {
+            embedding_client: self.embedding_client.clone(),
+            embedding_dim: self.embedding_dim,
+        })
     }
 }
 
-struct MiniMaxEmbedUpdater {
+struct MiniMaxEmbeddingGenerator {
     embedding_client: gemini::Client,
     embedding_dim: usize,
 }
 
-#[async_trait(?Send)]
-impl EmbedUpdater for MiniMaxEmbedUpdater {
-    async fn embed_and_update(
-        &self,
-        content: String,
-        listing_id: String,
-        conn: &mut PgConnection,
-    ) -> Result<(), ToolError> {
+#[async_trait]
+impl EmbeddingGenerator for MiniMaxEmbeddingGenerator {
+    async fn generate(&self, normalized_text: &str) -> anyhow::Result<Vec<f64>> {
         let embedding_model = gemini::embedding::EmbeddingModel::new(
             self.embedding_client.clone(),
             gemini::EMBEDDING_001,
             self.embedding_dim,
         );
         let document = Document {
-            id: listing_id.clone(),
-            content: content.clone(),
+            id: uuid::Uuid::new_v4().to_string(),
+            content: normalized_text.to_string(),
         };
         let embeddings = EmbeddingsBuilder::new(embedding_model)
             .document(document)
-            .map_err(|e| ToolError(format!("Embedding builder error: {}", e)))?
+            .map_err(|e| anyhow::anyhow!("Embedding builder error: {e}"))?
             .build()
             .await
-            .map_err(|e| ToolError(format!("Embeddings API error: {}", e)))?;
-
-        // Extract the embedding vector (Vec<f64>) for SQL binding.
-        let embedding_vec: Vec<f64> = embeddings[0].1.first_ref().vec.clone();
-        let document_json = serde_json::json!({ "id": listing_id, "content": content });
-
-        sqlx::query(
-            "INSERT INTO documents (id, document, embedded_text, embedding) \
-             VALUES ($1, $2::jsonb, $3, $4) \
-             ON CONFLICT (id) DO UPDATE SET \
-               document = EXCLUDED.document, \
-               embedded_text = EXCLUDED.embedded_text, \
-               embedding = EXCLUDED.embedding",
-        )
-        .bind(&listing_id)
-        .bind(&document_json)
-        .bind(&content)
-        .bind(&embedding_vec)
-        .execute(conn)
-        .await
-        .map_err(|e| ToolError(format!("Vector DB error: {}", e)))?;
-
-        Ok(())
+            .map_err(|e| anyhow::anyhow!("Embeddings API error: {e}"))?;
+        embeddings
+            .first()
+            .map(|embedding| embedding.1.first_ref().vec.clone())
+            .ok_or_else(|| anyhow::anyhow!("embedding provider returned no vector"))
     }
 }
 
@@ -178,11 +122,8 @@ impl super::LlmProvider for MiniMaxProvider {
         current_user_id: Option<String>,
         current_campus_id: Option<uuid::Uuid>,
     ) -> anyhow::Result<Box<dyn MarketplaceAgent>> {
-        let (rag_store, embed_updater) = self.build_vector_store(db_pool);
-
         let ctx = ToolContext {
             db_pool: db_pool.clone(),
-            embed_updater,
             current_user_id,
             current_campus_id,
             notification: crate::services::notification::NotificationService::new(db_pool.clone()),
@@ -192,7 +133,8 @@ impl super::LlmProvider for MiniMaxProvider {
             .chat_client
             .agent(&self.model)
             .preamble(PREAMBLE)
-            .dynamic_context(3, rag_store)
+            // Global dynamic_context is disabled until retrieval can enforce
+            // campus/status/restriction scope before vector ranking.
             .tool(crate::agents::tools::CreateListingTool { ctx: ctx.clone() })
             .tool(crate::agents::tools::SearchInventoryTool { ctx: ctx.clone() })
             .tool(crate::agents::tools::GetListingDetailsTool { ctx: ctx.clone() })
@@ -206,11 +148,16 @@ impl super::LlmProvider for MiniMaxProvider {
         Ok(Box::new(MiniMaxMarketplaceAgent(agent)))
     }
 
-    fn embed_updater(
-        self: Arc<Self>,
-        db_pool: &PgPool,
-    ) -> Arc<dyn crate::agents::tools::EmbedUpdater> {
-        self.build_vector_store(db_pool).1
+    fn embedding_generator(self: Arc<Self>) -> Arc<dyn EmbeddingGenerator> {
+        self.build_embedding_generator()
+    }
+
+    fn embedding_metadata(&self) -> EmbeddingModelMetadata {
+        EmbeddingModelMetadata {
+            provider: "gemini",
+            model: gemini::EMBEDDING_001,
+            dimensions: self.embedding_dim,
+        }
     }
 
     async fn create_negotiate_agent(self: Arc<Self>) -> anyhow::Result<Box<dyn NegotiateAgent>> {

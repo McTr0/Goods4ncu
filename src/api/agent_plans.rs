@@ -46,11 +46,6 @@ pub async fn confirm_plan(
     // unchanged.
     let ctx = crate::agents::tools::ToolContext {
         db_pool: state.infra.db.clone(),
-        embed_updater: state
-            .agents
-            .llm_provider
-            .clone()
-            .embed_updater(&state.infra.db),
         current_user_id: Some(session.user_id.clone()),
         current_campus_id: session.campus_id,
         notification: state.infra.notification.clone(),

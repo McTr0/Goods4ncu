@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 适用读者 | 本地开发者、部署维护者、SRE、数据库管理员和事故响应人员 |
-| 当前状态 | 当前配置和单实例排错已可用；完整 SLO、PITR、KMS、outbox 和多副本 runbook 属于目标态 |
+| 当前状态 | 当前配置、outbox/embedding 队列和单实例排错已可用；完整 SLO、KMS 与生产级多副本 runbook 仍需完善 |
 | 事实来源 | 配置加载代码、环境模板、Docker/Compose、migration、metrics、worker 和实际启动行为 |
 | 最后核对范围 | 环境变量、PostgreSQL/pgvector、CORS、Redis、媒体审核、日志、健康检查和常见故障 |
 
@@ -225,7 +225,86 @@ DB_NAME=goods4ncu APP_PASSWORD=<secret> ./scripts/provision_app_role.sh
 - `attempts/last_error/available_at` 显示重试与退避（2^n 秒，封顶 5 分钟，默认 8 次）。
 - 超限进入 `dead_lettered_at`，worker 不再认领；修复根因后用 `services::outbox::replay_dead_lettered`（或等价 SQL 置空 `dead_lettered_at` 并重置 `attempts`）受控重放。
 - `locked_by/locked_until` 是 60 秒租约；worker 崩溃后租约到期事件自动可被重新认领。堆积排查先看最老未处理事件的 `available_at` 和 `last_error`。
-- 多副本注意：WS 投递只到达当前实例持有的连接；接入第二副本前必须先落地 Redis pub/sub 路由（Phase 4）。
+- 多副本通过已实现的 Redis pub/sub 把推送路由到持有连接的实例；异常时同时检查 outbox、Redis fan-out 和客户端 HTTP 补拉，不能只看当前副本的连接表。
+
+## Listing Embedding Jobs
+
+[已实现] `0057_versioned_embedding_jobs.sql` 建立独立于通知 outbox 的 `embedding_jobs`。listing INSERT、语义字段/status/campus 变化，以及 restriction effect 生效或结束，都在原业务事务内推进 `inventory.content_revision` 并合并同一 `listing_id` 的 `desired_revision`。迁移会为全部既有 inventory 建立 pending job；它不在 migration 内调用 provider。
+
+状态与恢复语义：
+
+- `pending`：等待 `available_at`；失败按 2^attempts 秒退避，封顶 5 分钟。
+- `processing`：由 `locked_by/locked_until` 持有 lease；进程退出后到期可重领。
+- `completed`：该行当时的 `desired_revision` 已完成。新 revision 会重新置为 pending。
+- `dead_lettered`：达到 `max_attempts`，保留 `last_error/dead_lettered_at` 等待人工确认后重放。
+- processing 期间新版本不会抢走现有 lease，而是只推进 `desired_revision`。旧 worker success/failure 时通过 claimed revision CAS 发现 superseded，并把最新版立即重新排队。
+
+Provider 故障不会回滚 listing 发布或更新。用户先得到已提交的 listing，向量缺失期间搜索与匹配走既有 fallback；恢复 provider/worker 后队列自动补齐。不要为了“强一致”把 provider HTTP 调用重新放回 inventory 数据库事务。
+
+常用只读检查：
+
+```sql
+-- 队列状态、数量与最老请求
+SELECT status, count(*) AS jobs, min(requested_at) AS oldest_requested_at
+FROM embedding_jobs
+GROUP BY status
+ORDER BY status;
+
+-- 可执行、退避中和 lease 已过期的工作
+SELECT
+  count(*) FILTER (WHERE status = 'pending' AND available_at <= now()) AS due,
+  count(*) FILTER (WHERE status = 'pending' AND available_at > now()) AS retry_wait,
+  count(*) FILTER (WHERE status = 'processing' AND locked_until < now()) AS expired_leases
+FROM embedding_jobs;
+
+-- dead-letter 明细；不要把 listing_id 做 Prometheus label
+SELECT listing_id, campus_id, desired_revision, attempts,
+       dead_lettered_at, last_error
+FROM embedding_jobs
+WHERE status = 'dead_lettered'
+ORDER BY dead_lettered_at;
+
+-- active 且未受限 listing 的当前投影覆盖率/陈旧量
+SELECT
+  count(*) AS eligible,
+  count(*) FILTER (
+    WHERE document.source_revision = listing.content_revision
+      AND document.embedding IS NOT NULL
+  ) AS current,
+  count(*) FILTER (
+    WHERE document.id IS NULL
+       OR document.source_revision IS DISTINCT FROM listing.content_revision
+       OR document.embedding IS NULL
+  ) AS missing_or_stale
+FROM inventory AS listing
+LEFT JOIN documents AS document ON document.id = listing.id
+WHERE listing.status = 'active'
+  AND NOT EXISTS (
+    SELECT 1 FROM listing_restriction_effects AS effect
+    WHERE effect.listing_id = listing.id AND effect.released_at IS NULL
+  );
+```
+
+修复根因并记录变更单/事故编号后，可用服务 API `services::embedding_jobs::replay_dead_lettered`，或在受控数据库会话执行等价的单条重放：
+
+```sql
+UPDATE embedding_jobs
+SET status = 'pending', attempts = 0, available_at = now(),
+    locked_by = NULL, locked_until = NULL, last_error = NULL,
+    completed_at = NULL, dead_lettered_at = NULL, requested_at = now()
+WHERE listing_id = '<listing-id>' AND status = 'dead_lettered'
+RETURNING listing_id, campus_id, desired_revision;
+```
+
+当前没有 embedding dead-letter 管理端，也没有自动写入管理员审计；直接 SQL 重放必须依赖外部变更记录，不能宣称为产品内受审计操作。`/api/metrics` 目前也未暴露 embedding queue depth、oldest pending、retry/dead-letter、provider latency 或 current-revision 覆盖率；上线前应补低基数 Prometheus 指标和告警。已完成 job 的归档/保留清理尚未实现，高量环境还需制定 retention，避免表和索引持续增长。
+
+部署与 backfill 顺序：
+
+1. 先部署 0057 schema；迁移只登记已有 inventory，不访问 provider。
+2. 部署能消费 versioned jobs 的 worker，再观察 pending、expired lease、dead-letter 与 provider 429/timeout。
+3. 对大库按校园限速消化 migration backfill；可以停止并重启 worker，按 listing 合并使过程幂等。
+4. 用上述覆盖率查询确认 active/unrestricted listing 的 `documents.source_revision = inventory.content_revision`，并抽查 deleted/sold/fulfilled/restricted 内容已删除投影。
+5. 模型/维度变化先双写或新建兼容的向量列/表并重建，完成读切换后再清理旧版本；固定 `vector(768)` 不能直接装入不同维度。
 
 ## Metrics 和结构化日志
 
@@ -251,8 +330,9 @@ DB_NAME=goods4ncu APP_PASSWORD=<secret> ./scripts/provision_app_role.sh
 | `refresh_tokens` | refresh token 是否过期、revoked_at 是否被设置、campus_id 是否与 access claim 和用户 membership 一致。 |
 | `revoked_access_tokens` | logout 或管理员撤销后的 JTI 是否存在。 |
 | `campuses` / `campus_memberships` | Campus status、用户资格、verification_method、verified_at；pending/suspended 不能执行受保护写操作。 |
-| `inventory` | 商品 campus_id、生命周期 status、owner_id、价格、分类、更新时间；重复发布时检查 `idempotency_key/idempotency_hash`；wanted 重开异常时检查 `lifecycle_epoch` 是否只增加一次。审核限制不写入 status。 |
-| `documents` | RAG 文档是否存在，embedding 是否非空，维度是否匹配。 |
+| `inventory` | 商品 campus_id、生命周期 status、owner_id、价格、分类、更新时间与 `content_revision`；重复发布时检查 `idempotency_key/idempotency_hash`；wanted 重开异常时检查 `lifecycle_epoch` 是否只增加一次。审核限制不写入 status。 |
+| `documents` | RAG 文档、embedding、维度，以及 campus/source_revision/content_hash/provider/model/version/embedded_at 是否与当前 listing 投影一致。 |
+| `embedding_jobs` | desired_revision、pending/processing/completed/dead-letter、attempt/backoff、lease owner/expiry 和 last_error。 |
 | `wanted_responses` | campus_id 与 wanted/offer 是否一致，responder/requester 是否同校园；`lifecycle_epoch` 为 NULL 的 legacy 行必须只读；同 wanted/epoch/offer 是否唯一；重试问题检查 `idempotency_key/idempotency_hash`。 |
 | `orders` | campus_id、状态、buyer/seller、listing、金额和时间戳。 |
 | `hitl_requests` | campus_id、pending/countered/expired 状态、counter_price、expires_at。 |
@@ -284,7 +364,7 @@ DB_NAME=goods4ncu APP_PASSWORD=<secret> ./scripts/provision_app_role.sh
 
 本地政策词、校内临时专项词或法务要求的词不要写死进源码，优先通过 `BLOCKED_KEYWORDS` 或 `[moderation].blocked_keywords` 配置。返回给用户的错误只说明类别，不暴露具体命中词，避免教用户绕过。
 
-图片审核仍是异步任务：业务接口保存媒体 URL 后写入 `moderation_jobs`，并从 listing、conversation 或用户 session 继承校园，客户端不能提交校园。后台 Worker 调外部图片审核 API 并回写资源状态；拒绝结果与资源状态、ModerationCase 在同一事务中提交。生产环境应配置 `MODERATION_IMAGE_API_URL` 和 `MODERATION_IMAGE_API_KEY`，否则只能完成文本审核。校园运营可以在 `GET /api/admin/moderation/jobs?status=pending` 和 `GET /api/admin/moderation/cases?status=open` 查看本校积压；平台管理员跨校排查或处置必须同时提交 `campus_id` 和 `reason`。
+图片审核仍是异步任务：listing 首次 commit 会把媒体 URL、资源 `pending` 状态和 `moderation_jobs` 原子写入，并从 listing、conversation 或用户 session 继承校园，客户端不能提交校园。后台 Worker 调外部图片审核 API 并回写资源状态；拒绝结果与资源状态、ModerationCase 在同一事务中提交。生产环境应配置 `MODERATION_IMAGE_API_URL` 和 `MODERATION_IMAGE_API_KEY`，否则只能完成文本审核。校园运营可以在 `GET /api/admin/moderation/jobs?status=pending` 和 `GET /api/admin/moderation/cases?status=open` 查看本校积压；平台管理员跨校排查或处置必须同时提交 `campus_id` 和 `reason`。
 
 ## 常见排错
 
@@ -316,7 +396,7 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 
 ### 语义搜索或推荐异常
 
-检查 `documents` 表是否有对应商品文档，embedding 是否非空，`VECTOR_DIM` 是否与 schema 一致，商品是否 active，LLM/embedding provider key 是否可用，pgvector 索引是否存在。语义搜索问题通常横跨 provider、文档写入和 SQL 过滤三层。
+先比较 `inventory.content_revision`、`embedding_jobs.desired_revision/status/last_error` 与 `documents.source_revision`。再检查 embedding 是否非空、`VECTOR_DIM` 是否与 schema 一致、商品是否 active/未受限、provider key 是否可用、pgvector 索引是否存在。Provider 故障时 listing 已提交是预期行为；应恢复 worker 并等待投影追平，不要删除业务 listing。语义搜索问题通常横跨 provider、版本化投影和 SQL 过滤三层。
 
 首页商品 feed、相似商品、listing wanted matches 或 intent feed/matches 的个性化顺序/条目缺失异常，还要检查当前用户/校园的 `feed_preferences.personalization_enabled/signals_reset_at` 和 `feed_feedback.resource_type/resource_id/action/signal_key/updated_at`。重置只让旧收藏、买家成交意向和 `less_like_this` 泛化信号失效；所有入口仍精确隐藏显式 feedback 的原资源。相似商品使用分类泛化降权；wanted matches 因分类已是硬约束，查询会把 feedback 目标连接回 inventory 并用规范化品牌降低同品牌候选。不要为排查排序直接删除 watchlist/order 等业务事实。
 
@@ -382,6 +462,7 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 | 消息投递退化 | DB 已写但 fan-out 延迟/失败 | Redis、实例连接表、HTTP 补偿 |
 | 审核积压 | pending age 和队列长度 | provider、worker lease、dead-letter |
 | Outbox 积压 | oldest unprocessed age | worker、不可重试事件、数据库锁 |
+| Embedding 投影落后 | oldest pending、current-revision 覆盖率 | worker lease、provider 配额、dead-letter |
 | Agent 退化 | 首 token、错误、熔断 | provider、模型、工具循环、配额 |
 | 媒体错误 | 上传/解码/公开失败率 | STS、bucket policy、MIME、CDN |
 

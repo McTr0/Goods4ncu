@@ -177,6 +177,15 @@ async fn main() -> Result<(), anyhow::Error> {
         shutdown.clone(),
     ));
 
+    let embedding_metadata = llm_provider.embedding_metadata();
+    let embedding_generator = Arc::clone(&llm_provider).embedding_generator();
+    let embedding_worker_handle = tokio::spawn(services::embedding_worker::run_embedding_worker(
+        db_pool.clone(),
+        embedding_generator,
+        embedding_metadata,
+        shutdown.clone(),
+    ));
+
     let router = crate::agents::router::IntentRouter::new(config.blocked_keywords.clone());
 
     // HITL expiration worker: scans every 10 min for pending requests > 48h old.
@@ -426,6 +435,7 @@ async fn main() -> Result<(), anyhow::Error> {
             undo_prune_handle,
             intent_expiry_handle,
             space_formation_handle,
+            embedding_worker_handle,
         );
         #[cfg(feature = "redis")]
         if let Some(handle) = ws_fanout_handle {
@@ -444,6 +454,7 @@ async fn main() -> Result<(), anyhow::Error> {
             ("undo_prune", workers.7),
             ("intent_expiry", workers.8),
             ("space_formation", workers.9),
+            ("embedding_worker", workers.10),
         ] {
             if let Err(e) = result {
                 tracing::error!(worker = name, %e, "Worker task failed during shutdown");

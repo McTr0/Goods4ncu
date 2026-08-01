@@ -8,36 +8,16 @@
 //! would quietly destroy a sale or a later edit, which is strictly worse than
 //! the confirmation dialog it replaced.
 
-use async_trait::async_trait;
-use goods4ncu::agents::tools::{
-    CreateListingArgs, CreateListingTool, EmbedUpdater, ToolContext, ToolError,
-};
+use goods4ncu::agents::tools::{CreateListingArgs, CreateListingTool, ToolContext};
 use goods4ncu::services::notification::NotificationService;
 use goods4ncu::services::undo::{UndoOutcome, UndoService};
 use goods4ncu::test_infra::with_test_pool;
 use rig::tool::Tool;
-use std::sync::Arc;
 use uuid::Uuid;
-
-#[derive(Clone)]
-struct NoopEmbedUpdater;
-
-#[async_trait(?Send)]
-impl EmbedUpdater for NoopEmbedUpdater {
-    async fn embed_and_update(
-        &self,
-        _content: String,
-        _listing_id: String,
-        _conn: &mut sqlx::PgConnection,
-    ) -> Result<(), ToolError> {
-        Ok(())
-    }
-}
 
 fn tool_ctx(pool: sqlx::PgPool, user_id: &str) -> ToolContext {
     ToolContext {
         db_pool: pool.clone(),
-        embed_updater: Arc::new(NoopEmbedUpdater),
         current_user_id: Some(user_id.to_string()),
         current_campus_id: None,
         notification: NotificationService::new(pool),

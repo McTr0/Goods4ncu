@@ -67,11 +67,18 @@ registered
 用户表单或 Agent 草稿
   -> 字段校验
   -> 同步文本审核
-  -> 写 inventory(direction=offer|wanted)
-  -> 写/更新 documents embedding
-  -> 可选媒体审核任务
+  -> 同一事务写 inventory(direction=offer|wanted)
+     + 推进 content_revision
+     + 合并 embedding_jobs desired_revision
+     + 可选媒体审核任务
   -> 返回 listing
+  -> embedding worker 读取权威 listing/限制状态
+  -> 按 revision CAS 写入或删除 documents 投影
 ```
+
+[已实现] HTTP、Flutter 和 Agent 发布共用数据库触发的不丢任务边界。创建、语义字段变化以及 status/campus 变化都会原子推进 `content_revision` 并登记最新版 projection job；短时间连续更新只保留同一 `listing_id` 的最高 `desired_revision`。限制 effect 的生效、释放、删除或改挂也会推进 revision，所以不依赖某一个管理入口记得手工重建向量。
+
+Embedding provider 调用发生在 listing 提交之后。provider 超时、限流或离线不会回滚已经通过校验和审核的发布；在投影完成前，读取路径使用现有关键词/规则 fallback。Worker 调用 provider 期间如果 listing 再次变化，旧 claim 不能完成新 revision，任务会回到 pending 处理最新版。
 
 `offer`：价格是出售价，成色是当前成色，owner 是提供方。
 
@@ -285,7 +292,7 @@ confirmed -> cancelled
 
 创建 intent 不改变 listing。卖家确认后可以选择自动把 offer 标为 sold。旧 pending 兼容为 intent_pending，旧 paid/shipped/completed 兼容为 confirmed；新业务不再产生支付或物流状态。
 
-成交确认事务包含 DealRecord 状态和可选 listing 下架。确认接口支持卖家范围内的 `Idempotency-Key`，网络超时后的相同请求不会重复下架；同 key 改变确认参数会安全失败。通知失败不应回滚已确认事实，但当前 best-effort 通知仍有丢失风险，生产目标使用 transactional outbox。
+成交确认事务包含 DealRecord 状态和可选 listing 下架。确认接口支持卖家范围内的 `Idempotency-Key`，网络超时后的相同请求不会重复下架；同 key 改变确认参数会安全失败。通知行与 `notification.push` outbox event 同事务提交；WebSocket 投递失败不会回滚已确认事实，并由至少一次投递与 HTTP 补拉恢复。
 
 普通用户主页不保留“我的订单”主入口；历史记录仍可从通知、相关会话或明确的成交记录入口访问。管理后台使用“成交记录”而不是“订单”。
 

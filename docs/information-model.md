@@ -230,6 +230,14 @@ ActionPlan 保存待执行输入快照、风险级、短期 confirmation token �
 
 业务写入与 outbox event 必须在同一数据库事务提交。日志或进程内 channel 不能替代事件事实。
 
+### Listing embedding 投影版本
+
+[已实现] `inventory.content_revision` 是 listing 可检索内容与可见性的单调版本。数据库 trigger 在 INSERT，以及 title/category/brand/condition/defects/description/direction、status 或 campus 变化时维护版本；`listing_restriction_effects` 的生效、释放、删除和改挂也会使对应 listing 失效并推进版本。
+
+`embedding_jobs` 每个 `listing_id` 一行，保存 `campus_id`、最新 `desired_revision`、pending/processing/completed/dead-letter 状态、attempt/backoff、lease 和错误。新的 revision 通过 UPSERT 合并；processing 中的行保持当前 lease，但提升 desired revision。Worker 必须重新读取权威 inventory 与 restriction 状态，决定 upsert embedding 还是删除投影，不能把 job payload 当业务事实。
+
+`documents.source_revision`、`content_hash`、embedding provider/model/version 和 `embedded_at` 描述已生成投影。Worker 在 provider I/O 后以 claimed revision 做 CAS：只有仍然匹配的结果才能完成；被更新取代的 attempt 将最新 revision 重新置为 pending。历史 document 的真实 source revision 无法证明时保持 NULL，并由 backfill 重建，不能用迁移时间伪造为“最新”。
+
 ## 信息生命周期
 
 ### 发布与公开

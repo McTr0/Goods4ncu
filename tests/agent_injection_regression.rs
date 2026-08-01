@@ -6,35 +6,17 @@
 //! assertions prove the validated execute bodies refuse to act outside the
 //! calling user's authority regardless of what the model asks for.
 
-use async_trait::async_trait;
 use goods4ncu::agents::tools::{
     execute_create_listing, execute_negotiate_item, execute_purchase_item, CreateListingArgs,
-    EmbedUpdater, NegotiateItemArgs, PurchaseItemIntentArgs, ToolContext, ToolError,
+    NegotiateItemArgs, PurchaseItemIntentArgs, ToolContext,
 };
 use goods4ncu::services::notification::NotificationService;
 use goods4ncu::test_infra::with_test_pool;
-use std::sync::Arc;
 use uuid::Uuid;
-
-#[derive(Clone)]
-struct NoopEmbedUpdater;
-
-#[async_trait(?Send)]
-impl EmbedUpdater for NoopEmbedUpdater {
-    async fn embed_and_update(
-        &self,
-        _content: String,
-        _listing_id: String,
-        _conn: &mut sqlx::PgConnection,
-    ) -> Result<(), ToolError> {
-        Ok(())
-    }
-}
 
 fn tool_ctx(pool: sqlx::PgPool, user_id: &str) -> ToolContext {
     ToolContext {
         db_pool: pool.clone(),
-        embed_updater: Arc::new(NoopEmbedUpdater),
         current_user_id: Some(user_id.to_string()),
         current_campus_id: None,
         notification: NotificationService::new(pool),

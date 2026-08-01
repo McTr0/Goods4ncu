@@ -502,23 +502,28 @@ impl ModerationService {
         image_url: &str,
         resource_type: &str,
     ) -> Result<String, sqlx::Error> {
+        let mut tx = pool.begin().await?;
+        let id = self
+            .submit_image_job_in_tx(&mut tx, campus_id, resource_id, image_url, resource_type)
+            .await?;
+        tx.commit().await?;
+        Ok(id)
+    }
+
+    pub async fn submit_image_job_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        campus_id: uuid::Uuid,
+        resource_id: &str,
+        image_url: &str,
+        resource_type: &str,
+    ) -> Result<String, sqlx::Error> {
         if !self.image_enabled {
-            // Moderation is off: mark the media explicitly reviewed-exempt so
-            // the serving gate (`= 'approved'`) still works. Leaving it
-            // 'pending' forever would hide every image in deployments without
-            // a moderation provider.
-            let mut tx = pool.begin().await?;
-            set_media_moderation_status(&mut tx, resource_type, resource_id, "approved").await?;
-            tx.commit().await?;
+            set_media_moderation_status(tx, resource_type, resource_id, "approved").await?;
             return Ok(String::new());
         }
 
-        // Quarantine and job enqueue commit atomically: from this moment the
-        // media is hidden from public serving until the worker approves it. A
-        // crash between the two would otherwise leave an unreviewed image
-        // publicly visible with no job to ever review it.
         let id = uuid::Uuid::new_v4().to_string();
-        let mut tx = pool.begin().await?;
         sqlx::query(
             r#"INSERT INTO moderation_jobs (
                    id, campus_id, resource_type, resource_id, image_url, status
@@ -529,10 +534,9 @@ impl ModerationService {
         .bind(resource_type)
         .bind(resource_id)
         .bind(image_url)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
-        set_media_moderation_status(&mut tx, resource_type, resource_id, "pending").await?;
-        tx.commit().await?;
+        set_media_moderation_status(tx, resource_type, resource_id, "pending").await?;
 
         Ok(id)
     }

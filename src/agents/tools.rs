@@ -1,46 +1,24 @@
-use crate::repositories::{CreateListingInput, PostgresListingRepository, UpdateListingInput};
+use crate::repositories::{
+    CreateListingInput, ListingRepository, PostgresListingRepository, UpdateListingInput,
+};
 use crate::services::campus::CampusService;
 use crate::services::order::{OrderError, OrderService};
 use crate::utils::cents_to_yuan;
-use async_trait::async_trait;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::{PgConnection, PgPool};
-use std::sync::Arc;
-use tokio::runtime::Handle;
-use tokio::task::spawn_blocking;
+use sqlx::PgPool;
 
 // ---------------------------------------------------------------------------
 // Shared context for all tools
 // ---------------------------------------------------------------------------
-
-/// EmbedUpdater enables atomic re-embedding of listing content within a DB transaction.
-///
-/// The `embed_and_update` method is called from INSIDE a `spawn_blocking` closure
-/// in `UpdateListingTool.call()`, where the `!Send` PgConnection can safely be used.
-/// Using `#[async_trait(?Send)]` on the impl allows the async HTTP call to generate
-/// a `!Send` future without conflicting with the `Tool::call()` `Send` bound.
-#[async_trait(?Send)]
-pub trait EmbedUpdater: Send + Sync {
-    async fn embed_and_update(
-        &self,
-        content: String,
-        listing_id: String,
-        conn: &mut PgConnection,
-    ) -> Result<(), ToolError>;
-}
 
 /// Shared dependencies injected into every marketplace tool.
 #[derive(Clone)]
 pub struct ToolContext {
     /// PostgreSQL pool — serves both relational data and vector data (pgvector).
     pub db_pool: PgPool,
-    /// Re-embed and update a listing's vector document within a DB transaction.
-    /// Called from spawn_blocking in UpdateListingTool so the !Send PgConnection
-    /// is safe to use without affecting the Tool::call() Send bound.
-    pub embed_updater: Arc<dyn EmbedUpdater>,
     pub current_user_id: Option<String>,
     pub current_campus_id: Option<uuid::Uuid>,
     /// Notification service for sending in-app alerts (e.g., negotiation requests).
@@ -320,14 +298,7 @@ pub async fn execute_create_listing(
             return Err(ToolError("价格必须为正且在合理范围内".to_string()));
         }
 
-        let content_to_embed = format!(
-            "Title: {}\nCategory: {}\nBrand: {}\nCondition: {}/10\nDescription: {}",
-            args.title, args.category, args.brand, args.condition_score, args.original_description
-        );
-
-        let db_pool = ctx.db_pool.clone();
         let listing_repo = PostgresListingRepository::new(ctx.db_pool.clone());
-        let embed_updater = ctx.embed_updater.clone();
         let input = CreateListingInput {
             campus_id,
             title: args.title.clone(),
@@ -342,34 +313,10 @@ pub async fn execute_create_listing(
             owner_id: owner.clone(),
         };
 
-        let listing_id = spawn_blocking(move || {
-            let rt = Handle::current();
-            rt.block_on(async move {
-                let mut tx: sqlx::Transaction<'_, sqlx::Postgres> = db_pool
-                    .begin()
-                    .await
-                    .map_err(|e| ToolError(format!("Transaction error: {}", e)))?;
-
-                let listing_id = listing_repo
-                    .create_in_tx(&mut tx, input)
-                    .await
-                    .map_err(|e| ToolError(format!("DB insert error: {}", e)))?;
-
-                #[allow(clippy::explicit_auto_deref)]
-                embed_updater
-                    .embed_and_update(content_to_embed, listing_id.clone(), &mut *tx)
-                    .await
-                    .map_err(|e| ToolError(format!("Embedding error: {}", e)))?;
-
-                tx.commit()
-                    .await
-                    .map_err(|e| ToolError(format!("Commit error: {}", e)))?;
-
-                Ok::<String, ToolError>(listing_id)
-            })
-        })
-        .await
-        .map_err(|e| ToolError(format!("Spawn error: {}", e)))??;
+        let listing_id = listing_repo
+            .create(input)
+            .await
+            .map_err(|e| ToolError(format!("DB insert error: {}", e)))?;
 
         Ok(CreatedListing {
             message: format!(
@@ -513,16 +460,6 @@ struct InventoryRow {
     category: String,
     condition_score: i64,
     suggested_price_cny: i64,
-}
-
-/// Lightweight row for fetching existing listing data before re-embedding.
-#[derive(sqlx::FromRow)]
-struct ExistingListingRow {
-    title: String,
-    category: String,
-    brand: String,
-    condition_score: i64,
-    description: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -679,156 +616,39 @@ pub async fn execute_update_listing(
             .current_user_id
             .clone()
             .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
+        let campus_id = require_verified_campus(ctx, &owner_id).await?;
 
         if args.new_price.is_none() && args.new_title.is_none() && args.new_description.is_none() {
             return Ok("No fields to update were provided.".to_string());
         }
 
-        let needs_reembedding = args.new_title.is_some() || args.new_description.is_some();
-
-        // If title or description changed, we must re-embed atomically within the same transaction.
-        // The spawn_blocking + block_on pattern lets us use the async EmbedUpdater
-        // (whose future is !Send due to PgConnection borrow) without violating Tool::call()'s Send bound.
-        if needs_reembedding {
-            // First fetch the current listing so we can build accurate content for re-embedding.
-            let existing = sqlx::query_as::<_, ExistingListingRow>(
-                "SELECT title, category, brand, condition_score, description \
-                 FROM inventory WHERE id = $1 AND owner_id = $2 AND status = 'active'
-                   AND NOT listing_has_active_restriction(id)",
+        let listing_repo = PostgresListingRepository::new(ctx.db_pool.clone());
+        let result = listing_repo
+            .update_owned_active(
+                &args.listing_id,
+                &owner_id,
+                campus_id,
+                &UpdateListingInput {
+                    title: args.new_title,
+                    category: None,
+                    brand: None,
+                    condition_score: None,
+                    suggested_price_cny: args.new_price.map(|v| v as f64 / 100.0),
+                    defects: None,
+                    description: args.new_description,
+                    status: None,
+                },
             )
-            .bind(&args.listing_id)
-            .bind(&owner_id)
-            .fetch_optional(&ctx.db_pool)
             .await
-            .map_err(|e| ToolError(format!("Fetch listing error: {}", e)))?;
+            .map_err(|e| ToolError(format!("Update error: {}", e)))?;
 
-            let (title, category, brand, condition_score, description) = match existing {
-                Some(row) => (
-                    row.title,
-                    row.category,
-                    row.brand,
-                    row.condition_score,
-                    row.description,
-                ),
-                None => {
-                    return Ok(format!(
-                        "No active listing found with ID: {} (or you don't own it)",
-                        args.listing_id
-                    ));
-                }
-            };
-
-            // Apply updates to the fetched fields for accurate content_to_embed
-            let final_title = args.new_title.as_deref().unwrap_or(&title);
-            let final_description = args.new_description.as_deref().unwrap_or(&description);
-
-            let content_to_embed = format!(
-                "Title: {}\nCategory: {}\nBrand: {}\nCondition: {}/10\nDescription: {}",
-                final_title, category, brand, condition_score, final_description
-            );
-
-            let db_pool = ctx.db_pool.clone();
-            let listing_repo = PostgresListingRepository::new(ctx.db_pool.clone());
-            let embed_updater = ctx.embed_updater.clone();
-            let listing_id = args.listing_id.clone();
-            let owner_id_clone = owner_id.clone();
-            let new_price = args.new_price;
-            let new_title = args.new_title.clone();
-            let new_description = args.new_description.clone();
-
-            let update_result = spawn_blocking(move || {
-                let rt = Handle::current();
-                let result: Result<bool, ToolError> = rt.block_on(async move {
-                    let mut tx: sqlx::Transaction<'_, sqlx::Postgres> = db_pool
-                        .begin()
-                        .await
-                        .map_err(|e| ToolError(format!("Transaction error: {}", e)))?;
-
-                    // Re-embed: same transaction so documents.id matches the listing_id
-                    // Note: &mut *tx is required because Transaction doesn't implement Executor,
-                    // but PoolConnection (what tx wraps) does.
-                    #[allow(clippy::explicit_auto_deref)]
-                    embed_updater
-                        .embed_and_update(content_to_embed, listing_id.clone(), &mut *tx)
-                        .await
-                        .map_err(|e| ToolError(format!("Re-embedding error: {}", e)))?;
-
-                    let update_result = listing_repo
-                        .update_owned_active_in_tx(
-                            &mut tx,
-                            &listing_id,
-                            &owner_id_clone,
-                            &UpdateListingInput {
-                                title: new_title,
-                                category: None,
-                                brand: None,
-                                condition_score: None,
-                                suggested_price_cny: new_price.map(|v| v as f64 / 100.0),
-                                defects: None,
-                                description: new_description,
-                                status: None,
-                            },
-                        )
-                        .await
-                        .map_err(|e| ToolError(format!("Update error: {}", e)))?;
-
-                    if !update_result {
-                        tx.rollback()
-                            .await
-                            .map_err(|e| ToolError(format!("Rollback error: {}", e)))?;
-                        Ok(false)
-                    } else {
-                        tx.commit()
-                            .await
-                            .map_err(|e| ToolError(format!("Commit error: {}", e)))?;
-                        Ok(true)
-                    }
-                });
-                result
-            })
-            .await
-            .map_err(|e| ToolError(format!("Spawn error: {}", e)))??;
-
-            if update_result {
-                Ok(format!(
-                    "Successfully updated listing {} (re-embedded)",
-                    args.listing_id
-                ))
-            } else {
-                Ok(format!(
-                    "No active listing found with ID: {} (or you don't own it)",
-                    args.listing_id
-                ))
-            }
+        if !result {
+            Ok(format!(
+                "No active listing found with ID: {} (or you don't own it)",
+                args.listing_id
+            ))
         } else {
-            // Price-only update — no re-embedding needed; keep it simple
-            let listing_repo = PostgresListingRepository::new(ctx.db_pool.clone());
-            let result = listing_repo
-                .update_owned_active(
-                    &args.listing_id,
-                    &owner_id,
-                    &UpdateListingInput {
-                        title: None,
-                        category: None,
-                        brand: None,
-                        condition_score: None,
-                        suggested_price_cny: args.new_price.map(|v| v as f64 / 100.0),
-                        defects: None,
-                        description: None,
-                        status: None,
-                    },
-                )
-                .await
-                .map_err(|e| ToolError(format!("Update error: {}", e)))?;
-
-            if !result {
-                Ok(format!(
-                    "No active listing found with ID: {} (or you don't own it)",
-                    args.listing_id
-                ))
-            } else {
-                Ok(format!("Successfully updated listing {}", args.listing_id))
-            }
+            Ok(format!("Successfully updated listing {}", args.listing_id))
         }
     }
 }
@@ -883,6 +703,7 @@ pub async fn execute_delete_listing(
             .current_user_id
             .clone()
             .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
+        let campus_id = require_verified_campus(ctx, &owner_id).await?;
         let listing_repo = PostgresListingRepository::new(ctx.db_pool.clone());
         let mut tx = ctx
             .db_pool
@@ -891,7 +712,7 @@ pub async fn execute_delete_listing(
             .map_err(|e| ToolError(format!("Transaction error: {}", e)))?;
 
         let deleted = listing_repo
-            .soft_delete_active_owned_in_tx(&mut tx, &args.listing_id, &owner_id)
+            .soft_delete_active_owned_in_tx(&mut tx, &args.listing_id, &owner_id, campus_id)
             .await
             .map_err(|e| ToolError(format!("Delete error: {}", e)))?;
 
@@ -1353,24 +1174,9 @@ mod tests {
     use sqlx::Row;
     use uuid::Uuid;
 
-    struct NoopEmbedUpdater;
-
-    #[async_trait(?Send)]
-    impl EmbedUpdater for NoopEmbedUpdater {
-        async fn embed_and_update(
-            &self,
-            _content: String,
-            _listing_id: String,
-            _conn: &mut PgConnection,
-        ) -> Result<(), ToolError> {
-            Ok(())
-        }
-    }
-
     fn tool_context(pool: sqlx::PgPool, current_user_id: Option<String>) -> ToolContext {
         ToolContext {
             db_pool: pool.clone(),
-            embed_updater: Arc::new(NoopEmbedUpdater),
             current_user_id,
             current_campus_id: None,
             notification: crate::services::notification::NotificationService::new(pool),
@@ -1568,24 +1374,11 @@ mod tests {
     }
 
     fn stub_ctx() -> ToolContext {
-        struct NoopEmbed;
-        #[async_trait(?Send)]
-        impl EmbedUpdater for NoopEmbed {
-            async fn embed_and_update(
-                &self,
-                _content: String,
-                _listing_id: String,
-                _conn: &mut PgConnection,
-            ) -> Result<(), ToolError> {
-                Ok(())
-            }
-        }
         // Definitions are pure — they never touch the pool — so a lazily
         // connected pool is enough and keeps this a unit test.
         let pool = PgPool::connect_lazy("postgres://unused/unused").expect("lazy pool");
         ToolContext {
             db_pool: pool.clone(),
-            embed_updater: Arc::new(NoopEmbed),
             current_user_id: None,
             current_campus_id: None,
             notification: crate::services::notification::NotificationService::new(pool),
@@ -1843,7 +1636,6 @@ mod tests {
 
             let ctx = ToolContext {
                 db_pool: pool.clone(),
-                embed_updater: Arc::new(NoopEmbedUpdater),
                 current_user_id: Some(owner_id.clone()),
                 current_campus_id: None,
                 notification: crate::services::notification::NotificationService::new(

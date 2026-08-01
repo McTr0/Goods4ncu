@@ -8,7 +8,7 @@ use goods4ncu::agents::router::IntentRouter;
 use goods4ncu::api::auth::{generate_access_token, generate_access_token_for_campus};
 use goods4ncu::api::{create_router, ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
 use goods4ncu::repositories::{
-    PostgresAuthRepository, PostgresChatRepository, PostgresListingRepository,
+    CreateListingInput, PostgresAuthRepository, PostgresChatRepository, PostgresListingRepository,
     PostgresOrderRepository, PostgresUserRepository,
 };
 use goods4ncu::services::intent::slots::{PriceSlot, Slots};
@@ -26,6 +26,166 @@ fn bearer(value: &str) -> String {
     format!("Bearer {}", value)
 }
 
+#[tokio::test]
+async fn listing_and_image_job_roll_back_as_one_transaction() {
+    with_test_pool(|pool| async move {
+        let owner = Uuid::new_v4().to_string();
+        insert_user(
+            &pool,
+            &owner,
+            &format!("rollback-owner-{}", Uuid::new_v4()),
+            "hash",
+            "user",
+            "active",
+        )
+        .await;
+        let campus: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let repo = PostgresListingRepository::new(pool.clone());
+        let mut tx = pool.begin().await.unwrap();
+        let created = repo
+            .create_idempotent_in_tx(
+                &mut tx,
+                CreateListingInput {
+                    campus_id: campus,
+                    title: "Rollback image".into(),
+                    category: "other".into(),
+                    brand: Some("Test".into()),
+                    direction: "offer".into(),
+                    condition_score: 8,
+                    suggested_price_cny: 100.0,
+                    defects: vec![],
+                    description: String::new(),
+                    image_url: Some("https://cdn.example.com/rollback.jpg".into()),
+                    owner_id: owner,
+                },
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let moderation = services::moderation::ModerationService::new_for_test(true);
+        assert!(moderation
+            .submit_image_job_in_tx(
+                &mut tx,
+                Uuid::new_v4(),
+                &created.id,
+                "https://cdn.example.com/rollback.jpg",
+                "listing_image"
+            )
+            .await
+            .is_err());
+        tx.rollback().await.unwrap();
+        let listings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE id = $1")
+            .bind(&created.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let jobs: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM moderation_jobs WHERE resource_id = $1")
+                .bind(&created.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!((listings, jobs), (0, 0));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn listing_create_commits_one_quarantined_image_job_and_replays_without_duplicates() {
+    with_test_pool(|pool| async move {
+        let user_id = Uuid::new_v4().to_string();
+        insert_user(
+            &pool,
+            &user_id,
+            &format!("image-owner-{}", Uuid::new_v4()),
+            "hash",
+            "user",
+            "active",
+        )
+        .await;
+        let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("campus");
+        let (token, _, _) = generate_access_token_for_campus(
+            &user_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("token");
+        let app = create_router(build_state_with_image_moderation(pool.clone(), true), &[]);
+        let key = Uuid::new_v4().to_string();
+        let body = json!({
+            "title": "Atomic image listing", "category": "other", "brand": "Test",
+            "condition_score": 8, "suggested_price_cny": 100.0, "defects": [],
+            "image_url": "https://cdn.example.com/atomic.jpg"
+        });
+        let mut listing_id = String::new();
+        for replayed in [false, true] {
+            let request = Request::builder()
+                .method("POST")
+                .uri("/api/listings")
+                .header("Content-Type", "application/json")
+                .header("Authorization", bearer(&token))
+                .header("Idempotency-Key", &key)
+                .body(Body::from(body.to_string()))
+                .unwrap();
+            let response = app.clone().oneshot(request).await.expect("response");
+            assert_eq!(response.status(), StatusCode::OK);
+            let json = response_json(response).await;
+            assert_eq!(json["replayed"], replayed);
+            listing_id = json["id"].as_str().unwrap().to_string();
+        }
+        let status: String =
+            sqlx::query_scalar("SELECT images_moderation_status FROM inventory WHERE id = $1")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("status");
+        let jobs: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM moderation_jobs WHERE resource_id = $1")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("jobs");
+        assert_eq!((status.as_str(), jobs), ("pending", 1));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn listing_update_rejects_cross_campus_and_non_active_targets() {
+    with_test_pool(|pool| async move {
+        let owner = Uuid::new_v4().to_string();
+        insert_user(&pool, &owner, &format!("update-owner-{}", Uuid::new_v4()), "hash", "user", "active").await;
+        let ncu: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'").fetch_one(&pool).await.unwrap();
+        let other = Uuid::new_v4();
+        sqlx::query("INSERT INTO campuses (id, slug, name_zh, name_en, email_domains) VALUES ($1, $2, '其他', 'Other', ARRAY[]::TEXT[])")
+            .bind(other).bind(format!("update-scope-{}", other.simple())).execute(&pool).await.unwrap();
+        let cross = Uuid::new_v4().to_string();
+        let inactive = Uuid::new_v4().to_string();
+        for (id, campus, status) in [(&cross, other, "active"), (&inactive, ncu, "deleted")] {
+            sqlx::query("INSERT INTO inventory (id, campus_id, title, category, brand, condition_score, suggested_price_cny, defects, owner_id, status) VALUES ($1,$2,'Original','other','Test',8,10000,'[]',$3,$4)")
+                .bind(id).bind(campus).bind(&owner).bind(status).execute(&pool).await.unwrap();
+        }
+        let (token, _, _) = generate_access_token_for_campus(&owner, "user", Some(ncu), "test_jwt_secret_at_least_32_characters_long", 3600).unwrap();
+        let app = create_router(build_state(pool.clone()), &[]);
+        for (id, expected) in [(&cross, StatusCode::NOT_FOUND), (&inactive, StatusCode::CONFLICT)] {
+            let (status, _) = authenticated_json(&app, Method::PUT, &format!("/api/listings/{id}"), &token, Some(json!({"title":"Changed"}))).await;
+            assert_eq!(status, expected);
+        }
+        let changed: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE owner_id = $1 AND title = 'Changed'")
+            .bind(&owner).fetch_one(&pool).await.unwrap();
+        assert_eq!(changed, 0);
+    }).await;
+}
+
 fn hash_refresh_token(token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(token.as_bytes());
@@ -33,6 +193,10 @@ fn hash_refresh_token(token: &str) -> String {
 }
 
 fn build_state(pool: sqlx::PgPool) -> AppState {
+    build_state_with_image_moderation(pool, false)
+}
+
+fn build_state_with_image_moderation(pool: sqlx::PgPool, image_enabled: bool) -> AppState {
     let (service_manager, _rx) = services::ServiceManager::new(pool.clone());
     let admin_service = service_manager.admin.clone();
     let event_tx = service_manager.event_tx.clone();
@@ -97,7 +261,7 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
                     price_tolerance: 0.5,
                     categories: vec!["other".to_string()],
                     blocked_keywords: vec![],
-                    moderation_image_enabled: false,
+                    moderation_image_enabled: image_enabled,
                     moderation_image_api_url: None,
                     moderation_image_api_key: None,
                     secret_chat_new_sessions_enabled: false,

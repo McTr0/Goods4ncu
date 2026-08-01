@@ -142,6 +142,22 @@ lazy_static::lazy_static! {
     pub static ref LLM_CIRCUIT_BREAKER: Arc<CircuitBreaker> = Arc::new(CircuitBreaker::new());
 }
 
+/// Provider-only embedding capability used by the durable projection worker.
+///
+/// It deliberately has no database handle: generating a vector is an external
+/// operation, while version-checked document persistence belongs to the worker.
+#[async_trait]
+pub trait EmbeddingGenerator: Send + Sync {
+    async fn generate(&self, normalized_text: &str) -> anyhow::Result<Vec<f64>>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmbeddingModelMetadata {
+    pub provider: &'static str,
+    pub model: &'static str,
+    pub dimensions: usize,
+}
+
 /// Unified LLM provider interface.
 ///
 /// Each concrete provider (Gemini, MiniMax) implements this trait,
@@ -151,10 +167,9 @@ pub trait LlmProvider: Send + Sync {
     #[allow(dead_code)]
     fn name(&self) -> &str;
 
-    /// Create a RAG-enabled marketplace agent.
-    ///
-    /// Each provider owns its concrete vector store type and embedding model,
-    /// hiding these implementation details from callers.
+    /// Create a marketplace agent. Global dynamic context is intentionally
+    /// disabled until retrieval can enforce tenant and visibility scope before
+    /// similarity ranking; `SearchInventoryTool` remains the safe search path.
     async fn create_marketplace_agent(
         self: Arc<Self>,
         db_pool: &sqlx::PgPool,
@@ -169,13 +184,9 @@ pub trait LlmProvider: Send + Sync {
     /// Create a tool-free assistant that only drafts non-binding replies.
     async fn create_reply_assistant(self: Arc<Self>) -> anyhow::Result<Box<dyn ReplyAssistant>>;
 
-    /// Build the transactional embed-updater for this provider's embedding
-    /// model. Needed outside agent construction (e.g. by the ActionPlan
-    /// executor, which re-embeds on confirmed listing writes).
-    fn embed_updater(
-        self: Arc<Self>,
-        db_pool: &sqlx::PgPool,
-    ) -> Arc<dyn crate::agents::tools::EmbedUpdater>;
+    fn embedding_generator(self: Arc<Self>) -> Arc<dyn EmbeddingGenerator>;
+
+    fn embedding_metadata(&self) -> EmbeddingModelMetadata;
 }
 
 /// Marker trait for marketplace agents — erased via `Box<dyn MarketplaceAgent>`.
@@ -216,14 +227,14 @@ pub const PREAMBLE: &str = "\
 ### 核心行为准则：
 1. **区分信息来源**：
    - **用户输入**：用户通过对话直接告诉你的信息。
-   - **库存上下文 (Store Context)**：通过 dynamic_context 提供的信息，它们来自平台数据库。
+   - **库存上下文 (Store Context)**：只能来自 search_inventory 的当前校园安全检索结果。
    - **禁止混淆**：绝对不要对用户说你刚才提供了XX项目的信息。如果信息来自上下文，请说根据平台目前的库存显示或我发现有一件...
 2. **按需提供信息**：
    - 如果用户只是在聊天，不要罗列随机搜到的库存商品细节。只需介绍你的功能。
    - 只有当用户表现出购买意向、搜索意向或询问特定商品时，才引用库存上下文。
 3. **功能边界**：
    - **卖东西**：调用 create_listing。
-   - **买/搜东西**：优先使用 search_inventory 进行精准带条件的搜索；对于模糊浏览，使用动态上下文。
+   - **买/搜东西**：使用 search_inventory 进行当前校园内的安全检索。
    - **管理**：通过 get_my_listings, update_listing, delete_listing 维护卖家的商品。
    - **交易**：用户确认要买时，调用 purchase_item 发起意向。
 

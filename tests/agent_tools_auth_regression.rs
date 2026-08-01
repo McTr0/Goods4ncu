@@ -1,62 +1,34 @@
-use async_trait::async_trait;
 use goods4ncu::agents::tools::{
     execute_create_listing, execute_delete_listing, execute_update_listing, CreateListingArgs,
-    CreateListingTool, DeleteListingArgs, DeleteListingTool, EmbedUpdater, ToolContext, ToolError,
-    UpdateListingArgs, UpdateListingTool,
+    CreateListingTool, DeleteListingArgs, DeleteListingTool, ToolContext, UpdateListingArgs,
+    UpdateListingTool,
 };
 use goods4ncu::services::notification::NotificationService;
 use goods4ncu::test_infra::with_test_pool;
 use rig::tool::Tool;
 use sqlx::Row;
-use std::sync::Arc;
 use uuid::Uuid;
 
-#[derive(Clone)]
-struct NoopEmbedUpdater;
-
-#[async_trait(?Send)]
-impl EmbedUpdater for NoopEmbedUpdater {
-    async fn embed_and_update(
-        &self,
-        _content: String,
-        _listing_id: String,
-        _conn: &mut sqlx::PgConnection,
-    ) -> Result<(), ToolError> {
-        Ok(())
-    }
-}
-
-#[derive(Clone)]
-struct FailingEmbedUpdater;
-
-#[async_trait(?Send)]
-impl EmbedUpdater for FailingEmbedUpdater {
-    async fn embed_and_update(
-        &self,
-        _content: String,
-        _listing_id: String,
-        _conn: &mut sqlx::PgConnection,
-    ) -> Result<(), ToolError> {
-        Err(ToolError("forced embedding failure".to_string()))
-    }
-}
-
 fn build_tool_context(db_pool: sqlx::PgPool, current_user_id: Option<&str>) -> ToolContext {
-    build_tool_context_with_updater(db_pool, current_user_id, Arc::new(NoopEmbedUpdater))
-}
-
-fn build_tool_context_with_updater(
-    db_pool: sqlx::PgPool,
-    current_user_id: Option<&str>,
-    embed_updater: Arc<dyn EmbedUpdater>,
-) -> ToolContext {
     ToolContext {
         db_pool: db_pool.clone(),
-        embed_updater,
         current_user_id: current_user_id.map(ToString::to_string),
         current_campus_id: None,
         notification: NotificationService::new(db_pool),
     }
+}
+
+async fn verify_ncu_membership(pool: &sqlx::PgPool, user_id: &str) {
+    sqlx::query(
+        "INSERT INTO campus_memberships (
+             campus_id, user_id, status, verification_method, verified_at
+         ) SELECT id, $1, 'verified', 'test_fixture', NOW()
+           FROM campuses WHERE slug = 'ncu'",
+    )
+    .bind(user_id)
+    .execute(pool)
+    .await
+    .expect("verify NCU membership");
 }
 
 #[tokio::test]
@@ -81,6 +53,7 @@ async fn test_update_listing_tool_denies_cross_owner_mutation() {
             .execute(&pool)
             .await
             .unwrap();
+        verify_ncu_membership(&pool, &attacker_id).await;
 
         sqlx::query(
             "INSERT INTO inventory (id, title, category, brand, condition_score, suggested_price_cny, defects, owner_id) \
@@ -140,6 +113,7 @@ async fn test_delete_listing_tool_denies_cross_owner_mutation() {
             .execute(&pool)
             .await
             .unwrap();
+        verify_ncu_membership(&pool, &attacker_id).await;
 
         sqlx::query(
             "INSERT INTO inventory (id, title, category, brand, condition_score, suggested_price_cny, defects, owner_id) \
@@ -175,12 +149,87 @@ async fn test_delete_listing_tool_denies_cross_owner_mutation() {
 }
 
 #[tokio::test]
-async fn create_listing_tool_rolls_back_inventory_when_embedding_fails() {
+async fn agent_listing_mutations_are_scoped_to_the_verified_active_campus() {
+    with_test_pool(|pool| async move {
+        let suffix = Uuid::new_v4().to_string();
+        let owner_id = format!("campus-owner-{suffix}");
+        sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')")
+            .bind(&owner_id)
+            .bind(format!("campus-owner-{suffix}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        verify_ncu_membership(&pool, &owner_id).await;
+
+        let other_campus = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO campuses (id, slug, name_zh, name_en, email_domains)
+             VALUES ($1, $2, '其他', 'Other', ARRAY[]::TEXT[])",
+        )
+        .bind(other_campus)
+        .bind(format!("agent-scope-{}", other_campus.simple()))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let listing_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO inventory (
+                 id, campus_id, title, category, brand, condition_score,
+                 suggested_price_cny, defects, owner_id, status
+             ) VALUES ($1, $2, 'Other Campus Item', 'misc', 'Brand', 8,
+                       10000, '[]', $3, 'active')",
+        )
+        .bind(&listing_id)
+        .bind(other_campus)
+        .bind(&owner_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let ctx = build_tool_context(pool.clone(), Some(&owner_id));
+        let update = execute_update_listing(
+            &ctx,
+            UpdateListingArgs {
+                listing_id: listing_id.clone(),
+                new_price: None,
+                new_title: Some("Cross-campus mutation".to_string()),
+                new_description: None,
+            },
+        )
+        .await
+        .unwrap();
+        let delete = execute_delete_listing(
+            &ctx,
+            DeleteListingArgs {
+                listing_id: listing_id.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(update.contains("No active listing"));
+        assert!(delete.contains("No active listing"));
+
+        let (title, status): (String, String) =
+            sqlx::query_as("SELECT title, status FROM inventory WHERE id = $1")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            (title.as_str(), status.as_str()),
+            ("Other Campus Item", "active")
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn create_listing_tool_does_not_depend_on_embedding_provider() {
     with_test_pool(|pool| async move {
         let suffix = Uuid::new_v4().to_string();
         let owner_id = format!("create-owner-{suffix}");
         let username = format!("create-owner-{suffix}");
-        let title = format!("Rollback Listing {suffix}");
+        let title = format!("Provider Independent Listing {suffix}");
 
         sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')")
             .bind(&owner_id)
@@ -188,24 +237,13 @@ async fn create_listing_tool_rolls_back_inventory_when_embedding_fails() {
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query(
-            "INSERT INTO campus_memberships (
-                campus_id, user_id, status, verification_method, verified_at
-             ) SELECT id, $1, 'verified', 'test_fixture', NOW()
-               FROM campuses WHERE slug = 'ncu'",
-        )
-        .bind(&owner_id)
-        .execute(&pool)
-        .await
-        .unwrap();
+        verify_ncu_membership(&pool, &owner_id).await;
 
-        let ctx = build_tool_context_with_updater(
-            pool.clone(),
-            Some(owner_id.as_str()),
-            Arc::new(FailingEmbedUpdater),
-        );
+        // ToolContext intentionally has no provider dependency. Publication
+        // commits inventory state while projection runs asynchronously.
+        let ctx = build_tool_context(pool.clone(), Some(owner_id.as_str()));
 
-        let err = execute_create_listing(
+        let result = execute_create_listing(
             &ctx,
             CreateListingArgs {
                 title: title.clone(),
@@ -214,13 +252,12 @@ async fn create_listing_tool_rolls_back_inventory_when_embedding_fails() {
                 condition_score: 8,
                 suggested_price_cny: 10_000,
                 defects: vec![],
-                original_description: "should rollback".to_string(),
+                original_description: "provider runs asynchronously".to_string(),
             },
         )
         .await
-        .unwrap_err();
-
-        assert!(err.to_string().contains("Embedding error"));
+        .expect("publication must not call generator");
+        assert_eq!(result.listing_id.len(), 36);
 
         let listing_count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE owner_id = $1 AND title = $2")
@@ -229,7 +266,7 @@ async fn create_listing_tool_rolls_back_inventory_when_embedding_fails() {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(listing_count, 0);
+        assert_eq!(listing_count, 1);
     })
     .await;
 }
@@ -248,6 +285,7 @@ async fn delete_listing_tool_removes_listing_document_in_same_operation() {
             .execute(&pool)
             .await
             .unwrap();
+        verify_ncu_membership(&pool, &owner_id).await;
 
         sqlx::query(
             "INSERT INTO inventory (id, title, category, brand, condition_score, suggested_price_cny, defects, owner_id) \

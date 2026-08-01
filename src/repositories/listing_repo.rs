@@ -46,12 +46,12 @@ impl PostgresListingRepository {
         input: CreateListingInput,
     ) -> Result<String, ApiError> {
         Ok(self
-            .create_in_tx_with_idempotency(tx, input, None, None)
+            .create_idempotent_in_tx(tx, input, None, None)
             .await?
             .id)
     }
 
-    async fn create_in_tx_with_idempotency(
+    pub async fn create_idempotent_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         input: CreateListingInput,
@@ -150,6 +150,9 @@ impl PostgresListingRepository {
         })
     }
 
+    // Public transaction-owning wrapper retained for repository integration
+    // tests; production HTTP flows compose `create_idempotent_in_tx` instead.
+    #[allow(dead_code)]
     pub async fn create_idempotent(
         &self,
         input: CreateListingInput,
@@ -162,7 +165,7 @@ impl PostgresListingRepository {
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
         let result = self
-            .create_in_tx_with_idempotency(&mut tx, input, idempotency_key, idempotency_hash)
+            .create_idempotent_in_tx(&mut tx, input, idempotency_key, idempotency_hash)
             .await?;
         tx.commit()
             .await
@@ -329,15 +332,17 @@ impl PostgresListingRepository {
         tx: &mut Transaction<'_, Postgres>,
         id: &str,
         owner_id: &str,
+        campus_id: Uuid,
         input: &UpdateListingInput,
     ) -> Result<bool, ApiError> {
         let status = sqlx::query_scalar::<_, String>(
             "SELECT status FROM inventory
-             WHERE id = $1 AND owner_id = $2
+             WHERE id = $1 AND owner_id = $2 AND campus_id = $3
              FOR UPDATE",
         )
         .bind(id)
         .bind(owner_id)
+        .bind(campus_id)
         .fetch_optional(&mut **tx)
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
@@ -374,6 +379,7 @@ impl PostgresListingRepository {
         &self,
         id: &str,
         owner_id: &str,
+        campus_id: Uuid,
         input: &UpdateListingInput,
     ) -> Result<bool, ApiError> {
         let mut tx = self
@@ -382,7 +388,7 @@ impl PostgresListingRepository {
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
         let updated = self
-            .update_owned_active_in_tx(&mut tx, id, owner_id, input)
+            .update_owned_active_in_tx(&mut tx, id, owner_id, campus_id, input)
             .await?;
         tx.commit()
             .await
@@ -390,17 +396,75 @@ impl PostgresListingRepository {
         Ok(updated)
     }
 
+    pub async fn update_in_campus(
+        &self,
+        id: &str,
+        owner_id: &str,
+        campus_id: Uuid,
+        input: UpdateListingInput,
+    ) -> Result<(), ApiError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        let status = sqlx::query_scalar::<_, String>(
+            "SELECT status FROM inventory
+             WHERE id = $1 AND owner_id = $2 AND campus_id = $3
+             FOR UPDATE",
+        )
+        .bind(id)
+        .bind(owner_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
+        .ok_or(ApiError::NotFound)?;
+        let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        if restricted {
+            return Err(ApiError::CodedConflict {
+                code: "listing_restricted",
+                message: "该发布受平台限制，不能编辑".to_string(),
+            });
+        }
+        if status != "active" {
+            return Err(ApiError::CodedConflict {
+                code: "listing_action_stale",
+                message: "只有正在展示的发布可以编辑".to_string(),
+            });
+        }
+
+        let query = Self::update_query_for_owner(&input, false)?;
+        Self::bind_update_query(sqlx::query(&query), &input)?
+            .bind(id)
+            .bind(owner_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        tx.commit()
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        Ok(())
+    }
+
     pub async fn soft_delete_active_owned_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         id: &str,
         owner_id: &str,
+        campus_id: Uuid,
     ) -> Result<bool, ApiError> {
         let result = sqlx::query(
-            "UPDATE inventory SET status = 'deleted' WHERE id = $1 AND owner_id = $2 AND status = 'active'",
+            "UPDATE inventory SET status = 'deleted'
+             WHERE id = $1 AND owner_id = $2 AND campus_id = $3 AND status = 'active'",
         )
         .bind(id)
         .bind(owner_id)
+        .bind(campus_id)
         .execute(&mut **tx)
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;

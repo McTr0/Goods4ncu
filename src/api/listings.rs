@@ -568,29 +568,40 @@ pub async fn create_listing(
         .as_ref()
         .map(|_| create_listing_request_hash(&input))
         .transpose()?;
+    let mut tx = state
+        .infra
+        .db
+        .begin()
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
     let create_result = state
         .listing_repo
-        .create_idempotent(input, idempotency_key.as_deref(), request_hash.as_deref())
+        .create_idempotent_in_tx(
+            &mut tx,
+            input,
+            idempotency_key.as_deref(),
+            request_hash.as_deref(),
+        )
         .await?;
-
     if !create_result.replayed {
         if let Some(image_url) = image_url.as_deref() {
-            if let Err(e) = state
+            state
                 .infra
                 .moderation
-                .submit_image_job(
-                    &state.infra.db,
+                .submit_image_job_in_tx(
+                    &mut tx,
                     tenant.campus_id,
                     &create_result.id,
                     image_url,
                     "listing_image",
                 )
                 .await
-            {
-                tracing::warn!(%e, listing_id = %create_result.id, "Failed to enqueue listing image moderation job");
-            }
+                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
         }
     }
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
     Ok(Json(CreateListingResponse {
         id: create_result.id,
@@ -1084,11 +1095,11 @@ pub async fn fulfill_wanted(
 /// PUT /api/listings/:id - update a listing (owner only)
 pub async fn update_listing(
     State(state): State<AppState>,
-    Session(session): Session,
+    tenant: VerifiedTenant,
     Path(id): Path<String>,
     Json(payload): Json<UpdateListingRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = session.user_id.clone();
+    let user_id = tenant.session.user_id.clone();
     // Validate individual fields before building update input
     if let Some(ref title) = payload.title {
         if title.is_empty() {
@@ -1166,9 +1177,10 @@ pub async fn update_listing(
 
     state
         .listing_repo
-        .update(
+        .update_in_campus(
             &id,
             &user_id,
+            tenant.campus_id,
             UpdateListingInput {
                 title: payload.title,
                 category,

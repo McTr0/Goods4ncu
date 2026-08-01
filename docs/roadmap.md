@@ -140,7 +140,7 @@
 - [部分完成] 首页商品 Feed 返回 `2026.07-feedback-v2`、服务端人话 `rank_reason` 与稳定 `source`；相似商品返回稳定解释 code 和 `2026.07-similar-feedback-v1`。listing wanted matches 返回 `known_slots_compatible`、只来自已执行硬约束的 `match_summary`、`source=wanted_match` 和 `2026.07-wanted-feedback-v1`。意图 feed/matches 返回稳定解释与 `2026.07-intent-hard-v1`。移动端把稳定 code 本地化为人话，并兼容已有服务端人话原因；不序列化作者、距离、权重或反馈信号。跨表达软排序与置信度校准仍待补。
 - [已实现] `feed_feedback`/`feed_preferences` 与未版本化 API 提供隐藏、少推荐这类、不相关、个性化开关和重置。目标与校园由服务端派生；重复反馈幂等更新。在首页商品、相似商品、listing wanted matches 与 intent feed/matches 中，三种 action 精确排除对应资源；`less_like_this` 分别降低同分类、wanted hard-category 内同品牌或同 kind 候选。关闭个性化或重置只停用泛化旧信号，明确反馈仍保留。Flutter 当前推荐与匹配入口均有本地化理由和反馈控件。
 - 防止重复条目、单一类别垄断和自己内容反复出现。
-- [下一步] 普通 HTTP/Flutter listing 发布也写入 embedding outbox；当前只有 Agent 发布路径保证生成向量，浏览器创建的 wanted/offer 仍可能退化到规则/新鲜度 fallback。
+- [已实现] 普通 HTTP、Flutter 和 Agent listing 写入已统一由数据库 trigger 原子推进 `content_revision` 并合并到 `embedding_jobs`。发布不再等待 embedding provider；独立 worker 按 revision CAS 写入或删除投影，向量尚未生成时继续使用规则/新鲜度 fallback。
 
 ### 评估
 
@@ -200,7 +200,7 @@
 ### 持久事件
 
 - [部分完成] transactional outbox 基础设施已落地（`0037_outbox_events.sql` + `src/services/outbox.rs`）：业务事务内 `enqueue_in_tx`，worker 支持 lease（`FOR UPDATE SKIP LOCKED` + 到期回收）、指数退避、dead-letter 和 `replay_dead_lettered`；原子入队、至少一次投递、租约互斥和重放均有集成测试（`tests/outbox_integration.rs`）。
-- [部分完成] 通知推送已迁入 outbox：`NotificationService::create` 与通知行同事务入队 `notification.push`，由 worker 投递 WS，进程崩溃不再丢推送。embedding、审核投影和其余 fan-out 仍待迁移；多副本时 WS 投递还需 Redis pub/sub 把消息路由到持有连接的实例。
+- [部分完成] 通知推送已迁入 outbox：`NotificationService::create` 与通知行同事务入队 `notification.push`，由 worker 投递 WS，进程崩溃不再丢推送。listing embedding 已使用专用、按 listing 合并的 `embedding_jobs` 队列迁移；审核投影和其余 fan-out 仍待迁移。多副本 WS 已有 Redis pub/sub 路由，压测与更多实时信号仍待完成。
 - [目标态] lag metrics 告警与 dead-letter 的管理端受审计重放接口。
 - 进程内 mpsc 只保留为演示/优化路径，不再承载通知投递。
 
@@ -250,7 +250,7 @@
 | Base64 fallback | Phase 1 | 新客户端零使用、指标验证后再迁移/删除 |
 | user_chat 大模块 | Phase 0–3 | 行为测试后按消息、媒体、状态和空间拆分 |
 | Secret Chat | Phase 1 | [已实现] 新建默认 403（`SECRET_CHAT_NEW_SESSIONS_ENABLED` 仅迁移窗口可开），移动端入口已移除，历史会话可读有回归覆盖 |
-| 进程内事件 | Phase 4 | [部分完成] outbox 基础设施与通知推送已迁移并有回归覆盖；embedding/搜索投影等其余消费者仍待迁移 |
+| 进程内事件 | Phase 4 | [部分完成] outbox 通知与专用 `embedding_jobs` listing 投影已迁移并有回归覆盖；审核投影等其余消费者仍待迁移 |
 | 单实例 WebSocket | Phase 4 | [部分完成] Redis fan-out 已实现并通过双实例端到端测试；断线补偿依赖既有 HTTP 拉取，压测仍待做 |
 | Agent 直接写工具 | Phase 3 | [已实现] 五个 L2/L3 写工具全部经 ActionPlan 确认执行，工具级与计划级回归覆盖 |
 
