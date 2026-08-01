@@ -150,7 +150,7 @@ offer 仍然 active
 | Conversation | 一次 realtime 或 mail 沟通，拥有独立状态机 |
 | DealRecord | 当前 `orders` 的产品语义，只记录线下成交意向与确认 |
 | HITL | Human-In-The-Loop，关键决定回到人类确认 |
-| ActionPlan | Agent 为写操作生成的待确认计划，属于目标态 |
+| ActionPlan | Agent 为需要事前确认的写操作生成的短期计划；当前 L2 一次确认、L3 使用独立两步 token |
 | JWT / JTI | access token 及其唯一标识，用于认证和撤销 |
 | Refresh rotation | refresh token 使用一次后立即换新，重复使用视为 replay |
 | pgvector / Embedding | 向量扩展和文本向量，用于语义召回 |

@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 适用读者 | AI/后端工程师、产品经理、安全工程师、测试工程师和 Agent 工具维护者 |
-| 当前状态 | 已有意图路由、RAG、多个 LLM provider 和市场工具；统一 ActionPlan、确认 token 和 Agent 审计仍是目标态 |
+| 当前状态 | 已有意图路由、耐久 RAG 投影、多个 LLM provider 和市场工具；ActionPlan 已 crash-safe，统一 AgentRun/审计与 ListingCommandService 仍是目标态 |
 | 事实来源 | `src/agents/`、`src/llm/`、聊天 API、工具测试、LLM metrics 和 Flutter 小帮入口 |
 | 最后核对范围 | 搜索、发布、更新、删除、成交意向、议价、回复建议和流式回复 |
 
@@ -21,11 +21,13 @@ Agent 的价值是把用户意图翻译为可理解、可检查、可撤销的�
 
 [已实现] 当前后端支持 Gemini、MiniMax 和多种 OpenAI-compatible provider。聊天模型可以通过 Rig 调用搜索、详情、发布、更新、删除、成交意向、议价和“我的发布”等工具。
 
-[已实现] 商品文本写入 `documents` 并生成 embedding，pgvector 用于语义搜索和相似推荐。回复助手使用独立的受限 agent，不挂载搜索、下单或议价工具。
+[已实现] 商品事务推进 `content_revision` 并合并 `embedding_jobs`；worker 在事务外调用 provider，以 revision CAS 重建或删除 `documents` 投影。provider 故障不回滚发布，pgvector 缺失时由关键词/规则路径降级。回复助手使用独立的受限 agent，不挂载搜索、下单或议价工具。
 
 [已实现] 小帮历史按认证用户隔离，客户端公共标识 `__agent__` 在服务端映射到用户专属会话。SSE 正常完成后才保存完整助手回复。
 
-[风险] 部分写工具可以在一次模型运行中直接改变业务数据，尚未统一经过 ActionPlan 与显式确认协议。工具日志和消息历史也还不能完整还原一次 Agent 决策链。
+[已实现] 可恢复的发布会立即执行并提供撤销窗口；更新/删除生成 L2 ActionPlan，成交意向/议价生成使用独立两步 token 的 L3 ActionPlan。确认锁、业务事实、适用时的通知/outbox 和计划终态原子提交，commit 前中断可安全重试。
+
+[风险] Agent listing 创建/更新与 HTTP 路径仍未收敛到同一 command service，文本审核、分类/空白规范化和金额类型存在漂移。资源版本快照、提案幂等、版本化风险文案和统一 AgentRun/审计也仍待补齐。
 
 ## 权限等级
 
@@ -33,7 +35,8 @@ Agent 的价值是把用户意图翻译为可理解、可检查、可撤销的�
 | --- | --- | --- |
 | L0 | 解释平台规则、总结公开信息、比较候选 | 可以直接回答，不得编造数据库事实 |
 | L1 | 搜索、匹配、生成发布草稿、生成礼貌回复 | 可以自动执行只读检索和草拟，不向外发送 |
-| L2 | 发布或更新信息、联系用户、推荐自己的商品 | 生成预览，用户一次确认后执行 |
+| L2 可恢复 | 当前的商品发布 | 校验后立即执行，向用户展示有期限、条件式撤销入口 |
+| L2 需确认 | 当前的商品更新/下架；未来不可安全撤销的外部动作 | 生成绑定输入的预览，用户一次确认后执行 |
 | L3 | 报价、接受议价、确认成交、公开收款码或其他隐私信息 | 二次确认，重新认证敏感操作，写入审计 |
 
 “用户说了请帮我”不自动等于 L2/L3 授权。授权必须绑定具体动作、具体资源、输入快照和短期有效期。
@@ -59,12 +62,21 @@ sequenceDiagram
     alt L0/L1
         P-->>A: allow
         A-->>UI: answer or draft
-    else L2/L3
+    else recoverable L2
+        P-->>A: allow with undo
+        A->>T: execute validated action
+        T->>DB: commit fact + register undo affordance
+        T-->>UI: result + undo window
+    else confirmed L2/L3
         P-->>A: require confirmation
         A-->>UI: AgentActionPlan preview
         U->>UI: confirm
-        UI->>T: execute plan with token
-        T->>DB: revalidate and transact
+        opt L3
+            T-->>UI: independent second-step token
+            U->>UI: confirm high-risk step
+        end
+        UI->>T: confirm plan with current-step token
+        T->>DB: lock plan, revalidate, atomically transact
         T-->>UI: committed result
     end
 ```
@@ -73,46 +85,46 @@ sequenceDiagram
 
 ## AgentActionPlan
 
-[目标态] 所有 L2/L3 动作先创建计划：
+[已实现] 当前 update/delete listing 使用 L2 计划，purchase/negotiate 使用 L3 计划。创建计划的内部事实形态为：
 
 ```json
 {
   "plan_id": "uuid",
-  "action_type": "intent.publish",
-  "risk_level": "L2",
-  "summary": "发布一条收物需求",
-  "preview": {
-    "direction": "wanted",
-    "title": "想收一台适合记笔记的平板",
-    "budget_cny": 1800,
-    "campus_id": "..."
+  "action_type": "purchase_item",
+  "risk_level": "L3",
+  "summary": "以 1800 元向卖家提出成交意向",
+  "args": {
+    "listing_id": "...",
+    "offered_price": 180000
   },
-  "input_snapshot": {},
-  "resource_versions": {},
+  "campus_id": "...",
+  "user_id": "...",
+  "status": "pending",
   "expires_at": "RFC3339 timestamp",
-  "idempotency_key": "client generated key",
-  "confirmation_mode": "single"
+  "confirmation_token": "primary capability",
+  "second_confirmation_token": "server-held capability"
 }
 ```
 
 计划状态：
 
 ```text
-drafted -> awaiting_confirmation
-awaiting_confirmation -> executing -> succeeded | failed
-awaiting_confirmation -> cancelled | expired
+pending -> confirmed_once (L3) -> executing (transaction-local) -> executed | failed
+pending | confirmed_once -> cancelled | expired
+legacy executing -> interrupted
 ```
 
-执行协议必须满足：
+当前执行协议：
 
-- confirmation token 绑定用户、plan、设备会话和过期时间。
-- plan 只能成功执行一次；重复请求返回同一个结果或明确的幂等响应。
-- 执行前重新校验校园 membership、资源 owner、状态、价格和版本。
-- `input_snapshot` 只保存执行所需字段，不能复制整段无关聊天历史。
-- 上下文变化会返回“计划已失效，请重新确认”，不能静默使用旧数据。
-- L3 计划记录确认界面版本、风险文案版本和审计事件。
+- plan 绑定创建时的用户、campus 和过期时间；list/cancel/confirm 都按认证用户与活动校园过滤。
+- L3 primary 与 second token 独立。primary 只能进入 `confirmed_once`；primary 的网络重试重放同一 second-token challenge，不能执行。
+- plan 行从 token 校验到业务结果一直持锁。业务写入位于 savepoint，业务事实、适用时的通知/outbox 与 `executed` 终态由同一外层事务 commit。
+- plan 只能成功执行一次；second confirm 的并发与成功响应丢失都返回同一个终态结果，不产生第二个业务事实。
+- 执行前重新校验 campus membership、资源 owner、状态和金额；上下文变化安全失败且不留下部分事实。
+- token 不进入模型文本或缓存响应；`args` 只保存执行所需字段，不复制无关聊天历史。
+- 旧协议中无法判断副作用的 durable `executing` 迁移为 `interrupted`，必须人工核对，永不自动重放。
 
-目标接口在 [API 参考](api-reference.md) 标记为 `[目标态]`。
+[目标态] 补资源版本快照、proposal idempotency key、设备/重新认证绑定、版本化风险文案、typed outcome 和统一审计事件。当前与目标 `/api/v1` 的区别见 [API 参考](api-reference.md)。
 
 ## 工具设计
 
@@ -136,11 +148,13 @@ audit category
 实现约束：
 
 1. 工具不直接信任模型提供的 `user_id`、`campus_id` 或 owner。
-2. 写工具调用与普通 HTTP API 相同的 service 和事务。
+2. 写工具与普通 HTTP API 必须调用同一个 command service 和事务入口。
 3. 工具输出使用小而稳定的结构，不把数据库行或内部错误原样交给模型。
 4. 只读工具也要做 tenant、状态和可见性过滤。
 5. 工具错误分为用户可修复、状态冲突、权限拒绝、依赖故障和内部错误。
 6. 工具描述不能承诺 service 实际不支持的行为。
+
+当前成交/议价的核心约束已复用事务内执行函数；listing 路径尚未完全满足第 2 条，统一 `ListingCommandService` 是下一项收敛工作，不能用工具侧复制校验冒充完成。
 
 ## 记忆与上下文
 
@@ -247,7 +261,7 @@ Metrics 关注成功路径与安全护栏：草稿采纳率、确认取消率、
 
 ## 上线门槛
 
-- L2/L3 已统一进入 ActionPlan 或明确禁用对应工具。
+- 需要事前确认的 L2/L3 已进入 crash-safe ActionPlan；可恢复 L2 有原子条件式撤销或被明确禁用。
 - 工具权限和幂等测试通过，越权执行数为零。
 - 有 provider 故障和无 LLM 的降级路径。
 - Prompt、工具和模型版本可追踪。

@@ -30,7 +30,7 @@
 当前能力还不是生产就绪。主要差距：
 
 - CampusMembership、核心资源校园作用域、后台审核队列、跨校园理由审计和统一 session extractor 已落地。当前 19 张租户表已启用 FORCE RLS（`0042` 及后续领域迁移，`app.campus_id` 事务级 GUC 触发，未设置时放行以保持应用层为主边界），隔离与写拒绝有集成测试；应用侧全请求 GUC 注入（fail-closed）与多副本租户验证仍属 Phase 4。
-- Agent 写工具已接入统一 ActionPlan 确认协议（模型只能提出、用户确认才执行，L3 需二次确认）；资源版本快照仍待补。
+- Agent 的更新/下架/成交意向/议价已接入 crash-safe ActionPlan（模型只能提出，L3 需独立 token 的二次确认）；发布采用立即执行 + 条件式撤销。listing command 统一化与资源版本快照仍待补。
 - WebSocket 跨副本投递已具备（Redis fan-out，双实例端到端验证）；typing/call signaling 多副本化与压测仍待做。outbox 基础与通知推送已持久化，其余事件消费者仍在进程内。
 - 媒体隔离、审核公开门槛、缩略图和 Base64 退出不完整；案件事实层已具备，但对象存储隔离仍需生产化。
 - API 缺少统一版本和 cursor；[已实现] 未版本化接口已有兼容旧客户端的稳定错误字段、服务端 request ID，以及 listing 发布、wanted response 和成交确认幂等，其他写接口仍需收敛。
@@ -165,28 +165,29 @@
 
 ### ActionPlan
 
-- [已实现] `0038_agent_action_plans.sql` + `AgentPlanService`：五个写工具（create/update/delete listing、purchase、negotiate）不再直接执行，而是生成 pending 计划（输入快照、L2/L3 风险级、10 分钟过期、单次 confirmation token）。token 只经认证的 `/api/agent/plans` 返回，绝不进入模型可见文本——prompt 注入无法确认模型自己提出的计划。
-- [已实现] 确认时通过条件状态转移（pending→executing）保证并发确认只执行一次；重复确认幂等返回原结果；执行体重新校验 membership、owner、商品状态和价格区间，世界状态变化后的确认安全失败。移动端小帮页内提供待确认操作卡片（确认/取消）。
-- [已实现] L3 二次确认：purchase/negotiate 计划第一次确认仅置为 confirmed_once 并返回 `needs_second_confirmation`，第二次确认才执行；两步都是条件状态转移，并发无法跳步。移动端弹出高风险二次确认对话框。[目标态] 资源版本快照比对和风险文案版本化。
+- [已实现] 发布采用“立即执行 + 撤销窗口”；update/delete listing 生成 L2 pending 计划，purchase/negotiate 生成 L3 pending 计划。输入快照、风险级、10 分钟过期和 token 由 `0038_agent_action_plans.sql` + `AgentPlanService` 承载；token 只经认证且禁止缓存的 `/api/agent/plans` 返回，绝不进入模型可见文本。
+- [已实现] `0058_agent_plan_atomic_confirmation.sql` 把计划行锁、业务执行、适用时的通知/outbox 和计划终态放进同一外层事务，动作内部使用 savepoint。commit 前崩溃整笔回滚；成功结果和业务事实同时可见；并发/重复 confirm 只产生一个业务事实。旧协议遗留的 `executing` 迁移为不可重放的 `interrupted`，等待人工核对。
+- [已实现] L3 两步使用不同 token：primary 只把计划置为 `confirmed_once` 并返回独立 second token；primary 的网络重试只重放同一挑战，只有 second token 能执行。当前校园绑定贯穿 list/cancel/confirm，移动端对新挑战和重新加载后的 armed 计划都在任何执行请求前展示高风险对话框。
+- [目标态] 补通用资源版本快照、提案幂等键、版本化风险文案、typed execution outcome 与完整审计/对账界面。
 
 ### 工具收敛
 
-- Agent 工具调用与 HTTP 相同的 service，不直接写 SQL 或复制状态机。
+- [进行中] Agent ActionPlan 执行已使用事务内共享函数，但 listing 创建/更新与 HTTP 仍存在审核、字段规范化和金额类型漂移；收敛为统一 `ListingCommandService` 后才能宣称同一业务入口。
 - 工具声明 auth、tenant、risk、side effects、idempotency 和 audit category。
 - 回复助手继续保持无工具、只读最近文本、只填草稿不发送。
 - Provider 能力建立支持矩阵，写动作不因 LLM 超时自动重试。
 
 ### 安全与质量
 
-- [部分完成] 工具层滥用测试集已落地（`tests/agent_injection_regression.rs`）：跨校园购买/议价、参数污染（空/超长标题、越界成色、非正/天价价格、越界出价）、自买自卖、未认证用户提案全部被拒并有零副作用断言；确认 token 与模型文本隔离、跨用户确认拒绝在计划测试中覆盖。execute 体已补齐与 HTTP 相同的输入校验，工具路径不再是校验旁路。针对真实 LLM 的间接注入与虚假承诺评估仍需线上评测集。
+- [部分完成] 工具层滥用测试集已落地（`tests/agent_injection_regression.rs`）：跨校园购买/议价、参数污染（空/超长标题、越界成色、非正/天价价格、越界出价）、自买自卖、未认证用户提案全部被拒并有零副作用断言；confirmation token 隔离、跨用户/校园确认拒绝和原子恢复在计划测试中覆盖。Agent listing 路径的同步文本审核、分类/空白规范化及与 HTTP 的统一 service 仍待完成。针对真实 LLM 的间接注入与虚假承诺评估仍需线上评测集。
 - AgentRun 记录路由、检索、工具、provider、版本、延迟和结果类别，敏感正文脱敏。
 - 无 LLM 时搜索、表单、聊天和成交记录仍可用。
 - Agent 变更采用 feature flag 和 canary，越权执行有立即 kill switch。
 
 ### 退出门槛
 
-- [已实现] 所有 L2/L3 写工具经过 ActionPlan 确认；无确认不执行有回归覆盖（`tests/agent_action_plan_integration.rs`）。
-- [已实现] 重复 confirm 只产生一次业务结果（幂等返回原结果），过期/取消/跨用户/错误 token 安全失败，确认后状态变化（如商品已售出）不产生业务写入；L3 单次确认不产生任何写入有回归覆盖。
+- [已实现] update/delete 的 L2 与 purchase/negotiate 的 L3 都经过 ActionPlan；发布则立即执行并可撤销。未确认的计划动作零执行有回归覆盖（`tests/agent_action_plan_integration.rs`）。
+- [已实现] primary 重试不会越过 L3 第二步；并发 second confirm 只产生一次业务结果；跨校园不可见/不可确认；终态写失败时业务事实与计划状态一起回滚并可安全重试。过期、取消、跨用户、错误 token 和确认后状态变化也安全失败。
 - 越权、跨校园和未确认执行测试为零容忍。
 - 离线评估覆盖中文口语、错别字、歧义、无结果、provider 和工具故障。
 - Agent 首 token p95 小于 3 秒，失败时用户输入和手工路径保留。
@@ -252,7 +253,7 @@
 | Secret Chat | Phase 1 | [已实现] 新建默认 403（`SECRET_CHAT_NEW_SESSIONS_ENABLED` 仅迁移窗口可开），移动端入口已移除，历史会话可读有回归覆盖 |
 | 进程内事件 | Phase 4 | [部分完成] outbox 通知与专用 `embedding_jobs` listing 投影已迁移并有回归覆盖；审核投影等其余消费者仍待迁移 |
 | 单实例 WebSocket | Phase 4 | [部分完成] Redis fan-out 已实现并通过双实例端到端测试；断线补偿依赖既有 HTTP 拉取，压测仍待做 |
-| Agent 直接写工具 | Phase 3 | [已实现] 五个 L2/L3 写工具全部经 ActionPlan 确认执行，工具级与计划级回归覆盖 |
+| Agent 直接写工具 | Phase 3 | [部分完成] 发布已进入可撤销直接执行，四个计划动作使用 crash-safe ActionPlan；listing 校验/审核仍需收敛到统一 command service |
 
 ## 路线图维护规则
 

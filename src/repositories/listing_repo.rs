@@ -375,6 +375,9 @@ impl PostgresListingRepository {
         Ok(result.rows_affected() > 0)
     }
 
+    // Transaction-owning compatibility wrapper retained for direct callers;
+    // ActionPlan execution composes `update_owned_active_in_tx` atomically.
+    #[allow(dead_code)]
     pub async fn update_owned_active(
         &self,
         id: &str,

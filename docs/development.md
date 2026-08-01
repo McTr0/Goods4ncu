@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 适用读者 | 后端、Flutter、AI、测试工程师和准备提交代码的新人 |
-| 当前状态 | 命令和当前分层可直接使用；多租户、ActionPlan、outbox 等目标任务按设计文档实施 |
+| 当前状态 | 命令和当前分层可直接使用；多租户、crash-safe ActionPlan 和 outbox 已有实现，剩余目标按设计文档实施 |
 | 事实来源 | Cargo/Flutter 配置、AGENTS.md、CI workflow、目录结构和现有测试 |
 | 最后核对范围 | 本地启动、验证命令、常见开发任务、协议兼容、SQL、async 和设计同步 |
 
@@ -117,7 +117,7 @@ flutter test
 
 ### 新增或修改 Agent 工具
 
-先在 [Agent 系统设计](agent-system.md) 判断风险等级。L0/L1 可以直接回答或草拟；L2/L3 必须使用 ActionPlan 或在生产配置中禁用。
+先在 [Agent 系统设计](agent-system.md) 判断风险等级。L0/L1 可以直接回答或草拟；只有满足原子、条件式撤销的可恢复 L2 才能立即执行，其他 L2/L3 必须使用 ActionPlan 或在生产配置中禁用。
 
 工具只做协议适配：身份、tenant、owner、状态、金额和事务仍由 service 校验。为工具声明输入 schema、side effects、幂等、审计类别和失败类型，并覆盖 prompt injection、跨用户/校园、资源状态变化和 provider timeout。
 

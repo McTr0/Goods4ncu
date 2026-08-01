@@ -1,6 +1,4 @@
-use crate::repositories::{
-    CreateListingInput, ListingRepository, PostgresListingRepository, UpdateListingInput,
-};
+use crate::repositories::{CreateListingInput, PostgresListingRepository, UpdateListingInput};
 use crate::services::campus::CampusService;
 use crate::services::order::{OrderError, OrderService};
 use crate::utils::cents_to_yuan;
@@ -8,7 +6,7 @@ use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 
 // ---------------------------------------------------------------------------
 // Shared context for all tools
@@ -29,6 +27,103 @@ pub struct ToolContext {
 #[derive(Debug, thiserror::Error)]
 #[error("Tool error: {0}")]
 pub struct ToolError(pub String);
+
+/// Lock and validate a campus membership in the caller's transaction.
+///
+/// A plan is bound to the campus captured when it was proposed. Re-reading the
+/// membership through the pool would leave a race where it could be revoked
+/// between validation and the planned write, so both the membership and campus
+/// rows are share-locked until the caller commits or rolls back.
+async fn lock_verified_membership_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: &str,
+    campus_id: uuid::Uuid,
+) -> Result<bool, ToolError> {
+    let row = sqlx::query_as::<_, (String, String)>(
+        "SELECT membership.status, campus.status
+         FROM campus_memberships membership
+         JOIN campuses campus ON campus.id = membership.campus_id
+         WHERE membership.user_id = $1 AND membership.campus_id = $2
+         FOR SHARE OF membership, campus",
+    )
+    .bind(user_id)
+    .bind(campus_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|error| ToolError(format!("校园身份校验失败: {}", error)))?;
+
+    Ok(matches!(
+        row.as_ref()
+            .map(|(membership, campus)| (membership.as_str(), campus.as_str())),
+        Some(("verified", "active"))
+    ))
+}
+
+async fn require_planned_actor_in_tx(
+    ctx: &ToolContext,
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: &str,
+    campus_id: uuid::Uuid,
+) -> Result<(), ToolError> {
+    if ctx.current_user_id.as_deref() != Some(user_id) {
+        return Err(ToolError("待确认操作与当前登录用户不匹配".to_string()));
+    }
+    if ctx
+        .current_campus_id
+        .is_some_and(|current| current != campus_id)
+    {
+        return Err(ToolError(
+            "当前校园与原计划校园不一致，请切回原校园或重新发起操作".to_string(),
+        ));
+    }
+    if !lock_verified_membership_in_tx(tx, user_id, campus_id).await? {
+        return Err(ToolError(
+            "原计划校园的身份已失效，请重新发起操作".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Execute a legacy action plan wholly inside the caller's transaction.
+///
+/// This function never begins, commits, or rolls back a transaction. The plan
+/// lifecycle row and every business side effect can therefore be committed as
+/// one unit by `AgentPlanService`. All model-supplied arguments are parsed and
+/// all mutable facts are re-locked and revalidated at execution time.
+pub(crate) async fn execute_planned_action_in_tx(
+    ctx: &ToolContext,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: &str,
+    campus_id: uuid::Uuid,
+    action: &str,
+    args: serde_json::Value,
+) -> Result<String, ToolError> {
+    fn parse<T: serde::de::DeserializeOwned>(args: serde_json::Value) -> Result<T, ToolError> {
+        serde_json::from_value(args)
+            .map_err(|error| ToolError(format!("计划参数已失效，无法安全执行: {}", error)))
+    }
+
+    require_planned_actor_in_tx(ctx, tx, user_id, campus_id).await?;
+
+    match action {
+        "create_listing" => execute_create_listing_in_tx(ctx, tx, user_id, campus_id, parse(args)?)
+            .await
+            .map(|created| created.message),
+        "update_listing" => {
+            execute_update_listing_in_tx(ctx, tx, user_id, campus_id, parse(args)?).await
+        }
+        "delete_listing" => {
+            execute_delete_listing_in_tx(ctx, tx, user_id, campus_id, parse(args)?).await
+        }
+        "purchase_item" => execute_purchase_item_in_tx(ctx, tx, user_id, campus_id, parse(args)?)
+            .await
+            .map(|(message, _)| message),
+        "negotiate_item" => {
+            execute_negotiate_item_in_tx(ctx, tx, user_id, campus_id, parse(args)?).await
+        }
+        other => Err(ToolError(format!("未知的计划动作: {}", other))),
+    }
+}
 
 async fn require_verified_campus(
     ctx: &ToolContext,
@@ -274,62 +369,78 @@ pub async fn execute_create_listing(
     ctx: &ToolContext,
     args: CreateListingArgs,
 ) -> Result<CreatedListing, ToolError> {
-    {
-        let owner = ctx
-            .current_user_id
-            .clone()
-            .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
-        let campus_id = require_verified_campus(ctx, &owner).await?;
-
-        // Model-supplied arguments are untrusted input. Mirror the HTTP
-        // handler's validation so a polluted tool call cannot slip records
-        // past the API-level rules (parameter-pollution defense).
-        let title = args.title.trim();
-        if title.is_empty() || title.len() > 200 {
-            return Err(ToolError("商品标题不能为空且不超过 200 字符".to_string()));
-        }
-        if args.brand.trim().len() > 100 {
-            return Err(ToolError("品牌不能超过 100 字符".to_string()));
-        }
-        if args.condition_score < 1 || args.condition_score > 10 {
-            return Err(ToolError("成色必须在 1 到 10 之间".to_string()));
-        }
-        if args.suggested_price_cny <= 0 || args.suggested_price_cny > 1_000_000_000 {
-            return Err(ToolError("价格必须为正且在合理范围内".to_string()));
-        }
-
-        let listing_repo = PostgresListingRepository::new(ctx.db_pool.clone());
-        let input = CreateListingInput {
-            campus_id,
-            title: args.title.clone(),
-            category: args.category.clone(),
-            brand: Some(args.brand.clone()),
-            direction: "offer".to_string(),
-            condition_score: args.condition_score as i32,
-            suggested_price_cny: args.suggested_price_cny as f64 / 100.0,
-            defects: args.defects.clone(),
-            description: args.original_description.clone(),
-            image_url: None,
-            owner_id: owner.clone(),
-        };
-
-        let listing_id = listing_repo
-            .create(input)
-            .await
-            .map_err(|e| ToolError(format!("DB insert error: {}", e)))?;
-
-        Ok(CreatedListing {
-            message: format!(
-                "Successfully created listing '{}' (ID: {}, Price: {} CNY, Owner: {})",
-                args.title,
-                listing_id,
-                cents_to_yuan(args.suggested_price_cny),
-                owner
-            ),
-            listing_id,
-            campus_id,
-        })
+    let owner = ctx
+        .current_user_id
+        .clone()
+        .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
+    let campus_id = require_verified_campus(ctx, &owner).await?;
+    let mut tx = ctx
+        .db_pool
+        .begin()
+        .await
+        .map_err(|error| ToolError(format!("Transaction error: {}", error)))?;
+    if !lock_verified_membership_in_tx(&mut tx, &owner, campus_id).await? {
+        return Err(ToolError("请先完成校园身份验证后再进行此操作".to_string()));
     }
+    let created = execute_create_listing_in_tx(ctx, &mut tx, &owner, campus_id, args).await?;
+    tx.commit()
+        .await
+        .map_err(|error| ToolError(format!("Commit error: {}", error)))?;
+    Ok(created)
+}
+
+async fn execute_create_listing_in_tx(
+    ctx: &ToolContext,
+    tx: &mut Transaction<'_, Postgres>,
+    owner: &str,
+    campus_id: uuid::Uuid,
+    args: CreateListingArgs,
+) -> Result<CreatedListing, ToolError> {
+    // Model-supplied arguments are untrusted input. Mirror the HTTP handler's
+    // bounds so a polluted legacy plan cannot slip records past the API rules.
+    let title = args.title.trim();
+    if title.is_empty() || title.len() > 200 {
+        return Err(ToolError("商品标题不能为空且不超过 200 字符".to_string()));
+    }
+    if args.brand.trim().len() > 100 {
+        return Err(ToolError("品牌不能超过 100 字符".to_string()));
+    }
+    if args.condition_score < 1 || args.condition_score > 10 {
+        return Err(ToolError("成色必须在 1 到 10 之间".to_string()));
+    }
+    if args.suggested_price_cny <= 0 || args.suggested_price_cny > 1_000_000_000 {
+        return Err(ToolError("价格必须为正且在合理范围内".to_string()));
+    }
+
+    let input = CreateListingInput {
+        campus_id,
+        title: args.title.clone(),
+        category: args.category.clone(),
+        brand: Some(args.brand.clone()),
+        direction: "offer".to_string(),
+        condition_score: args.condition_score as i32,
+        suggested_price_cny: args.suggested_price_cny as f64 / 100.0,
+        defects: args.defects.clone(),
+        description: args.original_description.clone(),
+        image_url: None,
+        owner_id: owner.to_string(),
+    };
+    let listing_id = PostgresListingRepository::new(ctx.db_pool.clone())
+        .create_in_tx(tx, input)
+        .await
+        .map_err(|error| ToolError(format!("DB insert error: {}", error)))?;
+
+    Ok(CreatedListing {
+        message: format!(
+            "Successfully created listing '{}' (ID: {}, Price: {} CNY, Owner: {})",
+            args.title,
+            listing_id,
+            cents_to_yuan(args.suggested_price_cny),
+            owner
+        ),
+        listing_id,
+        campus_id,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -607,49 +718,70 @@ impl Tool for UpdateListingTool {
 }
 
 /// Validated execution body for `update_listing`; plan-confirmed only.
+#[allow(dead_code)] // retained as a transaction-owning wrapper for direct callers/tests
 pub async fn execute_update_listing(
     ctx: &ToolContext,
     args: UpdateListingArgs,
 ) -> Result<String, ToolError> {
-    {
-        let owner_id = ctx
-            .current_user_id
-            .clone()
-            .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
-        let campus_id = require_verified_campus(ctx, &owner_id).await?;
+    let owner_id = ctx
+        .current_user_id
+        .clone()
+        .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
+    let campus_id = require_verified_campus(ctx, &owner_id).await?;
+    let mut tx = ctx
+        .db_pool
+        .begin()
+        .await
+        .map_err(|error| ToolError(format!("Transaction error: {}", error)))?;
+    if !lock_verified_membership_in_tx(&mut tx, &owner_id, campus_id).await? {
+        return Err(ToolError("请先完成校园身份验证后再进行此操作".to_string()));
+    }
+    let result = execute_update_listing_in_tx(ctx, &mut tx, &owner_id, campus_id, args).await?;
+    tx.commit()
+        .await
+        .map_err(|error| ToolError(format!("Commit error: {}", error)))?;
+    Ok(result)
+}
 
-        if args.new_price.is_none() && args.new_title.is_none() && args.new_description.is_none() {
-            return Ok("No fields to update were provided.".to_string());
-        }
+async fn execute_update_listing_in_tx(
+    ctx: &ToolContext,
+    tx: &mut Transaction<'_, Postgres>,
+    owner_id: &str,
+    campus_id: uuid::Uuid,
+    args: UpdateListingArgs,
+) -> Result<String, ToolError> {
+    if args.new_price.is_none() && args.new_title.is_none() && args.new_description.is_none() {
+        return Ok("No fields to update were provided.".to_string());
+    }
 
-        let listing_repo = PostgresListingRepository::new(ctx.db_pool.clone());
-        let result = listing_repo
-            .update_owned_active(
-                &args.listing_id,
-                &owner_id,
-                campus_id,
-                &UpdateListingInput {
-                    title: args.new_title,
-                    category: None,
-                    brand: None,
-                    condition_score: None,
-                    suggested_price_cny: args.new_price.map(|v| v as f64 / 100.0),
-                    defects: None,
-                    description: args.new_description,
-                    status: None,
-                },
-            )
-            .await
-            .map_err(|e| ToolError(format!("Update error: {}", e)))?;
+    let listing_id = args.listing_id.clone();
+    let result = PostgresListingRepository::new(ctx.db_pool.clone())
+        .update_owned_active_in_tx(
+            tx,
+            &listing_id,
+            owner_id,
+            campus_id,
+            &UpdateListingInput {
+                title: args.new_title,
+                category: None,
+                brand: None,
+                condition_score: None,
+                suggested_price_cny: args.new_price.map(|value| value as f64 / 100.0),
+                defects: None,
+                description: args.new_description,
+                status: None,
+            },
+        )
+        .await
+        .map_err(|error| ToolError(format!("Update error: {}", error)))?;
 
-        if !result {
-            Ok(format!(
-                "No active listing found with ID: {} (or you don't own it)",
-                args.listing_id
-            ))
-        } else {
-            Ok(format!("Successfully updated listing {}", args.listing_id))
-        }
+    if result {
+        Ok(format!("Successfully updated listing {}", listing_id))
+    } else {
+        Ok(format!(
+            "No active listing found with ID: {} (or you don't own it)",
+            listing_id
+        ))
     }
 }
 
@@ -694,52 +826,78 @@ impl Tool for DeleteListingTool {
 }
 
 /// Validated execution body for `delete_listing`; plan-confirmed only.
+#[allow(dead_code)] // retained as a transaction-owning wrapper for direct callers/tests
 pub async fn execute_delete_listing(
     ctx: &ToolContext,
     args: DeleteListingArgs,
 ) -> Result<String, ToolError> {
-    {
-        let owner_id = ctx
-            .current_user_id
-            .clone()
-            .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
-        let campus_id = require_verified_campus(ctx, &owner_id).await?;
-        let listing_repo = PostgresListingRepository::new(ctx.db_pool.clone());
-        let mut tx = ctx
-            .db_pool
-            .begin()
-            .await
-            .map_err(|e| ToolError(format!("Transaction error: {}", e)))?;
-
-        let deleted = listing_repo
-            .soft_delete_active_owned_in_tx(&mut tx, &args.listing_id, &owner_id, campus_id)
-            .await
-            .map_err(|e| ToolError(format!("Delete error: {}", e)))?;
-
-        if !deleted {
-            tx.rollback()
-                .await
-                .map_err(|e| ToolError(format!("Rollback error: {}", e)))?;
-            return Ok(format!(
-                "No active listing found with ID: {} (or you don't own it)",
-                args.listing_id
-            ));
-        }
-
-        // Sync vector store: remove stale embedding so RAG won't surface deleted listings.
-        // pgvector stores documents in the same 'documents' table, so we use SQL DELETE.
-        sqlx::query("DELETE FROM documents WHERE id = $1")
-            .bind(&args.listing_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| ToolError(format!("Vector cleanup error: {}", e)))?;
-
-        tx.commit()
-            .await
-            .map_err(|e| ToolError(format!("Commit error: {}", e)))?;
-
-        Ok(format!("Successfully removed listing {}", args.listing_id))
+    let owner_id = ctx
+        .current_user_id
+        .clone()
+        .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
+    let campus_id = require_verified_campus(ctx, &owner_id).await?;
+    let mut tx = ctx
+        .db_pool
+        .begin()
+        .await
+        .map_err(|error| ToolError(format!("Transaction error: {}", error)))?;
+    if !lock_verified_membership_in_tx(&mut tx, &owner_id, campus_id).await? {
+        return Err(ToolError("请先完成校园身份验证后再进行此操作".to_string()));
     }
+    let result = execute_delete_listing_in_tx(ctx, &mut tx, &owner_id, campus_id, args).await?;
+    tx.commit()
+        .await
+        .map_err(|error| ToolError(format!("Commit error: {}", error)))?;
+    Ok(result)
+}
+
+async fn execute_delete_listing_in_tx(
+    ctx: &ToolContext,
+    tx: &mut Transaction<'_, Postgres>,
+    owner_id: &str,
+    campus_id: uuid::Uuid,
+    args: DeleteListingArgs,
+) -> Result<String, ToolError> {
+    let listing = sqlx::query_as::<_, (String, bool)>(
+        "SELECT status, listing_has_active_restriction(id)
+         FROM inventory
+         WHERE id = $1 AND owner_id = $2 AND campus_id = $3
+         FOR UPDATE",
+    )
+    .bind(&args.listing_id)
+    .bind(owner_id)
+    .bind(campus_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|error| ToolError(format!("Delete validation error: {}", error)))?;
+
+    let Some((status, _restricted)) = listing else {
+        return Ok(format!(
+            "No active listing found with ID: {} (or you don't own it)",
+            args.listing_id
+        ));
+    };
+    if status != "active" {
+        return Ok(format!(
+            "No active listing found with ID: {} (or you don't own it)",
+            args.listing_id
+        ));
+    }
+    // Owners may remove their own restricted content. Restriction blocks
+    // editing or commerce, not the safety-improving act of taking it down.
+    let deleted = PostgresListingRepository::new(ctx.db_pool.clone())
+        .soft_delete_active_owned_in_tx(tx, &args.listing_id, owner_id, campus_id)
+        .await
+        .map_err(|error| ToolError(format!("Delete error: {}", error)))?;
+    if !deleted {
+        return Err(ToolError(
+            "商品状态在删除前发生变化，请重新确认".to_string(),
+        ));
+    }
+
+    // Migration 0057 enqueues a durable projection tombstone from the status
+    // transition, so this path no longer performs a one-off documents delete.
+    Ok(format!("Successfully removed listing {}", args.listing_id))
 }
 
 // ---------------------------------------------------------------------------
@@ -792,97 +950,194 @@ impl Tool for PurchaseItemIntentTool {
 }
 
 /// Validated execution body for `purchase_item`; plan-confirmed only.
+#[allow(dead_code)] // retained as a transaction-owning wrapper for direct callers/tests
 pub async fn execute_purchase_item(
     ctx: &ToolContext,
     args: PurchaseItemIntentArgs,
 ) -> Result<String, ToolError> {
-    {
-        let buyer_id = ctx
-            .current_user_id
-            .clone()
-            .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
-        let campus_id = require_verified_campus(ctx, &buyer_id).await?;
-
-        // The service creates only an intent; seller confirmation performs any
-        // optional delisting later.
-        let listing = sqlx::query_as::<_, ListingCheckRow>(
-            "SELECT id, campus_id, owner_id, suggested_price_cny, status
-             FROM inventory WHERE id = $1
-               AND NOT listing_has_active_restriction(id)",
-        )
-        .bind(&args.listing_id)
-        .fetch_optional(&ctx.db_pool)
+    let buyer_id = ctx
+        .current_user_id
+        .clone()
+        .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
+    let campus_id = require_verified_campus(ctx, &buyer_id).await?;
+    let mut tx = ctx
+        .db_pool
+        .begin()
         .await
-        .map_err(|e| ToolError(format!("Query error: {}", e)))?;
-
-        let listing = match listing {
-            Some(l) => l,
-            None => return Ok(format!("No listing found with ID: {}", args.listing_id)),
-        };
-
-        if listing.campus_id != campus_id {
-            return Err(ToolError("只能对当前校园的商品发起成交意向".to_string()));
+        .map_err(|error| ToolError(format!("Transaction error: {}", error)))?;
+    if !lock_verified_membership_in_tx(&mut tx, &buyer_id, campus_id).await? {
+        return Err(ToolError("请先完成校园身份验证后再进行此操作".to_string()));
+    }
+    let (message, recorded_intent) =
+        execute_purchase_item_in_tx(ctx, &mut tx, &buyer_id, campus_id, args).await?;
+    tx.commit()
+        .await
+        .map_err(|error| ToolError(format!("Commit error: {}", error)))?;
+    if recorded_intent {
+        if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {
+            metrics.record_deal_intent_created();
         }
-        CampusService::new(ctx.db_pool.clone())
-            .require_verified_in_campus(&listing.owner_id, campus_id)
-            .await
-            .map_err(|_| ToolError("只能与当前校园的已认证用户成交".to_string()))?;
+    }
+    Ok(message)
+}
 
-        if listing.status != "active" {
-            return Ok(format!(
+fn reasonable_offer_bounds(current_price: i64) -> (i64, i64) {
+    (current_price / 2, current_price.saturating_mul(3) / 2)
+}
+
+fn purchase_intent_message(
+    order_id: &str,
+    listing_id: &str,
+    buyer_id: &str,
+    seller_id: &str,
+    price: i64,
+) -> String {
+    format!(
+        "Deal intent sent! Record ID: {}. Listing: '{}'. Buyer: {}, Seller: {}, Price: {:.2} CNY. The seller must confirm before the item is considered sold; Goods4ncu does not escrow funds.",
+        order_id,
+        listing_id,
+        buyer_id,
+        seller_id,
+        cents_to_yuan(price)
+    )
+}
+
+async fn execute_purchase_item_in_tx(
+    ctx: &ToolContext,
+    tx: &mut Transaction<'_, Postgres>,
+    buyer_id: &str,
+    campus_id: uuid::Uuid,
+    args: PurchaseItemIntentArgs,
+) -> Result<(String, bool), ToolError> {
+    // Lock the listing before reading owner, state and the price used for the
+    // tolerance check. OrderService locks it again in this same transaction;
+    // that is harmless and keeps its standalone invariant intact.
+    let listing = sqlx::query_as::<_, ListingCheckRow>(
+        "SELECT id, campus_id, owner_id, suggested_price_cny, status
+         FROM inventory WHERE id = $1 FOR UPDATE",
+    )
+    .bind(&args.listing_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|error| ToolError(format!("Query error: {}", error)))?;
+    let Some(listing) = listing else {
+        return Ok((
+            format!("No listing found with ID: {}", args.listing_id),
+            false,
+        ));
+    };
+
+    let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+        .bind(&args.listing_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|error| ToolError(format!("Query error: {}", error)))?;
+    // Preserve the public tool's non-enumerating response for restricted rows.
+    if restricted {
+        return Ok((
+            format!("No listing found with ID: {}", args.listing_id),
+            false,
+        ));
+    }
+    if listing.campus_id != campus_id {
+        return Err(ToolError("只能对当前校园的商品发起成交意向".to_string()));
+    }
+    if !lock_verified_membership_in_tx(tx, &listing.owner_id, campus_id).await? {
+        return Err(ToolError("只能与当前校园的已认证用户成交".to_string()));
+    }
+    if listing.status != "active" {
+        return Ok((
+            format!(
                 "Listing {} is no longer available (status: {})",
                 args.listing_id, listing.status
-            ));
-        }
+            ),
+            false,
+        ));
+    }
+    if buyer_id == listing.owner_id {
+        return Err(ToolError("不能购买自己发布的商品".to_string()));
+    }
 
-        // Cannot buy your own listing
-        if buyer_id == listing.owner_id {
-            return Err(ToolError("不能购买自己发布的商品".to_string()));
-        }
+    let (min_price, max_price) = reasonable_offer_bounds(listing.suggested_price_cny);
+    if args.offered_price < min_price || args.offered_price > max_price {
+        return Err(ToolError(format!(
+            "出价 ¥{:.2} 不在合理范围内（¥{:.2} - ¥{:.2}）。商品标价 ¥{:.2}。",
+            cents_to_yuan(args.offered_price),
+            cents_to_yuan(min_price),
+            cents_to_yuan(max_price),
+            cents_to_yuan(listing.suggested_price_cny),
+        )));
+    }
 
-        // Validate offered price is within reasonable range of suggested price (±50%).
-        // This prevents both unrealistic lowballs and accidentally overpaying.
-        const PRICE_TOLERANCE: f64 = 0.50;
-        let min_price = (listing.suggested_price_cny as f64 * (1.0 - PRICE_TOLERANCE)) as i64;
-        let max_price = (listing.suggested_price_cny as f64 * (1.0 + PRICE_TOLERANCE)) as i64;
-        if args.offered_price < min_price || args.offered_price > max_price {
+    // A pending intent is idempotent only when it represents the same price.
+    // Without comparing final_price, a newly confirmed amount could appear in
+    // the result text while the database still held an older amount.
+    if let Some((existing_id, existing_price)) = sqlx::query_as::<_, (String, i64)>(
+        "SELECT id, final_price
+         FROM orders
+         WHERE listing_id = $1 AND buyer_id = $2 AND status = 'intent_pending'
+         ORDER BY created_at DESC
+         LIMIT 1
+         FOR UPDATE",
+    )
+    .bind(&args.listing_id)
+    .bind(buyer_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|error| ToolError(format!("订单重复校验失败: {}", error)))?
+    {
+        if existing_price != args.offered_price {
             return Err(ToolError(format!(
-                "出价 ¥{:.2} 不在合理范围内（¥{:.2} - ¥{:.2}）。商品标价 ¥{:.2}。",
-                cents_to_yuan(args.offered_price),
-                cents_to_yuan(min_price),
-                cents_to_yuan(max_price),
-                cents_to_yuan(listing.suggested_price_cny),
+                "你已对该商品发起过 ¥{:.2} 的待确认成交意向；请先处理该意向，再以 ¥{:.2} 重新发起",
+                cents_to_yuan(existing_price),
+                cents_to_yuan(args.offered_price)
             )));
         }
-
-        let order_id = OrderService::new(ctx.db_pool.clone())
-            .create_order(
+        return Ok((
+            purchase_intent_message(
+                &existing_id,
                 &args.listing_id,
-                &buyer_id,
+                buyer_id,
                 &listing.owner_id,
-                args.offered_price,
-            )
-            .await
-            .map_err(|e| match e {
-                OrderError::AlreadySold => ToolError(format!(
-                    "Listing {} is no longer available",
-                    args.listing_id
-                )),
-                other => {
-                    tracing::error!(%other, listing_id = %args.listing_id, "Failed to create order from purchase tool");
-                    ToolError("订单创建失败，请稍后再试".to_string())
-                }
-            })?;
-
-        Ok(format!(
-            "Deal intent sent! Record ID: {}. Listing: '{}'. Buyer: {}, Seller: {}, Price: {:.2} CNY. The seller must confirm before the item is considered sold; Goods4ncu does not escrow funds.",
-            order_id,
-            args.listing_id,
-            buyer_id,
-            listing.owner_id,
-            cents_to_yuan(args.offered_price)
-        ))
+                existing_price,
+            ),
+            false,
+        ));
     }
+
+    let order_id = OrderService::new(ctx.db_pool.clone())
+        .create_order_in_tx(
+            tx,
+            &args.listing_id,
+            buyer_id,
+            &listing.owner_id,
+            args.offered_price,
+        )
+        .await
+        .map_err(|error| match error {
+            OrderError::AlreadySold => ToolError(format!(
+                "Listing {} is no longer available",
+                args.listing_id
+            )),
+            OrderError::ListingRestricted | OrderError::NotFound => {
+                ToolError(format!("No listing found with ID: {}", args.listing_id))
+            }
+            other => {
+                tracing::error!(%other, listing_id = %args.listing_id, "Failed to create order from purchase tool");
+                ToolError("订单创建失败，请稍后再试".to_string())
+            }
+        })?;
+
+    Ok((
+        purchase_intent_message(
+            &order_id,
+            &args.listing_id,
+            buyer_id,
+            &listing.owner_id,
+            args.offered_price,
+        ),
+        true,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -942,136 +1197,141 @@ impl Tool for NegotiateItemTool {
 }
 
 /// Validated execution body for `negotiate_item`; plan-confirmed only.
+#[allow(dead_code)] // retained as a transaction-owning wrapper for direct callers/tests
 pub async fn execute_negotiate_item(
     ctx: &ToolContext,
     args: NegotiateItemArgs,
 ) -> Result<String, ToolError> {
-    {
-        let buyer_id = ctx
-            .current_user_id
-            .clone()
-            .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
-        let campus_id = require_verified_campus(ctx, &buyer_id).await?;
-
-        let mut tx = ctx
-            .db_pool
-            .begin()
-            .await
-            .map_err(|e| ToolError(format!("Transaction error: {}", e)))?;
-
-        // Inventory is the first lock. This serializes eligibility, duplicate
-        // detection and HITL insertion against takedown and concurrent retries.
-        let listing_row = sqlx::query_as::<_, ListingCheckRow>(
-            "SELECT id, campus_id, owner_id, suggested_price_cny, status
-             FROM inventory WHERE id = $1 AND campus_id = $2 FOR UPDATE",
-        )
-        .bind(&args.listing_id)
-        .bind(campus_id)
-        .fetch_optional(&mut *tx)
+    let buyer_id = ctx
+        .current_user_id
+        .clone()
+        .ok_or_else(|| ToolError("请先登录再进行操作".to_string()))?;
+    let campus_id = require_verified_campus(ctx, &buyer_id).await?;
+    let mut tx = ctx
+        .db_pool
+        .begin()
         .await
-        .map_err(|e| ToolError(format!("DB error: {}", e)))?;
-
-        let listing = match listing_row {
-            Some(l) => l,
-            None => return Err(ToolError("当前校园未找到可议价的商品".to_string())),
-        };
-
-        if buyer_id == listing.owner_id {
-            return Err(ToolError("不能对自己的商品发起还价".to_string()));
-        }
-
-        CampusService::new(ctx.db_pool.clone())
-            .require_verified_in_campus(&listing.owner_id, campus_id)
-            .await
-            .map_err(|_| ToolError("只能与当前校园的已认证用户议价".to_string()))?;
-
-        let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
-            .bind(&args.listing_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| ToolError(format!("DB error: {}", e)))?;
-        if restricted {
-            return Err(ToolError("该商品受平台限制，无法发起还价".to_string()));
-        }
-        if listing.status != "active" {
-            return Ok(format!("商品 {} 已下架或售出，无法还价", args.listing_id));
-        }
-
-        // Validate offered price is within a reasonable range (±50% of asking price)
-        const PRICE_TOLERANCE: f64 = 0.50;
-        let min_price = (listing.suggested_price_cny as f64 * (1.0 - PRICE_TOLERANCE)) as i64;
-        let max_price = (listing.suggested_price_cny as f64 * (1.0 + PRICE_TOLERANCE)) as i64;
-        if args.offered_price < min_price || args.offered_price > max_price {
-            return Err(ToolError(format!(
-                "还价 ¥{:.2} 不在合理范围 ¥{:.2} - ¥{:.2} 内",
-                cents_to_yuan(args.offered_price),
-                cents_to_yuan(min_price),
-                cents_to_yuan(max_price),
-            )));
-        }
-
-        // Check if there's already a pending negotiation for this buyer+listing
-        let existing = sqlx::query(
-            "SELECT id FROM hitl_requests WHERE listing_id = $1 AND buyer_id = $2 AND status = 'pending'",
-        )
-        .bind(&args.listing_id)
-        .bind(&buyer_id)
-        .fetch_optional(&mut *tx)
+        .map_err(|error| ToolError(format!("Transaction error: {}", error)))?;
+    if !lock_verified_membership_in_tx(&mut tx, &buyer_id, campus_id).await? {
+        return Err(ToolError("请先完成校园身份验证后再进行此操作".to_string()));
+    }
+    let message = execute_negotiate_item_in_tx(ctx, &mut tx, &buyer_id, campus_id, args).await?;
+    tx.commit()
         .await
-        .map_err(|e| ToolError(format!("DB error: {}", e)))?;
-        if existing.is_some() {
-            return Ok("你已对该商品发起过还价，请等待卖家响应后再发起新还价".to_string());
-        }
+        .map_err(|error| ToolError(format!("Commit error: {}", error)))?;
+    Ok(message)
+}
 
-        // Create the HITL request in the database
-        let hitl_id = uuid::Uuid::new_v4().to_string();
-        sqlx::query(
-            r#"INSERT INTO hitl_requests
-               (id, campus_id, listing_id, buyer_id, seller_id, proposed_price, reason, status, expires_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', CURRENT_TIMESTAMP + INTERVAL '48 hours')"#,
-        )
-        .bind(&hitl_id)
-        .bind(campus_id)
+async fn execute_negotiate_item_in_tx(
+    ctx: &ToolContext,
+    tx: &mut Transaction<'_, Postgres>,
+    buyer_id: &str,
+    campus_id: uuid::Uuid,
+    args: NegotiateItemArgs,
+) -> Result<String, ToolError> {
+    // Inventory is the first business-fact lock. This serializes eligibility,
+    // duplicate detection and HITL insertion against takedown and retries.
+    let listing = sqlx::query_as::<_, ListingCheckRow>(
+        "SELECT id, campus_id, owner_id, suggested_price_cny, status
+         FROM inventory WHERE id = $1 AND campus_id = $2 FOR UPDATE",
+    )
+    .bind(&args.listing_id)
+    .bind(campus_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|error| ToolError(format!("DB error: {}", error)))?;
+    let Some(listing) = listing else {
+        return Err(ToolError("当前校园未找到可议价的商品".to_string()));
+    };
+
+    if buyer_id == listing.owner_id {
+        return Err(ToolError("不能对自己的商品发起还价".to_string()));
+    }
+    if !lock_verified_membership_in_tx(tx, &listing.owner_id, campus_id).await? {
+        return Err(ToolError("只能与当前校园的已认证用户议价".to_string()));
+    }
+
+    let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
         .bind(&args.listing_id)
-        .bind(&buyer_id)
-        .bind(&listing.owner_id)
-        .bind(args.offered_price)
-        .bind(&args.reason)
-        .execute(&mut *tx)
+        .fetch_one(&mut **tx)
         .await
-        .map_err(|e| ToolError(format!("DB error: {}", e)))?;
+        .map_err(|error| ToolError(format!("DB error: {}", error)))?;
+    if restricted {
+        return Err(ToolError("该商品受平台限制，无法发起还价".to_string()));
+    }
+    if listing.status != "active" {
+        return Ok(format!("商品 {} 已下架或售出，无法还价", args.listing_id));
+    }
 
-        tx.commit()
-            .await
-            .map_err(|e| ToolError(format!("Commit error: {}", e)))?;
+    let (min_price, max_price) = reasonable_offer_bounds(listing.suggested_price_cny);
+    if args.offered_price < min_price || args.offered_price > max_price {
+        return Err(ToolError(format!(
+            "还价 ¥{:.2} 不在合理范围 ¥{:.2} - ¥{:.2} 内",
+            cents_to_yuan(args.offered_price),
+            cents_to_yuan(min_price),
+            cents_to_yuan(max_price),
+        )));
+    }
 
-        // Notify the seller immediately
-        let _ = ctx
-            .notification
-            .create(crate::services::notification::NewNotification {
+    let existing = sqlx::query(
+        "SELECT id FROM hitl_requests
+         WHERE listing_id = $1 AND buyer_id = $2 AND status = 'pending'",
+    )
+    .bind(&args.listing_id)
+    .bind(buyer_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|error| ToolError(format!("DB error: {}", error)))?;
+    if existing.is_some() {
+        return Ok("你已对该商品发起过还价，请等待卖家响应后再发起新还价".to_string());
+    }
+
+    let hitl_id = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        r#"INSERT INTO hitl_requests
+           (id, campus_id, listing_id, buyer_id, seller_id, proposed_price, reason, status, expires_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', CURRENT_TIMESTAMP + INTERVAL '48 hours')"#,
+    )
+    .bind(&hitl_id)
+    .bind(campus_id)
+    .bind(&args.listing_id)
+    .bind(buyer_id)
+    .bind(&listing.owner_id)
+    .bind(args.offered_price)
+    .bind(&args.reason)
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| ToolError(format!("DB error: {}", error)))?;
+
+    let notification_body = format!(
+        "买家出价 ¥{:.2}，理由：{}",
+        cents_to_yuan(args.offered_price),
+        args.reason
+    );
+    ctx.notification
+        .create_in_tx(
+            tx,
+            crate::services::notification::NewNotification {
                 campus_id,
                 user_id: &listing.owner_id,
                 event_type: "negotiation_request",
                 title: "有新的还价请求",
-                body: &format!(
-                    "买家出价 ¥{:.2}，理由：{}",
-                    cents_to_yuan(args.offered_price),
-                    args.reason
-                ),
+                body: &notification_body,
                 related_order_id: Some(&hitl_id),
                 related_listing_id: Some(&args.listing_id),
                 related_conversation_id: None,
                 related_space_id: None,
-            })
-            .await;
+            },
+        )
+        .await
+        .map_err(|error| ToolError(format!("通知创建失败: {}", error)))?;
 
-        Ok(format!(
-            "你的还价 ¥{:.2} 已发送给卖家，等待确认中。\
-             卖家同意后订单将自动创建。\
-             请留意通知。",
-            cents_to_yuan(args.offered_price)
-        ))
-    }
+    Ok(format!(
+        "你的还价 ¥{:.2} 已发送给卖家，等待确认中。\
+         卖家同意后订单将自动创建。\
+         请留意通知。",
+        cents_to_yuan(args.offered_price)
+    ))
 }
 
 #[derive(sqlx::FromRow)]

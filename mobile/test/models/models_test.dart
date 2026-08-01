@@ -1063,4 +1063,49 @@ void main() {
       expect(intent.source, 'intent_match');
     });
   });
+
+  group('AgentPlan confirmation protocol', () {
+    test(
+      'parses an armed plan so reloads preserve the second-confirmation gate',
+      () {
+        final plan = AgentPlan.fromJson({
+          'id': 'plan-1',
+          'action': 'purchase_item',
+          'risk_level': 'L3',
+          'summary': '购买二手教材',
+          'status': 'confirmed_once',
+          'confirmation_token': 'second-token',
+          'expires_at': '2026-08-01T12:00:00Z',
+        });
+
+        expect(plan.isHighRisk, isTrue);
+        expect(plan.isArmed, isTrue);
+        expect(plan.confirmationToken, 'second-token');
+      },
+    );
+
+    test('defaults legacy plans to pending', () {
+      final plan = AgentPlan.fromJson({
+        'id': 'plan-legacy',
+        'action': 'update_listing',
+        'risk_level': 'L2',
+        'summary': '更新商品',
+        'confirmation_token': 'primary-token',
+      });
+
+      expect(plan.status, 'pending');
+      expect(plan.isArmed, isFalse);
+    });
+
+    test('parses the rotated token returned by the primary confirmation', () {
+      final outcome = AgentPlanConfirmResult.fromJson({
+        'status': 'needs_second_confirmation',
+        'confirmation_token': 'rotated-second-token',
+      });
+
+      expect(outcome.needsSecondConfirmation, isTrue);
+      expect(outcome.confirmationToken, 'rotated-second-token');
+      expect(outcome.executed, isFalse);
+    });
+  });
 }

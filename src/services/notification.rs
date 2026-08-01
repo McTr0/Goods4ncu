@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde::Serialize;
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, Row, Transaction};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -64,15 +64,23 @@ impl NotificationService {
     /// around it, so budgeted topics are refused outright rather than trusted
     /// not to appear. See [`create_budgeted`](Self::create_budgeted).
     pub async fn create(&self, notification: NewNotification<'_>) -> Result<String> {
-        if crate::services::interruption::is_budgeted_topic(notification.event_type) {
-            anyhow::bail!(
-                "'{}' is a budgeted topic and must be sent through \
-                 InterruptionService::request, which accounts for the user's \
-                 interruption budget",
-                notification.event_type
-            );
-        }
+        Self::ensure_directed_topic(notification.event_type)?;
         self.insert(notification, true, None).await
+    }
+
+    /// Create a directed notification inside the caller's transaction.
+    ///
+    /// The notification row and its push outbox event are appended to `tx`; this
+    /// method deliberately does not commit or roll back. It lets a business fact
+    /// such as a negotiation request and the corresponding user-visible signal
+    /// become durable as one atomic operation.
+    pub async fn create_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        notification: NewNotification<'_>,
+    ) -> Result<String> {
+        Self::ensure_directed_topic(notification.event_type)?;
+        self.insert_in_tx(tx, notification, true, None).await
     }
 
     /// Create a budgeted notification according to the budget's verdict.
@@ -107,13 +115,27 @@ impl NotificationService {
         push: bool,
         interruption_id: Option<Uuid>,
     ) -> Result<String> {
-        let id = Uuid::new_v4().to_string();
-
         // Notification row and its push event commit atomically: either both
         // exist or neither does. Delivery itself happens from the outbox
         // worker, so a crash right after this commit cannot lose the push the
         // way the old fire-and-forget in-process broadcast could.
         let mut tx = self.db.begin().await?;
+        let id = self
+            .insert_in_tx(&mut tx, notification, push, interruption_id)
+            .await?;
+        tx.commit().await?;
+
+        Ok(id)
+    }
+
+    async fn insert_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        notification: NewNotification<'_>,
+        push: bool,
+        interruption_id: Option<Uuid>,
+    ) -> Result<String> {
+        let id = Uuid::new_v4().to_string();
         sqlx::query(
             "INSERT INTO notifications (
                 id, campus_id, user_id, event_type, title, body, related_order_id,
@@ -132,7 +154,7 @@ impl NotificationService {
         .bind(notification.related_conversation_id)
         .bind(interruption_id)
         .bind(notification.related_space_id)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
 
         if push {
@@ -148,16 +170,27 @@ impl NotificationService {
                 },
             });
             crate::services::outbox::enqueue_in_tx(
-                &mut tx,
+                tx,
                 crate::services::outbox::TOPIC_NOTIFICATION_PUSH,
                 &push_payload,
             )
             .await
             .map_err(|error| anyhow::anyhow!("enqueue notification push: {error}"))?;
         }
-        tx.commit().await?;
 
         Ok(id)
+    }
+
+    fn ensure_directed_topic(event_type: &str) -> Result<()> {
+        if crate::services::interruption::is_budgeted_topic(event_type) {
+            anyhow::bail!(
+                "'{}' is a budgeted topic and must be sent through \
+                 InterruptionService::request, which accounts for the user's \
+                 interruption budget",
+                event_type
+            );
+        }
+        Ok(())
     }
 
     /// List all notifications for a user (read + unread, most recent first).

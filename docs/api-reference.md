@@ -693,13 +693,13 @@ Flutter 在 wanted 详情按当前用户身份展示“收到的推荐”或“�
 
 ## Agent ActionPlan
 
-[已实现] 小帮的写动作（发布、修改、下架、成交意向、还价）不再直接执行：工具调用产生 pending 计划，用户在应用内确认后才执行。confirmation token 只通过以下认证接口返回，不出现在聊天文本中。
+[已实现] 小帮的商品发布是可恢复的低风险动作：通过校验后立即发布，并在小帮页提供撤销窗口。修改、下架使用 L2 ActionPlan；成交意向和还价使用 L3 ActionPlan。confirmation token 只通过以下认证接口返回，不出现在聊天文本中；带 token 的响应使用 `Cache-Control: no-store`。
 
-- `GET /api/agent/plans` — 当前用户 pending 且未过期的计划（含 `confirmation_token`、`risk_level`、`summary`、`expires_at`）。
-- `POST /api/agent/plans/{id}/confirm` — body `{ "confirmation_token": "..." }`。L2 计划直接执行并返回 `{ "status": "executed", "result": "..." }`；L3 计划第一次确认返回 `{ "status": "needs_second_confirmation" }`，第二次确认才执行。重复确认幂等返回同一结果。过期/已取消返回 `409`；错误 token、他人计划或不存在统一 `404`（不泄露归属）。执行失败返回 `409` 并保留计划为 `failed`。
-- `POST /api/agent/plans/{id}/cancel` — 取消 pending 计划。
+- `GET /api/agent/plans` — 只列出当前用户在当前活动校园内、未过期的 `pending` 或 `confirmed_once` 计划，返回 `status`、当前步骤的 `confirmation_token`、`risk_level`、`summary` 和 `expires_at`。
+- `POST /api/agent/plans/{id}/confirm` — body `{ "confirmation_token": "..." }`。L2 计划一次确认后执行。L3 第一次必须提交 primary token，响应为 `{ "status": "needs_second_confirmation", "confirmation_token": "<独立的第二步 token>" }`；只有返回的第二步 token 可以执行。primary 请求的传输重试只会重放同一挑战，不会被计为第二次确认。终态重试返回同一执行结果。过期/已取消返回 `409`；错误 token、其他用户、其他校园或不存在统一 `404`（不泄露归属）。执行校验失败返回 `409` 并把计划记为 `failed`。
+- `POST /api/agent/plans/{id}/cancel` — 取消当前校园内的 `pending` 或 `confirmed_once` 计划。
 
-执行体在确认时重新校验校园资格、所有权、商品状态和价格区间；提出计划后世界状态变化（例如商品已售出）时，确认不会产生业务写入。
+确认从锁定计划行、重新校验校园资格/所有权/商品状态/金额，到业务事实、适用时的通知/outbox 和计划终态都位于同一个数据库事务。业务执行使用 savepoint：校验失败不会留下部分事实；进程在 commit 前中断时整笔事务回滚，原 token 可安全重试。升级前遗留的已提交 `executing` 行被迁移为 `interrupted`，必须人工核对，系统绝不自动重放。
 
 ## AI Chat
 
@@ -970,7 +970,7 @@ listing 的生命周期和可用性是两个正交维度：`inventory.status` �
 
 `code` 是客户端稳定判断依据，`message` 可本地化，`details` 只包含安全的字段级信息。不得返回 SQL、provider 原始错误、屏蔽关系或审核规则。
 
-发布、wanted response 和成交确认已实现 `Idempotency-Key`。聊天创建/消息发送使用请求体中的客户端 UUID 幂等；其他关键写接口和 Agent confirm 的统一幂等契约仍属于目标态。同一作用域、key 和请求内容的重试返回首次结果；相同 key 配不同 body 必须冲突。已返回 `replayed` 的接口用该字段区分首次执行和结果重放。
+发布、wanted response 和成交确认已实现 `Idempotency-Key`。聊天创建/消息发送使用请求体中的客户端 UUID 幂等；Agent confirm 以 plan + 当前步骤 token 重放稳定挑战或终态结果。其他关键写接口、Agent proposal 的客户端幂等键及统一 `/api/v1` 幂等错误契约仍属于目标态。同一作用域、key 和请求内容的重试返回首次结果；相同 key 配不同 body 必须冲突。已返回 `replayed` 的接口用该字段区分首次执行和结果重放。
 
 列表统一使用：
 
@@ -1028,9 +1028,9 @@ POST /api/v1/agent/plans/{id}/confirm
 POST /api/v1/agent/plans/{id}/cancel
 ```
 
-创建计划返回 `plan_id`、`action_type`、`risk_level`、`summary`、`preview`、`expires_at`、`idempotency_key` 和 `confirmation_mode`。L2 使用一次确认，L3 使用二次确认并写审计。
+这是目标 `/api/v1` 形态，不等同于上方当前未版本化接口。目标创建协议还应返回 `idempotency_key`、`confirmation_mode`、版本化预览和风险文案；L3 继续使用相互独立的两步 token。
 
-Confirm 时服务端重新验证 tenant、membership、owner、资源版本、状态和金额。过期、上下文变化和重复执行返回稳定冲突，不静默更新计划输入。
+当前 confirm 已重新验证 tenant、membership、owner、状态和金额，并把业务事实与计划终态原子提交。通用资源版本快照、提案幂等键、稳定错误 code 和完整审计信封仍是 `/api/v1` 收敛项。
 
 ### Moderation 与申诉
 

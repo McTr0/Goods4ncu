@@ -9,11 +9,20 @@ import 'package:goods4ncu_mobile/services/sse_service.dart';
 import 'package:goods4ncu_mobile/services/upload_service.dart';
 
 class _FakeApiService extends ApiService {
-  _FakeApiService({this.undoable = const [], this.undoResult});
+  _FakeApiService({
+    this.undoable = const [],
+    this.undoResult,
+    List<AgentPlan> agentPlans = const [],
+    List<AgentPlanConfirmResult> confirmOutcomes = const [],
+  }) : agentPlans = List.of(agentPlans),
+       confirmOutcomes = List.of(confirmOutcomes);
 
   List<UndoableAction> undoable;
   final UndoResult? undoResult;
   final List<String> undone = [];
+  List<AgentPlan> agentPlans;
+  final List<AgentPlanConfirmResult> confirmOutcomes;
+  final List<String> confirmedTokens = [];
 
   @override
   Future<Map<String, dynamic>> getUserProfile() async => {'user_id': 'user-1'};
@@ -22,7 +31,20 @@ class _FakeApiService extends ApiService {
   Future<List<HitlRequest>> getNegotiations() async => const [];
 
   @override
-  Future<List<AgentPlan>> getAgentPlans() async => const [];
+  Future<List<AgentPlan>> getAgentPlans() async => List.of(agentPlans);
+
+  @override
+  Future<AgentPlanConfirmResult> confirmAgentPlan(
+    String id,
+    String confirmationToken,
+  ) async {
+    confirmedTokens.add(confirmationToken);
+    final outcome = confirmOutcomes.removeAt(0);
+    if (outcome.executed) {
+      agentPlans = agentPlans.where((plan) => plan.id != id).toList();
+    }
+    return outcome;
+  }
 
   @override
   Future<List<UndoableAction>> getUndoableActions() async => undoable;
@@ -208,5 +230,121 @@ void main() {
     final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
     expect(find.text(l.undoDoneHeader), findsNothing);
     expect(find.text('过期的发布'), findsNothing);
+  });
+
+  testWidgets('a pending L3 plan executes only with its rotated second token', (
+    tester,
+  ) async {
+    final api = _FakeApiService(
+      agentPlans: [
+        AgentPlan(
+          id: 'plan-pending',
+          action: 'purchase_item',
+          riskLevel: 'L3',
+          summary: '购买二手教材',
+          confirmationToken: 'primary-token',
+        ),
+      ],
+      confirmOutcomes: [
+        AgentPlanConfirmResult(
+          status: 'needs_second_confirmation',
+          result: '',
+          confirmationToken: 'rotated-second-token',
+        ),
+        AgentPlanConfirmResult(status: 'executed', result: '已发送成交意向'),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _buildTestApp(
+        ChatPage(
+          apiService: api,
+          chatService: _FakeChatService(),
+          sseService: SseService(),
+          uploadService: _FakeUploadService(),
+          embedded: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
+    await tester.tap(find.text(l.agentPlanConfirmAction));
+    await tester.pumpAndSettle();
+
+    expect(api.confirmedTokens, ['primary-token']);
+    expect(find.byType(AlertDialog), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text(l.agentPlanSecondConfirmAction),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(api.confirmedTokens, ['primary-token', 'rotated-second-token']);
+  });
+
+  testWidgets('an armed L3 plan shows the dialog before sending any request', (
+    tester,
+  ) async {
+    final api = _FakeApiService(
+      agentPlans: [
+        AgentPlan(
+          id: 'plan-armed',
+          action: 'purchase_item',
+          riskLevel: 'L3',
+          summary: '购买二手教材',
+          status: 'confirmed_once',
+          confirmationToken: 'second-token-from-list',
+        ),
+      ],
+      confirmOutcomes: [
+        AgentPlanConfirmResult(status: 'executed', result: '已发送成交意向'),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _buildTestApp(
+        ChatPage(
+          apiService: api,
+          chatService: _FakeChatService(),
+          sseService: SseService(),
+          uploadService: _FakeUploadService(),
+          embedded: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
+    await tester.tap(find.text(l.agentPlanConfirmAction));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(api.confirmedTokens, isEmpty);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text(l.cancel),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(api.confirmedTokens, isEmpty);
+
+    await tester.tap(find.text(l.agentPlanConfirmAction));
+    await tester.pumpAndSettle();
+    expect(api.confirmedTokens, isEmpty);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text(l.agentPlanSecondConfirmAction),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(api.confirmedTokens, ['second-token-from-list']);
   });
 }

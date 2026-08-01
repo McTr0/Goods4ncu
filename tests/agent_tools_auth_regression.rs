@@ -272,7 +272,7 @@ async fn create_listing_tool_does_not_depend_on_embedding_provider() {
 }
 
 #[tokio::test]
-async fn delete_listing_tool_removes_listing_document_in_same_operation() {
+async fn delete_listing_tool_enqueues_a_revision_matched_projection_tombstone() {
     with_test_pool(|pool| async move {
         let suffix = Uuid::new_v4().to_string();
         let owner_id = format!("delete-owner-{suffix}");
@@ -319,20 +319,30 @@ async fn delete_listing_tool_removes_listing_document_in_same_operation() {
 
         assert!(result.contains("Successfully removed"));
 
-        let row = sqlx::query("SELECT status FROM inventory WHERE id = $1")
+        let row = sqlx::query("SELECT status, content_revision FROM inventory WHERE id = $1")
             .bind(&listing_id)
             .fetch_one(&pool)
             .await
             .unwrap();
         let status: String = row.get("status");
+        let content_revision: i64 = row.get("content_revision");
         assert_eq!(status, "deleted");
 
-        let document_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM documents WHERE id = $1")
+        // Projection cleanup is durable and asynchronous: migration 0057
+        // coalesces the delete revision into the listing's embedding job. The
+        // worker will remove the stale document after this business transaction
+        // commits, without coupling deletion success to provider availability.
+        let job = sqlx::query(
+            "SELECT desired_revision, status FROM embedding_jobs WHERE listing_id = $1",
+        )
             .bind(&listing_id)
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(document_count, 0);
+        let desired_revision: i64 = job.get("desired_revision");
+        let job_status: String = job.get("status");
+        assert_eq!(desired_revision, content_revision);
+        assert_eq!(job_status, "pending");
     })
     .await;
 }

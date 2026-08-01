@@ -84,7 +84,7 @@ Embedding provider 调用发生在 listing 提交之后。provider 超时、限�
 
 `wanted`：价格是预算上限，成色是最低可接受成色，owner 是需求方。没有品牌偏好时当前客户端可提交“不限”，生产目标应改为显式可选字段而不是把展示词当真实品牌。
 
-Agent 不能绕过表单使用的审核和校验。[目标态] Agent 发布先生成 L2 ActionPlan，用户确认后才执行。
+Agent 发布当前是低风险即时动作，并在小帮页提供撤销窗口；它仍必须经过与表单相同的审核和校验。当前 Agent/HTTP 的 listing command 入口尚未完全统一，这是必须收敛的已知缺口。
 
 ### 状态
 
@@ -264,19 +264,19 @@ Mail 创建后进入 open，主题 1–120 字、正文 1–2000 字，无需接
 
 当前小帮支持普通 JSON 和 SSE。请求先经过审核和意图路由，需要工具时进入 LLM provider/Agent。
 
-[目标态] Agent 动作流：
+[已实现] 当前市场 Agent 动作流：
 
 ```text
 用户意图
   -> L0/L1：解释、搜索、匹配、草拟，可直接返回
-  -> L2：发布、更新、联系、推荐，生成 ActionPlan
-  -> L3：报价、议价接受、成交、隐私公开，生成二次确认 ActionPlan
-  -> 用户确认
-  -> service 重新校验并幂等执行
-  -> audit + domain event
+  -> 可恢复发布：校验后立即执行，展示撤销窗口
+  -> L2 更新/下架：生成一次确认 ActionPlan
+  -> L3 成交意向/议价：生成使用独立两步 token 的 ActionPlan
+  -> 用户确认；L3 primary 只解锁 second token
+  -> 原校园内重新校验并把业务事实、适用时的通知/outbox、计划终态原子提交
 ```
 
-ActionPlan 过期、资源版本变化、membership 失效或权限变化时安全失败。模型不能用聊天中的“已经同意”绕过确认 token。
+ActionPlan 过期、membership 失效、权限或商品状态变化时安全失败。模型不能用聊天中的“已经同意”绕过 confirmation token；primary 请求重试也不能变成第二次确认。通用资源版本快照和统一 Agent 审计仍是目标态。
 
 Provider 失败时保留用户输入，提供关键词搜索、普通表单和手工聊天；不能让整个市场不可用。
 

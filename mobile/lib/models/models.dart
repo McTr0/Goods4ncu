@@ -1357,6 +1357,7 @@ class AgentPlan {
   final String action;
   final String riskLevel;
   final String summary;
+  final String status;
   final String confirmationToken;
   final DateTime? expiresAt;
 
@@ -1365,6 +1366,7 @@ class AgentPlan {
     required this.action,
     required this.riskLevel,
     required this.summary,
+    this.status = 'pending',
     required this.confirmationToken,
     this.expiresAt,
   });
@@ -1374,18 +1376,34 @@ class AgentPlan {
     action: json['action']?.toString() ?? '',
     riskLevel: json['risk_level']?.toString() ?? 'L2',
     summary: json['summary']?.toString() ?? '',
+    status: json['status']?.toString() ?? 'pending',
     confirmationToken: json['confirmation_token']?.toString() ?? '',
     expiresAt: DateTime.tryParse(json['expires_at']?.toString() ?? ''),
   );
 
   bool get isHighRisk => riskLevel == 'L3';
+  bool get isArmed => status == 'confirmed_once';
 }
 
 /// Outcome of confirming an agent plan.
 class AgentPlanConfirmResult {
   final String status;
   final String result;
-  AgentPlanConfirmResult({required this.status, required this.result});
+  final String? confirmationToken;
+
+  AgentPlanConfirmResult({
+    required this.status,
+    required this.result,
+    this.confirmationToken,
+  });
+
+  factory AgentPlanConfirmResult.fromJson(Map<String, dynamic> json) =>
+      AgentPlanConfirmResult(
+        status: json['status']?.toString() ?? '',
+        result: json['result']?.toString() ?? '',
+        confirmationToken: json['confirmation_token']?.toString(),
+      );
+
   bool get needsSecondConfirmation => status == 'needs_second_confirmation';
   bool get executed => status == 'executed';
 }

@@ -194,15 +194,18 @@ listing 已使用 case-owned、可组合的 `listing_restriction_effects`：effe
 
 ### AgentRun 与 AgentActionPlan
 
-[已实现] AgentRun 的部分事实仍分散在聊天消息、LLM metrics、工具结果和日志中；统一 `AgentRun` 仍是目标态。每个受支持的 Agent 写动作已经形成 `AgentActionPlan`：
+[已实现] AgentRun 的部分事实仍分散在聊天消息、LLM metrics、工具结果和日志中；统一 `AgentRun` 仍是目标态。需要事前确认的修改、删除、成交意向和议价形成 `AgentActionPlan`；低风险发布立即执行并进入撤销窗口：
 
 ```text
 AgentRun: request -> routing -> retrieval -> model/tool steps -> outcome
-ActionPlan: pending -> confirmed_once (L3) -> executing -> executed | failed
-            pending -> cancelled | expired
+ActionPlan: pending -> confirmed_once (L3) -> executing (transaction-local) -> executed | failed
+            pending | confirmed_once -> cancelled | expired
+            legacy executing -> interrupted
 ```
 
-ActionPlan 保存待执行输入快照、风险级、短期 confirmation token 和执行结果，不是已执行事实。L2 一次确认，L3 二次确认；执行时重新检查 tenant、membership、权限和资源状态。通用资源版本快照比较仍待补齐。
+ActionPlan 保存待执行输入快照、风险级、短期 confirmation capability 和执行结果，不是已执行事实。L2 一次确认；L3 primary token 只能进入 `confirmed_once`，服务端随后才公开独立的第二步 token。primary 重试只重放挑战，不能执行。计划归属创建时的 campus，list/cancel/confirm 都按当前认证用户和活动校园过滤。
+
+新协议中的 `executing` 只存在于未提交事务内：计划行锁、业务写入、通知/outbox 和 `executed` 结果一起 commit；动作失败先回滚 savepoint，再在同一外层事务记录 `failed`。因此 commit 前崩溃不会留下业务事实或持久 `executing`。迁移发现的旧协议 `executing` 无法安全判断副作用是否已提交，只能标记 `interrupted` 并人工核对，绝不自动重放。通用资源版本快照、提案幂等和统一审计事件仍待补齐。
 
 ### AuditEvent 与 DomainEvent
 

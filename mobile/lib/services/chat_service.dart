@@ -35,10 +35,7 @@ class ChatService extends BaseService {
       jsonEncode({'confirmation_token': confirmationToken}),
     );
     final data = handleResponse(response, (d) => d as Map<String, dynamic>);
-    return AgentPlanConfirmResult(
-      status: data['status']?.toString() ?? '',
-      result: data['result']?.toString() ?? '',
-    );
+    return AgentPlanConfirmResult.fromJson(data);
   }
 
   /// POST /api/agent/plans/{id}/cancel — discard a proposed agent action.

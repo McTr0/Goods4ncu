@@ -8,13 +8,10 @@
 //! campus membership, listing state, price bounds), so a confirmed plan whose
 //! world has changed fails safely instead of executing against stale state.
 
-use sqlx::{PgPool, Row};
+use sqlx::{Acquire, PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
-use crate::agents::tools::{
-    execute_create_listing, execute_delete_listing, execute_negotiate_item, execute_purchase_item,
-    execute_update_listing, ToolContext, ToolError,
-};
+use crate::agents::tools::{execute_planned_action_in_tx, ToolContext};
 
 /// How long a pending plan stays confirmable.
 const PLAN_TTL_MINUTES: i64 = 10;
@@ -27,8 +24,8 @@ pub struct AgentPlanView {
     pub summary: String,
     pub status: String,
     pub args: serde_json::Value,
-    /// Single-use secret proving the confirmer saw the plan through the
-    /// authenticated API rather than through model output.
+    /// Active confirmation capability for the plan's current step. An armed L3
+    /// view exposes only its independent step-two capability.
     pub confirmation_token: String,
     pub expires_at: chrono::DateTime<chrono::Utc>,
     pub result: Option<String>,
@@ -41,7 +38,7 @@ pub enum ConfirmOutcome {
     Executed(String),
     /// First confirmation of an L3 plan accepted; a second confirmation is
     /// required before execution.
-    NeedsSecondConfirmation,
+    NeedsSecondConfirmation { confirmation_token: String },
     /// Plan had already been executed; contains the recorded result.
     AlreadyExecuted(String),
     /// The underlying action failed validation or execution.
@@ -75,12 +72,16 @@ impl AgentPlanService {
         args: &serde_json::Value,
         summary: &str,
     ) -> anyhow::Result<Uuid> {
-        let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+        let token = new_confirmation_token();
+        let second_token = (risk_level == "L3").then(new_confirmation_token);
         let id: Uuid = sqlx::query_scalar(
             "INSERT INTO agent_action_plans (
                 campus_id, user_id, action, risk_level, args, summary,
-                confirmation_token, expires_at
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW() + make_interval(mins => $8::int))
+                confirmation_token, second_confirmation_token, expires_at
+             ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8,
+                NOW() + make_interval(mins => $9::int)
+             )
              RETURNING id",
         )
         .bind(campus_id)
@@ -90,23 +91,35 @@ impl AgentPlanService {
         .bind(args)
         .bind(summary)
         .bind(&token)
+        .bind(second_token.as_deref())
         .bind(PLAN_TTL_MINUTES as i32)
         .fetch_one(&self.db)
         .await?;
         Ok(id)
     }
 
-    /// Pending (unexpired) plans for a user, most recent first.
-    pub async fn list_pending(&self, user_id: &str) -> anyhow::Result<Vec<AgentPlanView>> {
+    /// Pending (unexpired) plans for a user in the active campus, most recent first.
+    pub async fn list_pending(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+    ) -> anyhow::Result<Vec<AgentPlanView>> {
         let rows = sqlx::query(
-            "SELECT id, action, risk_level, summary, status, args, confirmation_token,
+            "SELECT id, action, risk_level, summary, status, args,
+                    CASE
+                        WHEN risk_level = 'L3' AND status = 'confirmed_once'
+                            THEN second_confirmation_token
+                        ELSE confirmation_token
+                    END AS confirmation_token,
                     expires_at, result, created_at
              FROM agent_action_plans
-             WHERE user_id = $1 AND status IN ('pending', 'confirmed_once') AND expires_at > NOW()
+             WHERE user_id = $1 AND campus_id = $2
+               AND status IN ('pending', 'confirmed_once') AND expires_at > NOW()
              ORDER BY created_at DESC
              LIMIT 20",
         )
         .bind(user_id)
+        .bind(campus_id)
         .fetch_all(&self.db)
         .await?;
         Ok(rows.into_iter().map(row_to_view).collect())
@@ -114,14 +127,21 @@ impl AgentPlanService {
 
     /// Cancel a pending plan. Idempotent-ish: cancelling twice is an error the
     /// caller can surface as "nothing to cancel".
-    pub async fn cancel(&self, user_id: &str, plan_id: Uuid) -> anyhow::Result<bool> {
+    pub async fn cancel(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+        plan_id: Uuid,
+    ) -> anyhow::Result<bool> {
         let updated = sqlx::query(
             "UPDATE agent_action_plans
              SET status = 'cancelled', updated_at = NOW()
-             WHERE id = $1 AND user_id = $2 AND status IN ('pending', 'confirmed_once')",
+             WHERE id = $1 AND user_id = $2 AND campus_id = $3
+               AND status IN ('pending', 'confirmed_once')",
         )
         .bind(plan_id)
         .bind(user_id)
+        .bind(campus_id)
         .execute(&self.db)
         .await?;
         Ok(updated.rows_affected() > 0)
@@ -129,149 +149,214 @@ impl AgentPlanService {
 
     /// Confirm and execute a plan.
     ///
-    /// The pending→executing transition is a conditional UPDATE, so exactly
-    /// one of any number of concurrent confirms claims the plan — the action
-    /// itself can never run twice.
+    /// The plan row stays locked from token validation through the business
+    /// mutation and terminal result. Every database side effect therefore
+    /// commits atomically with `executed`, or rolls back to the confirmable state
+    /// when the request/process is interrupted before commit.
     pub async fn confirm(
         &self,
         ctx: &ToolContext,
         user_id: &str,
+        campus_id: Uuid,
         plan_id: Uuid,
         token: &str,
     ) -> anyhow::Result<ConfirmOutcome> {
-        // Read first to distinguish outcomes without leaking other users' plans.
+        let mut tx = self.db.begin().await?;
+
+        // Serialise every confirmation of this plan. A duplicate primary L3
+        // request that waited here observes confirmed_once and replays the same
+        // second-step challenge instead of accidentally counting as step two.
         let row = sqlx::query(
-            "SELECT status, risk_level, action, args, confirmation_token, expires_at, result
-             FROM agent_action_plans WHERE id = $1 AND user_id = $2",
+            "SELECT status, risk_level, action, args, confirmation_token,
+                    second_confirmation_token, expires_at <= NOW() AS is_expired,
+                    result
+             FROM agent_action_plans
+             WHERE id = $1 AND user_id = $2 AND campus_id = $3
+             FOR UPDATE",
         )
         .bind(plan_id)
         .bind(user_id)
-        .fetch_optional(&self.db)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
         .await?;
         let Some(row) = row else {
-            return Ok(ConfirmOutcome::NotFound);
+            return commit_outcome(tx, ConfirmOutcome::NotFound).await;
         };
-        let stored_token: String = row.get("confirmation_token");
-        if !constant_time_eq(stored_token.as_bytes(), token.as_bytes()) {
-            return Ok(ConfirmOutcome::NotFound);
-        }
+
         let status: String = row.get("status");
         let risk_level: String = row.get("risk_level");
+        let stored_token: String = row.get("confirmation_token");
+        let second_token: Option<String> = row.get("second_confirmation_token");
+        let primary_matches = constant_time_eq(stored_token.as_bytes(), token.as_bytes());
+        let second_matches = second_token
+            .as_deref()
+            .is_some_and(|stored| constant_time_eq(stored.as_bytes(), token.as_bytes()));
+
+        // The undisclosed second token cannot skip the first L3 confirmation.
+        // Terminal states accept either capability so a lost success response is
+        // safely replayable with whichever step the client last submitted.
+        let token_is_valid = if status == "pending" {
+            primary_matches
+        } else {
+            primary_matches || second_matches
+        };
+        if !token_is_valid {
+            return commit_outcome(tx, ConfirmOutcome::NotFound).await;
+        }
+
         match status.as_str() {
             "executed" => {
                 let result: Option<String> = row.get("result");
-                return Ok(ConfirmOutcome::AlreadyExecuted(result.unwrap_or_default()));
+                return commit_outcome(
+                    tx,
+                    ConfirmOutcome::AlreadyExecuted(result.unwrap_or_default()),
+                )
+                .await;
             }
             "pending" | "confirmed_once" => {}
+            "expired" => return commit_outcome(tx, ConfirmOutcome::Expired).await,
             other => {
-                return Ok(ConfirmOutcome::NotConfirmable(other.to_string()));
+                return commit_outcome(tx, ConfirmOutcome::NotConfirmable(other.to_string())).await;
             }
         }
-        let expires_at: chrono::DateTime<chrono::Utc> = row.get("expires_at");
-        if expires_at <= chrono::Utc::now() {
+
+        let is_expired: bool = row.get("is_expired");
+        if is_expired {
             sqlx::query(
                 "UPDATE agent_action_plans SET status = 'expired', updated_at = NOW()
-                 WHERE id = $1 AND status IN ('pending', 'confirmed_once')",
+                 WHERE id = $1 AND user_id = $2 AND campus_id = $3
+                   AND status IN ('pending', 'confirmed_once')",
             )
             .bind(plan_id)
-            .execute(&self.db)
+            .bind(user_id)
+            .bind(campus_id)
+            .execute(&mut *tx)
             .await?;
-            return Ok(ConfirmOutcome::Expired);
+            return commit_outcome(tx, ConfirmOutcome::Expired).await;
         }
 
-        // High-risk (L3) actions take two confirmations: the first only arms
-        // the plan. Both transitions are conditional updates, so concurrent
-        // confirms cannot skip a step or execute twice.
+        // High-risk actions use independent capabilities for the two steps. The
+        // second capability is returned only after the primary token is accepted.
         if risk_level == "L3" && status == "pending" {
-            let armed = sqlx::query(
+            let second_token = second_token.ok_or_else(|| {
+                anyhow::anyhow!("L3 action plan {} is missing its second token", plan_id)
+            })?;
+            sqlx::query(
                 "UPDATE agent_action_plans
-                 SET status = 'confirmed_once', updated_at = NOW()
-                 WHERE id = $1 AND status = 'pending' AND expires_at > NOW()",
+                 SET status = 'confirmed_once', first_confirmed_at = NOW(), updated_at = NOW()
+                 WHERE id = $1 AND user_id = $2 AND campus_id = $3",
             )
             .bind(plan_id)
-            .execute(&self.db)
+            .bind(user_id)
+            .bind(campus_id)
+            .execute(&mut *tx)
             .await?;
-            if armed.rows_affected() == 0 {
-                return Ok(ConfirmOutcome::NotConfirmable("executing".to_string()));
-            }
-            return Ok(ConfirmOutcome::NeedsSecondConfirmation);
+            return commit_outcome(
+                tx,
+                ConfirmOutcome::NeedsSecondConfirmation {
+                    confirmation_token: second_token,
+                },
+            )
+            .await;
         }
 
-        // Claim: only one concurrent confirm wins this transition. L2 claims
-        // from 'pending'; L3 claims from 'confirmed_once'.
-        let claim_from = if risk_level == "L3" {
-            "confirmed_once"
-        } else {
-            "pending"
-        };
-        let claimed = sqlx::query(
+        if risk_level == "L3" && status == "confirmed_once" && primary_matches {
+            let second_token = second_token.ok_or_else(|| {
+                anyhow::anyhow!("L3 action plan {} is missing its second token", plan_id)
+            })?;
+            return commit_outcome(
+                tx,
+                ConfirmOutcome::NeedsSecondConfirmation {
+                    confirmation_token: second_token,
+                },
+            )
+            .await;
+        }
+
+        if risk_level == "L3" && status == "confirmed_once" && !second_matches {
+            return commit_outcome(tx, ConfirmOutcome::NotFound).await;
+        }
+        if risk_level != "L3" && status != "pending" {
+            return commit_outcome(tx, ConfirmOutcome::NotConfirmable(status)).await;
+        }
+
+        sqlx::query(
             "UPDATE agent_action_plans
-             SET status = 'executing', updated_at = NOW()
-             WHERE id = $1 AND status = $2 AND expires_at > NOW()",
+             SET status = 'executing',
+                 second_confirmed_at = CASE
+                     WHEN risk_level = 'L3' THEN NOW()
+                     ELSE second_confirmed_at
+                 END,
+                 updated_at = NOW()
+             WHERE id = $1 AND user_id = $2 AND campus_id = $3",
         )
         .bind(plan_id)
-        .bind(claim_from)
-        .execute(&self.db)
+        .bind(user_id)
+        .bind(campus_id)
+        .execute(&mut *tx)
         .await?;
-        if claimed.rows_affected() == 0 {
-            return Ok(ConfirmOutcome::NotConfirmable("executing".to_string()));
-        }
 
         let action: String = row.get("action");
         let args: serde_json::Value = row.get("args");
-        let execution = execute_action(ctx, &action, args).await;
+        let mut action_savepoint = (&mut tx).begin().await?;
+        let execution = execute_planned_action_in_tx(
+            ctx,
+            &mut action_savepoint,
+            user_id,
+            campus_id,
+            &action,
+            args,
+        )
+        .await;
 
         match execution {
             Ok(result) => {
+                action_savepoint.commit().await?;
                 sqlx::query(
                     "UPDATE agent_action_plans
                      SET status = 'executed', executed_at = NOW(), result = $2, updated_at = NOW()
-                     WHERE id = $1",
+                     WHERE id = $1 AND user_id = $3 AND campus_id = $4
+                       AND status = 'executing'",
                 )
                 .bind(plan_id)
                 .bind(&result)
-                .execute(&self.db)
+                .bind(user_id)
+                .bind(campus_id)
+                .execute(&mut *tx)
                 .await?;
-                Ok(ConfirmOutcome::Executed(result))
+                commit_outcome(tx, ConfirmOutcome::Executed(result)).await
             }
             Err(error) => {
+                action_savepoint.rollback().await?;
                 let message = error.to_string();
                 sqlx::query(
                     "UPDATE agent_action_plans
                      SET status = 'failed', result = $2, updated_at = NOW()
-                     WHERE id = $1",
+                     WHERE id = $1 AND user_id = $3 AND campus_id = $4
+                       AND status = 'executing'",
                 )
                 .bind(plan_id)
                 .bind(&message)
-                .execute(&self.db)
+                .bind(user_id)
+                .bind(campus_id)
+                .execute(&mut *tx)
                 .await?;
-                Ok(ConfirmOutcome::Failed(message))
+                commit_outcome(tx, ConfirmOutcome::Failed(message)).await
             }
         }
     }
 }
 
-/// Route a confirmed plan to its validated execution body.
-async fn execute_action(
-    ctx: &ToolContext,
-    action: &str,
-    args: serde_json::Value,
-) -> Result<String, ToolError> {
-    fn parse<T: serde::de::DeserializeOwned>(args: serde_json::Value) -> Result<T, ToolError> {
-        serde_json::from_value(args).map_err(|e| ToolError(format!("计划参数已失效: {}", e)))
-    }
-    match action {
-        // Still routed so plans created before create_listing became an
-        // immediate (undoable) L2 action can finish executing.
-        "create_listing" => execute_create_listing(ctx, parse(args)?)
-            .await
-            .map(|created| created.message),
-        "update_listing" => execute_update_listing(ctx, parse(args)?).await,
-        "delete_listing" => execute_delete_listing(ctx, parse(args)?).await,
-        "purchase_item" => execute_purchase_item(ctx, parse(args)?).await,
-        "negotiate_item" => execute_negotiate_item(ctx, parse(args)?).await,
-        other => Err(ToolError(format!("未知的计划动作: {}", other))),
-    }
+async fn commit_outcome(
+    tx: Transaction<'_, Postgres>,
+    outcome: ConfirmOutcome,
+) -> anyhow::Result<ConfirmOutcome> {
+    tx.commit().await?;
+    Ok(outcome)
+}
+
+fn new_confirmation_token() -> String {
+    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {

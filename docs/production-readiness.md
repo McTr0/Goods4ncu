@@ -37,9 +37,10 @@
 
 | 门槛 | 证据 |
 | --- | --- |
-| 五个 L2/L3 写工具全部经 ActionPlan 确认；无确认零执行 | `tests/agent_action_plan_integration.rs` |
+| 可恢复发布立即执行并可撤销；update/delete L2 与 purchase/negotiate L3 才经 ActionPlan，未确认计划零执行 | `tests/agent_action_plan_integration.rs`、`tests/undo_integration.rs` |
 | confirmation token 与模型可见文本隔离（prompt 注入不可自确认） | 同上（token 不出现于模型回复的断言） |
-| L3 二次确认；单次确认零写入；并发确认单赢；重复确认幂等 | `tests/agent_action_plan_integration.rs::l3_plan_requires_two_confirmations_before_any_write` |
+| L3 独立两步 token；primary 重试不执行；并发 second token 单赢且终态稳定 | `tests/agent_action_plan_integration.rs::{l3_plan_requires_two_confirmations_before_any_write,retrying_the_primary_l3_token_never_executes_and_replays_the_same_second_token,concurrent_second_token_confirms_share_one_stable_terminal_result}` |
+| 计划绑定原校园；终态写失败时业务事实与计划状态原子回滚，可用同一 second token 重试 | `tests/agent_action_plan_integration.rs::{plans_are_not_visible_or_confirmable_from_another_campus,terminal_plan_update_failure_rolls_back_the_domain_fact_and_is_safely_retryable}` |
 | 工具层滥用测试集（跨校园/参数污染/自买自卖/未认证） | `tests/agent_injection_regression.rs` |
 
 ### 信息流闭环（Phase 2）

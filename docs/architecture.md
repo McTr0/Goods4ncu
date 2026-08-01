@@ -129,7 +129,7 @@ wanted matches 使用活动 campus、分类、预算、成色和 active 状态�
 
 自然语言入口先经过内容审核和 IntentRouter，再根据意图直接回答、检索或调用 Agent。Provider 支持 Gemini、MiniMax 和 OpenAI-compatible chat；embedding 当前仍主要依赖 Gemini 客户端和配置维度。
 
-市场 Agent 已挂载发布、搜索、详情、更新、删除、成交意向、议价和“我的发布”等工具。工具会做权限和状态检查，但统一 ActionPlan/确认 token 仍未完成，因此新增写工具前必须阅读[Agent 系统设计](agent-system.md)。
+市场 Agent 已挂载发布、搜索、详情、更新、删除、成交意向、议价和“我的发布”等工具。发布立即执行并进入撤销窗口；更新/删除使用 L2 ActionPlan，成交意向/议价使用独立两步 token 的 L3 ActionPlan。确认与业务事实已原子提交，但 listing 工具和 HTTP 的 command/审核入口仍需统一；新增写工具前必须阅读[Agent 系统设计](agent-system.md)。
 
 回复助手是受限 agent，只生成三个不超过限制的草稿，不读取媒体，不自动发送，也不挂载成交工具。
 
@@ -176,7 +176,7 @@ wanted matches 使用活动 campus、分类、预算、成色和 active 状态�
 | 进程内事件 | 崩溃可能丢失异步动作 | transactional outbox |
 | 单实例 WebSocket | 多副本无法直接 fan-out | Redis pub/sub + HTTP 补偿 |
 | 媒体兼容路径 | URL-first 与 Base64、静态 uploads 并存 | 私有隔离对象存储和 CDN |
-| Agent 写工具 | 未统一 ActionPlan 确认 | 分级授权、幂等执行和审计 |
+| Agent listing 写工具 | ActionPlan 已 crash-safe，但与 HTTP 仍有审核/规范化漂移 | 统一 ListingCommandService、资源版本与审计 |
 | Secret Chat | 服务器不可读，治理边界冲突 | 停止生产承诺并迁移 |
 | TEXT/UUID 并存 | join 和 fixture 可能只覆盖一类 ID | repository 兼容封装和分阶段收敛 |
 | 大模块 | user_chat 和页面承担多种职责 | 先补行为测试，再按领域拆分 |

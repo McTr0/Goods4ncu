@@ -647,14 +647,12 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _confirmAgentPlan(AgentPlan plan) async {
     final l = AppLocalizations.of(context)!;
     try {
-      var outcome = await _apiService.confirmAgentPlan(
-        plan.id,
-        plan.confirmationToken,
-      );
-      if (!mounted) return;
-      if (outcome.needsSecondConfirmation) {
-        // High-risk action: the backend armed the plan and demands an
-        // explicit second confirmation before executing.
+      // An armed plan has already consumed its primary token. This can happen
+      // after a reload, a lost first response, or when the user dismissed the
+      // second-confirmation dialog earlier. Never send its execution token
+      // until the user has explicitly accepted the high-risk dialog.
+      String token = plan.confirmationToken;
+      if (plan.isHighRisk && plan.isArmed) {
         final proceed = await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
@@ -676,10 +674,43 @@ class _ChatPageState extends State<ChatPage> {
           await _loadAgentPlans();
           return;
         }
-        outcome = await _apiService.confirmAgentPlan(
-          plan.id,
-          plan.confirmationToken,
+      }
+
+      var outcome = await _apiService.confirmAgentPlan(plan.id, token);
+      if (!mounted) return;
+      if (outcome.needsSecondConfirmation) {
+        // The primary token can only arm an L3 plan. Execution requires the
+        // freshly rotated token returned by that transition; reusing the
+        // primary token must remain a transport-idempotent no-op.
+        final secondToken = outcome.confirmationToken;
+        if (secondToken == null || secondToken.isEmpty) {
+          await _loadAgentPlans();
+          throw StateError('Second confirmation token was not returned');
+        }
+
+        final proceed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Text(l.agentPlanSecondConfirmTitle),
+            content: Text(plan.summary),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(l.cancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: Text(l.agentPlanSecondConfirmAction),
+              ),
+            ],
+          ),
         );
+        if (proceed != true || !mounted) {
+          await _loadAgentPlans();
+          return;
+        }
+        token = secondToken;
+        outcome = await _apiService.confirmAgentPlan(plan.id, token);
         if (!mounted) return;
       }
       ScaffoldMessenger.of(context).showSnackBar(

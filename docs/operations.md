@@ -241,6 +241,26 @@ DB_NAME=goods4ncu APP_PASSWORD=<secret> ./scripts/provision_app_role.sh
 
 Provider 故障不会回滚 listing 发布或更新。用户先得到已提交的 listing，向量缺失期间搜索与匹配走既有 fallback；恢复 provider/worker 后队列自动补齐。不要为了“强一致”把 provider HTTP 调用重新放回 inventory 数据库事务。
 
+## Agent ActionPlan 中断恢复
+
+[已实现] 新确认协议从计划行锁、业务写入、通知/outbox 到计划终态只使用一个外层数据库事务；动作校验位于 savepoint。新请求的 `executing` 因此只在未提交事务内存在：进程在 commit 前退出会整笔回滚，客户端可用当前步骤 token 重试；commit 成功后业务事实与 `executed` 同时可见。
+
+升级时发现的旧协议 `executing` 无法证明业务副作用是否已经提交。`0058_agent_plan_atomic_confirmation.sql` 将它们标为 `interrupted`，不自动重放。值班排查先只读列出异常行：
+
+```sql
+SELECT id, campus_id, user_id, action, status, args, result, updated_at
+FROM agent_action_plans
+WHERE status IN ('interrupted', 'executing')
+ORDER BY updated_at;
+```
+
+- `interrupted`：建立人工事件，按 `action/args` 核对 inventory、orders、hitl_requests、notifications/outbox 和审计事实，再联系用户确认；在没有 plan-scoped receipt 前绝不能猜测后重放。
+- 新迁移之后若能从另一个连接持续读到 `executing`，它不是正常中间态，而是协议不变量被破坏。立即关闭 Agent L2/L3 写入开关、保留行和日志并升级处理。
+- confirmation token 不写日志、不进模型上下文，token-bearing API 响应必须保持 `Cache-Control: no-store`。
+- 事务内只允许数据库副作用。新增外部调用必须先写 transactional outbox，由幂等 worker 在 commit 后投递，不能把网络请求塞进确认事务。
+
+当前没有自动化 `interrupted` 对账/结案界面；资源版本快照、typed execution outcome 和统一审计仍是后续运行性门槛。
+
 常用只读检查：
 
 ```sql
