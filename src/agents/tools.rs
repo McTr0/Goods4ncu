@@ -1,5 +1,9 @@
-use crate::repositories::{CreateListingInput, PostgresListingRepository, UpdateListingInput};
+use crate::api::error::ApiError;
 use crate::services::campus::CampusService;
+use crate::services::listing_command::{
+    CreateListingDraft, ListingCommandService, UpdateListingDraft,
+};
+use crate::services::moderation::ModerationService;
 use crate::services::order::{OrderError, OrderService};
 use crate::utils::cents_to_yuan;
 use rig::completion::ToolDefinition;
@@ -19,6 +23,8 @@ pub struct ToolContext {
     pub db_pool: PgPool,
     pub current_user_id: Option<String>,
     pub current_campus_id: Option<uuid::Uuid>,
+    /// Configured content policy shared with the HTTP listing command path.
+    pub moderation: ModerationService,
     /// Notification service for sending in-app alerts (e.g., negotiation requests).
     pub notification: crate::services::notification::NotificationService,
 }
@@ -396,49 +402,38 @@ async fn execute_create_listing_in_tx(
     campus_id: uuid::Uuid,
     args: CreateListingArgs,
 ) -> Result<CreatedListing, ToolError> {
-    // Model-supplied arguments are untrusted input. Mirror the HTTP handler's
-    // bounds so a polluted legacy plan cannot slip records past the API rules.
-    let title = args.title.trim();
-    if title.is_empty() || title.len() > 200 {
-        return Err(ToolError("商品标题不能为空且不超过 200 字符".to_string()));
-    }
-    if args.brand.trim().len() > 100 {
-        return Err(ToolError("品牌不能超过 100 字符".to_string()));
-    }
-    if args.condition_score < 1 || args.condition_score > 10 {
-        return Err(ToolError("成色必须在 1 到 10 之间".to_string()));
-    }
-    if args.suggested_price_cny <= 0 || args.suggested_price_cny > 1_000_000_000 {
-        return Err(ToolError("价格必须为正且在合理范围内".to_string()));
-    }
-
-    let input = CreateListingInput {
-        campus_id,
-        title: args.title.clone(),
-        category: args.category.clone(),
-        brand: Some(args.brand.clone()),
-        direction: "offer".to_string(),
-        condition_score: args.condition_score as i32,
-        suggested_price_cny: args.suggested_price_cny as f64 / 100.0,
-        defects: args.defects.clone(),
-        description: args.original_description.clone(),
-        image_url: None,
-        owner_id: owner.to_string(),
-    };
-    let listing_id = PostgresListingRepository::new(ctx.db_pool.clone())
-        .create_in_tx(tx, input)
+    let title = args.title.clone();
+    let price_cents = args.suggested_price_cny;
+    let result = ListingCommandService::new(ctx.db_pool.clone(), ctx.moderation.clone())
+        .create_in_tx(
+            tx,
+            CreateListingDraft {
+                campus_id,
+                owner_id: owner.to_string(),
+                title: args.title,
+                category: args.category,
+                brand: args.brand,
+                direction: Some("offer".to_string()),
+                condition_score: args.condition_score as i32,
+                suggested_price_cny: price_cents as f64 / 100.0,
+                defects: args.defects,
+                description: Some(args.original_description),
+                image_url: None,
+            },
+            None,
+        )
         .await
-        .map_err(|error| ToolError(format!("DB insert error: {}", error)))?;
+        .map_err(|error| ToolError(format!("发布校验失败: {}", error)))?;
 
     Ok(CreatedListing {
         message: format!(
             "Successfully created listing '{}' (ID: {}, Price: {} CNY, Owner: {})",
-            args.title,
-            listing_id,
-            cents_to_yuan(args.suggested_price_cny),
+            title,
+            result.id,
+            cents_to_yuan(price_cents),
             owner
         ),
-        listing_id,
+        listing_id: result.id,
         campus_id,
     })
 }
@@ -755,13 +750,13 @@ async fn execute_update_listing_in_tx(
     }
 
     let listing_id = args.listing_id.clone();
-    let result = PostgresListingRepository::new(ctx.db_pool.clone())
-        .update_owned_active_in_tx(
+    let result = ListingCommandService::new(ctx.db_pool.clone(), ctx.moderation.clone())
+        .update_in_tx(
             tx,
             &listing_id,
             owner_id,
             campus_id,
-            &UpdateListingInput {
+            UpdateListingDraft {
                 title: args.new_title,
                 category: None,
                 brand: None,
@@ -769,11 +764,10 @@ async fn execute_update_listing_in_tx(
                 suggested_price_cny: args.new_price.map(|value| value as f64 / 100.0),
                 defects: None,
                 description: args.new_description,
-                status: None,
             },
         )
         .await
-        .map_err(|error| ToolError(format!("Update error: {}", error)))?;
+        .map_err(|error| ToolError(format!("更新校验失败: {}", error)))?;
 
     if result {
         Ok(format!("Successfully updated listing {}", listing_id))
@@ -858,46 +852,30 @@ async fn execute_delete_listing_in_tx(
     campus_id: uuid::Uuid,
     args: DeleteListingArgs,
 ) -> Result<String, ToolError> {
-    let listing = sqlx::query_as::<_, (String, bool)>(
-        "SELECT status, listing_has_active_restriction(id)
-         FROM inventory
-         WHERE id = $1 AND owner_id = $2 AND campus_id = $3
-         FOR UPDATE",
-    )
-    .bind(&args.listing_id)
-    .bind(owner_id)
-    .bind(campus_id)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(|error| ToolError(format!("Delete validation error: {}", error)))?;
-
-    let Some((status, _restricted)) = listing else {
-        return Ok(format!(
-            "No active listing found with ID: {} (or you don't own it)",
-            args.listing_id
-        ));
-    };
-    if status != "active" {
-        return Ok(format!(
-            "No active listing found with ID: {} (or you don't own it)",
-            args.listing_id
-        ));
-    }
     // Owners may remove their own restricted content. Restriction blocks
     // editing or commerce, not the safety-improving act of taking it down.
-    let deleted = PostgresListingRepository::new(ctx.db_pool.clone())
-        .soft_delete_active_owned_in_tx(tx, &args.listing_id, owner_id, campus_id)
+    let deleted = match ListingCommandService::new(ctx.db_pool.clone(), ctx.moderation.clone())
+        .delete_in_tx(tx, &args.listing_id, owner_id, campus_id)
         .await
-        .map_err(|error| ToolError(format!("Delete error: {}", error)))?;
-    if !deleted {
-        return Err(ToolError(
-            "商品状态在删除前发生变化，请重新确认".to_string(),
-        ));
-    }
+    {
+        Ok(result) => result,
+        Err(ApiError::NotFound) | Err(ApiError::BadRequest(_)) => {
+            return Ok(format!(
+                "No active listing found with ID: {} (or you don't own it)",
+                args.listing_id
+            ));
+        }
+        Err(error) => return Err(ToolError(format!("删除校验失败: {}", error))),
+    };
 
     // Migration 0057 enqueues a durable projection tombstone from the status
     // transition, so this path no longer performs a one-off documents delete.
-    Ok(format!("Successfully removed listing {}", args.listing_id))
+    match deleted {
+        crate::repositories::DeleteOwnedResult::Deleted
+        | crate::repositories::DeleteOwnedResult::AlreadyDeleted => {
+            Ok(format!("Successfully removed listing {}", args.listing_id))
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1439,6 +1417,7 @@ mod tests {
             db_pool: pool.clone(),
             current_user_id,
             current_campus_id: None,
+            moderation: ModerationService::new_for_test(false),
             notification: crate::services::notification::NotificationService::new(pool),
         }
     }
@@ -1641,6 +1620,7 @@ mod tests {
             db_pool: pool.clone(),
             current_user_id: None,
             current_campus_id: None,
+            moderation: ModerationService::new_for_test(false),
             notification: crate::services::notification::NotificationService::new(pool),
         }
     }
@@ -1898,6 +1878,7 @@ mod tests {
                 db_pool: pool.clone(),
                 current_user_id: Some(owner_id.clone()),
                 current_campus_id: None,
+                moderation: ModerationService::new_for_test(false),
                 notification: crate::services::notification::NotificationService::new(
                     pool.clone(),
                 ),

@@ -156,12 +156,16 @@ round_state = closed
 | 概念 | 是否持久化 | 作用 |
 | --- | --- | --- |
 | Conversation | 是 | 保存参与者、模式、状态、商品上下文、主题和过期时间 |
-| ConversationMember | 是 | 保存成员级未读、归档和阅读偏好 |
+| ConversationMember | 是 | 保存成员级归档和迁移期兼容字段；目标态不保存发送方可见的阅读事实 |
 | ConversationEvent | 是 | 记录握手、关闭和过期等转换 |
 | Thread | 查询聚合 | 让同一聊天对象在收件箱只出现一次 |
 | Message | 是 | 保存文本、媒体引用、回复、quote、编辑和审核状态 |
+| LocalSeen | 否（设备本地） | 接收端自己的阅读位置，不上传、不广播 |
+| Acknowledgement | 是（用户主动） | `received`、`will_review` 或 `completed`，可替换或撤销 |
 
 Conversation 终止后不可复活。重新联系会创建新 Conversation，但仍显示在同一个 Thread 中。
+
+目标态下，`Conversation` 仍然是一次留言或连接的边界；`Thread` 只是关系级查询聚合。服务器只保存消息送达所需的技术事实和用户主动发出的 acknowledgement，不从页面打开、Push、解密、媒体播放或键盘活动推导“已读”。多设备可以各自维护 `LocalSeen`，因此设备间的新留言提示允许暂时不同步，以换取更清晰的隐私边界。
 
 ### DealRecord
 

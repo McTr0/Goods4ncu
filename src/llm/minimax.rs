@@ -121,11 +121,13 @@ impl super::LlmProvider for MiniMaxProvider {
         _event_tx: mpsc::Sender<BusinessEvent>,
         current_user_id: Option<String>,
         current_campus_id: Option<uuid::Uuid>,
+        moderation: crate::services::moderation::ModerationService,
     ) -> anyhow::Result<Box<dyn MarketplaceAgent>> {
         let ctx = ToolContext {
             db_pool: db_pool.clone(),
             current_user_id,
             current_campus_id,
+            moderation,
             notification: crate::services::notification::NotificationService::new(db_pool.clone()),
         };
 

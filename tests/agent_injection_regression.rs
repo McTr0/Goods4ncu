@@ -19,6 +19,7 @@ fn tool_ctx(pool: sqlx::PgPool, user_id: &str) -> ToolContext {
         db_pool: pool.clone(),
         current_user_id: Some(user_id.to_string()),
         current_campus_id: None,
+        moderation: goods4ncu::services::moderation::ModerationService::new_for_test(false),
         notification: NotificationService::new(pool),
     }
 }

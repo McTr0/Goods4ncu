@@ -114,7 +114,7 @@ wanted matches 使用活动 campus、分类、预算、成色和 active 状态�
 用户直聊的底层事实：
 
 - `chat_conversations`：realtime/mail、参与者、状态、主题和过期时间。
-- `chat_conversation_members`：成员级未读、归档和阅读偏好。
+- `chat_conversation_members`：迁移期成员级未读、归档和阅读偏好；目标态的 `LocalSeen` 由设备本地维护。
 - `chat_conversation_events`：握手、关闭和过期时间线。
 - `chat_messages`：正文、媒体 URL/Base64 fallback、reply、quote、编辑和审核状态。
 - `chat_blocks`：屏蔽关系。
@@ -176,7 +176,7 @@ wanted matches 使用活动 campus、分类、预算、成色和 active 状态�
 | 进程内事件 | 崩溃可能丢失异步动作 | transactional outbox |
 | 单实例 WebSocket | 多副本无法直接 fan-out | Redis pub/sub + HTTP 补偿 |
 | 媒体兼容路径 | URL-first 与 Base64、静态 uploads 并存 | 私有隔离对象存储和 CDN |
-| Agent listing 写工具 | ActionPlan 已 crash-safe，但与 HTTP 仍有审核/规范化漂移 | 统一 ListingCommandService、资源版本与审计 |
+| Agent listing 写工具 | ActionPlan 已 crash-safe，HTTP 与 Agent 已共享 ListingCommandService | 资源版本、提案幂等与完整审计 |
 | Secret Chat | 服务器不可读，治理边界冲突 | 停止生产承诺并迁移 |
 | TEXT/UUID 并存 | join 和 fixture 可能只覆盖一类 ID | repository 兼容封装和分阶段收敛 |
 | 大模块 | user_chat 和页面承担多种职责 | 先补行为测试，再按领域拆分 |

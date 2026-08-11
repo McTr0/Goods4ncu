@@ -26,6 +26,7 @@ fn tool_ctx_in_campus(pool: sqlx::PgPool, user_id: &str, campus_id: Uuid) -> Too
         db_pool: pool.clone(),
         current_user_id: Some(user_id.to_string()),
         current_campus_id: Some(campus_id),
+        moderation: goods4ncu::services::moderation::ModerationService::new_for_test(false),
         notification: NotificationService::new(pool),
     }
 }

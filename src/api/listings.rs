@@ -11,9 +11,14 @@ use crate::api::error::ApiError;
 use crate::api::request_context::idempotency_key_from_headers;
 use crate::api::session::{OptionalSession, Session, VerifiedTenant};
 use crate::api::AppState;
-use crate::categories::{normalize_category, valid_category_message, MARKETPLACE_CATEGORIES};
-use crate::repositories::{CreateListingInput, ListingRepository, UpdateListingInput};
+use crate::categories::MARKETPLACE_CATEGORIES;
+#[cfg(test)]
+use crate::repositories::CreateListingInput;
+use crate::repositories::{ListingRepository, UpdateOwnedResult};
 use crate::services::campus::CampusService;
+use crate::services::listing_command::{
+    CreateListingDraft, ListingCommandService, UpdateListingDraft,
+};
 use crate::services::notification::NewNotification;
 use crate::services::wanted_match::WantedMatchService;
 use crate::utils::cents_to_yuan;
@@ -188,14 +193,9 @@ fn normalize_direction(value: Option<&str>, default: &str) -> Result<String, Api
     }
 }
 
+#[cfg(test)]
 fn create_listing_request_hash(input: &CreateListingInput) -> Result<String, ApiError> {
-    let canonical = serde_json::to_vec(input).map_err(|e| {
-        ApiError::Internal(anyhow::anyhow!(
-            "Failed to serialize normalized listing input: {}",
-            e
-        ))
-    })?;
-    Ok(hex::encode(Sha256::digest(canonical)))
+    crate::services::listing_command::create_listing_request_hash(input)
 }
 
 fn wanted_response_request_hash(
@@ -476,136 +476,40 @@ pub async fn create_listing(
 ) -> Result<Json<CreateListingResponse>, ApiError> {
     let session = tenant.session.clone();
     let idempotency_key = idempotency_key_from_headers(&headers)?;
-
-    // Validate input
-    let direction = normalize_direction(payload.direction.as_deref(), "offer")?;
-    if direction == "all" {
-        return Err(ApiError::BadRequest(
-            "direction 创建时只能为 offer 或 wanted".to_string(),
-        ));
-    }
-    if payload.title.is_empty() {
-        return Err(ApiError::BadRequest("title is required".to_string()));
-    }
-    if payload.title.len() > 200 {
-        return Err(ApiError::BadRequest(
-            "title must be 200 characters or fewer".to_string(),
-        ));
-    }
-    let brand = if direction == "wanted" && payload.brand.trim().is_empty() {
-        "不限".to_string()
-    } else {
-        payload.brand.trim().to_string()
-    };
-    if brand.is_empty() {
-        return Err(ApiError::BadRequest("brand is required".to_string()));
-    }
-    if brand.len() > 100 {
-        return Err(ApiError::BadRequest(
-            "brand must be 100 characters or fewer".to_string(),
-        ));
-    }
-    let category = normalize_category(&payload.category)
-        .ok_or_else(|| ApiError::BadRequest(valid_category_message()))?
-        .to_string();
-    if payload.condition_score < 1 || payload.condition_score > 10 {
-        return Err(ApiError::BadRequest(
-            "condition_score must be between 1 and 10".to_string(),
-        ));
-    }
-    if payload.suggested_price_cny < 0.0 {
-        return Err(ApiError::BadRequest(
-            "suggested_price_cny cannot be negative".to_string(),
-        ));
-    }
-    // Max 10 million yuan (100 million cents) — prevents i32 overflow in storage
-    if payload.suggested_price_cny > 10_000_000.0 {
-        return Err(ApiError::BadRequest(
-            "suggested_price_cny cannot exceed 10,000,000 CNY".to_string(),
-        ));
-    }
-    if let Some(image_url) = payload.image_url.as_deref() {
-        if !image_url.starts_with("http://") && !image_url.starts_with("https://") {
-            return Err(ApiError::BadRequest("image_url格式无效".to_string()));
-        }
-    }
-
-    // Text content moderation — block prohibited content before persisting.
-    let text_to_check = format!(
-        "{}\n{}\n{}",
-        payload.title,
-        brand,
-        payload.description.as_deref().unwrap_or_default(),
-    );
-    let defects_text = payload.defects.join(" ");
-    let full_text = if defects_text.is_empty() {
-        text_to_check
-    } else {
-        format!("{}\n{}", text_to_check, defects_text)
-    };
-    let mod_result = state.infra.moderation.check_text(&full_text);
-    if !mod_result.passed {
-        return Err(ApiError::ContentViolation(
-            mod_result.reason.unwrap_or_default(),
-        ));
-    }
-
-    let image_url = payload.image_url.clone();
-    let input = CreateListingInput {
-        campus_id: tenant.campus_id,
-        title: payload.title,
-        category,
-        brand: Some(brand),
-        direction: direction.clone(),
-        condition_score: payload.condition_score,
-        suggested_price_cny: payload.suggested_price_cny,
-        defects: payload.defects,
-        description: payload.description.unwrap_or_default(),
-        image_url: image_url.clone(),
-        owner_id: session.user_id,
-    };
-    let request_hash = idempotency_key
-        .as_ref()
-        .map(|_| create_listing_request_hash(&input))
-        .transpose()?;
+    let command =
+        ListingCommandService::new(state.infra.db.clone(), state.infra.moderation.clone());
     let mut tx = state
         .infra
         .db
         .begin()
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-    let create_result = state
-        .listing_repo
-        .create_idempotent_in_tx(
+    let create_result = command
+        .create_in_tx(
             &mut tx,
-            input,
+            CreateListingDraft {
+                campus_id: tenant.campus_id,
+                owner_id: session.user_id,
+                title: payload.title,
+                category: payload.category,
+                brand: payload.brand,
+                direction: payload.direction,
+                condition_score: payload.condition_score,
+                suggested_price_cny: payload.suggested_price_cny,
+                defects: payload.defects,
+                description: payload.description,
+                image_url: payload.image_url,
+            },
             idempotency_key.as_deref(),
-            request_hash.as_deref(),
         )
         .await?;
-    if !create_result.replayed {
-        if let Some(image_url) = image_url.as_deref() {
-            state
-                .infra
-                .moderation
-                .submit_image_job_in_tx(
-                    &mut tx,
-                    tenant.campus_id,
-                    &create_result.id,
-                    image_url,
-                    "listing_image",
-                )
-                .await
-                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        }
-    }
     tx.commit()
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
     Ok(Json(CreateListingResponse {
         id: create_result.id,
-        message: if direction == "wanted" {
+        message: if create_result.direction == "wanted" {
             "需求发布成功".to_string()
         } else {
             "商品发布成功".to_string()
@@ -1100,99 +1004,44 @@ pub async fn update_listing(
     Json(payload): Json<UpdateListingRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user_id = tenant.session.user_id.clone();
-    // Validate individual fields before building update input
-    if let Some(ref title) = payload.title {
-        if title.is_empty() {
-            return Err(ApiError::BadRequest("title cannot be empty".to_string()));
-        }
-        if title.len() > 200 {
-            return Err(ApiError::BadRequest(
-                "title must be 200 characters or fewer".to_string(),
-            ));
-        }
-    }
-    let category = payload
-        .category
-        .as_deref()
-        .map(|category| {
-            normalize_category(category)
-                .map(str::to_string)
-                .ok_or_else(|| ApiError::BadRequest(valid_category_message()))
-        })
-        .transpose()?;
-    if let Some(ref brand) = payload.brand {
-        if brand.is_empty() {
-            return Err(ApiError::BadRequest("brand cannot be empty".to_string()));
-        }
-        if brand.len() > 100 {
-            return Err(ApiError::BadRequest(
-                "brand must be 100 characters or fewer".to_string(),
-            ));
-        }
-    }
-    if let Some(score) = payload.condition_score {
-        if !(1..=10).contains(&score) {
-            return Err(ApiError::BadRequest(
-                "condition_score must be between 1 and 10".to_string(),
-            ));
-        }
-    }
-    if let Some(price) = payload.suggested_price_cny {
-        if price < 0.0 {
-            return Err(ApiError::BadRequest(
-                "suggested_price_cny cannot be negative".to_string(),
-            ));
-        }
-        if price > 10_000_000.0 {
-            return Err(ApiError::BadRequest(
-                "suggested_price_cny cannot exceed 10,000,000 CNY".to_string(),
-            ));
-        }
-    }
-    if let Some(ref defects) = payload.defects {
-        let _ = serde_json::to_string(defects)
-            .map_err(|e| ApiError::BadRequest(format!("invalid defects: {}", e)))?;
-    }
-
-    // Text content moderation — check only the fields being updated.
-    let defects_joined = payload.defects.as_ref().map(|d| d.join(" "));
-    let fields_to_check = [
-        payload.title.as_deref(),
-        payload.brand.as_deref(),
-        payload.description.as_deref(),
-        defects_joined.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>()
-    .join("\n");
-    if !fields_to_check.is_empty() {
-        let mod_result = state.infra.moderation.check_text(&fields_to_check);
-        if !mod_result.passed {
-            return Err(ApiError::ContentViolation(
-                mod_result.reason.unwrap_or_default(),
-            ));
-        }
-    }
-
-    state
-        .listing_repo
-        .update_in_campus(
+    let command =
+        ListingCommandService::new(state.infra.db.clone(), state.infra.moderation.clone());
+    let mut tx = state
+        .infra
+        .db
+        .begin()
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+    let update_result = command
+        .update_with_state_in_tx(
+            &mut tx,
             &id,
             &user_id,
             tenant.campus_id,
-            UpdateListingInput {
+            UpdateListingDraft {
                 title: payload.title,
-                category,
+                category: payload.category,
                 brand: payload.brand,
                 condition_score: payload.condition_score,
                 suggested_price_cny: payload.suggested_price_cny,
                 defects: payload.defects,
                 description: payload.description,
-                status: None, // status updates should go through specific endpoints
             },
         )
         .await?;
+    match update_result {
+        UpdateOwnedResult::Updated => {}
+        UpdateOwnedResult::NotFound => return Err(ApiError::NotFound),
+        UpdateOwnedResult::Inactive => {
+            return Err(ApiError::CodedConflict {
+                code: "listing_action_stale",
+                message: "只有正在展示的发布可以编辑".to_string(),
+            });
+        }
+    }
+    tx.commit()
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
 
     tracing::info!(listing_id = %id, updated_by = %user_id, "Listing updated");
 
@@ -1209,11 +1058,20 @@ pub async fn delete_listing(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user_id = tenant.session.user_id.clone();
-
-    state
-        .listing_repo
-        .delete(&id, &user_id, tenant.campus_id)
+    let command =
+        ListingCommandService::new(state.infra.db.clone(), state.infra.moderation.clone());
+    let mut tx = state
+        .infra
+        .db
+        .begin()
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+    command
+        .delete_in_tx(&mut tx, &id, &user_id, tenant.campus_id)
         .await?;
+    tx.commit()
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
 
     tracing::info!(listing_id = %id, deleted_by = %user_id, "Listing deleted");
 

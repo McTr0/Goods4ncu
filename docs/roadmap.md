@@ -19,7 +19,7 @@
 - JWT/JTI、refresh rotation、logout 撤销、封禁和管理员审计。
 - offer/wanted 发布、列表、匹配和响应基础能力。
 - 分类亲和度、新鲜度和向量相似推荐。
-- 联系人 Thread、realtime/mail、消息回复/反应/举报/已读/quote。
+- 联系人 Thread、realtime/mail、消息回复/反应/举报/quote；已读和 typing 仍处于兼容迁移期。
 - 群组、频道、通话信令和 Secret Chat 原型。
 - 多 LLM provider、RAG、市场工具和回复助手。
 - 线下成交意向、卖家确认和可选自动下架。
@@ -31,6 +31,7 @@
 
 - CampusMembership、核心资源校园作用域、后台审核队列、跨校园理由审计和统一 session extractor 已落地。当前 19 张租户表已启用 FORCE RLS（`0042` 及后续领域迁移，`app.campus_id` 事务级 GUC 触发，未设置时放行以保持应用层为主边界），隔离与写拒绝有集成测试；应用侧全请求 GUC 注入（fail-closed）与多副本租户验证仍属 Phase 4。
 - Agent 的更新/下架/成交意向/议价已接入 crash-safe ActionPlan（模型只能提出，L3 需独立 token 的二次确认）；发布采用立即执行 + 条件式撤销。listing command 统一化与资源版本快照仍待补。
+- 聊天隐私目标已确定但尚未切换：留言/连接二分、服务端已发送、设备本地 `LOCALLY_SEEN` 和主动 acknowledgement 将在 listing 写路径硬化后分阶段迁移。
 - WebSocket 跨副本投递已具备（Redis fan-out，双实例端到端验证）；typing/call signaling 多副本化与压测仍待做。outbox 基础与通知推送已持久化，其余事件消费者仍在进程内。
 - 媒体隔离、审核公开门槛、缩略图和 Base64 退出不完整；案件事实层已具备，但对象存储隔离仍需生产化。
 - API 缺少统一版本和 cursor；[已实现] 未版本化接口已有兼容旧客户端的稳定错误字段、服务端 request ID，以及 listing 发布、wanted response 和成交确认幂等，其他写接口仍需收敛。
@@ -172,14 +173,21 @@
 
 ### 工具收敛
 
-- [进行中] Agent ActionPlan 执行已使用事务内共享函数，但 listing 创建/更新与 HTTP 仍存在审核、字段规范化和金额类型漂移；收敛为统一 `ListingCommandService` 后才能宣称同一业务入口。
+- [已实现] Agent ActionPlan、HTTP 创建/更新/下架已共享 `ListingCommandService`，统一类别/空白/金额规范化、文本审核、图片审核任务、幂等创建和事务入口。
 - 工具声明 auth、tenant、risk、side effects、idempotency 和 audit category。
 - 回复助手继续保持无工具、只读最近文本、只填草稿不发送。
 - Provider 能力建立支持矩阵，写动作不因 LLM 超时自动重试。
 
+### 沟通隐私迁移（Listing 收敛后）
+
+- [目标态] 将消息公开状态收敛为 `sending | sent | failed`；`sent` 只表示服务器已持久化，不声称接收设备已收到。
+- [目标态] 新增稳定的 `received | will_review | completed` acknowledgement。每个用户对每条消息最多一个，可替换或撤销；普通 reaction 保持独立语义。
+- [迁移顺序] 移动端先停止调用 read/typing 并把旧 `delivered/read` 映射为 `sent`；兼容窗口内旧接口无广播、无新的公开注意力事实，之后再删除字段和事件。
+- [目标态] `LOCALLY_SEEN` 只保存在设备本地；连接请求的权限、静音、忙碌、陌生人限制和重复请求抑制随后补齐。群组临时讨论留在更后阶段。
+
 ### 安全与质量
 
-- [部分完成] 工具层滥用测试集已落地（`tests/agent_injection_regression.rs`）：跨校园购买/议价、参数污染（空/超长标题、越界成色、非正/天价价格、越界出价）、自买自卖、未认证用户提案全部被拒并有零副作用断言；confirmation token 隔离、跨用户/校园确认拒绝和原子恢复在计划测试中覆盖。Agent listing 路径的同步文本审核、分类/空白规范化及与 HTTP 的统一 service 仍待完成。针对真实 LLM 的间接注入与虚假承诺评估仍需线上评测集。
+- [部分完成] 工具层滥用测试集已落地（`tests/agent_injection_regression.rs`）：跨校园购买/议价、参数污染（空/超长标题、越界成色、非正/天价价格、越界出价）、自买自卖、未认证用户提案全部被拒并有零副作用断言；confirmation token 隔离、跨用户/校园确认拒绝和原子恢复在计划测试中覆盖。Agent listing 已与 HTTP 共享同步文本审核、分类/空白/金额规范化；针对真实 LLM 的间接注入与虚假承诺评估仍需线上评测集。
 - AgentRun 记录路由、检索、工具、provider、版本、延迟和结果类别，敏感正文脱敏。
 - 无 LLM 时搜索、表单、聊天和成交记录仍可用。
 - Agent 变更采用 feature flag 和 canary，越权执行有立即 kill switch。

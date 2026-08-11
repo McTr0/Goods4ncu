@@ -397,6 +397,7 @@ pub(crate) async fn handle_chat(
             state.infra.event_tx.clone(),
             Some(current_user_id.clone()),
             session.campus_id,
+            state.infra.moderation.clone(),
         )
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!(e)))?;
@@ -599,6 +600,7 @@ async fn handle_chat_stream_request(
             state.infra.event_tx.clone(),
             Some(current_user_id.clone()),
             session.campus_id,
+            state.infra.moderation.clone(),
         )
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!(e)))?;

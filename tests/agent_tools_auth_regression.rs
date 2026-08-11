@@ -14,6 +14,7 @@ fn build_tool_context(db_pool: sqlx::PgPool, current_user_id: Option<&str>) -> T
         db_pool: db_pool.clone(),
         current_user_id: current_user_id.map(ToString::to_string),
         current_campus_id: None,
+        moderation: goods4ncu::services::moderation::ModerationService::new_for_test(false),
         notification: NotificationService::new(db_pool),
     }
 }

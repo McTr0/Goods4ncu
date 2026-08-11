@@ -13,7 +13,7 @@ mod user_repo;
 
 pub use auth_repo::PostgresAuthRepository;
 pub use chat_repo::PostgresChatRepository;
-pub use listing_repo::PostgresListingRepository;
+pub use listing_repo::{DeleteOwnedResult, PostgresListingRepository, UpdateOwnedResult};
 pub use order_repo::PostgresOrderRepository;
 pub use traits::*;
 pub use user_repo::PostgresUserRepository;

@@ -6,6 +6,19 @@ use crate::repositories::{CreateListingInput, Listing, ListingRepository, Update
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeleteOwnedResult {
+    Deleted,
+    AlreadyDeleted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateOwnedResult {
+    Updated,
+    NotFound,
+    Inactive,
+}
+
 /// Escape special characters for PostgreSQL LIKE patterns.
 ///
 /// The following characters are escaped:
@@ -335,6 +348,21 @@ impl PostgresListingRepository {
         campus_id: Uuid,
         input: &UpdateListingInput,
     ) -> Result<bool, ApiError> {
+        Ok(matches!(
+            self.update_owned_active_with_state_in_tx(tx, id, owner_id, campus_id, input)
+                .await?,
+            UpdateOwnedResult::Updated
+        ))
+    }
+
+    pub async fn update_owned_active_with_state_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        id: &str,
+        owner_id: &str,
+        campus_id: Uuid,
+        input: &UpdateListingInput,
+    ) -> Result<UpdateOwnedResult, ApiError> {
         let status = sqlx::query_scalar::<_, String>(
             "SELECT status FROM inventory
              WHERE id = $1 AND owner_id = $2 AND campus_id = $3
@@ -347,7 +375,7 @@ impl PostgresListingRepository {
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
         let Some(status) = status else {
-            return Ok(false);
+            return Ok(UpdateOwnedResult::NotFound);
         };
         let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
             .bind(id)
@@ -361,7 +389,7 @@ impl PostgresListingRepository {
             });
         }
         if status != "active" {
-            return Ok(false);
+            return Ok(UpdateOwnedResult::Inactive);
         }
 
         let query = Self::update_query_for_owner(input, false)?;
@@ -372,7 +400,11 @@ impl PostgresListingRepository {
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
-        Ok(result.rows_affected() > 0)
+        Ok(if result.rows_affected() == 1 {
+            UpdateOwnedResult::Updated
+        } else {
+            UpdateOwnedResult::Inactive
+        })
     }
 
     // Transaction-owning compatibility wrapper retained for direct callers;
@@ -399,6 +431,7 @@ impl PostgresListingRepository {
         Ok(updated)
     }
 
+    #[allow(dead_code)]
     pub async fn update_in_campus(
         &self,
         id: &str,
@@ -454,6 +487,7 @@ impl PostgresListingRepository {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn soft_delete_active_owned_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -473,6 +507,52 @@ impl PostgresListingRepository {
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
         Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn delete_owned_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        id: &str,
+        owner_id: &str,
+        campus_id: Uuid,
+    ) -> Result<DeleteOwnedResult, ApiError> {
+        let status = sqlx::query_scalar::<_, String>(
+            "SELECT status FROM inventory
+             WHERE id = $1 AND owner_id = $2 AND campus_id = $3
+             FOR UPDATE",
+        )
+        .bind(id)
+        .bind(owner_id)
+        .bind(campus_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
+        .ok_or(ApiError::NotFound)?;
+
+        if status == "sold" {
+            return Err(ApiError::BadRequest("无法删除已售出的商品".to_string()));
+        }
+        if status == "deleted" {
+            return Ok(DeleteOwnedResult::AlreadyDeleted);
+        }
+
+        let updated = sqlx::query(
+            "UPDATE inventory SET status = 'deleted'
+             WHERE id = $1 AND owner_id = $2 AND campus_id = $3 AND status = $4",
+        )
+        .bind(id)
+        .bind(owner_id)
+        .bind(campus_id)
+        .bind(&status)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        if updated.rows_affected() != 1 {
+            return Err(ApiError::Conflict(
+                "商品状态已发生变化，无法删除".to_string(),
+            ));
+        }
+        Ok(DeleteOwnedResult::Deleted)
     }
 }
 
@@ -750,48 +830,8 @@ impl ListingRepository for PostgresListingRepository {
             .begin()
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        let row = sqlx::query(
-            "SELECT status
-             FROM inventory
-             WHERE id = $1 AND owner_id = $2 AND campus_id = $3
-             FOR UPDATE",
-        )
-        .bind(id)
-        .bind(owner_id)
-        .bind(campus_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-        .ok_or(ApiError::NotFound)?;
-
-        let status: String = row.get("status");
-        if status == "sold" {
-            return Err(ApiError::BadRequest("无法删除已售出的商品".to_string()));
-        }
-        if status == "deleted" {
-            tx.commit()
-                .await
-                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-            return Ok(());
-        }
-
-        let updated = sqlx::query(
-            "UPDATE inventory
-             SET status = 'deleted'
-             WHERE id = $1 AND owner_id = $2 AND campus_id = $3 AND status = $4",
-        )
-        .bind(id)
-        .bind(owner_id)
-        .bind(campus_id)
-        .bind(&status)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        if updated.rows_affected() != 1 {
-            return Err(ApiError::Conflict(
-                "商品状态已发生变化，无法删除".to_string(),
-            ));
-        }
+        self.delete_owned_in_tx(&mut tx, id, owner_id, campus_id)
+            .await?;
         tx.commit()
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;

@@ -186,7 +186,7 @@ tenant / visibility / status hard filter
 
 ## 联系人线程与独立会话
 
-消息首页第一层按 `peer_user_id` 聚合为 Thread，同一个聊天对象只显示一次。Thread 聚合最近活动、总未读、Conversation 数量和待回应状态。
+消息首页第一层按 `peer_user_id` 聚合为 Thread，同一个聊天对象只显示一次。Thread 聚合最近活动、联系人级新留言、Conversation 数量和待回应状态；迁移期仍兼容服务端 unread 字段。
 
 进入 Thread 后按 Conversation 卡组展示多次 realtime、mail 和历史。Conversation 仍然是独立事实，不跨卡混排成没有边界的消息流。
 
@@ -215,22 +215,19 @@ SYN 带完整首条文本，接收方接通前可读但不能回复。双方同�
 
 ### Mail
 
-Mail 创建后进入 open，主题 1–120 字、正文 1–2000 字，无需接受即可送达。Mail 不向发件人展示 typing 或对方 read 状态；成员本地未读仍可清零。
+Mail 创建后进入 open，主题 1–120 字、正文 1–2000 字，无需接受即可发送。发送成功只表示消息已持久化到服务器；没有设备 ACK 时不宣称“已送达”。Mail 不向发件人展示 typing 或对方 read 状态，接收端可以本地记录 `LOCALLY_SEEN`，也可以主动发送 `received`、`will_review` 或 `completed`。
 
 归档是成员级状态，不影响对方和底层历史。
 
 ## 消息、已读、回复与 Quote
 
-### 已读策略
+### 已读、确认与注意力隐私
 
-用户全局设置为 auto/manual，Conversation 可以 inherit/auto/manual 覆盖。
+[当前兼容行为] 用户全局设置和 Conversation 覆盖项仍支持 realtime 的 auto/manual read；Mail 的本地 unread 清零不会向发件人广播 read。旧客户端仍可能收到 `message_read` 或使用 typing 接口。
 
-- effective auto：active realtime 页面加载后可调用 read。
-- effective manual：加载和收到新消息不自动 read，用户从会话设置或上下文动作标记。
-- Mail：本地 unread 可清零，但不向发件人广播 read。
-- 单条已读图标只根据消息事实显示，不用“整个会话已读”代替发送方反馈。
+[目标态] `LOCALLY_SEEN` 只存在于接收端设备，不写入发送方可见事实，也不由服务器推断。公开状态收敛为 `sending | sent | failed`；只有接收者主动选择 `received | will_review | completed` 才产生可见 acknowledgement。打开会话、查看通知、接收 Push、解密内容、播放媒体、回复或普通 reaction 都不自动生成 acknowledgement。
 
-已读策略属于具体设置菜单，不常驻占用聊天主界面。
+目标态下 realtime 的 `active` 连接本身就是双方明确参与的信号，不再额外暴露 typing、online 或 last seen。迁移期间保留旧字段和接口以兼容旧客户端，但停止为新客户端产生新的公开已读事实。
 
 ### Reply 与结构化 Quote
 

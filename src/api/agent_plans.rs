@@ -53,6 +53,7 @@ pub async fn confirm_plan(
         db_pool: state.infra.db.clone(),
         current_user_id: Some(tenant.session.user_id.clone()),
         current_campus_id: Some(tenant.campus_id),
+        moderation: state.infra.moderation.clone(),
         notification: state.infra.notification.clone(),
     };
 

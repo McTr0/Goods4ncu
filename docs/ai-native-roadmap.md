@@ -147,7 +147,7 @@
 - 变更全部留痕（谁改的、依据哪句话），可回溯
 - 现有 `chat_conversations` 保留，作为共识空间的会话载体
 
-**明确保留**（v1 曾错误地列为下线）：`chat_message_reactions`（社区里的轻量回应，降低表态门槛）、typing 指示与已读偏好（活跃对话中确实有用）、`chat_calls` 与信令（社区语音沟通有价值）、`chat_blocks` / `chat_message_reports`（反骚扰，社区里更重要）。
+**明确保留**（v1 曾错误地列为下线）：`chat_message_reactions`（社区里的轻量回应，降低表态门槛）、`chat_calls` 与信令、`chat_blocks` / `chat_message_reports`。typing、online、last seen 和自动已读不再作为长期产品方向；realtime 的明确连接状态足以表达双方正在参与，留言只公开送达所需的技术事实和用户主动 acknowledgement。
 
 **AI 的具体职责**：从自然对话抽取槽位、检测共识分歧（"你说三点他说四点"）、生成待办提醒（"明天 15:00 体育馆 3 号场，记得带球拍"）。
 
