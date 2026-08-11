@@ -182,7 +182,7 @@
 
 - [进行中] 消息公开状态已在新服务端/移动端收敛为 `sending | sent | failed`；`sent` 只表示服务器已持久化，不声称接收设备已收到。旧 `delivered/read` 映射为 `sent`，`read_at` 暂保留但新路径不再返回事实。
 - [进行中] 已新增稳定的 `received | will_review | completed` acknowledgement。每个用户对每条消息最多一个，可替换或撤销；普通 reaction 保持独立语义，并通过 `message_acknowledgement_changed` 同步。
-- [进行中] 移动端已停止自动 read/typing 调用并忽略旧事件；兼容接口无广播、无新的公开注意力事实。下一步删除旧字段、设置和 WebSocket 事件，并将新留言提示完全迁到设备本地。
+- [进行中] 移动端已停止自动 read/typing 调用、移除 read preference 设置并忽略旧事件；兼容接口无广播、无新的公开注意力事实，旧 preference 写入也被冻结。下一步删除旧字段和 WebSocket 事件，并将新留言提示完全迁到设备本地。
 - [目标态] `LOCALLY_SEEN` 只保存在设备本地；连接请求的权限、静音、忙碌、陌生人限制和重复请求抑制随后补齐。群组临时讨论留在更后阶段。
 
 ### 安全与质量

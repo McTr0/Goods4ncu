@@ -196,7 +196,7 @@ Content-Type: application/json
 
 ### PATCH `/api/user/profile`
 
-需要登录。可更新昵称、学校邮箱、头像 URL、查找设置、全局聊天已读策略和收款码设置。邮箱更新后会同步重新推断 `student_id`。`chat_read_receipt_mode` 可选 `auto` 或 `manual`，默认 `auto`。
+需要登录。可更新昵称、学校邮箱、头像 URL、查找设置和收款码设置。邮箱更新后会同步重新推断 `student_id`。`chat_read_receipt_mode` 仅为旧客户端兼容字段：仍接受 `auto` 或 `manual`，但会校验后忽略写入，不改变服务器状态；资料响应继续返回数据库中的兼容值，迁移窗口结束后移除该字段。
 
 ```json
 {
@@ -555,7 +555,7 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 }
 ```
 
-`inherit`、`auto`、`manual` 仅为旧客户端兼容设置；当前服务端不因这些设置产生公开已读事实。返回更新后的会话对象，迁移窗口结束后将移除该设置。
+`inherit`、`auto`、`manual` 仅为旧客户端兼容设置；当前服务端接受并忽略这些写入，不因这些设置产生公开已读事实。返回当前会话对象，迁移窗口结束后将移除该设置。
 
 ### PATCH `/api/chat/messages/{id}`
 

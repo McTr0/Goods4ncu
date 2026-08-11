@@ -775,13 +775,9 @@ impl UserRepository for PostgresUserRepository {
                 "chat_read_receipt_mode must be auto or manual".to_string(),
             ));
         }
-        sqlx::query("UPDATE users SET chat_read_receipt_mode = $1 WHERE id = $2")
-            .bind(mode)
-            .bind(user_id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
+        // Compatibility-only setting.  New clients keep read position on the
+        // device, so accepting this legacy write must not alter server state.
+        let _ = (user_id, mode);
         Ok(())
     }
 

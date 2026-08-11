@@ -1124,20 +1124,9 @@ impl ChatConversationService {
         }
         let row = load_conversation(&self.pool, conversation_id).await?;
         row.ensure_participant(user_id)?;
-        let result = sqlx::query(
-            "UPDATE chat_conversation_members
-             SET read_receipt_mode = $1
-             WHERE conversation_id = $2 AND user_id = $3",
-        )
-        .bind(mode)
-        .bind(conversation_id)
-        .bind(user_id)
-        .execute(&self.pool)
-        .await
-        .map_err(db_error)?;
-        if result.rows_affected() == 0 {
-            return Err(ApiError::NotFound);
-        }
+        // Compatibility endpoint only.  The preference no longer changes
+        // server behaviour or creates an attention fact; leave the legacy
+        // column untouched until the rollback window closes.
         self.get_conversation(conversation_id, user_id).await
     }
 

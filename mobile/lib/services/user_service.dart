@@ -218,7 +218,6 @@ class UserService extends BaseService {
     String? email,
     String? avatarUrl,
     Map<String, bool?>? discoverability,
-    String? chatReadReceiptMode,
     Map<String, dynamic>? paymentQr,
   }) async {
     final headers = await authHeaders();
@@ -226,9 +225,6 @@ class UserService extends BaseService {
     if (username != null) body['username'] = username;
     if (email != null) body['email'] = email;
     if (avatarUrl != null) body['avatar_url'] = avatarUrl;
-    if (chatReadReceiptMode != null) {
-      body['chat_read_receipt_mode'] = chatReadReceiptMode;
-    }
     if (discoverability != null) {
       body['discoverability'] = {
         if (discoverability.containsKey('username'))

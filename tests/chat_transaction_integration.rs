@@ -568,7 +568,7 @@ async fn mark_read_compatibility_endpoint_does_not_create_attention_facts() {
 }
 
 #[tokio::test]
-async fn read_preference_inherits_global_and_allows_member_override() {
+async fn read_preference_compatibility_endpoint_does_not_change_server_state() {
     with_test_pool(|pool| async move {
         insert_user(&pool, "user-a", "alice").await;
         insert_user(&pool, "user-b", "bob").await;
@@ -591,8 +591,27 @@ async fn read_preference_inherits_global_and_allows_member_override() {
             .set_read_preference(conversation_id, "user-b", "auto")
             .await
             .unwrap();
-        assert_eq!(overridden.read_receipt_mode, "auto");
-        assert_eq!(overridden.effective_read_receipt_mode, "auto");
+        assert_eq!(overridden.read_receipt_mode, "inherit");
+        assert_eq!(overridden.effective_read_receipt_mode, "manual");
+
+        let stored_member_mode = sqlx::query_scalar::<_, String>(
+            "SELECT read_receipt_mode
+             FROM chat_conversation_members
+             WHERE conversation_id = $1 AND user_id = 'user-b'",
+        )
+        .bind(conversation_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(stored_member_mode, "inherit");
+
+        let stored_global_mode = sqlx::query_scalar::<_, String>(
+            "SELECT chat_read_receipt_mode FROM users WHERE id = 'user-b'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(stored_global_mode, "manual");
 
         let invalid = service
             .set_read_preference(conversation_id, "user-b", "sometimes")

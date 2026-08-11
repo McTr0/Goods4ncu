@@ -223,7 +223,7 @@ Mail 创建后进入 open，主题 1–120 字、正文 1–2000 字，无需接
 
 ### 已读、确认与注意力隐私
 
-[迁移进行中] 用户全局设置和 Conversation 覆盖项仍接受旧客户端的 auto/manual read 配置，但 read API 已变为无操作且不再广播；typing API 同样只做成员校验后返回兼容结果。旧客户端可能继续调用接口，但服务端不产生新的公开注意力事实。
+[迁移进行中] 用户全局设置和 Conversation 覆盖项仍接受旧客户端的 auto/manual read 配置但忽略写入；read API 已变为无操作且不再广播，typing API 同样只做成员校验后返回兼容结果。旧客户端可能继续调用接口，但服务端不产生新的公开注意力事实。
 
 [迁移进行中] `LOCALLY_SEEN` 只存在于接收端设备，不写入发送方可见事实，也不由服务器推断。公开状态已收敛为 `sending | sent | failed`；只有接收者主动选择 `received | will_review | completed` 才产生可见 acknowledgement。打开会话、查看通知、接收 Push、解密内容、播放媒体、回复或普通 reaction 都不自动生成 acknowledgement。
 

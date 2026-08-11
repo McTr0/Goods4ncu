@@ -17,6 +17,10 @@ class SharedPreferencesChatLocalSeenStorage implements ChatLocalSeenStorage {
   @override
   Future<DateTime?> read(String peerUserId) async {
     final prefs = await SharedPreferences.getInstance();
+    return _readFrom(prefs, peerUserId);
+  }
+
+  DateTime? _readFrom(SharedPreferences prefs, String peerUserId) {
     final raw = prefs.getString('$_keyPrefix$peerUserId');
     return raw == null ? null : DateTime.tryParse(raw);
   }
@@ -24,7 +28,7 @@ class SharedPreferencesChatLocalSeenStorage implements ChatLocalSeenStorage {
   @override
   Future<void> mark(String peerUserId, DateTime seenAt) async {
     final prefs = await SharedPreferences.getInstance();
-    final current = await read(peerUserId);
+    final current = _readFrom(prefs, peerUserId);
     if (current != null && !seenAt.isAfter(current)) return;
     await prefs.setString(
       '$_keyPrefix$peerUserId',

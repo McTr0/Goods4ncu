@@ -155,9 +155,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   _buildFeedSettings(),
                   const SizedBox(height: 12),
 
-                  _buildReadReceiptSettings(),
-                  const SizedBox(height: 12),
-
                   _buildPaymentQrSettings(),
                   const SizedBox(height: 12),
 
@@ -411,90 +408,6 @@ class _SettingsPageState extends State<SettingsPage> {
       );
     } finally {
       if (mounted) setState(() => _personalizationClearing = false);
-    }
-  }
-
-  Widget _buildReadReceiptSettings() {
-    final l = AppLocalizations.of(context)!;
-    final mode = _profile?['chat_read_receipt_mode']?.toString() ?? 'auto';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionHeader(title: l.chatReadReceiptSettingsTitle),
-        const SizedBox(height: 8),
-        _SettingsCard(
-          icon: Icons.mark_chat_read_outlined,
-          title: l.chatReadReceiptDefaultTitle,
-          subtitle: mode == 'manual'
-              ? l.chatReadReceiptManualCurrent
-              : l.chatReadReceiptAutoCurrent,
-          trailing: Text(
-            mode == 'manual'
-                ? l.chatReadReceiptManualTitle
-                : l.chatReadReceiptAutoTitle,
-            style: const TextStyle(color: AppTheme.textSecondary),
-          ),
-          onTap: _showReadReceiptDialog,
-        ),
-      ],
-    );
-  }
-
-  Future<void> _showReadReceiptDialog() async {
-    final l = AppLocalizations.of(context)!;
-    final current = _profile?['chat_read_receipt_mode']?.toString() ?? 'auto';
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: Icon(
-                current == 'auto'
-                    ? Icons.radio_button_checked
-                    : Icons.radio_button_unchecked,
-                color: current == 'auto'
-                    ? AppTheme.primary
-                    : AppTheme.textSecondary,
-              ),
-              title: Text(l.chatReadReceiptAutoTitle),
-              subtitle: Text(l.chatReadReceiptAutoSubtitle),
-              onTap: () => Navigator.pop(sheetContext, 'auto'),
-            ),
-            ListTile(
-              leading: Icon(
-                current == 'manual'
-                    ? Icons.radio_button_checked
-                    : Icons.radio_button_unchecked,
-                color: current == 'manual'
-                    ? AppTheme.primary
-                    : AppTheme.textSecondary,
-              ),
-              title: Text(l.chatReadReceiptManualTitle),
-              subtitle: Text(l.chatReadReceiptManualSubtitle),
-              onTap: () => Navigator.pop(sheetContext, 'manual'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (selected == null || selected == current) return;
-    if (!mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      final updated = await _userService.updateProfile(
-        chatReadReceiptMode: selected,
-      );
-      if (!mounted) return;
-      setState(() => _profile = updated);
-      messenger.showSnackBar(SnackBar(content: Text(l.chatReadReceiptUpdated)));
-    } catch (error) {
-      if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(content: Text(l.settingsUpdateFailed(error.toString()))),
-      );
     }
   }
 
