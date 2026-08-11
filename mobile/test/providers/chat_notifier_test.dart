@@ -249,7 +249,7 @@ void main() {
     },
   );
 
-  test('auto read preference marks active realtime messages as read', () async {
+  test('hydrating a conversation does not publish an automatic read signal', () async {
     final chatService = FakeChatService(
       messages: [
         ConversationMessage(
@@ -280,11 +280,11 @@ void main() {
     await notifier.hydrateConnectionStatus();
     await flushAsync();
 
-    expect(chatService.markConversationReadCalls, greaterThanOrEqualTo(1));
+    expect(chatService.markConversationReadCalls, 0);
     notifier.dispose();
   });
 
-  test('manual read preference waits for explicit mark read', () async {
+  test('legacy manual read affordance stays disabled during migration', () async {
     final chatService = FakeChatService(
       messages: [
         ConversationMessage(
@@ -316,7 +316,7 @@ void main() {
     await flushAsync();
 
     expect(chatService.markConversationReadCalls, 0);
-    expect(notifier.shouldShowManualReadAction, isTrue);
+    expect(notifier.shouldShowManualReadAction, isFalse);
 
     await notifier.markConversationRead();
     expect(chatService.markConversationReadCalls, 1);

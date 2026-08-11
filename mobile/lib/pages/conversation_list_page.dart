@@ -8,6 +8,7 @@ import '../components/contact_conversation_sheet.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
+import '../services/chat_local_seen_storage.dart';
 import '../services/user_service.dart';
 import '../services/ws_service.dart';
 import '../utils/category_utils.dart';
@@ -15,10 +16,16 @@ import 'chat_page.dart';
 import 'user_chat_page.dart';
 
 class ConversationListPage extends StatefulWidget {
-  const ConversationListPage({super.key, this.chatService, this.userService});
+  const ConversationListPage({
+    super.key,
+    this.chatService,
+    this.userService,
+    this.localSeenStorage,
+  });
 
   final ChatService? chatService;
   final UserService? userService;
+  final ChatLocalSeenStorage? localSeenStorage;
 
   @override
   State<ConversationListPage> createState() => _ConversationListPageState();
@@ -27,6 +34,7 @@ class ConversationListPage extends StatefulWidget {
 class _ConversationListPageState extends State<ConversationListPage> {
   late final ChatService _chatService;
   late final UserService _userService;
+  late final ChatLocalSeenStorage _localSeenStorage;
   StreamSubscription<WsNotification>? _wsSubscription;
   List<ChatThread> _threads = const [];
   List<_ChatSpace> _spaces = const [];
@@ -43,6 +51,8 @@ class _ConversationListPageState extends State<ConversationListPage> {
     super.initState();
     _chatService = widget.chatService ?? context.read<ChatService>();
     _userService = widget.userService ?? context.read<UserService>();
+    _localSeenStorage =
+        widget.localSeenStorage ?? SharedPreferencesChatLocalSeenStorage();
     _load();
     _loadAssistantPreview();
     _wsSubscription = WsService.instance.stream.listen((notification) {
@@ -51,7 +61,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
         'conversation_created',
         'conversation_state_changed',
         'new_message',
-        'message_read',
+        'message_acknowledgement_changed',
         'space_message_created',
         'space_member_changed',
       }.contains(notification.eventType)) {
@@ -81,7 +91,8 @@ class _ConversationListPageState extends State<ConversationListPage> {
         else
           Future.value(<Map<String, dynamic>>[]),
       ]);
-      final threads = results[0] as List<ChatThread>;
+      final serverThreads = results[0] as List<ChatThread>;
+      final threads = await Future.wait(serverThreads.map(_applyLocalSeen));
       final spaces = (results[1] as List<Map<String, dynamic>>)
           .map(_ChatSpace.fromJson)
           .toList();
@@ -109,6 +120,23 @@ class _ConversationListPageState extends State<ConversationListPage> {
         _error = error.toString();
       });
     }
+  }
+
+  Future<ChatThread> _applyLocalSeen(ChatThread thread) async {
+    try {
+      // Preference plugins can be unavailable during web bootstrap or tests;
+      // do not hold the inbox on a local badge lookup.
+      final seenAt = await _localSeenStorage
+          .read(thread.peerUserId)
+          .timeout(const Duration(milliseconds: 100));
+      if (seenAt != null && !thread.latestActivityAt.isAfter(seenAt)) {
+        return thread.copyWith(unreadCount: 0);
+      }
+    } catch (_) {
+      // If local storage is unavailable, retain the server count as a
+      // conservative fallback without writing any read fact remotely.
+    }
+    return thread;
   }
 
   Future<void> _loadAssistantPreview() async {

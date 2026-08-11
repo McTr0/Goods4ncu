@@ -235,6 +235,45 @@ pub struct MessageReactionSummary {
     pub reacted_by_me: bool,
 }
 
+/// An acknowledgement is an explicit action by the recipient, not a read
+/// receipt inferred from transport or UI activity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcknowledgementKind {
+    Received,
+    WillReview,
+    Completed,
+}
+
+impl AcknowledgementKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Received => "received",
+            Self::WillReview => "will_review",
+            Self::Completed => "completed",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, ApiError> {
+        match value {
+            "received" => Ok(Self::Received),
+            "will_review" => Ok(Self::WillReview),
+            "completed" => Ok(Self::Completed),
+            _ => Err(ApiError::Internal(anyhow::anyhow!(
+                "unknown message acknowledgement kind"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MessageAcknowledgement {
+    pub user_id: String,
+    pub kind: AcknowledgementKind,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ConversationMessageRecord {
     pub id: i64,
@@ -246,6 +285,7 @@ pub struct ConversationMessageRecord {
     pub reply_preview: Option<MessageReplyPreview>,
     pub quote: Option<StructuredQuote>,
     pub reactions: Vec<MessageReactionSummary>,
+    pub acknowledgements: Vec<MessageAcknowledgement>,
     pub hidden_for_me: bool,
     pub can_hide: bool,
     pub can_react: bool,
@@ -1200,32 +1240,10 @@ impl ChatConversationService {
     pub async fn mark_read(&self, conversation_id: Uuid, user_id: &str) -> Result<i64, ApiError> {
         let row = load_conversation(&self.pool, conversation_id).await?;
         row.ensure_participant(user_id)?;
-        let mut tx = self.begin().await?;
-        let result = sqlx::query(
-            "UPDATE chat_messages
-             SET read_at = COALESCE(read_at, NOW()), read_by = $1, status = 'read'
-             WHERE direct_conversation_id = $2 AND receiver = $1 AND read_at IS NULL",
-        )
-        .bind(user_id)
-        .bind(conversation_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_error)?;
-        sqlx::query(
-            "UPDATE chat_conversation_members
-             SET unread_count = 0,
-                 last_read_message_id = (
-                    SELECT MAX(id) FROM chat_messages WHERE direct_conversation_id = $1
-                 )
-             WHERE conversation_id = $1 AND user_id = $2",
-        )
-        .bind(conversation_id)
-        .bind(user_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_error)?;
-        tx.commit().await.map_err(commit_error)?;
-        Ok(result.rows_affected() as i64)
+        // Compatibility endpoint only.  The legacy read marker remains in the
+        // schema for rollback, but a request from an old client must not create
+        // or broadcast a new public attention fact.
+        Ok(0)
     }
 
     pub async fn get_messages(
@@ -1384,6 +1402,52 @@ impl ChatConversationService {
             .execute(&self.pool)
             .await
             .map_err(db_error)?;
+        load_message_by_id_for_user(&self.pool, message_id, user_id).await
+    }
+
+    pub async fn set_message_acknowledgement(
+        &self,
+        message_id: i64,
+        user_id: &str,
+        kind: AcknowledgementKind,
+    ) -> Result<ConversationMessageRecord, ApiError> {
+        let mut tx = self.begin().await?;
+        load_acknowledgement_target(&mut tx, message_id, user_id).await?;
+        sqlx::query(
+            "INSERT INTO chat_message_acknowledgements (message_id, user_id, kind)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (message_id, user_id)
+             DO UPDATE SET kind = EXCLUDED.kind, updated_at = NOW()",
+        )
+        .bind(message_id)
+        .bind(user_id)
+        .bind(kind.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        tx.commit().await.map_err(commit_error)?;
+        // Loading through the normal visibility path also returns reactions,
+        // reply previews, and the complete acknowledgement list.
+        load_message_by_id_for_user(&self.pool, message_id, user_id).await
+    }
+
+    pub async fn delete_message_acknowledgement(
+        &self,
+        message_id: i64,
+        user_id: &str,
+    ) -> Result<ConversationMessageRecord, ApiError> {
+        let mut tx = self.begin().await?;
+        load_acknowledgement_target(&mut tx, message_id, user_id).await?;
+        sqlx::query(
+            "DELETE FROM chat_message_acknowledgements
+             WHERE message_id = $1 AND user_id = $2",
+        )
+        .bind(message_id)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        tx.commit().await.map_err(commit_error)?;
         load_message_by_id_for_user(&self.pool, message_id, user_id).await
     }
 
@@ -1821,6 +1885,47 @@ async fn load_visible_direct_message_context(
     Ok(DirectMessageContext { other_user_id })
 }
 
+async fn load_acknowledgement_target(
+    tx: &mut Transaction<'_, Postgres>,
+    message_id: i64,
+    user_id: &str,
+) -> Result<(), ApiError> {
+    let row = sqlx::query(
+        "SELECT cm.sender, cm.receiver, c.initiator_id, c.recipient_id
+         FROM chat_messages cm
+         JOIN chat_conversations c ON c.id = cm.direct_conversation_id
+         WHERE cm.id = $1
+           AND NOT EXISTS (
+               SELECT 1 FROM chat_message_hidden_members h
+               WHERE h.message_id = cm.id AND h.user_id = $2
+           )
+         FOR UPDATE OF cm, c",
+    )
+    .bind(message_id)
+    .bind(user_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(db_error)?
+    .ok_or(ApiError::NotFound)?;
+
+    let initiator_id: String = row.get("initiator_id");
+    let recipient_id: String = row.get("recipient_id");
+    if user_id != initiator_id && user_id != recipient_id {
+        return Err(ApiError::Forbidden);
+    }
+    // Only the message receiver can intentionally acknowledge it.  A sender
+    // can observe the public acknowledgement but cannot manufacture one.
+    let receiver: Option<String> = row.get("receiver");
+    if receiver.as_deref() != Some(user_id) {
+        return Err(ApiError::Forbidden);
+    }
+    let sender: String = row.get("sender");
+    if pair_is_blocked(tx, &sender, user_id).await? {
+        return Err(ApiError::Conflict("conversation_unavailable".to_string()));
+    }
+    Ok(())
+}
+
 async fn pair_is_blocked_pool(pool: &PgPool, one: &str, two: &str) -> Result<bool, ApiError> {
     sqlx::query_scalar(
         "SELECT EXISTS(
@@ -1935,6 +2040,31 @@ async fn enrich_message_for_user(
             reacted_by_me: row.get("reacted_by_me"),
         })
         .collect();
+
+    let acknowledgement_rows = sqlx::query(
+        "SELECT user_id, kind, created_at, updated_at
+         FROM chat_message_acknowledgements
+         WHERE message_id = $1
+         ORDER BY updated_at ASC, user_id ASC",
+    )
+    .bind(message.id)
+    .fetch_all(pool)
+    .await
+    .map_err(db_error)?;
+    message.acknowledgements = acknowledgement_rows
+        .into_iter()
+        .map(|row| {
+            let kind: String = row.get("kind");
+            let created_at: DateTime<Utc> = row.get("created_at");
+            let updated_at: DateTime<Utc> = row.get("updated_at");
+            Ok(MessageAcknowledgement {
+                user_id: row.get("user_id"),
+                kind: AcknowledgementKind::parse(&kind)?,
+                created_at: created_at.to_rfc3339(),
+                updated_at: updated_at.to_rfc3339(),
+            })
+        })
+        .collect::<Result<Vec<_>, ApiError>>()?;
     Ok(())
 }
 
@@ -2146,9 +2276,16 @@ async fn find_message_by_client_id(
 
 fn row_to_message(row: sqlx::postgres::PgRow, conversation_id: Uuid) -> ConversationMessageRecord {
     let timestamp: DateTime<Utc> = row.get("timestamp");
-    let read_at: Option<DateTime<Utc>> = row.get("read_at");
     let edited_at: Option<DateTime<Utc>> = row.get("edited_at");
     let client_message_id: Option<Uuid> = row.get("client_message_id");
+    let raw_status: String = row.get("status");
+    let status = match raw_status.as_str() {
+        // Legacy facts are intentionally collapsed for new clients.  The
+        // database columns stay available during rollback, but the API never
+        // presents them as delivery or attention evidence.
+        "delivered" | "read" => "sent".to_string(),
+        _ => raw_status,
+    };
     let quote_kind: Option<String> = row.try_get("quote_kind").ok().flatten();
     let quote_ref_id: Option<String> = row.try_get("quote_ref_id").ok().flatten();
     let quote_snapshot: Value = row.try_get("quote_snapshot").unwrap_or_else(|_| json!({}));
@@ -2169,17 +2306,20 @@ fn row_to_message(row: sqlx::postgres::PgRow, conversation_id: Uuid) -> Conversa
         reply_preview: None,
         quote,
         reactions: Vec::new(),
+        acknowledgements: Vec::new(),
         hidden_for_me: false,
         can_hide: true,
         can_react: true,
         can_report: true,
         timestamp: timestamp.to_rfc3339(),
-        read_at: read_at.map(|value| value.to_rfc3339()),
+        // Keep the field in the wire model for old clients, but never expose
+        // the legacy read_at fact after the privacy migration begins.
+        read_at: None,
         image_data: row.get("image_data"),
         audio_data: row.get("audio_data"),
         image_url: row.get("image_url"),
         audio_url: row.get("audio_url"),
-        status: row.get("status"),
+        status,
         kind: row.get("kind"),
         edited_at: edited_at.map(|value| value.to_rfc3339()),
     }

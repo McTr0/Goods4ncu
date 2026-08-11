@@ -27,8 +27,34 @@ void main() {
       expect(message.audioBase64, 'def456');
       expect(message.sentAt, DateTime.parse('2024-01-15T10:30:00Z'));
       expect(message.readAt, DateTime.parse('2024-01-15T10:35:00Z'));
-      expect(message.status, 'read');
+      expect(message.status, 'sent');
       expect(message.editedAt, DateTime.parse('2024-01-15T10:40:00Z'));
+    });
+
+    test('parses explicit acknowledgements without treating them as read state', () {
+      final message = ConversationMessage.fromJson({
+        'id': '123',
+        'conversation_id': 'conv-456',
+        'sender': 'user-789',
+        'content': 'Hello',
+        'timestamp': '2024-01-15T10:30:00Z',
+        'read_at': '2024-01-15T10:35:00Z',
+        'acknowledgements': [
+          {
+            'user_id': 'user-789',
+            'kind': 'will_review',
+            'created_at': '2024-01-15T10:40:00Z',
+            'updated_at': '2024-01-15T10:41:00Z',
+          },
+        ],
+      });
+
+      expect(message.acknowledgements, hasLength(1));
+      expect(
+        message.acknowledgements.single.kind,
+        MessageAcknowledgementKind.willReview,
+      );
+      expect(message.acknowledgementFor('user-789'), isNotNull);
     });
 
     test('fromJson handles missing optional fields', () {

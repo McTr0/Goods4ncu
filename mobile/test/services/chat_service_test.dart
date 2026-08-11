@@ -28,7 +28,7 @@ void main() {
         expect(message.audioBase64, 'SUQzBAAAAAAAI1RTU0U=');
         expect(message.sentAt, DateTime.parse('2024-01-15T10:30:00Z'));
         expect(message.readAt, DateTime.parse('2024-01-15T10:35:00Z'));
-        expect(message.status, 'delivered');
+        expect(message.status, 'sent');
         expect(message.editedAt, DateTime.parse('2024-01-15T11:00:00Z'));
       });
 
@@ -69,7 +69,10 @@ void main() {
           };
 
           final message = ConversationMessage.fromJson(json);
-          expect(message.status, status);
+          expect(
+            message.status,
+            status == 'delivered' || status == 'read' ? 'sent' : status,
+          );
         }
       });
 

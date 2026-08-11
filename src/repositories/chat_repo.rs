@@ -245,19 +245,9 @@ impl ChatRepository for PostgresChatRepository {
         conversation_id: &str,
         reader_id: &str,
     ) -> Result<(), ApiError> {
-        sqlx::query(
-            "UPDATE chat_messages SET read_at = NOW() \
-             WHERE conversation_id = $1 \
-               AND direct_conversation_id IS NULL \
-               AND receiver = $2 \
-               AND read_at IS NULL",
-        )
-        .bind(conversation_id)
-        .bind(reader_id)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
+        // Kept for the legacy repository trait.  Read position is now a
+        // device-local concern; accepting the call must not write read_at.
+        let _ = (conversation_id, reader_id);
         Ok(())
     }
 
@@ -292,12 +282,8 @@ impl ChatRepository for PostgresChatRepository {
     }
 
     async fn mark_message_read(&self, message_id: &str, reader_id: &str) -> Result<(), ApiError> {
-        sqlx::query("UPDATE chat_messages SET read_at = NOW() WHERE id = $1 AND receiver = $2")
-            .bind(message_id)
-            .bind(reader_id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        // Compatibility no-op; see mark_conversation_read above.
+        let _ = (message_id, reader_id);
         Ok(())
     }
 }

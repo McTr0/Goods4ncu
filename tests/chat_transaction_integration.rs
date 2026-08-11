@@ -2,8 +2,8 @@
 
 use goods4ncu::api::error::ApiError;
 use goods4ncu::services::chat_conversation::{
-    ChatConversationService, ConversationDecision, ConversationMode, ConversationState,
-    CreateConversationInput, SendConversationMessageInput, StructuredQuoteInput,
+    AcknowledgementKind, ChatConversationService, ConversationDecision, ConversationMode,
+    ConversationState, CreateConversationInput, SendConversationMessageInput, StructuredQuoteInput,
     StructuredQuoteKind,
 };
 use goods4ncu::test_infra::with_test_pool;
@@ -268,6 +268,101 @@ async fn message_reply_reaction_hide_and_report_are_member_scoped() {
 }
 
 #[tokio::test]
+async fn message_acknowledgement_is_recipient_scoped_idempotent_replaceable_and_withdrawable() {
+    with_test_pool(|pool| async move {
+        insert_user(&pool, "ack-user-a", "ack_alice").await;
+        insert_user(&pool, "ack-user-b", "ack_bob").await;
+        insert_user(&pool, "ack-user-c", "ack_carol").await;
+        let service = ChatConversationService::new(pool.clone());
+        let created = service
+            .create_conversation(mail_input(
+                "ack-user-a",
+                "ack-user-b",
+                "请确认",
+                "请在方便时确认这条留言",
+            ))
+            .await
+            .unwrap();
+        let conversation_id = Uuid::parse_str(&created.conversation.id).unwrap();
+        let message = service
+            .get_messages(conversation_id, "ack-user-b", 20, 0)
+            .await
+            .unwrap()
+            .0
+            .pop()
+            .unwrap();
+
+        let received = service
+            .set_message_acknowledgement(message.id, "ack-user-b", AcknowledgementKind::Received)
+            .await
+            .unwrap();
+        assert_eq!(received.acknowledgements.len(), 1);
+        assert_eq!(
+            received.acknowledgements[0].kind,
+            AcknowledgementKind::Received
+        );
+
+        let repeated = service
+            .set_message_acknowledgement(message.id, "ack-user-b", AcknowledgementKind::Received)
+            .await
+            .unwrap();
+        assert_eq!(repeated.acknowledgements.len(), 1);
+
+        let replaced = service
+            .set_message_acknowledgement(message.id, "ack-user-b", AcknowledgementKind::Completed)
+            .await
+            .unwrap();
+        assert_eq!(
+            replaced.acknowledgements[0].kind,
+            AcknowledgementKind::Completed
+        );
+
+        assert!(matches!(
+            service
+                .set_message_acknowledgement(
+                    message.id,
+                    "ack-user-a",
+                    AcknowledgementKind::Received,
+                )
+                .await,
+            Err(ApiError::Forbidden)
+        ));
+        assert!(matches!(
+            service
+                .set_message_acknowledgement(
+                    message.id,
+                    "ack-user-c",
+                    AcknowledgementKind::Received,
+                )
+                .await,
+            Err(ApiError::Forbidden)
+        ));
+
+        let withdrawn = service
+            .delete_message_acknowledgement(message.id, "ack-user-b")
+            .await
+            .unwrap();
+        assert!(withdrawn.acknowledgements.is_empty());
+
+        service
+            .block_user("ack-user-b", "ack-user-a")
+            .await
+            .unwrap();
+        assert!(matches!(
+            service
+                .set_message_acknowledgement(
+                    message.id,
+                    "ack-user-b",
+                    AcknowledgementKind::WillReview,
+                )
+                .await,
+            Err(ApiError::Conflict(code)) if code == "conversation_unavailable"
+        ));
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn realtime_accept_then_sender_message_auto_acknowledges_and_tracks_unread() {
     with_test_pool(|pool| async move {
         insert_user(&pool, "user-a", "alice").await;
@@ -433,7 +528,7 @@ async fn mail_thread_opens_immediately_allows_reply_and_member_archiving() {
 }
 
 #[tokio::test]
-async fn mark_read_resets_member_unread_and_marks_received_messages() {
+async fn mark_read_compatibility_endpoint_does_not_create_attention_facts() {
     with_test_pool(|pool| async move {
         insert_user(&pool, "user-a", "alice").await;
         insert_user(&pool, "user-b", "bob").await;
@@ -446,13 +541,13 @@ async fn mark_read_resets_member_unread_and_marks_received_messages() {
         let conversation_id = Uuid::parse_str(&created.conversation.id).unwrap();
 
         let marked = service.mark_read(conversation_id, "user-b").await.unwrap();
-        assert_eq!(marked, 1);
+        assert_eq!(marked, 0);
 
         let receiver_view = service
             .get_conversation(conversation_id, "user-b")
             .await
             .unwrap();
-        assert_eq!(receiver_view.unread_count, 0);
+        assert_eq!(receiver_view.unread_count, 1);
 
         let row = sqlx::query(
             "SELECT read_by, read_at, status
@@ -463,14 +558,11 @@ async fn mark_read_resets_member_unread_and_marks_received_messages() {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(
-            row.get::<Option<String>, _>("read_by").as_deref(),
-            Some("user-b")
-        );
+        assert!(row.get::<Option<String>, _>("read_by").is_none());
         assert!(row
             .get::<Option<chrono::DateTime<chrono::Utc>>, _>("read_at")
-            .is_some());
-        assert_eq!(row.get::<String, _>("status"), "read");
+            .is_none());
+        assert_ne!(row.get::<String, _>("status"), "read");
     })
     .await;
 }

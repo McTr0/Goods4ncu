@@ -172,6 +172,8 @@ class MessageBubble extends StatelessWidget {
   final VoidCallback? onEdit;
   final VoidCallback? onReply;
   final ValueChanged<String>? onReact;
+  final ValueChanged<MessageAcknowledgementKind>? onAcknowledge;
+  final VoidCallback? onWithdrawAcknowledgement;
   final VoidCallback? onHide;
   final VoidCallback? onReport;
   final bool deliveryOnly;
@@ -184,6 +186,8 @@ class MessageBubble extends StatelessWidget {
     this.onEdit,
     this.onReply,
     this.onReact,
+    this.onAcknowledge,
+    this.onWithdrawAcknowledgement,
     this.onHide,
     this.onReport,
     this.deliveryOnly = false,
@@ -338,6 +342,34 @@ class MessageBubble extends StatelessWidget {
                     }).toList(),
                   ),
                 ),
+              if (message.acknowledgements.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Wrap(
+                    spacing: 4,
+                    runSpacing: 4,
+                    children: message.acknowledgements.map((acknowledgement) {
+                      return Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: (isMe ? Colors.white : Colors.black)
+                              .withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          _acknowledgementLabel(context, acknowledgement.kind),
+                          style: TextStyle(
+                            color: isMe ? Colors.white : Colors.black87,
+                            fontSize: 12,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
               const SizedBox(height: 4),
               Row(
                 mainAxisSize: MainAxisSize.min,
@@ -381,6 +413,8 @@ class MessageBubble extends StatelessWidget {
     final actionsAvailable =
         onReply != null ||
         onReact != null ||
+        onAcknowledge != null ||
+        onWithdrawAcknowledgement != null ||
         onEdit != null ||
         onHide != null ||
         onReport != null;
@@ -430,6 +464,41 @@ class MessageBubble extends StatelessWidget {
                   }).toList(),
                 ),
               ),
+            if (onAcknowledge != null) ...[
+              ListTile(
+                leading: const Icon(Icons.check_circle_outline_rounded),
+                title: Text(l.acknowledgementReceived),
+                onTap: () {
+                  Navigator.pop(context);
+                  onAcknowledge?.call(MessageAcknowledgementKind.received);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.schedule_rounded),
+                title: Text(l.acknowledgementWillReview),
+                onTap: () {
+                  Navigator.pop(context);
+                  onAcknowledge?.call(MessageAcknowledgementKind.willReview);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.task_alt_rounded),
+                title: Text(l.acknowledgementCompleted),
+                onTap: () {
+                  Navigator.pop(context);
+                  onAcknowledge?.call(MessageAcknowledgementKind.completed);
+                },
+              ),
+            ],
+            if (onWithdrawAcknowledgement != null)
+              ListTile(
+                leading: const Icon(Icons.undo_rounded),
+                title: Text(l.acknowledgementWithdraw),
+                onTap: () {
+                  Navigator.pop(context);
+                  onWithdrawAcknowledgement?.call();
+                },
+              ),
             if (onEdit != null)
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
@@ -465,15 +534,17 @@ class MessageBubble extends StatelessWidget {
   }
 
   Widget _buildStatus(BuildContext context) {
-    if (deliveryOnly &&
-        message.status != 'sending' &&
-        message.status != 'failed') {
+    final status = switch (message.status) {
+      'delivered' || 'read' => 'sent',
+      final value => value,
+    };
+    if (deliveryOnly && status != 'sending' && status != 'failed') {
       return _DeliveryTicks(
-        status: 'delivered',
+        status: 'sent',
         color: isMe ? Colors.white70 : Colors.black45,
       );
     }
-    switch (message.status) {
+    switch (status) {
       case 'sending':
         return const Row(
           mainAxisSize: MainAxisSize.min,
@@ -494,13 +565,6 @@ class MessageBubble extends StatelessWidget {
           status: 'sent',
           color: isMe ? Colors.white70 : Colors.black45,
         );
-      case 'delivered':
-        return _DeliveryTicks(
-          status: 'delivered',
-          color: isMe ? Colors.white70 : Colors.black45,
-        );
-      case 'read':
-        return const _DeliveryTicks(status: 'read', color: Color(0xFF4FC3F7));
       case 'failed':
         return Tooltip(
           message: AppLocalizations.of(context)!.sendFailedShort,
@@ -513,6 +577,18 @@ class MessageBubble extends StatelessWidget {
       default:
         return const SizedBox.shrink();
     }
+  }
+
+  String _acknowledgementLabel(
+    BuildContext context,
+    MessageAcknowledgementKind kind,
+  ) {
+    final l = AppLocalizations.of(context)!;
+    return switch (kind) {
+      MessageAcknowledgementKind.received => l.acknowledgementReceived,
+      MessageAcknowledgementKind.willReview => l.acknowledgementWillReview,
+      MessageAcknowledgementKind.completed => l.acknowledgementCompleted,
+    };
   }
 
   String _formatTime(DateTime dt) {
@@ -531,8 +607,7 @@ class _DeliveryTicks extends StatelessWidget {
     final l = AppLocalizations.of(context)!;
     final (icon, label) = switch (status) {
       'sent' => (Icons.done_rounded, l.messageSentStatus),
-      'read' => (Icons.done_all_rounded, l.messageReadStatus),
-      _ => (Icons.done_all_rounded, l.messageDeliveredStatus),
+      _ => (Icons.done_rounded, l.messageSentStatus),
     };
     return Tooltip(
       message: label,
@@ -651,6 +726,12 @@ class UserChatMessageList extends StatelessWidget {
   final ValueChanged<ConversationMessage>? onReplyMessage;
   final void Function(ConversationMessage message, String emoji)?
   onReactMessage;
+  final void Function(
+    ConversationMessage message,
+    MessageAcknowledgementKind kind,
+  )?
+  onAcknowledgeMessage;
+  final ValueChanged<ConversationMessage>? onWithdrawAcknowledgement;
   final ValueChanged<ConversationMessage>? onHideMessage;
   final ValueChanged<ConversationMessage>? onReportMessage;
   final bool allowEditing;
@@ -668,6 +749,8 @@ class UserChatMessageList extends StatelessWidget {
     required this.onEditMessage,
     this.onReplyMessage,
     this.onReactMessage,
+    this.onAcknowledgeMessage,
+    this.onWithdrawAcknowledgement,
     this.onHideMessage,
     this.onReportMessage,
     this.allowEditing = true,
@@ -716,6 +799,18 @@ class UserChatMessageList extends StatelessWidget {
           onReply: onReplyMessage == null ? null : () => onReplyMessage!(msg),
           onReact: msg.canReact && onReactMessage != null
               ? (emoji) => onReactMessage!(msg, emoji)
+              : null,
+          onAcknowledge: !isMe && onAcknowledgeMessage != null
+              ? (kind) => onAcknowledgeMessage!(msg, kind)
+              : null,
+          onWithdrawAcknowledgement:
+              !isMe &&
+                  onWithdrawAcknowledgement != null &&
+                  msg.acknowledgements.any(
+                    (acknowledgement) =>
+                        acknowledgement.userId == (currentUserId ?? ''),
+                  )
+              ? () => onWithdrawAcknowledgement!(msg)
               : null,
           onHide: msg.canHide && onHideMessage != null
               ? () => onHideMessage!(msg)

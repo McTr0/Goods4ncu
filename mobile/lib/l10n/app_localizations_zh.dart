@@ -2427,6 +2427,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get messageDeliveredStatus => '已送达';
 
   @override
+  String get acknowledgementReceived => '收到';
+
+  @override
+  String get acknowledgementWillReview => '我会看';
+
+  @override
+  String get acknowledgementCompleted => '已处理';
+
+  @override
+  String get acknowledgementWithdraw => '撤销主动确认';
+
+  @override
   String typingIndicator(String username) {
     return '$username 正在输入...';
   }

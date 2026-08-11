@@ -4668,6 +4668,30 @@ abstract class AppLocalizations {
   /// **'Delivered'**
   String get messageDeliveredStatus;
 
+  /// No description provided for @acknowledgementReceived.
+  ///
+  /// In en, this message translates to:
+  /// **'Received'**
+  String get acknowledgementReceived;
+
+  /// No description provided for @acknowledgementWillReview.
+  ///
+  /// In en, this message translates to:
+  /// **'I\'ll review'**
+  String get acknowledgementWillReview;
+
+  /// No description provided for @acknowledgementCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed'**
+  String get acknowledgementCompleted;
+
+  /// No description provided for @acknowledgementWithdraw.
+  ///
+  /// In en, this message translates to:
+  /// **'Withdraw acknowledgement'**
+  String get acknowledgementWithdraw;
+
   /// No description provided for @typingIndicator.
   ///
   /// In en, this message translates to:

@@ -223,9 +223,9 @@ Mail 创建后进入 open，主题 1–120 字、正文 1–2000 字，无需接
 
 ### 已读、确认与注意力隐私
 
-[当前兼容行为] 用户全局设置和 Conversation 覆盖项仍支持 realtime 的 auto/manual read；Mail 的本地 unread 清零不会向发件人广播 read。旧客户端仍可能收到 `message_read` 或使用 typing 接口。
+[迁移进行中] 用户全局设置和 Conversation 覆盖项仍接受旧客户端的 auto/manual read 配置，但 read API 已变为无操作且不再广播；typing API 同样只做成员校验后返回兼容结果。旧客户端可能继续调用接口，但服务端不产生新的公开注意力事实。
 
-[目标态] `LOCALLY_SEEN` 只存在于接收端设备，不写入发送方可见事实，也不由服务器推断。公开状态收敛为 `sending | sent | failed`；只有接收者主动选择 `received | will_review | completed` 才产生可见 acknowledgement。打开会话、查看通知、接收 Push、解密内容、播放媒体、回复或普通 reaction 都不自动生成 acknowledgement。
+[迁移进行中] `LOCALLY_SEEN` 只存在于接收端设备，不写入发送方可见事实，也不由服务器推断。公开状态已收敛为 `sending | sent | failed`；只有接收者主动选择 `received | will_review | completed` 才产生可见 acknowledgement。打开会话、查看通知、接收 Push、解密内容、播放媒体、回复或普通 reaction 都不自动生成 acknowledgement。
 
 目标态下 realtime 的 `active` 连接本身就是双方明确参与的信号，不再额外暴露 typing、online 或 last seen。迁移期间保留旧字段和接口以兼容旧客户端，但停止为新客户端产生新的公开已读事实。
 

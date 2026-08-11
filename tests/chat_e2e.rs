@@ -681,7 +681,7 @@ async fn test_read_receipts() -> anyhow::Result<()> {
     );
     let read_result = read_response.json::<MarkReadResponse>().await?;
     assert_eq!(read_result.conversation_id, conversation_id);
-    assert!(read_result.marked_count >= 1);
+    assert_eq!(read_result.marked_count, 0);
 
     let get_response = client
         .get(format!(
@@ -697,7 +697,7 @@ async fn test_read_receipts() -> anyhow::Result<()> {
         .iter()
         .find(|message| message.id == sent_message.id)
         .expect("sent message should still be listed");
-    assert!(read_msg.read_at.is_some());
+    assert!(read_msg.read_at.is_none());
 
     cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
     Ok(())
@@ -729,9 +729,12 @@ async fn test_typing_indicator() -> anyhow::Result<()> {
     assert_eq!(
         typing_response.status(),
         StatusCode::OK,
-        "Typing indicator failed: {:?}",
+        "Typing compatibility request failed: {:?}",
         typing_response.text().await?
     );
+    let typing_result = typing_response.json::<serde_json::Value>().await?;
+    assert_eq!(typing_result["sent"], false);
+    assert_eq!(typing_result["deprecated"], true);
 
     cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
     Ok(())

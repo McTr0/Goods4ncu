@@ -113,8 +113,6 @@ class _UserChatPageState extends State<UserChatPage> {
       (_connectionStatus == 'connected' || _connectionStatus == 'active');
   bool get _isMail => _conversation?.mode == ConversationMode.mail;
 
-  bool get _isOtherTyping => _chatData?.isOtherTyping ?? false;
-
   bool get _isRecording => _sessionController.isRecording;
 
   int get _recordingSeconds => _sessionController.recordingSeconds;
@@ -146,6 +144,7 @@ class _UserChatPageState extends State<UserChatPage> {
         widget.chatNotifier ??
         ChatNotifier(
           conversationId: widget.conversationId,
+          peerUserId: widget.otherUserId,
           chatService: _chatService,
           userService: _userService,
         );
@@ -223,22 +222,18 @@ class _UserChatPageState extends State<UserChatPage> {
           notif.eventType,
           messageId: notif.messageId,
           conversationId: notif.conversationId,
-          typingUserId: notif.typingUserId,
         );
         break;
 
       case 'message_read':
+      case 'message_acknowledgement_changed':
       case 'message_reaction_changed':
       case 'message_hidden':
       case 'message_reported':
-        _chatNotifier.handleWsNotification(notif.eventType);
-        break;
-
-      case 'typing':
         _chatNotifier.handleWsNotification(
           notif.eventType,
+          messageId: notif.messageId,
           conversationId: notif.conversationId,
-          typingUserId: notif.typingUserId,
         );
         break;
     }
@@ -262,11 +257,6 @@ class _UserChatPageState extends State<UserChatPage> {
     } catch (e) {
       _showSnackBar(l.chatRejectFailed(e.toString()));
     }
-  }
-
-  /// 发送typing indicator
-  void _sendTypingIndicator() {
-    _composerController.sendTypingIndicator();
   }
 
   /// 开始编辑消息
@@ -386,23 +376,24 @@ class _UserChatPageState extends State<UserChatPage> {
     }
   }
 
-  Future<void> _markConversationRead() async {
-    final l = AppLocalizations.of(context)!;
+  Future<void> _acknowledgeMessage(
+    ConversationMessage message,
+    MessageAcknowledgementKind kind,
+  ) async {
     try {
-      await _chatNotifier.markConversationRead();
-      _showSnackBar(l.markConversationReadSuccess);
+      await _chatNotifier.acknowledgeMessage(message, kind);
     } catch (error) {
-      _showSnackBar(l.markReadFailed(error.toString()));
+      if (mounted) _showSnackBar('确认失败：$error');
     }
   }
 
-  Future<void> _setReadPreference(String mode) async {
-    final l = AppLocalizations.of(context)!;
+  Future<void> _withdrawMessageAcknowledgement(
+    ConversationMessage message,
+  ) async {
     try {
-      await _chatNotifier.setReadPreference(mode);
-      _showSnackBar(l.readPreferenceUpdated);
+      await _chatNotifier.withdrawMessageAcknowledgement(message);
     } catch (error) {
-      _showSnackBar(l.readPreferenceUpdateFailed(error.toString()));
+      if (mounted) _showSnackBar('撤销确认失败：$error');
     }
   }
 
@@ -758,15 +749,6 @@ class _UserChatPageState extends State<UserChatPage> {
             onClose: _closeConversation,
             onRestart: _restartConversation,
           ),
-        if (_chatNotifier.shouldShowManualReadAction)
-          _ManualReadBanner(
-            unreadCount: _conversation?.unreadCount ?? 0,
-            onMarkRead: _markConversationRead,
-          ),
-        if (_isOtherTyping &&
-            !_isMail &&
-            _conversation?.state == ConversationState.active)
-          UserChatTypingBanner(username: _displayName),
         Expanded(
           child: UserChatMessageList(
             isLoading: _isLoading,
@@ -779,6 +761,8 @@ class _UserChatPageState extends State<UserChatPage> {
             onEditMessage: _startEditMessage,
             onReplyMessage: _startReplyMessage,
             onReactMessage: _reactToMessage,
+            onAcknowledgeMessage: _acknowledgeMessage,
+            onWithdrawAcknowledgement: _withdrawMessageAcknowledgement,
             onHideMessage: _hideMessage,
             onReportMessage: _reportMessage,
             allowEditing:
@@ -803,7 +787,7 @@ class _UserChatPageState extends State<UserChatPage> {
           onCancelQuote: _clearPendingQuote,
           onCancelEdit: _cancelEdit,
           onCancelReply: _cancelReply,
-          onChanged: (_) => _sendTypingIndicator(),
+          onChanged: (_) {},
           onSubmitted: (_) => _sendMessage(),
           onSend: _editingMessageId != null ? _confirmEdit : _sendMessage,
         ),
@@ -897,10 +881,6 @@ class _UserChatPageState extends State<UserChatPage> {
 
   Widget _buildConversationMenu() {
     final l = AppLocalizations.of(context)!;
-    String selected(String label, String mode) =>
-        _conversation?.readReceiptMode == mode
-        ? '$label${l.selectedSuffix}'
-        : label;
     return PopupMenuButton<String>(
       onSelected: (value) {
         if (value == 'close') {
@@ -915,31 +895,8 @@ class _UserChatPageState extends State<UserChatPage> {
         if (value == 'call_video') {
           _startCall('video');
         }
-        if (value.startsWith('read_')) {
-          _setReadPreference(value.substring('read_'.length));
-        }
       },
       itemBuilder: (context) => [
-        PopupMenuItem(
-          enabled: false,
-          child: Text(
-            l.conversationReadMenuHeader(_currentReadModeLabel()),
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          ),
-        ),
-        PopupMenuItem(
-          value: 'read_inherit',
-          child: Text(selected(l.readPreferenceInherit, 'inherit')),
-        ),
-        PopupMenuItem(
-          value: 'read_auto',
-          child: Text(selected(l.readPreferenceAuto, 'auto')),
-        ),
-        PopupMenuItem(
-          value: 'read_manual',
-          child: Text(selected(l.readPreferenceManual, 'manual')),
-        ),
-        const PopupMenuDivider(),
         if (_conversation?.state == ConversationState.active) ...[
           PopupMenuItem(value: 'call_audio', child: Text(l.audioCallMvp)),
           PopupMenuItem(value: 'call_video', child: Text(l.videoCallMvp)),
@@ -949,17 +906,6 @@ class _UserChatPageState extends State<UserChatPage> {
         PopupMenuItem(value: 'block', child: Text(l.blockAction)),
       ],
     );
-  }
-
-  String _currentReadModeLabel() {
-    final l = AppLocalizations.of(context)!;
-    final conversation = _conversation;
-    if (conversation == null) return l.readModeUnknown;
-    return switch (conversation.effectiveReadReceiptMode) {
-      'manual' => l.readModeManual,
-      'auto' => l.readModeAuto,
-      _ => l.readModeInherit,
-    };
   }
 
   Widget _buildSuggestionArea() {
@@ -1171,50 +1117,4 @@ class _ConversationProtocolBanner extends StatelessWidget {
         ConversationState.expired => l.conversationNaturallyEndedTitle,
         _ => l.conversationClosedTitle,
       };
-}
-
-class _ManualReadBanner extends StatelessWidget {
-  const _ManualReadBanner({
-    required this.unreadCount,
-    required this.onMarkRead,
-  });
-
-  final int unreadCount;
-  final VoidCallback onMarkRead;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppTheme.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.18)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.mark_chat_read_outlined, color: AppTheme.primary),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              unreadCount <= 1
-                  ? l.manualReadUnreadOne
-                  : l.manualReadUnreadMany(unreadCount),
-              style: const TextStyle(
-                color: AppTheme.textPrimary,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: onMarkRead,
-            child: Text(l.markConversationRead),
-          ),
-        ],
-      ),
-    );
-  }
 }

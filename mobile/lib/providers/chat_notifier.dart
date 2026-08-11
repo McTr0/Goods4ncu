@@ -1,7 +1,7 @@
-import 'dart:async';
 import 'package:state_notifier/state_notifier.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
+import '../services/chat_local_seen_storage.dart';
 import '../services/user_service.dart';
 
 /// Sealed state for chat messages — mutually exclusive states prevent boolean flag soup.
@@ -75,24 +75,29 @@ class ChatViewError extends ChatViewState {
   const ChatViewError(this.message, [this.messages = const []]);
 }
 
-/// Chat state notifier — manages message list, connection status, typing indicators,
-/// and message editing for a single conversation.
+/// Chat state notifier — manages message list, connection status, explicit
+/// acknowledgements, and message editing for a single conversation.
 class ChatNotifier extends StateNotifier<ChatViewState> {
   final ChatService _chatService;
   final UserService _userService;
   final String conversationId;
+  final String? peerUserId;
+  final ChatLocalSeenStorage _localSeenStorage;
 
-  Timer? _typingTimer;
   String? _currentUserId;
   String? _connectionStatus;
   Conversation? _conversation;
 
   ChatNotifier({
     required this.conversationId,
+    this.peerUserId,
     ChatService? chatService,
     UserService? userService,
+    ChatLocalSeenStorage? localSeenStorage,
   }) : _chatService = chatService ?? ChatService(),
        _userService = userService ?? UserService(),
+       _localSeenStorage =
+           localSeenStorage ?? SharedPreferencesChatLocalSeenStorage(),
        super(const ChatViewInitial()) {
     _loadCurrentUser();
     loadMessages();
@@ -129,7 +134,6 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
         if (!mounted) return;
       }
       setConversation(conversation);
-      await _markReadIfAuto();
     } catch (_) {
       // Best-effort hydrate. Live WS events and send paths still update state.
     }
@@ -163,10 +167,23 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
           conversation: _conversation,
         );
       }
-      await _markReadIfAuto();
+      await _markLocallySeen(messages);
     } catch (e) {
       if (!mounted) return;
       state = ChatViewError(e.toString());
+    }
+  }
+
+  Future<void> _markLocallySeen(List<ConversationMessage> messages) async {
+    final peer = peerUserId;
+    if (peer == null || peer.isEmpty || messages.isEmpty) return;
+    try {
+      final latest = messages
+          .map((message) => message.sentAt)
+          .reduce((left, right) => left.isAfter(right) ? left : right);
+      await _localSeenStorage.mark(peer, latest);
+    } catch (_) {
+      // Local badge persistence is best effort and must never block chat.
     }
   }
 
@@ -191,23 +208,9 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
   }
 
   bool get shouldShowManualReadAction {
-    final conversation = _conversation;
-    return conversation != null &&
-        conversation.mode == ConversationMode.realtime &&
-        conversation.state == ConversationState.active &&
-        conversation.effectiveReadReceiptMode == 'manual' &&
-        conversation.unreadCount > 0;
-  }
-
-  Future<void> _markReadIfAuto() async {
-    final conversation = _conversation;
-    if (conversation == null ||
-        conversation.mode != ConversationMode.realtime ||
-        conversation.state != ConversationState.active ||
-        conversation.effectiveReadReceiptMode != 'auto') {
-      return;
-    }
-    await markConversationRead(refresh: false);
+    // Read position is device-local. Keep this getter during the compatibility
+    // window so older callers compile, but never expose a server read action.
+    return false;
   }
 
   Future<void> markConversationRead({bool refresh = true}) async {
@@ -257,7 +260,6 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
       mode,
     );
     setConversation(conversation);
-    await _markReadIfAuto();
   }
 
   void setOtherTyping(bool typing) {
@@ -396,11 +398,8 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
   }
 
   void sendTypingIndicator() {
-    if (_conversation?.mode != ConversationMode.realtime ||
-        _conversation?.state != ConversationState.active) {
-      return;
-    }
-    _chatService.sendTyping(conversationId).catchError((_) {});
+    // Typing is intentionally not a public attention signal. Keep the method
+    // as a source-compatible no-op while old callers migrate.
   }
 
   Future<void> acceptConnection(String connectionId) async {
@@ -437,6 +436,28 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
         )
         ? await _chatService.deleteMessageReaction(message.id)
         : await _chatService.setMessageReaction(message.id, emoji);
+    _replaceMessage(currentState, updated);
+  }
+
+  Future<void> acknowledgeMessage(
+    ConversationMessage message,
+    MessageAcknowledgementKind kind,
+  ) async {
+    if (state is! ChatViewData) return;
+    final currentState = state as ChatViewData;
+    final updated = await _chatService.setMessageAcknowledgement(
+      message.id,
+      kind,
+    );
+    _replaceMessage(currentState, updated);
+  }
+
+  Future<void> withdrawMessageAcknowledgement(
+    ConversationMessage message,
+  ) async {
+    if (state is! ChatViewData) return;
+    final currentState = state as ChatViewData;
+    final updated = await _chatService.deleteMessageAcknowledgement(message.id);
     _replaceMessage(currentState, updated);
   }
 
@@ -495,31 +516,19 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
         }
         break;
       case 'message_read':
+        // Legacy event intentionally ignored. New clients use explicit
+        // acknowledgement changes instead of inferred read receipts.
+        break;
+      case 'message_acknowledgement_changed':
       case 'message_reaction_changed':
       case 'message_hidden':
       case 'message_reported':
         loadMessages();
         break;
       case 'typing':
-        if (state is! ChatViewData) return;
-        final currentState = state as ChatViewData;
-        if (conversationId == this.conversationId &&
-            typingUserId != currentState.currentUserId) {
-          state = currentState.copyWith(isOtherTyping: true);
-          _typingTimer?.cancel();
-          _typingTimer = Timer(const Duration(seconds: 3), () {
-            if (state is ChatViewData) {
-              state = (state as ChatViewData).copyWith(isOtherTyping: false);
-            }
-          });
-        }
+        // Legacy typing event intentionally ignored.
         break;
     }
   }
 
-  @override
-  void dispose() {
-    _typingTimer?.cancel();
-    super.dispose();
-  }
 }

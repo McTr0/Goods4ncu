@@ -433,12 +433,14 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 ## User Chat
 
-用户直聊已经从“永久好友连接”改为“每次联系创建独立会话”。会话有两种模式：
+用户直聊已经从“永久好友连接”改为“每次联系创建独立会话”。产品语义分为留言和连接两种模式：
 
-- `realtime`：TCP 式三次握手，`syn_sent -> syn_ack -> active`，只显示本次沟通。
-- `mail`：异步留言，创建后直接 `open`，不展示在线、typing 或已读给发件人。
+- `mail`：异步留言，状态体验是“发送中 → 已发送 → 可选主动确认”；创建后直接 `open`。
+- `realtime`：连接请求的握手状态为 `syn_sent -> syn_ack -> active`，产品体验是“请求连接 → 已连接 → 已结束”，不等于全局在线。
 
-公共会话字段包括 `id`、`mode`、`state`、`initiator_id`、`recipient_id`、`other_user_id`、`other_username`、`listing_id`、`subject`、`last_message`、`unread_count`、`read_receipt_mode`、`effective_read_receipt_mode`、`expires_at`、`is_blocked` 和 `capabilities`。`read_receipt_mode` 是本会话覆盖项，可为 `inherit`、`auto` 或 `manual`；`effective_read_receipt_mode` 是后端合并全局默认后的实际行为。`capabilities` 告诉移动端当前用户是否可以 `respond`、`ack`、`send`、`close`、`archive` 或 `restart`。
+`sent` 只表示消息已经持久化到服务器。没有设备 ACK 时，API 不称其为“已送达”。接收端的 `LOCALLY_SEEN` 由设备本地维护，不上传、不广播，也不会产生发送方可查询的 `read_at`。
+
+公共会话字段包括 `id`、`mode`、`state`、`initiator_id`、`recipient_id`、`other_user_id`、`other_username`、`listing_id`、`subject`、`last_message`、`unread_count`、`read_receipt_mode`、`effective_read_receipt_mode`、`expires_at`、`is_blocked` 和 `capabilities`。其中 read preference 字段和未读计数属于兼容迁移字段；新客户端不得据此推断对方注意力。`capabilities` 告诉移动端当前用户是否可以 `respond`、`ack`、`send`、`close`、`archive` 或 `restart`。
 
 非法状态转换返回 `409 invalid_conversation_state`。重复创建和重复发送依赖客户端 UUID 幂等。
 
@@ -515,7 +517,7 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 ### GET `/api/chat/conversations/{id}/messages`
 
-需要登录且必须是会话成员。支持 `limit`、`offset`。返回 `conversation_id`、`messages` 和 `total`。消息字段包括 `id`、`client_message_id`、`sender`、`content`、`timestamp`、`read_at`、`image_url`、`audio_url`、Base64 fallback 字段、`reply_to_message_id`、`reply_preview`、`quote`、`status`、`kind` 和 `edited_at`。
+需要登录且必须是会话成员。支持 `limit`、`offset`。返回 `conversation_id`、`messages` 和 `total`。消息字段包括 `id`、`client_message_id`、`sender`、`content`、`timestamp`、`image_url`、`audio_url`、Base64 fallback 字段、`reply_to_message_id`、`reply_preview`、`quote`、`reactions`、`acknowledgements`、`status`、`kind` 和 `edited_at`。新客户端看到的 `status` 只有 `sending | sent | failed`；旧数据库中的 `delivered/read` 会映射为 `sent`。`read_at` 保留为兼容字段但新接口返回 `null`，不能当作注意力事实使用。
 
 ### POST `/api/chat/conversations/{id}/messages`
 
@@ -541,7 +543,7 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 ### POST `/api/chat/conversations/{id}/read`
 
-需要登录且必须是会话成员。批量标记当前用户收到的未读消息，返回 `conversation_id` 和 `marked_count`。邮件不会向发件人推送已读事件；实时 `active` 会话会通过 WebSocket 推送 `message_read`。
+需要登录且必须是会话成员。兼容旧客户端的无操作接口，返回 `conversation_id` 和 `marked_count: 0`。不会写入 `read_at`、清零服务器阅读位置，也不会广播 `message_read`。新客户端应在设备本地维护 `LOCALLY_SEEN`。
 
 ### POST `/api/chat/conversations/{id}/read-preference`
 
@@ -553,7 +555,7 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 }
 ```
 
-`inherit` 表示跟随用户全局 `chat_read_receipt_mode`，`auto` 表示打开 active realtime 会话后自动标记已读，`manual` 表示只有显式调用 read API 才标记已读。返回更新后的会话对象。
+`inherit`、`auto`、`manual` 仅为旧客户端兼容设置；当前服务端不因这些设置产生公开已读事实。返回更新后的会话对象，迁移窗口结束后将移除该设置。
 
 ### PATCH `/api/chat/messages/{id}`
 
@@ -579,6 +581,22 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 移除当前用户对该消息的 reaction，不影响其他用户。
 
+### POST `/api/chat/messages/{id}/acknowledgement`
+
+需要登录且消息对当前用户可见。只有消息接收方可以提交主动确认，`kind` 必须是 `received`（收到）、`will_review`（我会看）或 `completed`（已处理）。同一用户对同一消息最多一条；重复提交幂等，改变 `kind` 会替换原确认。回复、引用和普通 emoji reaction 不会自动创建 acknowledgement。
+
+```json
+{
+  "kind": "will_review"
+}
+```
+
+返回完整消息对象及 `acknowledgements`。屏蔽关系、越权、隐藏消息、跨校园消息均拒绝。
+
+### DELETE `/api/chat/messages/{id}/acknowledgement`
+
+撤销当前用户对该消息的主动确认。撤销是幂等的，返回更新后的消息对象。
+
 ### POST `/api/chat/messages/{id}/hide`
 
 “仅对自己删除”。消息从当前用户列表隐藏，对方仍可见，数据库原文和必要审核记录保留。当前接口不提供用户 hard delete。
@@ -598,7 +616,7 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 ### POST `/api/chat/conversations/{id}/typing`
 
-需要登录且必须是会话成员。只适用于 `realtime/active`。邮件不发送 typing 事件。
+需要登录且必须是会话成员。兼容旧客户端的无操作接口，返回 `{"sent": false, "deprecated": true}`，不保存、不广播 typing，也不暴露注意力状态。
 
 ### POST `/api/chat/conversations/{id}/reply-suggestions`
 
@@ -725,7 +743,7 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 
 ### GET `/api/ws`
 
-使用 `Authorization: Bearer <jwt>` 建连。服务端会验证 token 未撤销、用户未封禁。连接用于通知推送、聊天消息提示、typing 等实时事件。客户端收到 WebSocket 事件后仍应回查 HTTP 列表，因为数据库才是最终事实。
+使用 `Authorization: Bearer <jwt>` 建连。服务端会验证 token 未撤销、用户未封禁。连接用于通知推送、聊天消息提示、会话状态和主动 acknowledgement 变更。新客户端不应依赖 `message_read` 或 `typing`；兼容期收到这些旧事件也必须忽略。客户端收到 WebSocket 事件后仍应回查 HTTP 列表，因为数据库才是最终事实。
 
 ## Deal Records（当前路径仍为 Orders）
 

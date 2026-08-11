@@ -467,7 +467,7 @@ void main() {
       expect(find.byIcon(Icons.done_rounded), findsOneWidget);
     });
 
-    testWidgets('shows delivered status', (tester) async {
+    testWidgets('maps legacy delivered status to sent', (tester) async {
       final message = ConversationMessage(
         id: '1',
         conversationId: 'conv-1',
@@ -488,10 +488,10 @@ void main() {
         ),
       );
 
-      expect(find.byIcon(Icons.done_all_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.done_rounded), findsOneWidget);
     });
 
-    testWidgets('shows read status with success color', (tester) async {
+    testWidgets('maps legacy read status to sent', (tester) async {
       final message = ConversationMessage(
         id: '1',
         conversationId: 'conv-1',
@@ -512,8 +512,7 @@ void main() {
         ),
       );
 
-      final readIcon = tester.widget<Icon>(find.byIcon(Icons.done_all_rounded));
-      expect(readIcon.color, const Color(0xFF4FC3F7));
+      expect(find.byIcon(Icons.done_rounded), findsOneWidget);
     });
 
     testWidgets('shows failed status', (tester) async {

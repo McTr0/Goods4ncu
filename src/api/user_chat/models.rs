@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::services::chat_conversation::{
-    ChatThreadDetail, ChatThreadView, ConversationDecision, ConversationMessageRecord,
-    ConversationMode, ConversationView,
+    AcknowledgementKind, ChatThreadDetail, ChatThreadView, ConversationDecision,
+    ConversationMessageRecord, ConversationMode, ConversationView,
 };
 
 #[derive(Debug, Deserialize)]
@@ -109,6 +109,11 @@ pub struct EditMessageBody {
 #[derive(Debug, Deserialize)]
 pub struct MessageReactionBody {
     pub emoji: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MessageAcknowledgementBody {
+    pub kind: AcknowledgementKind,
 }
 
 #[derive(Debug, Serialize)]

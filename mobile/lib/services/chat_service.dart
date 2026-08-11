@@ -344,6 +344,36 @@ class ChatService extends BaseService {
     );
   }
 
+  Future<ConversationMessage> setMessageAcknowledgement(
+    String messageId,
+    MessageAcknowledgementKind kind,
+  ) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/chat/messages/$messageId/acknowledgement'),
+      headers,
+      jsonEncode({'kind': kind.wireValue}),
+    );
+    return handleResponse(
+      response,
+      (data) => ConversationMessage.fromJson(data as Map<String, dynamic>),
+    );
+  }
+
+  Future<ConversationMessage> deleteMessageAcknowledgement(
+    String messageId,
+  ) async {
+    final headers = await authHeaders();
+    final response = await delete(
+      Uri.parse('$baseUrl/api/chat/messages/$messageId/acknowledgement'),
+      headers,
+    );
+    return handleResponse(
+      response,
+      (data) => ConversationMessage.fromJson(data as Map<String, dynamic>),
+    );
+  }
+
   Future<void> hideMessage(String messageId) async {
     final headers = await authHeaders();
     final response = await post(

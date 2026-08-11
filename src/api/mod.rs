@@ -767,6 +767,11 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             post(user_chat::set_message_reaction).delete(user_chat::delete_message_reaction),
         )
         .route(
+            "/api/chat/messages/{id}/acknowledgement",
+            post(user_chat::set_message_acknowledgement)
+                .delete(user_chat::delete_message_acknowledgement),
+        )
+        .route(
             "/api/chat/messages/{id}/hide",
             post(user_chat::hide_message),
         )

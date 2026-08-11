@@ -330,7 +330,7 @@ void main() {
     notifier.dispose();
   });
 
-  test('sendTypingIndicator delegates to chat service', () async {
+  test('sendTypingIndicator is a compatibility no-op', () async {
     final chatService = _FakeChatService();
     final notifier = ChatNotifier(
       conversationId: 'conv-1',
@@ -344,7 +344,7 @@ void main() {
     controller.sendTypingIndicator();
     await flushAsync();
 
-    expect(chatService.typingCalls, 1);
+    expect(chatService.typingCalls, 0);
 
     controller.dispose();
     notifier.dispose();

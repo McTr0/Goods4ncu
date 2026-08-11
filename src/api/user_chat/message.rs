@@ -3,20 +3,18 @@ use axum::{
     http::HeaderMap,
     Json,
 };
-use sqlx::Row;
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
 use crate::api::{ws, AppState};
 use crate::services::chat_conversation::{
-    ChatConversationService, ConversationMessageRecord, ConversationMode, ConversationState,
-    SendConversationMessageInput,
+    ChatConversationService, ConversationMessageRecord, SendConversationMessageInput,
 };
 
 use super::{
     authenticated_user, moderate_text, EditMessageBody, HideMessageResponse, MarkReadResponse,
-    MessageListQuery, MessageListResponse, MessageReactionBody, ReportMessageBody,
-    ReportMessageResponse, SendMessageBody,
+    MessageAcknowledgementBody, MessageListQuery, MessageListResponse, MessageReactionBody,
+    ReportMessageBody, ReportMessageResponse, SendMessageBody,
 };
 
 async fn conversation_campus_id(state: &AppState, conversation_id: Uuid) -> Result<Uuid, ApiError> {
@@ -146,27 +144,39 @@ pub async fn mark_conversation_read(
     let user_id = authenticated_user(&state, &headers)?;
     let service = ChatConversationService::new(state.infra.db.clone());
     let marked_count = service.mark_read(conversation_id, &user_id).await?;
-    let conversation = service.get_conversation(conversation_id, &user_id).await?;
-    if conversation.mode == ConversationMode::Realtime
-        && conversation.state == ConversationState::Active
-    {
-        let other_user_id = if user_id == conversation.initiator_id {
-            &conversation.recipient_id
-        } else {
-            &conversation.initiator_id
-        };
-        let payload = serde_json::json!({
-            "event": "message_read",
-            "conversation_id": conversation_id,
-            "read_by": user_id,
-        })
-        .to_string();
-        ws::broadcast_to_user(other_user_id, &payload);
-    }
     Ok(Json(MarkReadResponse {
         conversation_id: conversation_id.to_string(),
         marked_count,
     }))
+}
+
+pub async fn set_message_acknowledgement(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(message_id): Path<i64>,
+    Json(body): Json<MessageAcknowledgementBody>,
+) -> Result<Json<ConversationMessageRecord>, ApiError> {
+    let user_id = authenticated_user(&state, &headers)?;
+    let service = ChatConversationService::new(state.infra.db.clone());
+    let message = service
+        .set_message_acknowledgement(message_id, &user_id, body.kind)
+        .await?;
+    broadcast_acknowledgement(&service, &user_id, &message).await?;
+    Ok(Json(message))
+}
+
+pub async fn delete_message_acknowledgement(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(message_id): Path<i64>,
+) -> Result<Json<ConversationMessageRecord>, ApiError> {
+    let user_id = authenticated_user(&state, &headers)?;
+    let service = ChatConversationService::new(state.infra.db.clone());
+    let message = service
+        .delete_message_acknowledgement(message_id, &user_id)
+        .await?;
+    broadcast_acknowledgement(&service, &user_id, &message).await?;
+    Ok(Json(message))
 }
 
 pub async fn edit_message(
@@ -260,36 +270,34 @@ pub async fn typing_indicator(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user_id = authenticated_user(&state, &headers)?;
     let service = ChatConversationService::new(state.infra.db.clone());
-    let conversation = service.get_conversation(conversation_id, &user_id).await?;
-    if conversation.mode != ConversationMode::Realtime
-        || conversation.state != ConversationState::Active
-        || conversation.is_blocked
-    {
-        return Err(ApiError::Conflict(
-            "typing_unavailable_for_conversation".to_string(),
-        ));
-    }
-    let other_user_id = if user_id == conversation.initiator_id {
-        &conversation.recipient_id
-    } else {
-        &conversation.initiator_id
-    };
-    let username = sqlx::query("SELECT username FROM users WHERE id = $1")
-        .bind(&user_id)
-        .fetch_optional(&state.infra.db)
-        .await
-        .ok()
-        .flatten()
-        .map(|row| row.get::<String, _>("username"));
+    // Validate access for old clients, but deliberately do not persist or
+    // broadcast a typing/attention signal.
+    service.get_conversation(conversation_id, &user_id).await?;
+    Ok(Json(
+        serde_json::json!({ "sent": false, "deprecated": true }),
+    ))
+}
+
+async fn broadcast_acknowledgement(
+    service: &ChatConversationService,
+    actor_id: &str,
+    message: &ConversationMessageRecord,
+) -> Result<(), ApiError> {
+    let conversation_id = Uuid::parse_str(&message.conversation_id)
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("invalid conversation id: {error}")))?;
+    let conversation = service.get_conversation(conversation_id, actor_id).await?;
     let payload = serde_json::json!({
-        "event": "typing",
+        "event": "message_acknowledgement_changed",
         "conversation_id": conversation_id,
-        "user_id": user_id,
-        "username": username,
+        "message_id": message.id,
+        "acknowledgements": message.acknowledgements,
     })
     .to_string();
-    ws::broadcast_to_user(other_user_id, &payload);
-    Ok(Json(serde_json::json!({ "sent": true })))
+    ws::broadcast_to_user(&conversation.initiator_id, &payload);
+    if conversation.recipient_id != conversation.initiator_id {
+        ws::broadcast_to_user(&conversation.recipient_id, &payload);
+    }
+    Ok(())
 }
 
 async fn broadcast_message_update(

@@ -13,9 +13,9 @@ pub use connection::{
     unblock_user,
 };
 pub use message::{
-    delete_message_reaction, edit_message, get_conversation_messages, hide_message,
-    mark_conversation_read, report_message, send_conversation_message, set_message_reaction,
-    typing_indicator,
+    delete_message_acknowledgement, delete_message_reaction, edit_message,
+    get_conversation_messages, hide_message, mark_conversation_read, report_message,
+    send_conversation_message, set_message_acknowledgement, set_message_reaction, typing_indicator,
 };
 pub use reply::reply_suggestions;
 pub use telegram::{

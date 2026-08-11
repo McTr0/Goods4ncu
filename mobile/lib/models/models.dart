@@ -1059,6 +1059,20 @@ class ChatThread {
   final bool hasActiveRealtime;
   final String? latestListingTitle;
 
+  ChatThread copyWith({int? unreadCount}) => ChatThread(
+    peerUserId: peerUserId,
+    peerUsername: peerUsername,
+    latestActivityAt: latestActivityAt,
+    latestPreview: latestPreview,
+    unreadCount: unreadCount ?? this.unreadCount,
+    conversationCount: conversationCount,
+    mailCount: mailCount,
+    realtimeCount: realtimeCount,
+    pendingCount: pendingCount,
+    hasActiveRealtime: hasActiveRealtime,
+    latestListingTitle: latestListingTitle,
+  );
+
   factory ChatThread.fromJson(Map<String, dynamic> json) {
     return ChatThread(
       peerUserId: json['peer_user_id']?.toString() ?? '',
@@ -1186,6 +1200,54 @@ class MessageStructuredQuote {
   }
 }
 
+enum MessageAcknowledgementKind {
+  received('received'),
+  willReview('will_review'),
+  completed('completed');
+
+  const MessageAcknowledgementKind(this.wireValue);
+
+  final String wireValue;
+
+  static MessageAcknowledgementKind fromWire(Object? value) {
+    switch (value?.toString()) {
+      case 'will_review':
+        return MessageAcknowledgementKind.willReview;
+      case 'completed':
+        return MessageAcknowledgementKind.completed;
+      case 'received':
+      default:
+        return MessageAcknowledgementKind.received;
+    }
+  }
+}
+
+class MessageAcknowledgement {
+  final String userId;
+  final MessageAcknowledgementKind kind;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  const MessageAcknowledgement({
+    required this.userId,
+    required this.kind,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory MessageAcknowledgement.fromJson(Map<String, dynamic> json) {
+    final createdAt = DateTime.tryParse(json['created_at']?.toString() ?? '');
+    final updatedAt = DateTime.tryParse(json['updated_at']?.toString() ?? '');
+    final now = DateTime.now();
+    return MessageAcknowledgement(
+      userId: json['user_id']?.toString() ?? '',
+      kind: MessageAcknowledgementKind.fromWire(json['kind']),
+      createdAt: createdAt ?? now,
+      updatedAt: updatedAt ?? createdAt ?? now,
+    );
+  }
+}
+
 /// 私聊消息
 class ConversationMessage {
   final String id;
@@ -1202,12 +1264,14 @@ class ConversationMessage {
   final MessageReplyPreview? replyPreview;
   final MessageStructuredQuote? quote;
   final List<MessageReactionSummary> reactions;
+  final List<MessageAcknowledgement> acknowledgements;
   final bool hiddenForMe;
   final bool canHide;
   final bool canReact;
   final bool canReport;
 
-  /// 消息状态: sending | sent | delivered | read | failed
+  /// 消息状态: sending | sent | failed. Legacy delivered/read values are
+  /// normalized to sent at the transport boundary.
   final String status;
 
   /// 已编辑时间
@@ -1230,6 +1294,7 @@ class ConversationMessage {
     this.replyPreview,
     this.quote,
     this.reactions = const [],
+    this.acknowledgements = const [],
     this.hiddenForMe = false,
     this.canHide = true,
     this.canReact = true,
@@ -1269,14 +1334,23 @@ class ConversationMessage {
               json['quote'] as Map<String, dynamic>,
             )
           : null,
-      reactions: (json['reactions'] as List<dynamic>? ?? const []).map((item) {
-        return MessageReactionSummary.fromJson(item as Map<String, dynamic>);
-      }).toList(),
+      reactions: (json['reactions'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(MessageReactionSummary.fromJson)
+          .toList(),
+      acknowledgements: (json['acknowledgements'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(MessageAcknowledgement.fromJson)
+          .toList(),
       hiddenForMe: json['hidden_for_me'] == true,
       canHide: json['can_hide'] != false,
       canReact: json['can_react'] != false,
       canReport: json['can_report'] != false,
-      status: json['status'] ?? 'sent',
+      status: switch (json['status']?.toString()) {
+        'delivered' || 'read' => 'sent',
+        final value when value != null && value.isNotEmpty => value,
+        _ => 'sent',
+      },
       editedAt: json['edited_at'] != null
           ? DateTime.tryParse(json['edited_at'].toString())
           : null,
@@ -1287,6 +1361,13 @@ class ConversationMessage {
 
   /// 消息是否已读（有连接且已读）
   bool get isRead => readAt != null;
+
+  MessageAcknowledgement? acknowledgementFor(String userId) {
+    for (final acknowledgement in acknowledgements) {
+      if (acknowledgement.userId == userId) return acknowledgement;
+    }
+    return null;
+  }
 
   /// 消息是否由指定用户发送
   bool isFrom(String userId) => senderId == userId;
@@ -1313,6 +1394,7 @@ class ConversationMessage {
     MessageReplyPreview? replyPreview,
     MessageStructuredQuote? quote,
     List<MessageReactionSummary>? reactions,
+    List<MessageAcknowledgement>? acknowledgements,
     bool? hiddenForMe,
     bool? canHide,
     bool? canReact,
@@ -1337,6 +1419,7 @@ class ConversationMessage {
       replyPreview: replyPreview ?? this.replyPreview,
       quote: quote ?? this.quote,
       reactions: reactions ?? this.reactions,
+      acknowledgements: acknowledgements ?? this.acknowledgements,
       hiddenForMe: hiddenForMe ?? this.hiddenForMe,
       canHide: canHide ?? this.canHide,
       canReact: canReact ?? this.canReact,

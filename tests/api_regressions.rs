@@ -2212,7 +2212,7 @@ async fn buyer_reject_counter_finalizes_negotiation_without_order() {
 }
 
 #[tokio::test]
-async fn typing_indicator_requires_active_realtime_conversation() {
+async fn typing_indicator_is_a_compatibility_noop_for_any_conversation_state() {
     with_test_pool(|pool| async move {
         insert_user(&pool, "typing-user-a", "typing_a", "hash", "user", "active").await;
         insert_user(&pool, "typing-user-b", "typing_b", "hash", "user", "active").await;
@@ -2246,7 +2246,11 @@ async fn typing_indicator_requires_active_realtime_conversation() {
             .unwrap();
 
         let resp = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::CONFLICT);
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["sent"], false);
+        assert_eq!(payload["deprecated"], true);
     })
     .await;
 }

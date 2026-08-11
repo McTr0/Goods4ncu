@@ -1238,6 +1238,10 @@
   "messageSentStatus": "Sent",
   "messageReadStatus": "Read",
   "messageDeliveredStatus": "Delivered",
+  "acknowledgementReceived": "Received",
+  "acknowledgementWillReview": "I'll review",
+  "acknowledgementCompleted": "Completed",
+  "acknowledgementWithdraw": "Withdraw acknowledgement",
   "typingIndicator": "{username} is typing...",
   "@typingIndicator": {
     "placeholders": {

@@ -156,7 +156,8 @@ round_state = closed
 | 概念 | 是否持久化 | 作用 |
 | --- | --- | --- |
 | Conversation | 是 | 保存参与者、模式、状态、商品上下文、主题和过期时间 |
-| ConversationMember | 是 | 保存成员级归档和迁移期兼容字段；目标态不保存发送方可见的阅读事实 |
+| ConversationMember | 是 | 保存成员级归档和迁移期兼容字段；read API 兼容窗口不再写入公开阅读事实 |
+| MessageAcknowledgement | 是 | 接收方主动选择的收到/我会看/已处理；每消息每用户最多一条，可替换或撤销 |
 | ConversationEvent | 是 | 记录握手、关闭和过期等转换 |
 | Thread | 查询聚合 | 让同一聊天对象在收件箱只出现一次 |
 | Message | 是 | 保存文本、媒体引用、回复、quote、编辑和审核状态 |

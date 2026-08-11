@@ -1211,6 +1211,10 @@
   "messageSentStatus": "已发送",
   "messageReadStatus": "已读",
   "messageDeliveredStatus": "已送达",
+  "acknowledgementReceived": "收到",
+  "acknowledgementWillReview": "我会看",
+  "acknowledgementCompleted": "已处理",
+  "acknowledgementWithdraw": "撤销主动确认",
   "typingIndicator": "{username} 正在输入...",
   "@typingIndicator": {
     "placeholders": {

@@ -2543,6 +2543,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get messageDeliveredStatus => 'Delivered';
 
   @override
+  String get acknowledgementReceived => 'Received';
+
+  @override
+  String get acknowledgementWillReview => 'I\'ll review';
+
+  @override
+  String get acknowledgementCompleted => 'Completed';
+
+  @override
+  String get acknowledgementWithdraw => 'Withdraw acknowledgement';
+
+  @override
   String typingIndicator(String username) {
     return '$username is typing...';
   }

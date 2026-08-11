@@ -15,7 +15,7 @@
 Flutter Web / Mobile
   -> HTTP JSON：认证、出收、用户、成交、管理、普通聊天操作
   -> SSE：小帮流式回复
-  -> WebSocket：消息、通知、typing、会话和通话信令事件
+  -> WebSocket：消息、通知、主动 acknowledgement、会话和通话信令事件
   -> Rust Axum Router
   -> middleware：CORS、body limit、rate limit、token denylist、metrics、安全响应头
   -> handler：解析协议和认证上下文
@@ -42,7 +42,7 @@ SSE 用于 Agent token 流式输出。服务端保存用户消息，调用 LLM/�
 
 ### WebSocket
 
-WebSocket 用于低延迟提示，不是业务事实来源。事件包括 conversation/message、read、typing、space、call 和 notification 等。
+WebSocket 用于低延迟提示，不是业务事实来源。事件包括 conversation/message、主动 acknowledgement、space、call 和 notification 等；`read`/`typing` 仅为兼容旧客户端保留，不再由新路径广播。
 
 客户端断线后要通过 HTTP 列表和消息接口补偿。当前连接表是单进程内存结构，因此多副本 fan-out 仍是生产缺口。
 
@@ -117,6 +117,7 @@ wanted matches 使用活动 campus、分类、预算、成色和 active 状态�
 - `chat_conversation_members`：迁移期成员级未读、归档和阅读偏好；目标态的 `LocalSeen` 由设备本地维护。
 - `chat_conversation_events`：握手、关闭和过期时间线。
 - `chat_messages`：正文、媒体 URL/Base64 fallback、reply、quote、编辑和审核状态。
+- `chat_message_acknowledgements`：接收方主动选择的 `received`、`will_review` 或 `completed`，每用户每消息最多一条，可替换或撤销。
 - `chat_blocks`：屏蔽关系。
 
 收件箱的 Thread 是按对方用户聚合的查询视图，不会合并底层 Conversation。群组、频道、message reaction/hide/report、call signaling 和 Secret Chat 原型位于 user_chat 模块。
