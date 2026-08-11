@@ -562,6 +562,15 @@ async fn insert_user(pool: &sqlx::PgPool, id: &str, username: &str, role: &str) 
     .execute(pool)
     .await
     .expect("insert default campus membership");
+    sqlx::query(
+        "INSERT INTO chat_connection_preferences (user_id, allow_strangers)
+         VALUES ($1, TRUE)
+         ON CONFLICT (user_id) DO UPDATE SET allow_strangers = TRUE",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .expect("insert chat connection preferences");
 }
 
 async fn insert_campus(pool: &sqlx::PgPool, campus_id: uuid::Uuid, slug: &str) {

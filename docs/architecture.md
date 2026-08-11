@@ -42,7 +42,7 @@ SSE 用于 Agent token 流式输出。服务端保存用户消息，调用 LLM/�
 
 ### WebSocket
 
-WebSocket 用于低延迟提示，不是业务事实来源。事件包括 conversation/message、主动 acknowledgement、space、call 和 notification 等；`read`/`typing` 仅为兼容旧客户端保留，不再由新路径广播。
+WebSocket 用于低延迟提示，不是业务事实来源。事件包括 conversation/message、主动 acknowledgement、space、call 和 notification 等；不承载 read、typing 或在线状态。
 
 客户端断线后要通过 HTTP 列表和消息接口补偿。当前连接表是单进程内存结构，因此多副本 fan-out 仍是生产缺口。
 
@@ -114,7 +114,7 @@ wanted matches 使用活动 campus、分类、预算、成色和 active 状态�
 用户直聊的底层事实：
 
 - `chat_conversations`：realtime/mail、参与者、状态、主题和过期时间。
-- `chat_conversation_members`：迁移期成员级未读、归档和阅读偏好；目标态的 `LocalSeen` 由设备本地维护。
+- `chat_conversation_members`：成员级归档；新留言的 `LOCALLY_SEEN` 由设备本地维护，不写入服务器。
 - `chat_conversation_events`：握手、关闭和过期时间线。
 - `chat_messages`：正文、媒体 URL/Base64 fallback、reply、quote、编辑和审核状态。
 - `chat_message_acknowledgements`：接收方主动选择的 `received`、`will_review` 或 `completed`，每用户每消息最多一条，可替换或撤销。

@@ -12,7 +12,6 @@ void main() {
         'image_base64': 'abc123',
         'audio_base64': 'def456',
         'sent_at': '2024-01-15T10:30:00Z',
-        'read_at': '2024-01-15T10:35:00Z',
         'status': 'read',
         'edited_at': '2024-01-15T10:40:00Z',
       };
@@ -26,36 +25,37 @@ void main() {
       expect(message.imageBase64, 'abc123');
       expect(message.audioBase64, 'def456');
       expect(message.sentAt, DateTime.parse('2024-01-15T10:30:00Z'));
-      expect(message.readAt, DateTime.parse('2024-01-15T10:35:00Z'));
       expect(message.status, 'sent');
       expect(message.editedAt, DateTime.parse('2024-01-15T10:40:00Z'));
     });
 
-    test('parses explicit acknowledgements without treating them as read state', () {
-      final message = ConversationMessage.fromJson({
-        'id': '123',
-        'conversation_id': 'conv-456',
-        'sender': 'user-789',
-        'content': 'Hello',
-        'timestamp': '2024-01-15T10:30:00Z',
-        'read_at': '2024-01-15T10:35:00Z',
-        'acknowledgements': [
-          {
-            'user_id': 'user-789',
-            'kind': 'will_review',
-            'created_at': '2024-01-15T10:40:00Z',
-            'updated_at': '2024-01-15T10:41:00Z',
-          },
-        ],
-      });
+    test(
+      'parses explicit acknowledgements without treating them as read state',
+      () {
+        final message = ConversationMessage.fromJson({
+          'id': '123',
+          'conversation_id': 'conv-456',
+          'sender': 'user-789',
+          'content': 'Hello',
+          'timestamp': '2024-01-15T10:30:00Z',
+          'acknowledgements': [
+            {
+              'user_id': 'user-789',
+              'kind': 'will_review',
+              'created_at': '2024-01-15T10:40:00Z',
+              'updated_at': '2024-01-15T10:41:00Z',
+            },
+          ],
+        });
 
-      expect(message.acknowledgements, hasLength(1));
-      expect(
-        message.acknowledgements.single.kind,
-        MessageAcknowledgementKind.willReview,
-      );
-      expect(message.acknowledgementFor('user-789'), isNotNull);
-    });
+        expect(message.acknowledgements, hasLength(1));
+        expect(
+          message.acknowledgements.single.kind,
+          MessageAcknowledgementKind.willReview,
+        );
+        expect(message.acknowledgementFor('user-789'), isNotNull);
+      },
+    );
 
     test('fromJson handles missing optional fields', () {
       final json = {
@@ -74,7 +74,6 @@ void main() {
       expect(message.content, 'Hello!');
       expect(message.imageBase64, isNull);
       expect(message.audioBase64, isNull);
-      expect(message.readAt, isNull);
       expect(message.status, 'sent'); // default
       expect(message.editedAt, isNull);
     });
@@ -161,8 +160,7 @@ void main() {
         imageBase64: 'img',
         audioBase64: 'aud',
         sentAt: DateTime.parse('2024-01-15T10:30:00Z'),
-        readAt: DateTime.parse('2024-01-15T10:35:00Z'),
-        status: 'read',
+        status: 'sent',
         editedAt: DateTime.parse('2024-01-15T10:40:00Z'),
       );
 
@@ -175,8 +173,7 @@ void main() {
       expect(modified.imageBase64, 'img');
       expect(modified.audioBase64, 'aud');
       expect(modified.sentAt, DateTime.parse('2024-01-15T10:30:00Z'));
-      expect(modified.readAt, DateTime.parse('2024-01-15T10:35:00Z'));
-      expect(modified.status, 'read');
+      expect(modified.status, 'sent');
       expect(modified.editedAt, DateTime.parse('2024-01-15T10:40:00Z'));
     });
 
@@ -249,31 +246,6 @@ void main() {
       // editedAt being non-null signals tombstone/deleted state
       expect(tombstoneMessage.editedAt, isNotNull);
       expect(tombstoneMessage.canEdit, isFalse);
-    });
-
-    test('isRead returns true when readAt is set', () {
-      final readMessage = ConversationMessage(
-        id: '123',
-        conversationId: 'conv-456',
-        senderId: 'user-789',
-        content: 'Read message',
-        sentAt: DateTime.now(),
-        readAt: DateTime.now(),
-      );
-
-      expect(readMessage.isRead, isTrue);
-    });
-
-    test('isRead returns false when readAt is null', () {
-      final unreadMessage = ConversationMessage(
-        id: '123',
-        conversationId: 'conv-456',
-        senderId: 'user-789',
-        content: 'Unread message',
-        sentAt: DateTime.now(),
-      );
-
-      expect(unreadMessage.isRead, isFalse);
     });
 
     test('isFrom returns true for matching userId', () {
@@ -606,11 +578,11 @@ void main() {
         conversation.lastMessageAt,
         DateTime.parse('2024-01-15T10:30:00Z'),
       );
-      expect(conversation.unreadCount, 5);
+      expect(conversation.unreadCount, 0);
       expect(conversation.isReceiver, false);
     });
 
-    test('fromJson parses read receipt preferences', () {
+    test('ignores removed read preference fields', () {
       final conversation = Conversation.fromJson({
         'id': 'conv-read',
         'mode': 'realtime',
@@ -623,8 +595,25 @@ void main() {
         'effective_read_receipt_mode': 'manual',
       });
 
-      expect(conversation.readReceiptMode, 'manual');
-      expect(conversation.effectiveReadReceiptMode, 'manual');
+      expect(conversation.unreadCount, 0);
+    });
+
+    test('parses connection privacy controls without online presence fields', () {
+      final preferences = ConnectionPreferences.fromJson({
+        'allow_strangers': false,
+        'busy_until': '2026-08-11T18:00:00Z',
+      });
+      final permission = ContactPermission.fromJson({
+        'peer_user_id': 'peer-1',
+        'allow_connection': true,
+        'muted_until': null,
+      });
+
+      expect(preferences.allowStrangers, isFalse);
+      expect(preferences.busyUntil, DateTime.parse('2026-08-11T18:00:00Z'));
+      expect(permission.peerUserId, 'peer-1');
+      expect(permission.allowConnection, isTrue);
+      expect(permission.mutedUntil, isNull);
     });
 
     test('canRespond is true only for pending incoming requests', () {
@@ -678,7 +667,7 @@ void main() {
           otherUsername: 'x',
           status: 'connected',
         ).connectionStatus,
-        ConnectionStatusType.online,
+        ConnectionStatusType.connected,
       );
       expect(
         Conversation(
@@ -688,7 +677,7 @@ void main() {
           otherUsername: 'x',
           status: 'established',
         ).connectionStatus,
-        ConnectionStatusType.online,
+        ConnectionStatusType.connected,
       );
       expect(
         Conversation(

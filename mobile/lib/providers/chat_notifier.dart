@@ -22,7 +22,6 @@ class ChatViewData extends ChatViewState {
   final String? currentUserId;
   final Conversation? conversation;
   final String? connectionStatus;
-  final bool isOtherTyping;
   final String? editingMessageId;
   final ConversationMessage? replyingToMessage;
   final bool isSending;
@@ -31,7 +30,6 @@ class ChatViewData extends ChatViewState {
     this.currentUserId,
     this.conversation,
     this.connectionStatus,
-    this.isOtherTyping = false,
     this.editingMessageId,
     this.replyingToMessage,
     this.isSending = false,
@@ -42,7 +40,6 @@ class ChatViewData extends ChatViewState {
     String? currentUserId,
     String? connectionStatus,
     Conversation? conversation,
-    bool? isOtherTyping,
     String? editingMessageId,
     ConversationMessage? replyingToMessage,
     bool? isSending,
@@ -57,7 +54,6 @@ class ChatViewData extends ChatViewState {
           connectionStatus ??
           conversation?.state.wireValue ??
           this.connectionStatus,
-      isOtherTyping: isOtherTyping ?? this.isOtherTyping,
       editingMessageId: clearEditing
           ? null
           : (editingMessageId ?? this.editingMessageId),
@@ -207,67 +203,6 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
     }
   }
 
-  bool get shouldShowManualReadAction {
-    // Read position is device-local. Keep this getter during the compatibility
-    // window so older callers compile, but never expose a server read action.
-    return false;
-  }
-
-  Future<void> markConversationRead({bool refresh = true}) async {
-    await _chatService.markConversationRead(conversationId);
-    if (!mounted) return;
-    if (_conversation != null) {
-      _conversation = Conversation(
-        id: _conversation!.id,
-        initiatorId: _conversation!.initiatorId,
-        recipientId: _conversation!.recipientId,
-        otherUserId: _conversation!.otherUserId,
-        otherUsername: _conversation!.otherUsername,
-        mode: _conversation!.mode,
-        state: _conversation!.state,
-        listingId: _conversation!.listingId,
-        listingTitle: _conversation!.listingTitle,
-        subject: _conversation!.subject,
-        lastMessage: _conversation!.lastMessage,
-        lastMessageAt: _conversation!.lastMessageAt,
-        unreadCount: 0,
-        readReceiptMode: _conversation!.readReceiptMode,
-        effectiveReadReceiptMode: _conversation!.effectiveReadReceiptMode,
-        archived: _conversation!.archived,
-        expiresAt: _conversation!.expiresAt,
-        establishedAt: _conversation!.establishedAt,
-        closedAt: _conversation!.closedAt,
-        closeReason: _conversation!.closeReason,
-        createdAt: _conversation!.createdAt,
-        updatedAt: _conversation!.updatedAt,
-        version: _conversation!.version,
-        isInitiator: _conversation!.isInitiator,
-        isBlocked: _conversation!.isBlocked,
-        capabilities: _conversation!.capabilities,
-      );
-      if (state is ChatViewData) {
-        state = (state as ChatViewData).copyWith(conversation: _conversation);
-      }
-    }
-    if (refresh) {
-      await loadMessages();
-    }
-  }
-
-  Future<void> setReadPreference(String mode) async {
-    final conversation = await _chatService.setConversationReadPreference(
-      conversationId,
-      mode,
-    );
-    setConversation(conversation);
-  }
-
-  void setOtherTyping(bool typing) {
-    if (state is ChatViewData) {
-      state = (state as ChatViewData).copyWith(isOtherTyping: typing);
-    }
-  }
-
   void _hydrateConversationAndReload() {
     hydrateConnectionStatus().then((_) {
       if (mounted) {
@@ -397,11 +332,6 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
     }
   }
 
-  void sendTypingIndicator() {
-    // Typing is intentionally not a public attention signal. Keep the method
-    // as a source-compatible no-op while old callers migrate.
-  }
-
   Future<void> acceptConnection(String connectionId) async {
     final conversation = await _chatService.respondConversation(
       connectionId,
@@ -501,7 +431,6 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
     String eventType, {
     String? messageId,
     String? conversationId,
-    String? typingUserId,
   }) {
     switch (eventType) {
       case 'conversation_created':
@@ -515,20 +444,12 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
           loadMessages();
         }
         break;
-      case 'message_read':
-        // Legacy event intentionally ignored. New clients use explicit
-        // acknowledgement changes instead of inferred read receipts.
-        break;
       case 'message_acknowledgement_changed':
       case 'message_reaction_changed':
       case 'message_hidden':
       case 'message_reported':
         loadMessages();
         break;
-      case 'typing':
-        // Legacy typing event intentionally ignored.
-        break;
     }
   }
-
 }

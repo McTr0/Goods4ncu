@@ -1,8 +1,7 @@
 //! End-to-end tests for user-to-user chat conversations.
 //!
 //! These tests exercise the public HTTP API for the TCP-style realtime
-//! conversation lifecycle, message sending, editing, read receipts, and typing
-//! indicators.
+//! conversation lifecycle, message sending, editing, and explicit acknowledgement.
 //!
 //! Run with: `cargo test --test chat_e2e`
 //! Enforce required mode: `CHAT_E2E_REQUIRED=true cargo test --test chat_e2e`
@@ -84,6 +83,17 @@ async fn create_test_user(
     let _ = register_user(client, base_url, &username, &password).await?;
     let login_response = login_user(client, base_url, &username, &password).await?;
 
+    let preferences = client
+        .put(format!("{}/api/chat/connection-preferences", base_url))
+        .headers(auth_headers(&login_response.token))
+        .json(&serde_json::json!({
+            "allow_strangers": true,
+            "busy_until": null
+        }))
+        .send()
+        .await?;
+    assert_eq!(preferences.status(), StatusCode::OK);
+
     Ok(TestUser {
         user_id: login_response.user_id,
         token: login_response.token,
@@ -130,7 +140,6 @@ struct ConversationEntry {
     state: String,
     initiator_id: String,
     recipient_id: String,
-    unread_count: i32,
     is_initiator: bool,
 }
 
@@ -159,7 +168,6 @@ struct MessageEntry {
     sender: String,
     content: String,
     timestamp: String,
-    read_at: Option<String>,
     image_data: Option<String>,
     audio_data: Option<String>,
     image_url: Option<String>,
@@ -182,12 +190,6 @@ struct MessageListResponse {
 #[derive(Debug, Serialize)]
 struct EditMessageBody {
     content: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct MarkReadResponse {
-    conversation_id: String,
-    marked_count: i64,
 }
 
 fn auth_headers(token: &str) -> HeaderMap {
@@ -452,7 +454,6 @@ async fn test_realtime_conversation_lifecycle() -> anyhow::Result<()> {
         .expect("receiver should see the realtime invitation");
     assert_eq!(found.state, "syn_sent");
     assert!(!found.is_initiator);
-    assert!(found.unread_count >= 1);
     assert!(conversations_b.next_cursor.is_none());
 
     let accept_response = client
@@ -635,106 +636,6 @@ async fn test_message_editing() -> anyhow::Result<()> {
         .send()
         .await?;
     assert_eq!(edit_b_response.status(), StatusCode::FORBIDDEN);
-
-    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_read_receipts() -> anyhow::Result<()> {
-    let database_url = db_safety::resolve_test_database_url();
-    let pool = PgPool::connect(&database_url).await?;
-    let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
-    let Some(base_url) = resolve_base_url(&client).await? else {
-        return Ok(());
-    };
-
-    let user_a = create_test_user(&client, &base_url, "read_a").await?;
-    let user_b = create_test_user(&client, &base_url, "read_b").await?;
-    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
-    let conversation_id =
-        create_active_realtime_conversation(&client, &base_url, &user_a, &user_b).await?;
-
-    let sent_message = send_text_message(
-        &client,
-        &base_url,
-        &user_a.token,
-        &conversation_id,
-        "Message for read receipt test",
-    )
-    .await?;
-    assert!(sent_message.read_at.is_none());
-
-    let read_response = client
-        .post(format!(
-            "{}/api/chat/conversations/{}/read",
-            base_url, conversation_id
-        ))
-        .headers(auth_headers(&user_b.token))
-        .send()
-        .await?;
-    assert_eq!(
-        read_response.status(),
-        StatusCode::OK,
-        "Mark read failed: {:?}",
-        read_response.text().await?
-    );
-    let read_result = read_response.json::<MarkReadResponse>().await?;
-    assert_eq!(read_result.conversation_id, conversation_id);
-    assert_eq!(read_result.marked_count, 0);
-
-    let get_response = client
-        .get(format!(
-            "{}/api/chat/conversations/{}/messages",
-            base_url, conversation_id
-        ))
-        .headers(auth_headers(&user_b.token))
-        .send()
-        .await?;
-    let messages = get_response.json::<MessageListResponse>().await?;
-    let read_msg = messages
-        .messages
-        .iter()
-        .find(|message| message.id == sent_message.id)
-        .expect("sent message should still be listed");
-    assert!(read_msg.read_at.is_none());
-
-    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_typing_indicator() -> anyhow::Result<()> {
-    let database_url = db_safety::resolve_test_database_url();
-    let pool = PgPool::connect(&database_url).await?;
-    let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
-    let Some(base_url) = resolve_base_url(&client).await? else {
-        return Ok(());
-    };
-
-    let user_a = create_test_user(&client, &base_url, "typing_a").await?;
-    let user_b = create_test_user(&client, &base_url, "typing_b").await?;
-    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
-    let conversation_id =
-        create_active_realtime_conversation(&client, &base_url, &user_a, &user_b).await?;
-
-    let typing_response = client
-        .post(format!(
-            "{}/api/chat/conversations/{}/typing",
-            base_url, conversation_id
-        ))
-        .headers(auth_headers(&user_a.token))
-        .send()
-        .await?;
-    assert_eq!(
-        typing_response.status(),
-        StatusCode::OK,
-        "Typing compatibility request failed: {:?}",
-        typing_response.text().await?
-    );
-    let typing_result = typing_response.json::<serde_json::Value>().await?;
-    assert_eq!(typing_result["sent"], false);
-    assert_eq!(typing_result["deprecated"], true);
 
     cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
     Ok(())

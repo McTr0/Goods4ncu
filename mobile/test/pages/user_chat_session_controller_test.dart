@@ -273,16 +273,15 @@ void main() {
     });
 
     final notification = WsNotification(
-      eventType: 'typing',
-      title: 'typing',
+      eventType: 'message_acknowledgement_changed',
+      title: 'acknowledgement',
       body: '',
       conversationId: 'conv-1',
-      typingUserId: 'user-2',
     );
     notificationSource.controller.add(notification);
     await Future<void>.delayed(Duration.zero);
 
-    expect(received?.eventType, 'typing');
+    expect(received?.eventType, 'message_acknowledgement_changed');
     expect(received?.conversationId, 'conv-1');
 
     controller.dispose();

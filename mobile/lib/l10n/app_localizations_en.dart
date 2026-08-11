@@ -87,6 +87,26 @@ class AppLocalizationsEn extends AppLocalizations {
       'Connection request sent, waiting for acceptance';
 
   @override
+  String get connectionPrivacyTitle => 'Connection privacy';
+
+  @override
+  String get connectionPrivacySubtitle =>
+      'Choose who may interrupt you with realtime requests.';
+
+  @override
+  String get allowStrangersTitle => 'Allow strangers to connect';
+
+  @override
+  String get allowStrangersSubtitle =>
+      'When off, strangers can still leave a message but cannot start realtime.';
+
+  @override
+  String get busyModeTitle => 'Pause realtime requests for one hour';
+
+  @override
+  String get busyModeSubtitle => 'Mail remains available while you are busy.';
+
+  @override
   String get contactSeller => 'Contact Seller';
 
   @override
@@ -2495,15 +2515,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get connectionRequestTitle => 'Connection request';
 
   @override
-  String connectionRequestReadReceiptNotice(String title, String body) {
-    return '$title\n\n$body\n\nRead receipts will be enabled after you confirm.';
-  }
-
-  @override
   String get offlineStatus => 'Offline';
 
   @override
   String get onlineStatus => 'Online';
+
+  @override
+  String get connectedStatus => 'Connected';
 
   @override
   String get pendingAcceptStatus => 'Pending';

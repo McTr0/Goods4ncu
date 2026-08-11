@@ -90,17 +90,6 @@ pub struct MessageListResponse {
     pub total: i64,
 }
 
-#[derive(Debug, Serialize)]
-pub struct MarkReadResponse {
-    pub conversation_id: String,
-    pub marked_count: i64,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ReadPreferenceBody {
-    pub mode: String,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct EditMessageBody {
     pub content: String,
@@ -147,6 +136,18 @@ pub struct BlockedUserEntry {
 #[derive(Debug, Serialize)]
 pub struct BlockListResponse {
     pub items: Vec<BlockedUserEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConnectionPreferencesBody {
+    pub allow_strangers: bool,
+    pub busy_until: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ContactPermissionBody {
+    pub allow_connection: bool,
+    pub muted_until: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

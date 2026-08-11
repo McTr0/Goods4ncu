@@ -28,27 +28,6 @@ void main() {
       expect(notification.body, 'You have a new message from Alice');
       expect(notification.messageId, 'msg-456');
       expect(notification.conversationId, 'conv-789');
-      expect(notification.typingUserId, 'user-alice');
-      expect(notification.typingUsername, 'alice');
-    });
-
-    test('parses typing event correctly', () {
-      final json = {
-        'event': 'typing',
-        'event_type': 'typing',
-        'title': 'Typing',
-        'body': 'Alice is typing...',
-        'conversation_id': 'conv-123',
-        'user_id': 'user-alice',
-        'username': 'alice',
-      };
-
-      final notification = WsNotification.fromJson(json);
-
-      expect(notification.eventType, 'typing');
-      expect(notification.conversationId, 'conv-123');
-      expect(notification.typingUserId, 'user-alice');
-      expect(notification.typingUsername, 'alice');
     });
 
     test('parses connection_request event correctly', () {
@@ -68,8 +47,6 @@ void main() {
       expect(notification.title, 'Connection Request');
       expect(notification.body, 'Bob wants to connect with you');
       expect(notification.connectionId, 'conn-456');
-      expect(notification.typingUserId, 'user-bob');
-      expect(notification.typingUsername, 'bob');
     });
 
     test('parses connection_established event correctly', () {
@@ -85,23 +62,6 @@ void main() {
 
       expect(notification.eventType, 'connection_established');
       expect(notification.connectionId, 'conn-123');
-    });
-
-    test('parses message_read event correctly', () {
-      final json = {
-        'event': 'message_read',
-        'event_type': 'message_read',
-        'title': 'Message Read',
-        'body': 'Alice read your message',
-        'message_id': 'msg-789',
-        'conversation_id': 'conv-123',
-      };
-
-      final notification = WsNotification.fromJson(json);
-
-      expect(notification.eventType, 'message_read');
-      expect(notification.messageId, 'msg-789');
-      expect(notification.conversationId, 'conv-123');
     });
 
     test('handles missing optional fields gracefully', () {
@@ -123,8 +83,6 @@ void main() {
       expect(notification.connectionId, isNull);
       expect(notification.messageId, isNull);
       expect(notification.conversationId, isNull);
-      expect(notification.typingUserId, isNull);
-      expect(notification.typingUsername, isNull);
     });
 
     test('handles null values gracefully', () {
@@ -156,8 +114,6 @@ void main() {
       expect(notification.connectionId, isNull);
       expect(notification.messageId, isNull);
       expect(notification.conversationId, isNull);
-      expect(notification.typingUserId, isNull);
-      expect(notification.typingUsername, isNull);
     });
 
     test('handles integer id values by converting to string', () {
@@ -180,7 +136,6 @@ void main() {
       expect(notification.messageId, '67890');
       expect(notification.connectionId, '11111');
       expect(notification.conversationId, '22222');
-      expect(notification.typingUserId, '33333');
     });
 
     test('prefers event field over event_type when both present', () {

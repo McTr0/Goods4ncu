@@ -893,7 +893,48 @@ class ConversationCapabilities {
   }
 }
 
-enum ConnectionStatusType { online, offline, pending }
+/// A conversation's transport state. `connected` describes this conversation
+/// only; it is never a claim about a person's global online presence.
+enum ConnectionStatusType { connected, offline, pending }
+
+/// Per-user policy for realtime connection requests.  `busyUntil` is a
+/// temporary interruption preference, not an online/last-seen signal.
+class ConnectionPreferences {
+  const ConnectionPreferences({required this.allowStrangers, this.busyUntil});
+
+  final bool allowStrangers;
+  final DateTime? busyUntil;
+
+  factory ConnectionPreferences.fromJson(Map<String, dynamic> json) {
+    return ConnectionPreferences(
+      allowStrangers: json['allow_strangers'] == true,
+      busyUntil: _jsonDateTime(json['busy_until']),
+    );
+  }
+}
+
+/// A deliberate relationship-specific permission.  A muted contact may still
+/// have a persisted conversation; only the interrupting notification is
+/// suppressed while the mute is active.
+class ContactPermission {
+  const ContactPermission({
+    required this.peerUserId,
+    required this.allowConnection,
+    this.mutedUntil,
+  });
+
+  final String peerUserId;
+  final bool allowConnection;
+  final DateTime? mutedUntil;
+
+  factory ContactPermission.fromJson(Map<String, dynamic> json) {
+    return ContactPermission(
+      peerUserId: json['peer_user_id']?.toString() ?? '',
+      allowConnection: json['allow_connection'] != false,
+      mutedUntil: _jsonDateTime(json['muted_until']),
+    );
+  }
+}
 
 class Conversation {
   Conversation({
@@ -912,8 +953,6 @@ class Conversation {
     this.lastMessage,
     this.lastMessageAt,
     this.unreadCount = 0,
-    this.readReceiptMode = 'inherit',
-    this.effectiveReadReceiptMode = 'auto',
     this.archived = false,
     this.expiresAt,
     this.establishedAt,
@@ -957,9 +996,9 @@ class Conversation {
   final String? subject;
   final String? lastMessage;
   final DateTime? lastMessageAt;
+
+  /// Device-local new-message marker (0 or 1), never supplied by the server.
   final int unreadCount;
-  final String readReceiptMode;
-  final String effectiveReadReceiptMode;
   final bool archived;
   final DateTime? expiresAt;
   final DateTime? establishedAt;
@@ -996,10 +1035,7 @@ class Conversation {
       subject: json['subject']?.toString(),
       lastMessage: json['last_message']?.toString(),
       lastMessageAt: date('last_message_at'),
-      unreadCount: (json['unread_count'] as num?)?.toInt() ?? 0,
-      readReceiptMode: json['read_receipt_mode']?.toString() ?? 'inherit',
-      effectiveReadReceiptMode:
-          json['effective_read_receipt_mode']?.toString() ?? 'auto',
+      unreadCount: 0,
       archived: json['archived'] == true,
       expiresAt: date('expires_at'),
       establishedAt: date('established_at'),
@@ -1027,7 +1063,7 @@ class Conversation {
       return ConnectionStatusType.pending;
     }
     return state == ConversationState.active
-        ? ConnectionStatusType.online
+        ? ConnectionStatusType.connected
         : ConnectionStatusType.offline;
   }
 }
@@ -1081,7 +1117,9 @@ class ChatThread {
           DateTime.tryParse(json['latest_activity_at']?.toString() ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0),
       latestPreview: json['latest_preview']?.toString(),
-      unreadCount: (json['unread_count'] as num?)?.toInt() ?? 0,
+      // The server no longer stores a read position.  Inbox badges are
+      // derived from the device-local marker in ConversationListPage.
+      unreadCount: 0,
       conversationCount: (json['conversation_count'] as num?)?.toInt() ?? 0,
       mailCount: (json['mail_count'] as num?)?.toInt() ?? 0,
       realtimeCount: (json['realtime_count'] as num?)?.toInt() ?? 0,
@@ -1259,7 +1297,6 @@ class ConversationMessage {
   final String? imageUrl;
   final String? audioUrl;
   final DateTime sentAt;
-  final DateTime? readAt;
   final String? replyToMessageId;
   final MessageReplyPreview? replyPreview;
   final MessageStructuredQuote? quote;
@@ -1289,7 +1326,6 @@ class ConversationMessage {
     this.imageUrl,
     this.audioUrl,
     required this.sentAt,
-    this.readAt,
     this.replyToMessageId,
     this.replyPreview,
     this.quote,
@@ -1320,9 +1356,6 @@ class ConversationMessage {
           : json['timestamp'] != null
           ? DateTime.parse(json['timestamp'].toString())
           : DateTime.now(),
-      readAt: json['read_at'] != null
-          ? DateTime.tryParse(json['read_at'].toString())
-          : null,
       replyToMessageId: json['reply_to_message_id']?.toString(),
       replyPreview: json['reply_preview'] is Map<String, dynamic>
           ? MessageReplyPreview.fromJson(
@@ -1359,9 +1392,6 @@ class ConversationMessage {
     );
   }
 
-  /// 消息是否已读（有连接且已读）
-  bool get isRead => readAt != null;
-
   MessageAcknowledgement? acknowledgementFor(String userId) {
     for (final acknowledgement in acknowledgements) {
       if (acknowledgement.userId == userId) return acknowledgement;
@@ -1389,7 +1419,6 @@ class ConversationMessage {
     String? imageUrl,
     String? audioUrl,
     DateTime? sentAt,
-    DateTime? readAt,
     String? replyToMessageId,
     MessageReplyPreview? replyPreview,
     MessageStructuredQuote? quote,
@@ -1414,7 +1443,6 @@ class ConversationMessage {
       imageUrl: imageUrl ?? this.imageUrl,
       audioUrl: audioUrl ?? this.audioUrl,
       sentAt: sentAt ?? this.sentAt,
-      readAt: readAt ?? this.readAt,
       replyToMessageId: replyToMessageId ?? this.replyToMessageId,
       replyPreview: replyPreview ?? this.replyPreview,
       quote: quote ?? this.quote,

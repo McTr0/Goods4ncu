@@ -23,9 +23,6 @@ class _FakePageChatService extends ChatService {
     int limit = 50,
     int offset = 0,
   }) async => const [];
-
-  @override
-  Future<void> markConnectionAsRead(String conversationId) async {}
 }
 
 class _FakePageUserService extends UserService {
@@ -720,7 +717,7 @@ void main() {
         ),
       );
 
-      expect(find.text('在线'), findsOneWidget);
+      expect(find.text('已连接'), findsOneWidget);
     });
 
     testWidgets('shows pending status', (tester) async {

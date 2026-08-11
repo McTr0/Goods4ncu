@@ -248,6 +248,24 @@ abstract class AppLocalizations {
   /// **'Connection request sent, waiting for acceptance'**
   String get connectionRequestSent;
 
+  /// No description provided for @connectionPrivacyTitle.
+  String get connectionPrivacyTitle;
+
+  /// No description provided for @connectionPrivacySubtitle.
+  String get connectionPrivacySubtitle;
+
+  /// No description provided for @allowStrangersTitle.
+  String get allowStrangersTitle;
+
+  /// No description provided for @allowStrangersSubtitle.
+  String get allowStrangersSubtitle;
+
+  /// No description provided for @busyModeTitle.
+  String get busyModeTitle;
+
+  /// No description provided for @busyModeSubtitle.
+  String get busyModeSubtitle;
+
   /// No description provided for @contactSeller.
   ///
   /// In en, this message translates to:
@@ -4578,12 +4596,6 @@ abstract class AppLocalizations {
   /// **'Connection request'**
   String get connectionRequestTitle;
 
-  /// No description provided for @connectionRequestReadReceiptNotice.
-  ///
-  /// In en, this message translates to:
-  /// **'{title}\n\n{body}\n\nRead receipts will be enabled after you confirm.'**
-  String connectionRequestReadReceiptNotice(String title, String body);
-
   /// No description provided for @offlineStatus.
   ///
   /// In en, this message translates to:
@@ -4595,6 +4607,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Online'**
   String get onlineStatus;
+
+  /// No description provided for @connectedStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected'**
+  String get connectedStatus;
 
   /// No description provided for @pendingAcceptStatus.
   ///

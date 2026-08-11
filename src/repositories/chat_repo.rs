@@ -38,8 +38,7 @@ impl PostgresChatRepository {
             ),
             rollup AS (
                 SELECT conversation_id,
-                       MIN(timestamp) AS created_at,
-                       COUNT(*) FILTER (WHERE receiver = $1 AND read_at IS NULL)::int AS unread_count
+                       MIN(timestamp) AS created_at
                 FROM visible_messages
                 GROUP BY conversation_id
             )
@@ -53,7 +52,7 @@ impl PostgresChatRepository {
                    'active'::text AS status,
                    NULL::timestamptz AS established_at,
                    rollup.created_at,
-                   rollup.unread_count,
+                   0::int AS unread_count,
                    latest.receiver = $1 AS is_receiver
             FROM latest
             JOIN rollup USING (conversation_id)
@@ -240,17 +239,6 @@ impl ChatRepository for PostgresChatRepository {
         Ok((rows, total))
     }
 
-    async fn mark_conversation_read(
-        &self,
-        conversation_id: &str,
-        reader_id: &str,
-    ) -> Result<(), ApiError> {
-        // Kept for the legacy repository trait.  Read position is now a
-        // device-local concern; accepting the call must not write read_at.
-        let _ = (conversation_id, reader_id);
-        Ok(())
-    }
-
     async fn edit_message(
         &self,
         message_id: &str,
@@ -278,12 +266,6 @@ impl ChatRepository for PostgresChatRepository {
             return Err(ApiError::BadRequest("消息不存在或无权编辑".to_string()));
         }
 
-        Ok(())
-    }
-
-    async fn mark_message_read(&self, message_id: &str, reader_id: &str) -> Result<(), ApiError> {
-        // Compatibility no-op; see mark_conversation_read above.
-        let _ = (message_id, reader_id);
         Ok(())
     }
 }

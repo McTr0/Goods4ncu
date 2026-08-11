@@ -11,7 +11,7 @@
 use crate::api::auth;
 use crate::api::error::ApiError;
 use crate::api::session::Session;
-use crate::api::{AppState, PeerAddr};
+use crate::api::{normalize_platform_media_url, AppState, PeerAddr};
 use crate::llm::MarketplaceAgent;
 use crate::services::chat::{ChatService, AGENT_CONVERSATION_SENTINEL};
 use axum::extract::{Query, State};
@@ -67,21 +67,6 @@ pub(crate) struct AssistantHistoryResponse {
     pub total: i64,
 }
 
-pub(crate) fn normalize_optional_media_url(
-    value: Option<String>,
-    field_name: &str,
-) -> Result<Option<String>, ApiError> {
-    let normalized = value
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty());
-    if let Some(url) = normalized.as_deref() {
-        if !url.starts_with("http://") && !url.starts_with("https://") {
-            return Err(ApiError::BadRequest(format!("{field_name}格式无效")));
-        }
-    }
-    Ok(normalized)
-}
-
 fn extract_bearer_token(headers: &HeaderMap) -> Result<&str, ApiError> {
     headers
         .get("Authorization")
@@ -118,10 +103,14 @@ pub(crate) async fn get_assistant_history(
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
     let offset = query.offset.unwrap_or(0).max(0);
     let service = ChatService::new(state.infra.db.clone());
-    let (messages, total) = service
+    let (mut messages, total) = service
         .get_assistant_messages(&user_id, limit, offset)
         .await
         .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
+    for message in &mut messages {
+        message.image_url = state.public_chat_media_url(message.image_url.take());
+        message.audio_url = state.public_chat_media_url(message.audio_url.take());
+    }
 
     Ok(Json(AssistantHistoryResponse {
         conversation_id: AGENT_CONVERSATION_SENTINEL,
@@ -285,8 +274,8 @@ pub(crate) async fn handle_chat(
         ));
     }
 
-    let normalized_image_url = normalize_optional_media_url(image_url, "image_url")?;
-    let normalized_audio_url = normalize_optional_media_url(audio_url, "audio_url")?;
+    let normalized_image_url = normalize_platform_media_url(&state, image_url, "image_url")?;
+    let normalized_audio_url = normalize_platform_media_url(&state, audio_url, "audio_url")?;
 
     // Direct TCP peer address as rate-limit key — cannot be spoofed.
     // X-Forwarded-For is read for logging only, never as a rate-limit token.
@@ -488,8 +477,8 @@ async fn handle_chat_stream_request(
         ));
     }
 
-    let normalized_image_url = normalize_optional_media_url(image_url, "image_url")?;
-    let normalized_audio_url = normalize_optional_media_url(audio_url, "audio_url")?;
+    let normalized_image_url = normalize_platform_media_url(&state, image_url, "image_url")?;
+    let normalized_audio_url = normalize_platform_media_url(&state, audio_url, "audio_url")?;
 
     let token = extract_bearer_token(&headers)?;
 
@@ -747,27 +736,6 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("Hello back!"));
         assert!(json.contains("conv-123"));
-    }
-
-    #[test]
-    fn normalize_optional_media_url_allows_https_urls() {
-        let normalized = normalize_optional_media_url(
-            Some(" https://cdn.example.com/file.jpg ".to_string()),
-            "image_url",
-        )
-        .expect("normalized");
-        assert_eq!(
-            normalized,
-            Some("https://cdn.example.com/file.jpg".to_string())
-        );
-    }
-
-    #[test]
-    fn normalize_optional_media_url_rejects_non_http_urls() {
-        let err =
-            normalize_optional_media_url(Some("file:///tmp/image.jpg".to_string()), "image_url")
-                .expect_err("invalid");
-        assert!(matches!(err, ApiError::BadRequest(_)));
     }
 
     #[test]

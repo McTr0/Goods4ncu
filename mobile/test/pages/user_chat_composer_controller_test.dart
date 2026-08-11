@@ -28,7 +28,6 @@ class _FakeChatService extends ChatService {
   String? sentContent;
   String? editedMessageId;
   String? editedContent;
-  int typingCalls = 0;
 
   @override
   Future<List<ConversationMessage>> getChatConversationMessages(
@@ -36,12 +35,6 @@ class _FakeChatService extends ChatService {
     int limit = 50,
     int offset = 0,
   }) async => messages;
-
-  @override
-  Future<void> markConnectionAsRead(String conversationId) async {}
-
-  @override
-  Future<void> markConversationRead(String conversationId) async {}
 
   @override
   Future<ConversationMessage> sendMessage(
@@ -88,27 +81,11 @@ class _FakeChatService extends ChatService {
           editedAt: DateTime.now(),
         );
   }
-
-  @override
-  Future<void> sendTyping(String conversationId) async {
-    typingCalls += 1;
-  }
 }
 
 class _FakeUserService extends UserService {
   @override
   Future<Map<String, dynamic>> getUserProfile() async => {'user_id': 'user-me'};
-}
-
-Conversation _activeConversation() {
-  return Conversation(
-    id: 'conv-1',
-    requesterId: 'user-me',
-    otherUserId: 'user-other',
-    otherUsername: 'Other',
-    state: ConversationState.active,
-    capabilities: const ConversationCapabilities(canSend: true),
-  );
 }
 
 void main() {
@@ -325,26 +302,6 @@ void main() {
         ),
       ),
     );
-
-    controller.dispose();
-    notifier.dispose();
-  });
-
-  test('sendTypingIndicator is a compatibility no-op', () async {
-    final chatService = _FakeChatService();
-    final notifier = ChatNotifier(
-      conversationId: 'conv-1',
-      chatService: chatService,
-      userService: _FakeUserService(),
-    );
-    await flushAsync();
-    final controller = UserChatComposerController(chatNotifier: notifier);
-    notifier.setConversation(_activeConversation());
-
-    controller.sendTypingIndicator();
-    await flushAsync();
-
-    expect(chatService.typingCalls, 0);
 
     controller.dispose();
     notifier.dispose();

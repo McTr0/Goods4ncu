@@ -25,6 +25,12 @@
   "confirmPassword": "Confirm Password",
   "connectionFailedRetry": "Connection failed, please try again later",
   "connectionRequestSent": "Connection request sent, waiting for acceptance",
+  "connectionPrivacyTitle": "Connection privacy",
+  "connectionPrivacySubtitle": "Choose who may interrupt you with realtime requests.",
+  "allowStrangersTitle": "Allow strangers to connect",
+  "allowStrangersSubtitle": "When off, strangers can still leave a message but cannot start realtime.",
+  "busyModeTitle": "Pause realtime requests for one hour",
+  "busyModeSubtitle": "Mail remains available while you are busy.",
   "contactSeller": "Contact Seller",
   "counterOfferAmount": "Counter offer amount",
   "counterOfferBySeller": "Seller counter-offered ¥{amount}",
@@ -1213,19 +1219,9 @@
     }
   },
   "connectionRequestTitle": "Connection request",
-  "connectionRequestReadReceiptNotice": "{title}\n\n{body}\n\nRead receipts will be enabled after you confirm.",
-  "@connectionRequestReadReceiptNotice": {
-    "placeholders": {
-      "title": {
-        "type": "String"
-      },
-      "body": {
-        "type": "String"
-      }
-    }
-  },
   "offlineStatus": "Offline",
   "onlineStatus": "Online",
+  "connectedStatus": "Connected",
   "pendingAcceptStatus": "Pending",
   "connectingStatus": "Connecting...",
   "replyPreviewGeneric": "Quoted a message",

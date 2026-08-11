@@ -158,7 +158,6 @@ pub struct UpdateProfileRequest {
     pub email: Option<String>,
     pub avatar_url: Option<String>,
     pub discoverability: Option<UpdateDiscoverabilityRequest>,
-    pub chat_read_receipt_mode: Option<String>,
     pub payment_qr: Option<UpdatePaymentQrRequest>,
 }
 
@@ -301,13 +300,6 @@ pub async fn update_profile(
                 discoverability.email,
                 discoverability.student_id,
             )
-            .await?;
-    }
-
-    if let Some(mode) = &body.chat_read_receipt_mode {
-        state
-            .user_repo
-            .update_chat_read_receipt_mode(&user_id, mode)
             .await?;
     }
 
@@ -793,7 +785,6 @@ mod tests {
                 email: false,
                 student_id: false,
             },
-            chat_read_receipt_mode: "auto".to_string(),
             avatar_url: None,
             payment_qr: crate::repositories::UserPaymentQr {
                 wechat_url: None,

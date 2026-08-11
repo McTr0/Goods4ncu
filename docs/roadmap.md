@@ -19,7 +19,7 @@
 - JWT/JTI、refresh rotation、logout 撤销、封禁和管理员审计。
 - offer/wanted 发布、列表、匹配和响应基础能力。
 - 分类亲和度、新鲜度和向量相似推荐。
-- 联系人 Thread、realtime/mail、消息回复/反应/举报/quote；已读和 typing 已进入兼容迁移期，主动 acknowledgement 正在落地。
+- 联系人 Thread、realtime/mail、消息回复/反应/举报/quote；服务端发送事实、设备本地 `LOCALLY_SEEN`、主动 acknowledgement 和连接隐私控制已落地。
 - 群组、频道、通话信令和 Secret Chat 原型。
 - 多 LLM provider、RAG、市场工具和回复助手。
 - 线下成交意向、卖家确认和可选自动下架。
@@ -31,8 +31,8 @@
 
 - CampusMembership、核心资源校园作用域、后台审核队列、跨校园理由审计和统一 session extractor 已落地。当前 19 张租户表已启用 FORCE RLS（`0042` 及后续领域迁移，`app.campus_id` 事务级 GUC 触发，未设置时放行以保持应用层为主边界），隔离与写拒绝有集成测试；应用侧全请求 GUC 注入（fail-closed）与多副本租户验证仍属 Phase 4。
 - Agent 的更新/下架/成交意向/议价已接入 crash-safe ActionPlan（模型只能提出，L3 需独立 token 的二次确认）；发布采用立即执行 + 条件式撤销。listing command 统一化与资源版本快照仍待补。
-- 聊天隐私目标已确定并开始切换：留言/连接二分、服务端已发送、设备本地 `LOCALLY_SEEN` 和主动 acknowledgement 按迁移阶段推进。
-- WebSocket 跨副本投递已具备（Redis fan-out，双实例端到端验证）；typing/call signaling 多副本化与压测仍待做。outbox 基础与通知推送已持久化，其余事件消费者仍在进程内。
+- 聊天隐私迁移已完成首阶段：留言/连接二分、服务端已发送、设备本地 `LOCALLY_SEEN`、主动 acknowledgement，以及陌生人/忙碌/联系人静音与重复请求抑制均由当前协议执行。
+- WebSocket 跨副本投递已具备（Redis fan-out，双实例端到端验证）；call signaling 多副本化与压测仍待做，typing 已从协议移除。outbox 基础与通知推送已持久化，其余事件消费者仍在进程内。
 - 媒体隔离、审核公开门槛、缩略图和 Base64 退出不完整；案件事实层已具备，但对象存储隔离仍需生产化。
 - API 缺少统一版本和 cursor；[已实现] 未版本化接口已有兼容旧客户端的稳定错误字段、服务端 request ID，以及 listing 发布、wanted response 和成交确认幂等，其他写接口仍需收敛。
 - 首页商品 feed、相似商品、listing wanted matches 与意图撮合均已有统一解释和显式反馈控制；离线质量评估、公平性指标与跨表达软排序仍不足。
@@ -180,10 +180,10 @@
 
 ### 沟通隐私迁移（Listing 收敛后）
 
-- [进行中] 消息公开状态已在新服务端/移动端收敛为 `sending | sent | failed`；`sent` 只表示服务器已持久化，不声称接收设备已收到。旧 `delivered/read` 映射为 `sent`，`read_at` 暂保留但新路径不再返回事实。
-- [进行中] 已新增稳定的 `received | will_review | completed` acknowledgement。每个用户对每条消息最多一个，可替换或撤销；普通 reaction 保持独立语义，并通过 `message_acknowledgement_changed` 同步。
-- [进行中] 移动端已停止自动 read/typing 调用、移除 read preference 设置并忽略旧事件；兼容接口无广播、无新的公开注意力事实，旧 preference 写入也被冻结。下一步删除旧字段和 WebSocket 事件，并将新留言提示完全迁到设备本地。
-- [目标态] `LOCALLY_SEEN` 只保存在设备本地；连接请求的权限、静音、忙碌、陌生人限制和重复请求抑制随后补齐。群组临时讨论留在更后阶段。
+- [已实现] 消息公开状态收敛为 `sending | sent | failed`；`sent` 只表示服务器已持久化，不声称接收设备已收到。旧 `delivered/read` 映射为 `sent`，服务器 `read_at/read_by` 已删除。
+- [已实现] 稳定的 `received | will_review | completed` acknowledgement 每用户每消息最多一个，可替换或撤销；普通 reaction 保持独立语义，并通过 `message_acknowledgement_changed` 同步。
+- [已实现] 移动端已停止 read/typing 调用；旧路由、设置、字段和 WebSocket 事件已移除，新留言提示完全迁到设备本地。打开、Push、通知预览、解密、播放和输入都不会产生发送方可见状态。
+- [已实现] `LOCALLY_SEEN` 只保存在设备本地；连接请求已加入权限、静音、忙碌、陌生人限制和按用户对重复抑制。群组临时讨论留在更后阶段。
 
 ### 安全与质量
 
@@ -215,7 +215,7 @@
 
 ### 多副本实时通信
 
-- [部分完成] Redis WebSocket pub/sub fan-out 已实现（`redis` feature 默认开启，设置 `REDIS_URL` 即激活）：所有 `broadcast_to_user` 经 Redis 频道路由，每个副本向自己持有的 socket 投递恰好一次；发布失败降级为本地投递。分布式限流在设置 `REDIS_URL` 时启用（Redis 故障降级为单机限流而不是拒绝启动）。跨进程投递已用双实例端到端测试验证：两个真实服务进程共享 Redis+Postgres，A 实例上的真实 WebSocket 客户端收到来自 A 进程之外发布的消息（`tests/ws_fanout_integration.rs`，需 `REDIS_TEST_URL`/`FANOUT_E2E`）。typing 与 call signaling 的多副本化仍待做。
+- [部分完成] Redis WebSocket pub/sub fan-out 已实现（`redis` feature 默认开启，设置 `REDIS_URL` 即激活）：所有 `broadcast_to_user` 经 Redis 频道路由，每个副本向自己持有的 socket 投递恰好一次；发布失败降级为本地投递。分布式限流在设置 `REDIS_URL` 时启用（Redis 故障降级为单机限流而不是拒绝启动）。跨进程投递已用双实例端到端测试验证：两个真实服务进程共享 Redis+Postgres，A 实例上的真实 WebSocket 客户端收到来自 A 进程之外发布的消息（`tests/ws_fanout_integration.rs`，需 `REDIS_TEST_URL`/`FANOUT_E2E`）。call signaling 的多副本化仍待做，typing 不再属于协议。
 - 消息和通知先持久化，socket 只做实时投递（outbox 已保证通知推送持久）。
 - 断线和跨实例丢事件通过 HTTP cursor 补偿。
 - TURN、权限、弱网和 signaling 多副本完成后，通话才从实验进入稳定。

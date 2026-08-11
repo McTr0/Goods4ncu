@@ -169,7 +169,6 @@ pub struct UserProfile {
     pub email: Option<String>,
     pub student_id: Option<String>,
     pub discoverability: UserDiscoverability,
-    pub chat_read_receipt_mode: String,
     pub avatar_url: Option<String>,
     pub payment_qr: UserPaymentQr,
     pub role: String,
@@ -279,13 +278,6 @@ pub trait UserRepository: Send + Sync {
         student_id: Option<bool>,
     ) -> Result<(), ApiError>;
 
-    /// Update global chat read receipt preference.
-    async fn update_chat_read_receipt_mode(
-        &self,
-        user_id: &str,
-        mode: &str,
-    ) -> Result<(), ApiError>;
-
     /// Update optional offline payment QR-code URLs and public visibility.
     async fn update_payment_qr(
         &self,
@@ -385,13 +377,6 @@ pub trait ChatRepository: Send + Sync {
         offset: i64,
     ) -> Result<(Vec<ChatMessage>, i64), ApiError>;
 
-    /// Mark all messages in a conversation as read.
-    async fn mark_conversation_read(
-        &self,
-        conversation_id: &str,
-        reader_id: &str,
-    ) -> Result<(), ApiError>;
-
     /// Edit a message (sender only, within 15 min).
     async fn edit_message(
         &self,
@@ -399,9 +384,6 @@ pub trait ChatRepository: Send + Sync {
         sender_id: &str,
         new_content: &str,
     ) -> Result<(), ApiError>;
-
-    /// Mark a message as read.
-    async fn mark_message_read(&self, message_id: &str, reader_id: &str) -> Result<(), ApiError>;
 }
 
 // ---------------------------------------------------------------------------

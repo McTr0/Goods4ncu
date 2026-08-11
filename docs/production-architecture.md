@@ -162,14 +162,14 @@ Redis 只保存可丢失或可重建状态：
 
 - 分布式限流计数。
 - WebSocket 实例间 pub/sub fan-out。
-- typing、在线心跳和短期 call signaling 状态。
+- 短期 call signaling 状态。
 - 有短 TTL 的 Feed/cache 结果。
 
 消息正文、会话状态、通知未读和成交记录不能只存在 Redis。
 
 WebSocket 连接由各 API replica 本地维护，事件经 Redis channel 按用户/campus 路由。客户端断线后使用数据库列表和游标补偿，不依赖 Redis 重放完整历史。
 
-邮件模式不发送 typing/read 给对方；realtime 事件也不能把“本机 socket 已连接”解释为“对方在线”。
+邮件和 realtime 都不发送 typing/read/online 给对方；realtime 事件也不能把“本机 socket 已连接”解释为“对方在线”。
 
 ## 媒体和对象存储
 
@@ -273,7 +273,7 @@ Feature flag 用于隔离 Agent 写工具、多校园、Feed 新排序和 Secret
 | --- | --- | --- |
 | LLM provider 不可用 | 显示手工搜索/表单，聊天业务继续 | 熔断 Agent 调用，不阻塞核心 API |
 | Embedding 不可用 | 使用关键词、分类和新鲜度 | outbox 保留重建任务 |
-| Redis 不可用 | typing/在线提示降级，列表仍可读取 | 限流进入批准的本地保守模式，禁止错误放开 |
+| Redis 不可用 | 列表和已持久化消息仍可读取，实时提示稍后补偿 | 限流进入批准的本地保守模式，禁止错误放开 |
 | 对象存储不可用 | 保留表单内容，媒体稍后重试 | 不回退为大 Base64 主路径 |
 | 审核 provider 不可用 | 媒体保持 pending/占位 | 队列重试并告警，不直接公开 |
 | WebSocket fan-out 故障 | 客户端轮询/刷新补偿 | 数据库消息和通知仍是事实 |

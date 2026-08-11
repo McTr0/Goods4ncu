@@ -55,9 +55,6 @@ fn profile_from_row(row: &sqlx::postgres::PgRow, user_id_column: &str) -> UserPr
             email: row.get("discover_by_email"),
             student_id: row.get("discover_by_student_id"),
         },
-        chat_read_receipt_mode: row
-            .try_get("chat_read_receipt_mode")
-            .unwrap_or_else(|_| "auto".to_string()),
         avatar_url: row.get("avatar_url"),
         payment_qr: UserPaymentQr {
             wechat_url: row.get("wechat_pay_qr_url"),
@@ -227,7 +224,7 @@ impl UserRepository for PostgresUserRepository {
         let row = sqlx::query(
             "SELECT id, username, email, student_id, discover_by_username,
                     discover_by_email, discover_by_student_id,
-                    chat_read_receipt_mode, avatar_url,
+                    avatar_url,
                     wechat_pay_qr_url, alipay_qr_url, show_wechat_pay_qr,
                     show_alipay_qr, role, created_at
              FROM users WHERE id = $1",
@@ -308,7 +305,7 @@ impl UserRepository for PostgresUserRepository {
         let rows = sqlx::query(
             "SELECT id, username, email, student_id, discover_by_username,
                     discover_by_email, discover_by_student_id,
-                    chat_read_receipt_mode, avatar_url,
+                    avatar_url,
                     wechat_pay_qr_url, alipay_qr_url, show_wechat_pay_qr,
                     show_alipay_qr, role, created_at
              FROM users
@@ -357,7 +354,7 @@ impl UserRepository for PostgresUserRepository {
                 r#"
                 SELECT u.id as user_id, u.username, u.email, u.student_id,
                        u.discover_by_username, u.discover_by_email,
-                       u.discover_by_student_id, u.chat_read_receipt_mode, u.avatar_url,
+                       u.discover_by_student_id, u.avatar_url,
                        u.wechat_pay_qr_url, u.alipay_qr_url,
                        u.show_wechat_pay_qr, u.show_alipay_qr,
                        u.role, u.created_at,
@@ -375,7 +372,7 @@ impl UserRepository for PostgresUserRepository {
                   AND u.username ILIKE $2
                 GROUP BY u.id, u.username, u.email, u.student_id,
                          u.discover_by_username, u.discover_by_email,
-                         u.discover_by_student_id, u.chat_read_receipt_mode, u.avatar_url,
+                         u.discover_by_student_id, u.avatar_url,
                          u.wechat_pay_qr_url, u.alipay_qr_url,
                          u.show_wechat_pay_qr, u.show_alipay_qr,
                          u.role, u.created_at
@@ -410,7 +407,7 @@ impl UserRepository for PostgresUserRepository {
                 r#"
                 SELECT u.id as user_id, u.username, u.email, u.student_id,
                        u.discover_by_username, u.discover_by_email,
-                       u.discover_by_student_id, u.chat_read_receipt_mode, u.avatar_url,
+                       u.discover_by_student_id, u.avatar_url,
                        u.wechat_pay_qr_url, u.alipay_qr_url,
                        u.show_wechat_pay_qr, u.show_alipay_qr,
                        u.role, u.created_at,
@@ -427,7 +424,7 @@ impl UserRepository for PostgresUserRepository {
                   AND u.status = 'active'
                 GROUP BY u.id, u.username, u.email, u.student_id,
                          u.discover_by_username, u.discover_by_email,
-                         u.discover_by_student_id, u.chat_read_receipt_mode, u.avatar_url,
+                         u.discover_by_student_id, u.avatar_url,
                          u.wechat_pay_qr_url, u.alipay_qr_url,
                          u.show_wechat_pay_qr, u.show_alipay_qr,
                          u.role, u.created_at
@@ -762,22 +759,6 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
 
-        Ok(())
-    }
-
-    async fn update_chat_read_receipt_mode(
-        &self,
-        user_id: &str,
-        mode: &str,
-    ) -> Result<(), ApiError> {
-        if !matches!(mode, "auto" | "manual") {
-            return Err(ApiError::BadRequest(
-                "chat_read_receipt_mode must be auto or manual".to_string(),
-            ));
-        }
-        // Compatibility-only setting.  New clients keep read position on the
-        // device, so accepting this legacy write must not alter server state.
-        let _ = (user_id, mode);
         Ok(())
     }
 

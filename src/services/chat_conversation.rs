@@ -112,9 +112,6 @@ pub struct ConversationView {
     pub subject: Option<String>,
     pub last_message: Option<String>,
     pub last_message_at: Option<String>,
-    pub unread_count: i32,
-    pub read_receipt_mode: String,
-    pub effective_read_receipt_mode: String,
     pub archived: bool,
     pub expires_at: Option<String>,
     pub established_at: Option<String>,
@@ -134,7 +131,6 @@ pub struct ChatThreadView {
     pub peer_username: String,
     pub latest_activity_at: String,
     pub latest_preview: Option<String>,
-    pub unread_count: i64,
     pub conversation_count: i64,
     pub mail_count: i64,
     pub realtime_count: i64,
@@ -166,6 +162,22 @@ pub struct CreateConversationResult {
     pub conversation: ConversationView,
     pub created: bool,
     pub mutual_open: bool,
+    /// Whether the recipient's current contact mute allows an interrupting
+    /// notification.  The conversation itself is still persisted when false.
+    pub notify_recipient: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ConnectionPreferencesView {
+    pub allow_strangers: bool,
+    pub busy_until: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ContactPermissionView {
+    pub peer_user_id: String,
+    pub allow_connection: bool,
+    pub muted_until: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -291,7 +303,6 @@ pub struct ConversationMessageRecord {
     pub can_react: bool,
     pub can_report: bool,
     pub timestamp: String,
-    pub read_at: Option<String>,
     pub image_data: Option<String>,
     pub audio_data: Option<String>,
     pub image_url: Option<String>,
@@ -371,6 +382,143 @@ impl ChatConversationService {
         Self { pool }
     }
 
+    pub async fn get_connection_preferences(
+        &self,
+        user_id: &str,
+    ) -> Result<ConnectionPreferencesView, ApiError> {
+        let row = sqlx::query(
+            "SELECT allow_strangers, busy_until
+             FROM chat_connection_preferences
+             WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_error)?;
+        Ok(ConnectionPreferencesView {
+            allow_strangers: row
+                .as_ref()
+                .map(|value| value.get("allow_strangers"))
+                .unwrap_or(false),
+            busy_until: row
+                .and_then(|value| value.get::<Option<DateTime<Utc>>, _>("busy_until"))
+                .map(|value| value.to_rfc3339()),
+        })
+    }
+
+    pub async fn set_connection_preferences(
+        &self,
+        user_id: &str,
+        allow_strangers: bool,
+        busy_until: Option<DateTime<Utc>>,
+    ) -> Result<ConnectionPreferencesView, ApiError> {
+        let busy_until = busy_until.filter(|value| *value > Utc::now());
+        sqlx::query(
+            "INSERT INTO chat_connection_preferences (user_id, allow_strangers, busy_until)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (user_id) DO UPDATE
+             SET allow_strangers = EXCLUDED.allow_strangers,
+                 busy_until = EXCLUDED.busy_until,
+                 updated_at = NOW()",
+        )
+        .bind(user_id)
+        .bind(allow_strangers)
+        .bind(busy_until)
+        .execute(&self.pool)
+        .await
+        .map_err(db_error)?;
+        self.get_connection_preferences(user_id).await
+    }
+
+    pub async fn list_contact_permissions(
+        &self,
+        owner_id: &str,
+    ) -> Result<Vec<ContactPermissionView>, ApiError> {
+        let rows = sqlx::query(
+            "SELECT peer_id, allow_connection, muted_until
+             FROM chat_contact_permissions
+             WHERE owner_id = $1
+             ORDER BY updated_at DESC, peer_id ASC",
+        )
+        .bind(owner_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_error)?;
+        Ok(rows
+            .into_iter()
+            .map(|row| ContactPermissionView {
+                peer_user_id: row.get("peer_id"),
+                allow_connection: row.get("allow_connection"),
+                muted_until: row
+                    .get::<Option<DateTime<Utc>>, _>("muted_until")
+                    .map(|value| value.to_rfc3339()),
+            })
+            .collect())
+    }
+
+    pub async fn set_contact_permission(
+        &self,
+        owner_id: &str,
+        peer_id: &str,
+        allow_connection: bool,
+        muted_until: Option<DateTime<Utc>>,
+    ) -> Result<ContactPermissionView, ApiError> {
+        if owner_id == peer_id {
+            return Err(ApiError::BadRequest("不能设置自己的联系人权限".to_string()));
+        }
+        let peer_exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)")
+                .bind(peer_id)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(db_error)?;
+        if !peer_exists {
+            return Err(ApiError::NotFound);
+        }
+        let muted_until = muted_until.filter(|value| *value > Utc::now());
+        let row = sqlx::query(
+            "INSERT INTO chat_contact_permissions (
+                owner_id, peer_id, allow_connection, muted_until
+             ) VALUES ($1, $2, $3, $4)
+             ON CONFLICT (owner_id, peer_id) DO UPDATE
+             SET allow_connection = EXCLUDED.allow_connection,
+                 muted_until = EXCLUDED.muted_until,
+                 updated_at = NOW()
+             RETURNING peer_id, allow_connection, muted_until",
+        )
+        .bind(owner_id)
+        .bind(peer_id)
+        .bind(allow_connection)
+        .bind(muted_until)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(db_error)?;
+        Ok(ContactPermissionView {
+            peer_user_id: row.get("peer_id"),
+            allow_connection: row.get("allow_connection"),
+            muted_until: row
+                .get::<Option<DateTime<Utc>>, _>("muted_until")
+                .map(|value| value.to_rfc3339()),
+        })
+    }
+
+    pub async fn delete_contact_permission(
+        &self,
+        owner_id: &str,
+        peer_id: &str,
+    ) -> Result<(), ApiError> {
+        sqlx::query(
+            "DELETE FROM chat_contact_permissions
+             WHERE owner_id = $1 AND peer_id = $2",
+        )
+        .bind(owner_id)
+        .bind(peer_id)
+        .execute(&self.pool)
+        .await
+        .map_err(db_error)?;
+        Ok(())
+    }
+
     pub async fn create_conversation(
         &self,
         input: CreateConversationInput,
@@ -436,6 +584,9 @@ impl ChatConversationService {
         .await
         .map_err(db_error)?
         {
+            let notify_recipient =
+                !recipient_has_muted_contact(&mut tx, &input.recipient_id, &input.initiator_id)
+                    .await?;
             tx.commit().await.map_err(commit_error)?;
             let conversation = self
                 .get_conversation(existing_id, &input.initiator_id)
@@ -444,6 +595,7 @@ impl ChatConversationService {
                 conversation,
                 created: false,
                 mutual_open: false,
+                notify_recipient,
             });
         }
 
@@ -461,6 +613,13 @@ impl ChatConversationService {
         }
 
         if input.mode == ConversationMode::Realtime {
+            lock_realtime_pair(
+                &mut tx,
+                input.campus_id,
+                &input.initiator_id,
+                &input.recipient_id,
+            )
+            .await?;
             if let Some(existing) = find_live_realtime(
                 &mut tx,
                 &input.initiator_id,
@@ -491,7 +650,6 @@ impl ChatConversationService {
                         None,
                     )
                     .await?;
-                    increment_unread(&mut tx, existing.id, &input.recipient_id).await?;
                     let now = Utc::now();
                     sqlx::query(
                         "UPDATE chat_conversations
@@ -515,6 +673,12 @@ impl ChatConversationService {
                         "active",
                     )
                     .await?;
+                    let notify_recipient = !recipient_has_muted_contact(
+                        &mut tx,
+                        &input.recipient_id,
+                        &input.initiator_id,
+                    )
+                    .await?;
                     tx.commit().await.map_err(commit_error)?;
                     let conversation = self
                         .get_conversation(existing.id, &input.initiator_id)
@@ -523,9 +687,13 @@ impl ChatConversationService {
                         conversation,
                         created: false,
                         mutual_open: true,
+                        notify_recipient,
                     });
                 }
 
+                let notify_recipient =
+                    !recipient_has_muted_contact(&mut tx, &input.recipient_id, &input.initiator_id)
+                        .await?;
                 tx.commit().await.map_err(commit_error)?;
                 let conversation = self
                     .get_conversation(existing.id, &input.initiator_id)
@@ -534,9 +702,16 @@ impl ChatConversationService {
                     conversation,
                     created: false,
                     mutual_open: false,
+                    notify_recipient,
                 });
             }
         }
+
+        let notify_recipient = if input.mode == ConversationMode::Realtime {
+            evaluate_connection_request(&mut tx, &input.initiator_id, &input.recipient_id).await?
+        } else {
+            !recipient_has_muted_contact(&mut tx, &input.recipient_id, &input.initiator_id).await?
+        };
 
         enforce_creation_limits(&mut tx, &input.initiator_id, &input.recipient_id).await?;
 
@@ -599,7 +774,6 @@ impl ChatConversationService {
             None,
         )
         .await?;
-        increment_unread(&mut tx, conversation_id, &input.recipient_id).await?;
         insert_event(
             &mut tx,
             conversation_id,
@@ -618,6 +792,7 @@ impl ChatConversationService {
             conversation,
             created: true,
             mutual_open: false,
+            notify_recipient,
         })
     }
 
@@ -694,7 +869,6 @@ impl ChatConversationService {
                            WHEN c.initiator_id = $1 THEN c.recipient_id
                            ELSE c.initiator_id
                        END AS peer_user_id,
-                       member.unread_count,
                        inventory.title AS listing_title,
                        latest.content AS latest_preview,
                        ROW_NUMBER() OVER (
@@ -723,7 +897,6 @@ impl ChatConversationService {
                    MAX(visible.last_activity_at) AS latest_activity_at,
                    MAX(visible.latest_preview) FILTER (WHERE visible.recency_rank = 1)
                        AS latest_preview,
-                   COALESCE(SUM(visible.unread_count), 0)::bigint AS unread_count,
                    COUNT(*)::bigint AS conversation_count,
                    COUNT(*) FILTER (WHERE visible.mode = 'mail')::bigint AS mail_count,
                    COUNT(*) FILTER (WHERE visible.mode = 'realtime')::bigint AS realtime_count,
@@ -768,7 +941,6 @@ impl ChatConversationService {
                     peer_username: row.get("peer_username"),
                     latest_activity_at: latest_activity_at.to_rfc3339(),
                     latest_preview: row.get("latest_preview"),
-                    unread_count: row.get("unread_count"),
                     conversation_count: row.get("conversation_count"),
                     mail_count: row.get("mail_count"),
                     realtime_count: row.get("realtime_count"),
@@ -844,10 +1016,7 @@ impl ChatConversationService {
             r#"
             SELECT COALESCE(other_user.username, '') AS other_username,
                    inventory.title AS listing_title,
-                   member.unread_count,
-                   member.read_receipt_mode,
                    member.archived_at,
-                   viewer.chat_read_receipt_mode,
                    latest.content AS last_message,
                    latest.timestamp AS last_message_at,
                    EXISTS(
@@ -858,7 +1027,6 @@ impl ChatConversationService {
             FROM chat_conversations c
             JOIN chat_conversation_members member
               ON member.conversation_id = c.id AND member.user_id = $2
-            JOIN users viewer ON viewer.id = $2
             LEFT JOIN users other_user ON other_user.id = $3
             LEFT JOIN inventory ON inventory.id = c.listing_id
             LEFT JOIN LATERAL (
@@ -892,13 +1060,6 @@ impl ChatConversationService {
         let expires_at = row.expiry_at().map(|value| value.to_rfc3339());
         let last_message_at: Option<DateTime<Utc>> = metadata.get("last_message_at");
         let archived_at: Option<DateTime<Utc>> = metadata.get("archived_at");
-        let read_receipt_mode: String = metadata.get("read_receipt_mode");
-        let global_read_receipt_mode: String = metadata.get("chat_read_receipt_mode");
-        let effective_read_receipt_mode = if read_receipt_mode == "inherit" {
-            global_read_receipt_mode
-        } else {
-            read_receipt_mode.clone()
-        };
         let can_restart = !is_blocked
             && mode == ConversationMode::Realtime
             && matches!(
@@ -922,9 +1083,6 @@ impl ChatConversationService {
             subject: row.subject,
             last_message: metadata.get("last_message"),
             last_message_at: last_message_at.map(|value| value.to_rfc3339()),
-            unread_count: metadata.get("unread_count"),
-            read_receipt_mode,
-            effective_read_receipt_mode,
             archived: archived_at.is_some(),
             expires_at,
             established_at: row.established_at.map(|value| value.to_rfc3339()),
@@ -1111,25 +1269,6 @@ impl ChatConversationService {
         self.get_conversation(conversation_id, user_id).await
     }
 
-    pub async fn set_read_preference(
-        &self,
-        conversation_id: Uuid,
-        user_id: &str,
-        mode: &str,
-    ) -> Result<ConversationView, ApiError> {
-        if !matches!(mode, "inherit" | "auto" | "manual") {
-            return Err(ApiError::BadRequest(
-                "read receipt mode must be inherit, auto, or manual".to_string(),
-            ));
-        }
-        let row = load_conversation(&self.pool, conversation_id).await?;
-        row.ensure_participant(user_id)?;
-        // Compatibility endpoint only.  The preference no longer changes
-        // server behaviour or creates an attention fact; leave the legacy
-        // column untouched until the rollback window closes.
-        self.get_conversation(conversation_id, user_id).await
-    }
-
     pub async fn send_message(
         &self,
         input: SendConversationMessageInput,
@@ -1203,7 +1342,6 @@ impl ChatConversationService {
             input.audio_url.as_deref(),
         )
         .await?;
-        increment_unread(&mut tx, input.conversation_id, &other_user_id).await?;
         let now = Utc::now();
         let idle_expires_at = (mode == ConversationMode::Realtime)
             .then_some(now + Duration::hours(ACTIVE_IDLE_HOURS));
@@ -1224,15 +1362,6 @@ impl ChatConversationService {
         let mut message = inserted;
         enrich_message_for_user(&self.pool, &input.sender_id, &mut message).await?;
         Ok(message)
-    }
-
-    pub async fn mark_read(&self, conversation_id: Uuid, user_id: &str) -> Result<i64, ApiError> {
-        let row = load_conversation(&self.pool, conversation_id).await?;
-        row.ensure_participant(user_id)?;
-        // Compatibility endpoint only.  The legacy read marker remains in the
-        // schema for rollback, but a request from an old client must not create
-        // or broadcast a new public attention fact.
-        Ok(0)
     }
 
     pub async fn get_messages(
@@ -1259,7 +1388,7 @@ impl ChatConversationService {
         .await
         .map_err(db_error)?;
         let rows = sqlx::query(
-            "SELECT id, client_message_id, sender, content, reply_to_message_id, timestamp, read_at,
+            "SELECT id, client_message_id, sender, content, reply_to_message_id, timestamp,
                     image_data, audio_data, image_url, audio_url, status, kind, edited_at,
                     quote_kind, quote_ref_id, quote_snapshot
              FROM chat_messages
@@ -1335,7 +1464,7 @@ impl ChatConversationService {
         let updated = sqlx::query(
             "UPDATE chat_messages SET content = $1, edited_at = NOW()
              WHERE id = $2
-             RETURNING id, client_message_id, sender, content, reply_to_message_id, timestamp, read_at,
+             RETURNING id, client_message_id, sender, content, reply_to_message_id, timestamp,
                        image_data, audio_data, image_url, audio_url, status, kind, edited_at,
                        quote_kind, quote_ref_id, quote_snapshot",
         )
@@ -1669,7 +1798,7 @@ async fn find_live_realtime(
     tx: &mut Transaction<'_, Postgres>,
     user_a: &str,
     user_b: &str,
-    listing_id: Option<&str>,
+    _listing_id: Option<&str>,
     campus_id: Uuid,
 ) -> Result<Option<ConversationRow>, ApiError> {
     sqlx::query_as::<_, ConversationRow>(
@@ -1680,17 +1809,39 @@ async fn find_live_realtime(
          WHERE mode = 'realtime' AND state IN ('syn_sent', 'syn_ack', 'active')
            AND ((initiator_id = $1 AND recipient_id = $2)
              OR (initiator_id = $2 AND recipient_id = $1))
-           AND listing_id IS NOT DISTINCT FROM $3
-           AND campus_id = $4
+           AND campus_id = $3
          FOR UPDATE",
     )
     .bind(user_a)
     .bind(user_b)
-    .bind(listing_id)
     .bind(campus_id)
     .fetch_optional(&mut **tx)
     .await
     .map_err(db_error)
+}
+
+/// Serialize realtime creation for one campus-scoped peer pair before the
+/// lookup/insert sequence. The partial unique index remains the final guard,
+/// while this lock turns concurrent duplicate requests into an idempotent
+/// lookup instead of a constraint error.
+async fn lock_realtime_pair(
+    tx: &mut Transaction<'_, Postgres>,
+    campus_id: Uuid,
+    user_a: &str,
+    user_b: &str,
+) -> Result<(), ApiError> {
+    let (first, second) = if user_a <= user_b {
+        (user_a, user_b)
+    } else {
+        (user_b, user_a)
+    };
+    let lock_key = format!("{campus_id}:{first}:{second}");
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(lock_key)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(db_error)?;
+    Ok(())
 }
 
 async fn pair_is_blocked(
@@ -1710,6 +1861,100 @@ async fn pair_is_blocked(
     .fetch_one(&mut **tx)
     .await
     .map_err(db_error)
+}
+
+/// Decide whether a realtime invite may interrupt the recipient.
+///
+/// A previous established conversation counts as an existing contact.  A
+/// stranger must either be explicitly allowed for this peer or be covered by
+/// the recipient's opt-in stranger setting.  Busy is a hard stop; mute only
+/// suppresses the notification because the request itself remains visible in
+/// the inbox when the recipient chooses to return.
+async fn evaluate_connection_request(
+    tx: &mut Transaction<'_, Postgres>,
+    initiator_id: &str,
+    recipient_id: &str,
+) -> Result<bool, ApiError> {
+    let preferences = sqlx::query(
+        "SELECT allow_strangers, busy_until
+         FROM chat_connection_preferences
+         WHERE user_id = $1",
+    )
+    .bind(recipient_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(db_error)?;
+    if preferences
+        .as_ref()
+        .and_then(|row| row.get::<Option<DateTime<Utc>>, _>("busy_until"))
+        .is_some_and(|until| until > Utc::now())
+    {
+        return Err(ApiError::CodedConflict {
+            code: "recipient_busy",
+            message: "对方当前设置为忙碌，请先留言".to_string(),
+        });
+    }
+
+    let explicit_permission = sqlx::query_scalar::<_, bool>(
+        "SELECT allow_connection
+         FROM chat_contact_permissions
+         WHERE owner_id = $1 AND peer_id = $2",
+    )
+    .bind(recipient_id)
+    .bind(initiator_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(db_error)?;
+    if explicit_permission == Some(false) {
+        return Err(ApiError::CodedConflict {
+            code: "connection_not_allowed",
+            message: "对方没有允许你的连接请求".to_string(),
+        });
+    }
+
+    let existing_contact: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM chat_conversations
+            WHERE ((initiator_id = $1 AND recipient_id = $2)
+                OR (initiator_id = $2 AND recipient_id = $1))
+              AND established_at IS NOT NULL
+         )",
+    )
+    .bind(initiator_id)
+    .bind(recipient_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(db_error)?;
+    let allow_strangers = preferences
+        .as_ref()
+        .map(|row| row.get::<bool, _>("allow_strangers"))
+        .unwrap_or(false);
+    if !existing_contact && explicit_permission != Some(true) && !allow_strangers {
+        return Err(ApiError::CodedConflict {
+            code: "connection_requires_contact",
+            message: "陌生人默认只能留言，请先获得联系人许可".to_string(),
+        });
+    }
+
+    Ok(!recipient_has_muted_contact(tx, recipient_id, initiator_id).await?)
+}
+
+async fn recipient_has_muted_contact(
+    tx: &mut Transaction<'_, Postgres>,
+    owner_id: &str,
+    peer_id: &str,
+) -> Result<bool, ApiError> {
+    sqlx::query_scalar(
+        "SELECT COALESCE(muted_until > NOW(), FALSE)
+         FROM chat_contact_permissions
+         WHERE owner_id = $1 AND peer_id = $2",
+    )
+    .bind(owner_id)
+    .bind(peer_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(db_error)
+    .map(|value| value.unwrap_or(false))
 }
 
 async fn enforce_creation_limits(
@@ -1937,7 +2182,7 @@ async fn load_message_by_id_for_user(
 ) -> Result<ConversationMessageRecord, ApiError> {
     let row = sqlx::query(
         "SELECT id, client_message_id, direct_conversation_id, sender, content,
-                reply_to_message_id, timestamp, read_at, image_data, audio_data,
+                reply_to_message_id, timestamp, image_data, audio_data,
                 image_url, audio_url, status, kind, edited_at,
                 quote_kind, quote_ref_id, quote_snapshot
          FROM chat_messages
@@ -2214,7 +2459,7 @@ async fn insert_message(
             quote_kind, quote_ref_id, quote_snapshot,
             image_data, audio_data, image_url, audio_url, status
          ) VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8, $9, $10, $11, COALESCE($12, '{}'::jsonb), $13, $14, $15, $16, 'sent')
-         RETURNING id, client_message_id, sender, content, reply_to_message_id, timestamp, read_at,
+         RETURNING id, client_message_id, sender, content, reply_to_message_id, timestamp,
                    image_data, audio_data, image_url, audio_url, status, kind, edited_at,
                    quote_kind, quote_ref_id, quote_snapshot",
     )
@@ -2248,7 +2493,7 @@ async fn find_message_by_client_id(
     let row = sqlx::query(
         "SELECT id, client_message_id, direct_conversation_id, sender, content,
                 reply_to_message_id, timestamp,
-                read_at, image_data, audio_data, image_url, audio_url, status, kind, edited_at,
+                image_data, audio_data, image_url, audio_url, status, kind, edited_at,
                 quote_kind, quote_ref_id, quote_snapshot
          FROM chat_messages WHERE sender = $1 AND client_message_id = $2",
     )
@@ -2301,9 +2546,6 @@ fn row_to_message(row: sqlx::postgres::PgRow, conversation_id: Uuid) -> Conversa
         can_react: true,
         can_report: true,
         timestamp: timestamp.to_rfc3339(),
-        // Keep the field in the wire model for old clients, but never expose
-        // the legacy read_at fact after the privacy migration begins.
-        read_at: None,
         image_data: row.get("image_data"),
         audio_data: row.get("audio_data"),
         image_url: row.get("image_url"),
@@ -2312,24 +2554,6 @@ fn row_to_message(row: sqlx::postgres::PgRow, conversation_id: Uuid) -> Conversa
         kind: row.get("kind"),
         edited_at: edited_at.map(|value| value.to_rfc3339()),
     }
-}
-
-async fn increment_unread(
-    tx: &mut Transaction<'_, Postgres>,
-    conversation_id: Uuid,
-    receiver_id: &str,
-) -> Result<(), ApiError> {
-    sqlx::query(
-        "UPDATE chat_conversation_members
-         SET unread_count = unread_count + 1
-         WHERE conversation_id = $1 AND user_id = $2",
-    )
-    .bind(conversation_id)
-    .bind(receiver_id)
-    .execute(&mut **tx)
-    .await
-    .map_err(db_error)?;
-    Ok(())
 }
 
 async fn insert_event(

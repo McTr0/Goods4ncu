@@ -357,10 +357,10 @@ RETURNING listing_id, campus_id, desired_revision;
 | `orders` | campus_id、状态、buyer/seller、listing、金额和时间戳。 |
 | `hitl_requests` | campus_id、pending/countered/expired 状态、counter_price、expires_at。 |
 | `chat_conversations` | campus_id、mode、state、initiator/recipient、listing、subject、过期时间、close_reason。 |
-| `chat_conversation_members` | 每个成员的 unread_count、last_read_message_id、archived_at。 |
+| `chat_conversation_members` | 每个成员的 `archived_at`；新消息提示的本地查看位置不在数据库。 |
 | `chat_conversation_events` | 握手、ACK、关闭、过期等状态事件时间线。 |
 | `chat_blocks` | blocker/blocked 屏蔽关系。 |
-| `chat_messages` | conversation_id、direct_conversation_id、sender、receiver、媒体 URL/Base64、edited_at；`read_at/read_by` 仅为迁移回滚列，不再由新路径写入。 |
+| `chat_messages` | conversation_id、direct_conversation_id、sender、receiver、媒体 URL/Base64、edited_at；不保存 `read_at/read_by`。 |
 | `chat_message_acknowledgements` | 每条消息每个用户最多一条主动确认，`received/will_review/completed` 及创建/更新时间。 |
 | `chat_spaces` 及成员/消息表 | group/channel、owner、成员角色、发言权限和更新时间。 |
 | `chat_secret_sessions` 及消息表 | [实验中][待弃用] 密文、参与者、过期时间和兼容读取。 |
@@ -411,9 +411,9 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 
 先确认 `chat_conversations.mode` 和 `state`。`mail/open` 可以异步发送；`realtime` 只有 `active` 可发送，但发起方在 `syn_ack` 直接发送时会自动 ACK。`syn_sent`、`declined`、`cancelled`、`expired`、`closed` 都不应允许普通发送。
 
-如果消息看起来丢了，先查 `chat_messages.direct_conversation_id` 是否等于会话 id，再查 sender/receiver 是否是会话成员。未读数量来自 `chat_conversation_members.unread_count`，不是全局字段。排查状态跳转时看 `chat_conversation_events`，它能说明会话是被接通、关闭、屏蔽还是 worker 过期。
+如果消息看起来丢了，先查 `chat_messages.direct_conversation_id` 是否等于会话 id，再查 sender/receiver 是否是会话成员。新留言徽标来自接收设备的 `LOCALLY_SEEN`，服务器没有可查询的阅读位置。排查状态跳转时看 `chat_conversation_events`，它能说明会话是被接通、关闭、屏蔽还是 worker 过期。
 
-如果实时信号异常，确认 WebSocket 收到的是 `conversation_created`、`conversation_state_changed`、`new_message` 或 `message_acknowledgement_changed`。`message_read` 与 `typing` 是兼容期旧事件，新路径不再广播。媒体问题仍按 URL-first 检查 `image_url`、`audio_url`，Base64 字段只是兼容 fallback。
+如果实时信号异常，确认 WebSocket 收到的是 `conversation_created`、`conversation_state_changed`、`new_message` 或 `message_acknowledgement_changed`。服务端不广播 `message_read`、`typing` 或在线状态。媒体问题先确认 `image_url`、`audio_url` 属于平台 bucket 或代理，Base64 字段只是兼容 fallback。
 
 ### 语义搜索或推荐异常
 

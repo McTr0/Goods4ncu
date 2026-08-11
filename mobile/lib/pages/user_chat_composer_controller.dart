@@ -90,10 +90,6 @@ class UserChatComposerController {
     }
   }
 
-  void sendTypingIndicator() {
-    _chatNotifier.sendTypingIndicator();
-  }
-
   void dispose() {
     textController.dispose();
   }

@@ -6,13 +6,13 @@ use axum::{
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
-use crate::api::{ws, AppState};
+use crate::api::{normalize_platform_media_url, ws, AppState};
 use crate::services::chat_conversation::{
     ChatConversationService, ConversationMessageRecord, SendConversationMessageInput,
 };
 
 use super::{
-    authenticated_user, moderate_text, EditMessageBody, HideMessageResponse, MarkReadResponse,
+    authenticated_user, moderate_text, EditMessageBody, HideMessageResponse,
     MessageAcknowledgementBody, MessageListQuery, MessageListResponse, MessageReactionBody,
     ReportMessageBody, ReportMessageResponse, SendMessageBody,
 };
@@ -42,6 +42,10 @@ pub async fn get_conversation_messages(
             query.offset.unwrap_or(0),
         )
         .await?;
+    let messages = messages
+        .into_iter()
+        .map(|message| present_message(&state, message))
+        .collect();
     Ok(Json(MessageListResponse {
         conversation_id: conversation_id.to_string(),
         messages,
@@ -58,8 +62,8 @@ pub async fn send_conversation_message(
     let user_id = authenticated_user(&state, &headers)?;
     let content = body.content.trim().to_string();
     moderate_text(&state, &content)?;
-    let image_url = normalize_media_url(body.image_url, "image_url")?;
-    let audio_url = normalize_media_url(body.audio_url, "audio_url")?;
+    let image_url = normalize_platform_media_url(&state, body.image_url, "image_url")?;
+    let audio_url = normalize_platform_media_url(&state, body.audio_url, "audio_url")?;
     let has_url_media = image_url.is_some() || audio_url.is_some();
     let has_base64_media = body
         .image_base64
@@ -104,6 +108,8 @@ pub async fn send_conversation_message(
         }
     }
 
+    let presented_message = present_message(&state, message.clone());
+
     let other_user_id = if user_id == conversation.initiator_id {
         &conversation.recipient_id
     } else {
@@ -116,8 +122,8 @@ pub async fn send_conversation_message(
         "sender": user_id,
         "content": content,
         "timestamp": message.timestamp,
-        "image_url": image_url,
-        "audio_url": audio_url,
+        "image_url": presented_message.image_url,
+        "audio_url": presented_message.audio_url,
         "kind": message.kind,
         "reply_to_message_id": message.reply_to_message_id,
         "reply_preview": message.reply_preview,
@@ -133,21 +139,7 @@ pub async fn send_conversation_message(
     if has_base64_media {
         state.infra.metrics.record_chat_media_base64_message();
     }
-    Ok(Json(message))
-}
-
-pub async fn mark_conversation_read(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(conversation_id): Path<Uuid>,
-) -> Result<Json<MarkReadResponse>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
-    let service = ChatConversationService::new(state.infra.db.clone());
-    let marked_count = service.mark_read(conversation_id, &user_id).await?;
-    Ok(Json(MarkReadResponse {
-        conversation_id: conversation_id.to_string(),
-        marked_count,
-    }))
+    Ok(Json(presented_message))
 }
 
 pub async fn set_message_acknowledgement(
@@ -162,7 +154,7 @@ pub async fn set_message_acknowledgement(
         .set_message_acknowledgement(message_id, &user_id, body.kind)
         .await?;
     broadcast_acknowledgement(&service, &user_id, &message).await?;
-    Ok(Json(message))
+    Ok(Json(present_message(&state, message)))
 }
 
 pub async fn delete_message_acknowledgement(
@@ -176,7 +168,7 @@ pub async fn delete_message_acknowledgement(
         .delete_message_acknowledgement(message_id, &user_id)
         .await?;
     broadcast_acknowledgement(&service, &user_id, &message).await?;
-    Ok(Json(message))
+    Ok(Json(present_message(&state, message)))
 }
 
 pub async fn edit_message(
@@ -190,7 +182,7 @@ pub async fn edit_message(
     moderate_text(&state, &content)?;
     let service = ChatConversationService::new(state.infra.db.clone());
     let message = service.edit_message(message_id, &user_id, &content).await?;
-    Ok(Json(message))
+    Ok(Json(present_message(&state, message)))
 }
 
 pub async fn set_message_reaction(
@@ -205,7 +197,7 @@ pub async fn set_message_reaction(
         .set_reaction(message_id, &user_id, &body.emoji)
         .await?;
     broadcast_message_update(&service, &user_id, &message, "message_reaction_changed").await?;
-    Ok(Json(message))
+    Ok(Json(present_message(&state, message)))
 }
 
 pub async fn delete_message_reaction(
@@ -217,7 +209,7 @@ pub async fn delete_message_reaction(
     let service = ChatConversationService::new(state.infra.db.clone());
     let message = service.delete_reaction(message_id, &user_id).await?;
     broadcast_message_update(&service, &user_id, &message, "message_reaction_changed").await?;
-    Ok(Json(message))
+    Ok(Json(present_message(&state, message)))
 }
 
 pub async fn hide_message(
@@ -263,21 +255,6 @@ pub async fn report_message(
     }))
 }
 
-pub async fn typing_indicator(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(conversation_id): Path<Uuid>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
-    let service = ChatConversationService::new(state.infra.db.clone());
-    // Validate access for old clients, but deliberately do not persist or
-    // broadcast a typing/attention signal.
-    service.get_conversation(conversation_id, &user_id).await?;
-    Ok(Json(
-        serde_json::json!({ "sent": false, "deprecated": true }),
-    ))
-}
-
 async fn broadcast_acknowledgement(
     service: &ChatConversationService,
     actor_id: &str,
@@ -321,17 +298,11 @@ async fn broadcast_message_update(
     Ok(())
 }
 
-fn normalize_media_url(value: Option<String>, field: &str) -> Result<Option<String>, ApiError> {
-    let value = value
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-    if value
-        .as_deref()
-        .is_some_and(|url| !url.starts_with("http://") && !url.starts_with("https://"))
-    {
-        return Err(ApiError::BadRequest(format!("{field} 格式无效")));
-    }
-    Ok(value)
+fn present_message(
+    state: &AppState,
+    mut message: ConversationMessageRecord,
+) -> ConversationMessageRecord {
+    message.image_url = state.public_chat_media_url(message.image_url);
+    message.audio_url = state.public_chat_media_url(message.audio_url);
+    message
 }

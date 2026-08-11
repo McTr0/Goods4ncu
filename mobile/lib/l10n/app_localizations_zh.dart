@@ -84,6 +84,24 @@ class AppLocalizationsZh extends AppLocalizations {
   String get connectionRequestSent => '已发送连接请求，等待对方接受';
 
   @override
+  String get connectionPrivacyTitle => '连接隐私';
+
+  @override
+  String get connectionPrivacySubtitle => '选择谁可以用实时连接打断你。';
+
+  @override
+  String get allowStrangersTitle => '允许陌生人发起连接';
+
+  @override
+  String get allowStrangersSubtitle => '关闭后陌生人仍可留言，但不能直接发起实时连接。';
+
+  @override
+  String get busyModeTitle => '暂停实时连接一小时';
+
+  @override
+  String get busyModeSubtitle => '忙碌期间仍可接收留言。';
+
+  @override
   String get contactSeller => '联系卖家';
 
   @override
@@ -2380,15 +2398,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get connectionRequestTitle => '连接请求';
 
   @override
-  String connectionRequestReadReceiptNotice(String title, String body) {
-    return '$title\n\n$body\n\n确认后将开启消息已读功能';
-  }
-
-  @override
   String get offlineStatus => '离线';
 
   @override
   String get onlineStatus => '在线';
+
+  @override
+  String get connectedStatus => '已连接';
 
   @override
   String get pendingAcceptStatus => '待接受';

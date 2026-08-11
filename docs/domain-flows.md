@@ -186,7 +186,7 @@ tenant / visibility / status hard filter
 
 ## 联系人线程与独立会话
 
-消息首页第一层按 `peer_user_id` 聚合为 Thread，同一个聊天对象只显示一次。Thread 聚合最近活动、联系人级新留言、Conversation 数量和待回应状态；迁移期仍兼容服务端 unread 字段。
+消息首页第一层按 `peer_user_id` 聚合为 Thread，同一个聊天对象只显示一次。Thread 聚合最近活动、联系人级新留言、Conversation 数量和待回应状态；新留言标记完全来自设备本地 `LOCALLY_SEEN`。
 
 进入 Thread 后按 Conversation 卡组展示多次 realtime、mail 和历史。Conversation 仍然是独立事实，不跨卡混排成没有边界的消息流。
 
@@ -223,11 +223,9 @@ Mail 创建后进入 open，主题 1–120 字、正文 1–2000 字，无需接
 
 ### 已读、确认与注意力隐私
 
-[迁移进行中] 用户全局设置和 Conversation 覆盖项仍接受旧客户端的 auto/manual read 配置但忽略写入；read API 已变为无操作且不再广播，typing API 同样只做成员校验后返回兼容结果。旧客户端可能继续调用接口，但服务端不产生新的公开注意力事实。
+服务器不再保存阅读位置、read preference 或 typing 状态；旧数据库字段已在迁移中删除，旧 read/typing 路由也不再注册。`LOCALLY_SEEN` 只存在于接收端设备，不写入发送方可见事实，也不由服务器推断。公开消息状态收敛为 `sending | sent | failed`；只有接收者主动选择 `received | will_review | completed` 才产生可见 acknowledgement。打开会话、查看通知、接收 Push、解密内容、播放媒体、回复或普通 reaction 都不自动生成 acknowledgement。
 
-[迁移进行中] `LOCALLY_SEEN` 只存在于接收端设备，不写入发送方可见事实，也不由服务器推断。公开状态已收敛为 `sending | sent | failed`；只有接收者主动选择 `received | will_review | completed` 才产生可见 acknowledgement。打开会话、查看通知、接收 Push、解密内容、播放媒体、回复或普通 reaction 都不自动生成 acknowledgement。
-
-目标态下 realtime 的 `active` 连接本身就是双方明确参与的信号，不再额外暴露 typing、online 或 last seen。迁移期间保留旧字段和接口以兼容旧客户端，但停止为新客户端产生新的公开已读事实。
+realtime 的 `active` 只表示这一段会话已经接通，不是全局在线、last seen 或注意力证明。移动端不发送 read/typing，WebSocket 也不广播这些事件。连接隐私由 `allow_strangers`、busy 截止时间和联系人权限控制；静音只抑制打扰通知，不改变历史或生成已读事实。
 
 ### Reply 与结构化 Quote
 

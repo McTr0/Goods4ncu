@@ -3,6 +3,7 @@ use axum::{
     http::HeaderMap,
     Json,
 };
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::api::auth::{
@@ -20,8 +21,9 @@ use crate::services::notification::NewNotification;
 
 use super::{
     ArchiveConversationBody, BlockListResponse, BlockUserBody, BlockedUserEntry,
-    ConversationListQuery, ConversationListResponse, CreateConversationBody, ReadPreferenceBody,
-    RespondConversationBody, ThreadDetailResponse, ThreadListQuery, ThreadListResponse,
+    ConnectionPreferencesBody, ContactPermissionBody, ConversationListQuery,
+    ConversationListResponse, CreateConversationBody, RespondConversationBody,
+    ThreadDetailResponse, ThreadListQuery, ThreadListResponse,
 };
 
 pub async fn create_conversation(
@@ -63,7 +65,7 @@ pub async fn create_conversation(
         })
         .await?;
 
-    if result.created {
+    if result.created && result.notify_recipient {
         let notification_title = match result.conversation.mode {
             crate::services::chat_conversation::ConversationMode::Realtime => "有人想现在聊聊",
             crate::services::chat_conversation::ConversationMode::Mail => "收到一封新留言",
@@ -93,7 +95,25 @@ pub async fn create_conversation(
         }
     }
 
-    broadcast_conversation("conversation_created", &result.conversation);
+    if result.created {
+        if result.notify_recipient {
+            broadcast_conversation("conversation_created", &result.conversation);
+        } else {
+            broadcast_conversation_to_user(
+                "conversation_created",
+                &result.conversation,
+                &result.conversation.initiator_id,
+            );
+        }
+    } else if result.mutual_open && result.notify_recipient {
+        broadcast_conversation("conversation_state_changed", &result.conversation);
+    } else {
+        broadcast_conversation_to_user(
+            "conversation_state_changed",
+            &result.conversation,
+            &result.conversation.initiator_id,
+        );
+    }
     Ok(Json(result))
 }
 
@@ -142,7 +162,7 @@ pub async fn open_conversation_for_intent(
         })
         .await?;
 
-    if result.created {
+    if result.created && result.notify_recipient {
         if let Err(error) = state
             .infra
             .notification
@@ -163,7 +183,15 @@ pub async fn open_conversation_for_intent(
         }
     }
 
-    broadcast_conversation("conversation_created", &result.conversation);
+    if result.created && result.notify_recipient {
+        broadcast_conversation("conversation_created", &result.conversation);
+    } else if result.created {
+        broadcast_conversation_to_user(
+            "conversation_created",
+            &result.conversation,
+            &result.conversation.initiator_id,
+        );
+    }
     Ok(result.conversation.id.clone())
 }
 
@@ -291,21 +319,6 @@ pub async fn archive_conversation(
     ))
 }
 
-pub async fn set_read_preference(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(conversation_id): Path<Uuid>,
-    Json(body): Json<ReadPreferenceBody>,
-) -> Result<Json<ConversationView>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
-    let service = ChatConversationService::new(state.infra.db.clone());
-    Ok(Json(
-        service
-            .set_read_preference(conversation_id, &user_id, body.mode.as_str())
-            .await?,
-    ))
-}
-
 pub async fn list_blocks(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -341,6 +354,101 @@ pub async fn unblock_user(
     let service = ChatConversationService::new(state.infra.db.clone());
     service.unblock_user(&user_id, &blocked_id).await?;
     Ok(Json(serde_json::json!({ "blocked": false })))
+}
+
+pub async fn get_connection_preferences(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<crate::services::chat_conversation::ConnectionPreferencesView>, ApiError> {
+    let user_id = authenticated_user(&state, &headers)?;
+    let service = ChatConversationService::new(state.infra.db.clone());
+    Ok(Json(service.get_connection_preferences(&user_id).await?))
+}
+
+pub async fn set_connection_preferences(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ConnectionPreferencesBody>,
+) -> Result<Json<crate::services::chat_conversation::ConnectionPreferencesView>, ApiError> {
+    let user_id = authenticated_user(&state, &headers)?;
+    let busy_until = parse_optional_timestamp(body.busy_until, "busy_until")?;
+    let service = ChatConversationService::new(state.infra.db.clone());
+    Ok(Json(
+        service
+            .set_connection_preferences(&user_id, body.allow_strangers, busy_until)
+            .await?,
+    ))
+}
+
+pub async fn list_contact_permissions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<crate::services::chat_conversation::ContactPermissionView>>, ApiError> {
+    let user_id = authenticated_user(&state, &headers)?;
+    let service = ChatConversationService::new(state.infra.db.clone());
+    Ok(Json(service.list_contact_permissions(&user_id).await?))
+}
+
+pub async fn set_contact_permission(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(peer_user_id): Path<String>,
+    Json(body): Json<ContactPermissionBody>,
+) -> Result<Json<crate::services::chat_conversation::ContactPermissionView>, ApiError> {
+    let session = authenticated_session(&state, &headers)?;
+    CampusService::new(state.infra.db.clone())
+        .require_shared_verified_campus_for_session(
+            &session.user_id,
+            &peer_user_id,
+            session.campus_id,
+        )
+        .await?;
+    let muted_until = parse_optional_timestamp(body.muted_until, "muted_until")?;
+    let service = ChatConversationService::new(state.infra.db.clone());
+    Ok(Json(
+        service
+            .set_contact_permission(
+                &session.user_id,
+                &peer_user_id,
+                body.allow_connection,
+                muted_until,
+            )
+            .await?,
+    ))
+}
+
+pub async fn delete_contact_permission(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(peer_user_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = authenticated_session(&state, &headers)?;
+    let service = CampusService::new(state.infra.db.clone());
+    service
+        .require_shared_verified_campus_for_session(
+            &session.user_id,
+            &peer_user_id,
+            session.campus_id,
+        )
+        .await?;
+    ChatConversationService::new(state.infra.db.clone())
+        .delete_contact_permission(&session.user_id, &peer_user_id)
+        .await?;
+    Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+fn parse_optional_timestamp(
+    value: Option<String>,
+    field: &str,
+) -> Result<Option<DateTime<Utc>>, ApiError> {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| {
+            DateTime::parse_from_rfc3339(value.trim())
+                .map(|parsed| parsed.with_timezone(&Utc))
+                .map_err(|_| ApiError::BadRequest(format!("{field} 必须是 RFC3339 时间")))
+        })
+        .transpose()
 }
 
 pub(crate) fn authenticated_user(
@@ -379,6 +487,11 @@ pub(crate) fn moderate_text(state: &AppState, content: &str) -> Result<(), ApiEr
 }
 
 pub(super) fn broadcast_conversation(event: &str, conversation: &ConversationView) {
+    broadcast_conversation_to_user(event, conversation, &conversation.initiator_id);
+    broadcast_conversation_to_user(event, conversation, &conversation.recipient_id);
+}
+
+fn broadcast_conversation_to_user(event: &str, conversation: &ConversationView, user_id: &str) {
     let payload = serde_json::json!({
         "event": event,
         "conversation_id": conversation.id,
@@ -388,6 +501,5 @@ pub(super) fn broadcast_conversation(event: &str, conversation: &ConversationVie
         "version": conversation.version,
     })
     .to_string();
-    ws::broadcast_to_user(&conversation.initiator_id, &payload);
-    ws::broadcast_to_user(&conversation.recipient_id, &payload);
+    ws::broadcast_to_user(user_id, &payload);
 }

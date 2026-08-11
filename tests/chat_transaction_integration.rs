@@ -27,6 +27,15 @@ async fn insert_user(pool: &sqlx::PgPool, id: &str, username: &str) {
     .execute(pool)
     .await
     .unwrap();
+    sqlx::query(
+        "INSERT INTO chat_connection_preferences (user_id, allow_strangers)
+         VALUES ($1, TRUE)
+         ON CONFLICT (user_id) DO UPDATE SET allow_strangers = TRUE",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 fn realtime_input(
@@ -144,7 +153,6 @@ async fn threads_group_multiple_conversations_by_peer_without_merging_history() 
         assert_eq!(thread.conversation_count, 2);
         assert_eq!(thread.realtime_count, 1);
         assert_eq!(thread.mail_count, 1);
-        assert_eq!(thread.unread_count, 2);
         assert_eq!(thread.latest_preview.as_deref(), Some("今晚七点可以吗"));
 
         let detail = service.get_thread("user-b", "user-a", None).await.unwrap();
@@ -363,7 +371,7 @@ async fn message_acknowledgement_is_recipient_scoped_idempotent_replaceable_and_
 }
 
 #[tokio::test]
-async fn realtime_accept_then_sender_message_auto_acknowledges_and_tracks_unread() {
+async fn realtime_accept_then_sender_message_auto_acknowledges_without_server_read_state() {
     with_test_pool(|pool| async move {
         insert_user(&pool, "user-a", "alice").await;
         insert_user(&pool, "user-b", "bob").await;
@@ -382,7 +390,6 @@ async fn realtime_accept_then_sender_message_auto_acknowledges_and_tracks_unread
             .get_conversation(conversation_id, "user-b")
             .await
             .unwrap();
-        assert_eq!(receiver_view.unread_count, 1);
         assert!(receiver_view.capabilities.can_respond);
 
         let accepted = service
@@ -413,7 +420,6 @@ async fn realtime_accept_then_sender_message_auto_acknowledges_and_tracks_unread
             .await
             .unwrap();
         assert_eq!(receiver_after.state, ConversationState::Active);
-        assert_eq!(receiver_after.unread_count, 2);
 
         let ack_events: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM chat_conversation_events
@@ -461,8 +467,107 @@ async fn mutual_realtime_intent_reuses_single_active_conversation() {
 
         let user_a_view = service.get_conversation(first_id, "user-a").await.unwrap();
         let user_b_view = service.get_conversation(first_id, "user-b").await.unwrap();
-        assert_eq!(user_a_view.unread_count, 1);
-        assert_eq!(user_b_view.unread_count, 1);
+        assert_eq!(user_a_view.state, ConversationState::Active);
+        assert_eq!(user_b_view.state, ConversationState::Active);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn stranger_realtime_requests_require_contact_permission_but_mail_is_allowed() {
+    with_test_pool(|pool| async move {
+        insert_user(&pool, "privacy-a", "privacy_alice").await;
+        insert_user(&pool, "privacy-b", "privacy_bob").await;
+        sqlx::query(
+            "UPDATE chat_connection_preferences
+             SET allow_strangers = FALSE WHERE user_id = 'privacy-b'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let service = ChatConversationService::new(pool.clone());
+
+        let error = service
+            .create_conversation(realtime_input("privacy-a", "privacy-b", "现在方便接通吗"))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ApiError::CodedConflict {
+                code: "connection_requires_contact",
+                ..
+            }
+        ));
+
+        let mail = service
+            .create_conversation(mail_input(
+                "privacy-a",
+                "privacy-b",
+                "留言",
+                "方便时回复就好",
+            ))
+            .await
+            .unwrap();
+        assert!(mail.created);
+
+        service
+            .set_contact_permission("privacy-b", "privacy-a", true, None)
+            .await
+            .unwrap();
+        let allowed = service
+            .create_conversation(realtime_input("privacy-a", "privacy-b", "现在方便接通吗"))
+            .await
+            .unwrap();
+        assert!(allowed.created);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn busy_rejects_realtime_and_contact_mute_suppresses_only_notification() {
+    with_test_pool(|pool| async move {
+        insert_user(&pool, "busy-a", "busy_alice").await;
+        insert_user(&pool, "busy-b", "busy_bob").await;
+        let service = ChatConversationService::new(pool.clone());
+        service
+            .set_connection_preferences(
+                "busy-b",
+                true,
+                Some(chrono::Utc::now() + chrono::Duration::hours(1)),
+            )
+            .await
+            .unwrap();
+        let error = service
+            .create_conversation(realtime_input("busy-a", "busy-b", "接通请求"))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ApiError::CodedConflict {
+                code: "recipient_busy",
+                ..
+            }
+        ));
+
+        service
+            .set_connection_preferences("busy-b", true, None)
+            .await
+            .unwrap();
+        service
+            .set_contact_permission(
+                "busy-b",
+                "busy-a",
+                true,
+                Some(chrono::Utc::now() + chrono::Duration::hours(1)),
+            )
+            .await
+            .unwrap();
+        let mail = service
+            .create_conversation(mail_input("busy-a", "busy-b", "留言", "不打扰，方便时看"))
+            .await
+            .unwrap();
+        assert!(mail.created);
+        assert!(!mail.notify_recipient);
     })
     .await;
 }
@@ -492,19 +597,12 @@ async fn mail_thread_opens_immediately_allows_reply_and_member_archiving() {
             .get_conversation(conversation_id, "user-b")
             .await
             .unwrap();
-        assert_eq!(receiver_view.unread_count, 1);
         assert!(receiver_view.capabilities.can_send);
 
         service
             .send_message(send_input(conversation_id, "user-b", "今晚 7 点后可以"))
             .await
             .unwrap();
-        let initiator_view = service
-            .get_conversation(conversation_id, "user-a")
-            .await
-            .unwrap();
-        assert_eq!(initiator_view.unread_count, 1);
-
         let archived = service
             .set_archived(conversation_id, "user-a", true)
             .await
@@ -528,96 +626,21 @@ async fn mail_thread_opens_immediately_allows_reply_and_member_archiving() {
 }
 
 #[tokio::test]
-async fn mark_read_compatibility_endpoint_does_not_create_attention_facts() {
+async fn server_schema_has_no_direct_read_position_or_preference_columns() {
     with_test_pool(|pool| async move {
-        insert_user(&pool, "user-a", "alice").await;
-        insert_user(&pool, "user-b", "bob").await;
-        let service = ChatConversationService::new(pool.clone());
-
-        let created = service
-            .create_conversation(mail_input("user-a", "user-b", "问题", "第一条消息"))
-            .await
-            .unwrap();
-        let conversation_id = Uuid::parse_str(&created.conversation.id).unwrap();
-
-        let marked = service.mark_read(conversation_id, "user-b").await.unwrap();
-        assert_eq!(marked, 0);
-
-        let receiver_view = service
-            .get_conversation(conversation_id, "user-b")
-            .await
-            .unwrap();
-        assert_eq!(receiver_view.unread_count, 1);
-
-        let row = sqlx::query(
-            "SELECT read_by, read_at, status
-             FROM chat_messages
-             WHERE direct_conversation_id = $1 AND receiver = 'user-b'",
-        )
-        .bind(conversation_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert!(row.get::<Option<String>, _>("read_by").is_none());
-        assert!(row
-            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("read_at")
-            .is_none());
-        assert_ne!(row.get::<String, _>("status"), "read");
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn read_preference_compatibility_endpoint_does_not_change_server_state() {
-    with_test_pool(|pool| async move {
-        insert_user(&pool, "user-a", "alice").await;
-        insert_user(&pool, "user-b", "bob").await;
-        sqlx::query("UPDATE users SET chat_read_receipt_mode = 'manual' WHERE id = 'user-b'")
-            .execute(&pool)
-            .await
-            .unwrap();
-
-        let service = ChatConversationService::new(pool.clone());
-        let conversation_id = create_active_realtime(&service, "user-a", "user-b").await;
-
-        let inherited = service
-            .get_conversation(conversation_id, "user-b")
-            .await
-            .unwrap();
-        assert_eq!(inherited.read_receipt_mode, "inherit");
-        assert_eq!(inherited.effective_read_receipt_mode, "manual");
-
-        let overridden = service
-            .set_read_preference(conversation_id, "user-b", "auto")
-            .await
-            .unwrap();
-        assert_eq!(overridden.read_receipt_mode, "inherit");
-        assert_eq!(overridden.effective_read_receipt_mode, "manual");
-
-        let stored_member_mode = sqlx::query_scalar::<_, String>(
-            "SELECT read_receipt_mode
-             FROM chat_conversation_members
-             WHERE conversation_id = $1 AND user_id = 'user-b'",
-        )
-        .bind(conversation_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert_eq!(stored_member_mode, "inherit");
-
-        let stored_global_mode = sqlx::query_scalar::<_, String>(
-            "SELECT chat_read_receipt_mode FROM users WHERE id = 'user-b'",
+        let removed_columns: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)
+             FROM information_schema.columns
+             WHERE table_schema = 'public'
+                 AND ((table_name = 'chat_messages' AND column_name IN ('read_at', 'read_by'))
+                 OR (table_name = 'chat_conversation_members' AND column_name IN ('unread_count', 'last_read_message_id', 'read_receipt_mode'))
+                 OR (table_name = 'chat_connections' AND column_name = 'unread_count')
+                 OR (table_name = 'users' AND column_name = 'chat_read_receipt_mode'))",
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(stored_global_mode, "manual");
-
-        let invalid = service
-            .set_read_preference(conversation_id, "user-b", "sometimes")
-            .await
-            .unwrap_err();
-        assert!(matches!(invalid, ApiError::BadRequest(_)));
+        assert_eq!(removed_columns, 0);
     })
     .await;
 }

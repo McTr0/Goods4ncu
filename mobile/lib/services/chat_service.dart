@@ -226,6 +226,79 @@ class ChatService extends BaseService {
     );
   }
 
+  Future<ConnectionPreferences> getConnectionPreferences() async {
+    final headers = await authHeaders();
+    final response = await get(
+      Uri.parse('$baseUrl/api/chat/connection-preferences'),
+      headers,
+    );
+    return handleResponse(
+      response,
+      (data) => ConnectionPreferences.fromJson(data as Map<String, dynamic>),
+    );
+  }
+
+  Future<ConnectionPreferences> updateConnectionPreferences({
+    required bool allowStrangers,
+    DateTime? busyUntil,
+  }) async {
+    final headers = await authHeaders();
+    final response = await put(
+      Uri.parse('$baseUrl/api/chat/connection-preferences'),
+      headers,
+      jsonEncode({
+        'allow_strangers': allowStrangers,
+        'busy_until': busyUntil?.toUtc().toIso8601String(),
+      }),
+    );
+    return handleResponse(
+      response,
+      (data) => ConnectionPreferences.fromJson(data as Map<String, dynamic>),
+    );
+  }
+
+  Future<List<ContactPermission>> getContactPermissions() async {
+    final headers = await authHeaders();
+    final response = await get(
+      Uri.parse('$baseUrl/api/chat/contacts'),
+      headers,
+    );
+    final data = handleResponse(response, (value) => value as List<dynamic>);
+    return data
+        .whereType<Map<String, dynamic>>()
+        .map(ContactPermission.fromJson)
+        .toList();
+  }
+
+  Future<ContactPermission> setContactPermission(
+    String peerUserId, {
+    required bool allowConnection,
+    DateTime? mutedUntil,
+  }) async {
+    final headers = await authHeaders();
+    final response = await put(
+      Uri.parse('$baseUrl/api/chat/contacts/$peerUserId'),
+      headers,
+      jsonEncode({
+        'allow_connection': allowConnection,
+        'muted_until': mutedUntil?.toUtc().toIso8601String(),
+      }),
+    );
+    return handleResponse(
+      response,
+      (data) => ContactPermission.fromJson(data as Map<String, dynamic>),
+    );
+  }
+
+  Future<void> deleteContactPermission(String peerUserId) async {
+    final headers = await authHeaders();
+    final response = await delete(
+      Uri.parse('$baseUrl/api/chat/contacts/$peerUserId'),
+      headers,
+    );
+    handleResponse(response, (_) {});
+  }
+
   Future<Conversation> respondConversation(
     String conversationId, {
     required bool accept,
@@ -537,34 +610,6 @@ class ChatService extends BaseService {
         .toList();
   }
 
-  Future<void> markConversationRead(String conversationId) async {
-    final headers = await authHeaders();
-    final response = await post(
-      Uri.parse('$baseUrl/api/chat/conversations/$conversationId/read'),
-      headers,
-      '{}',
-    );
-    handleResponse(response, (_) {});
-  }
-
-  Future<Conversation> setConversationReadPreference(
-    String conversationId,
-    String mode,
-  ) async {
-    final headers = await authHeaders();
-    final response = await post(
-      Uri.parse(
-        '$baseUrl/api/chat/conversations/$conversationId/read-preference',
-      ),
-      headers,
-      jsonEncode({'mode': mode}),
-    );
-    return handleResponse(
-      response,
-      (data) => Conversation.fromJson(data as Map<String, dynamic>),
-    );
-  }
-
   Future<ConversationMessage> editMessage(
     String messageId,
     String content,
@@ -579,16 +624,6 @@ class ChatService extends BaseService {
       response,
       (data) => ConversationMessage.fromJson(data as Map<String, dynamic>),
     );
-  }
-
-  Future<void> sendTyping(String conversationId) async {
-    final headers = await authHeaders();
-    final response = await post(
-      Uri.parse('$baseUrl/api/chat/conversations/$conversationId/typing'),
-      headers,
-      '{}',
-    );
-    handleResponse(response, (_) {});
   }
 
   Future<List<ReplySuggestion>> getReplySuggestions(
@@ -647,8 +682,4 @@ class ChatService extends BaseService {
   Future<void> rejectConnection(String conversationId) async {
     await respondConversation(conversationId, accept: false);
   }
-
-  Future<void> markConnectionAsRead(String conversationId) =>
-      markConversationRead(conversationId);
-  Future<void> markMessageRead(String messageId) async {}
 }

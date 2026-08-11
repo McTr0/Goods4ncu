@@ -7,17 +7,25 @@ import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import '../components/payment_qr_image.dart';
 import '../l10n/app_localizations.dart';
+import '../models/models.dart';
 import '../services/locale_service.dart';
 import '../services/user_service.dart';
 import '../services/base_service.dart';
 import '../services/feed_feedback_service.dart';
+import '../services/chat_service.dart';
 import '../theme/app_theme.dart';
 
 class SettingsPage extends StatefulWidget {
   final UserService? userService;
   final FeedFeedbackService? feedbackService;
+  final ChatService? chatService;
 
-  const SettingsPage({super.key, this.userService, this.feedbackService});
+  const SettingsPage({
+    super.key,
+    this.userService,
+    this.feedbackService,
+    this.chatService,
+  });
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -26,6 +34,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late final UserService _userService;
   late final FeedFeedbackService _feedbackService;
+  late final ChatService _chatService;
 
   Map<String, dynamic>? _profile;
   bool _loading = true;
@@ -41,6 +50,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _userService = widget.userService ?? context.read<UserService>();
     _feedbackService =
         widget.feedbackService ?? context.read<FeedFeedbackService>();
+    _chatService = widget.chatService ?? ChatService();
     _loadProfile();
     _loadFeedPreferences();
   }
@@ -150,6 +160,14 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: 12),
 
                   _buildDiscoverySettings(),
+                  const SizedBox(height: 12),
+
+                  _SettingsCard(
+                    icon: Icons.shield_outlined,
+                    title: l.connectionPrivacyTitle,
+                    subtitle: l.connectionPrivacySubtitle,
+                    onTap: _showConnectionPrivacyDialog,
+                  ),
                   const SizedBox(height: 12),
 
                   _buildFeedSettings(),
@@ -307,6 +325,37 @@ class _SettingsPageState extends State<SettingsPage> {
         SnackBar(content: Text(l.settingsUpdateFailed(error.toString()))),
       );
     }
+  }
+
+  Future<void> _showConnectionPrivacyDialog() async {
+    final l = AppLocalizations.of(context)!;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l.connectionPrivacyTitle),
+        content: FutureBuilder<ConnectionPreferences>(
+          future: _chatService.getConnectionPreferences(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const SizedBox(
+                height: 96,
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (snapshot.hasError || !snapshot.hasData) {
+              return Text(l.operationFailed(snapshot.error?.toString() ?? ''));
+            }
+            return _ConnectionPrivacyForm(
+              initial: snapshot.data!,
+              chatService: _chatService,
+              onSaved: () {
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+              },
+            );
+          },
+        ),
+      ),
+    );
   }
 
   Widget _buildFeedSettings() {
@@ -1016,6 +1065,92 @@ class _DiscoverySwitchCard extends StatelessWidget {
         value: value,
         onChanged: onChanged,
       ),
+    );
+  }
+}
+
+class _ConnectionPrivacyForm extends StatefulWidget {
+  const _ConnectionPrivacyForm({
+    required this.initial,
+    required this.chatService,
+    required this.onSaved,
+  });
+
+  final ConnectionPreferences initial;
+  final ChatService chatService;
+  final VoidCallback onSaved;
+
+  @override
+  State<_ConnectionPrivacyForm> createState() => _ConnectionPrivacyFormState();
+}
+
+class _ConnectionPrivacyFormState extends State<_ConnectionPrivacyForm> {
+  late bool _allowStrangers = widget.initial.allowStrangers;
+  late bool _busy = widget.initial.busyUntil?.isAfter(DateTime.now()) ?? false;
+  bool _saving = false;
+
+  Future<void> _update({bool? allowStrangers, bool? busy}) async {
+    if (_saving) return;
+    final nextAllowStrangers = allowStrangers ?? _allowStrangers;
+    final nextBusy = busy ?? _busy;
+    setState(() {
+      _allowStrangers = nextAllowStrangers;
+      _busy = nextBusy;
+      _saving = true;
+    });
+    try {
+      await widget.chatService.updateConnectionPreferences(
+        allowStrangers: nextAllowStrangers,
+        busyUntil: nextBusy
+            ? DateTime.now().toUtc().add(const Duration(hours: 1))
+            : null,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _allowStrangers = widget.initial.allowStrangers;
+        _busy = widget.initial.busyUntil?.isAfter(DateTime.now()) ?? false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(context)!.operationFailed(error.toString()),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text(l.allowStrangersTitle),
+          subtitle: Text(l.allowStrangersSubtitle),
+          value: _allowStrangers,
+          onChanged: _saving ? null : (value) => _update(allowStrangers: value),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text(l.busyModeTitle),
+          subtitle: Text(l.busyModeSubtitle),
+          value: _busy,
+          onChanged: _saving ? null : (value) => _update(busy: value),
+        ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: _saving ? null : widget.onSaved,
+            child: Text(l.cancel),
+          ),
+        ),
+      ],
     );
   }
 }

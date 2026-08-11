@@ -26,11 +26,14 @@ Future<void> showUserChatConnectionRequestDialog({
       final l = AppLocalizations.of(ctx)!;
       return AlertDialog(
         title: Text(l.connectionRequestTitle),
-        content: Text(
-          l.connectionRequestReadReceiptNotice(
-            notification.title,
-            notification.body,
-          ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(notification.title),
+            const SizedBox(height: 8),
+            Text(notification.body),
+          ],
         ),
         actions: [
           TextButton(
@@ -105,7 +108,7 @@ class ConnectionIndicatorState extends State<ConnectionIndicator>
       switch (widget.status) {
         case 'connected':
           color = AppTheme.success;
-          label = l.onlineStatus;
+          label = l.connectedStatus;
           dot = Container(
             width: 8,
             height: 8,
@@ -614,34 +617,6 @@ class _DeliveryTicks extends StatelessWidget {
       child: Semantics(
         label: label,
         child: Icon(icon, size: 15, color: color),
-      ),
-    );
-  }
-}
-
-class UserChatTypingBanner extends StatelessWidget {
-  final String username;
-
-  const UserChatTypingBanner({super.key, required this.username});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      color: Colors.grey[100],
-      child: Row(
-        children: [
-          const SizedBox(
-            width: 12,
-            height: 12,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            AppLocalizations.of(context)!.typingIndicator(username),
-            style: const TextStyle(color: Colors.grey, fontSize: 12),
-          ),
-        ],
       ),
     );
   }

@@ -103,16 +103,34 @@ class ApiService extends BaseService {
   Future<ConversationMessage> editMessage(String messageId, String content) =>
       _chatService.editMessage(messageId, content);
 
-  Future<void> markMessageRead(String messageId) =>
-      _chatService.markMessageRead(messageId);
-
-  Future<void> sendTyping(String conversationId) =>
-      _chatService.sendTyping(conversationId);
-
-  Future<void> markConnectionAsRead(String conversationId) =>
-      _chatService.markConnectionAsRead(conversationId);
-
   Future<List<Conversation>> getConnections() => _chatService.getConnections();
+
+  Future<ConnectionPreferences> getConnectionPreferences() =>
+      _chatService.getConnectionPreferences();
+
+  Future<ConnectionPreferences> updateConnectionPreferences({
+    required bool allowStrangers,
+    DateTime? busyUntil,
+  }) => _chatService.updateConnectionPreferences(
+    allowStrangers: allowStrangers,
+    busyUntil: busyUntil,
+  );
+
+  Future<List<ContactPermission>> getContactPermissions() =>
+      _chatService.getContactPermissions();
+
+  Future<ContactPermission> setContactPermission(
+    String peerUserId, {
+    required bool allowConnection,
+    DateTime? mutedUntil,
+  }) => _chatService.setContactPermission(
+    peerUserId,
+    allowConnection: allowConnection,
+    mutedUntil: mutedUntil,
+  );
+
+  Future<void> deleteContactPermission(String peerUserId) =>
+      _chatService.deleteContactPermission(peerUserId);
 
   Future<void> requestConnection(String receiverId, {String? listingId}) =>
       _chatService.requestConnection(receiverId, listingId: listingId);

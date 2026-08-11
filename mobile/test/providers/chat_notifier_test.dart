@@ -27,7 +27,6 @@ class FakeChatService extends ChatService {
   String? sentImageUrl;
   String? sentAudioUrl;
   int loadMessagesCalls = 0;
-  int markConversationReadCalls = 0;
 
   @override
   Future<List<ConversationMessage>> getChatConversationMessages(
@@ -37,36 +36,6 @@ class FakeChatService extends ChatService {
   }) async {
     loadMessagesCalls += 1;
     return messages;
-  }
-
-  @override
-  Future<void> markConnectionAsRead(String conversationId) async {}
-
-  @override
-  Future<void> markConversationRead(String conversationId) async {
-    markConversationReadCalls += 1;
-  }
-
-  @override
-  Future<Conversation> setConversationReadPreference(
-    String conversationId,
-    String mode,
-  ) async {
-    final updated = Conversation(
-      id: conversation?.id ?? conversationId,
-      requesterId: conversation?.requesterId ?? 'user-me',
-      otherUserId: conversation?.otherUserId ?? 'user-other',
-      otherUsername: conversation?.otherUsername ?? 'Other',
-      state: conversation?.state ?? ConversationState.active,
-      unreadCount: conversation?.unreadCount ?? 0,
-      readReceiptMode: mode,
-      effectiveReadReceiptMode: mode == 'inherit' ? 'auto' : mode,
-      capabilities:
-          conversation?.capabilities ??
-          const ConversationCapabilities(canSend: true),
-    );
-    conversation = updated;
-    return updated;
   }
 
   @override
@@ -248,79 +217,4 @@ void main() {
       notifier.dispose();
     },
   );
-
-  test('hydrating a conversation does not publish an automatic read signal', () async {
-    final chatService = FakeChatService(
-      messages: [
-        ConversationMessage(
-          id: 'm1',
-          conversationId: 'conv-1',
-          senderId: 'user-other',
-          content: 'hello',
-          sentAt: DateTime.now(),
-        ),
-      ],
-      conversation: Conversation(
-        id: 'conv-1',
-        requesterId: 'user-other',
-        otherUserId: 'user-other',
-        otherUsername: 'Other',
-        state: ConversationState.active,
-        unreadCount: 1,
-        effectiveReadReceiptMode: 'auto',
-      ),
-    );
-    final notifier = ChatNotifier(
-      conversationId: 'conv-1',
-      chatService: chatService,
-      userService: FakeUserService({'user_id': 'user-me'}),
-    );
-
-    await flushAsync();
-    await notifier.hydrateConnectionStatus();
-    await flushAsync();
-
-    expect(chatService.markConversationReadCalls, 0);
-    notifier.dispose();
-  });
-
-  test('legacy manual read affordance stays disabled during migration', () async {
-    final chatService = FakeChatService(
-      messages: [
-        ConversationMessage(
-          id: 'm1',
-          conversationId: 'conv-1',
-          senderId: 'user-other',
-          content: 'hello',
-          sentAt: DateTime.now(),
-        ),
-      ],
-      conversation: Conversation(
-        id: 'conv-1',
-        requesterId: 'user-other',
-        otherUserId: 'user-other',
-        otherUsername: 'Other',
-        state: ConversationState.active,
-        unreadCount: 1,
-        effectiveReadReceiptMode: 'manual',
-      ),
-    );
-    final notifier = ChatNotifier(
-      conversationId: 'conv-1',
-      chatService: chatService,
-      userService: FakeUserService({'user_id': 'user-me'}),
-    );
-
-    await flushAsync();
-    await notifier.hydrateConnectionStatus();
-    await flushAsync();
-
-    expect(chatService.markConversationReadCalls, 0);
-    expect(notifier.shouldShowManualReadAction, isFalse);
-
-    await notifier.markConversationRead();
-    expect(chatService.markConversationReadCalls, 1);
-    expect(notifier.shouldShowManualReadAction, isFalse);
-    notifier.dispose();
-  });
 }

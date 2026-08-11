@@ -225,7 +225,6 @@ class _UserChatPageState extends State<UserChatPage> {
         );
         break;
 
-      case 'message_read':
       case 'message_acknowledgement_changed':
       case 'message_reaction_changed':
       case 'message_hidden':

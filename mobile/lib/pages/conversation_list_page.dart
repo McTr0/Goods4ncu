@@ -124,19 +124,22 @@ class _ConversationListPageState extends State<ConversationListPage> {
 
   Future<ChatThread> _applyLocalSeen(ChatThread thread) async {
     try {
-      // Preference plugins can be unavailable during web bootstrap or tests;
-      // do not hold the inbox on a local badge lookup.
+      // The server no longer supplies unread counts.  A local marker is the
+      // only source for this badge, so an unseen latest activity is shown as
+      // one new item without exposing a reading position remotely.
       final seenAt = await _localSeenStorage
           .read(thread.peerUserId)
           .timeout(const Duration(milliseconds: 100));
-      if (seenAt != null && !thread.latestActivityAt.isAfter(seenAt)) {
-        return thread.copyWith(unreadCount: 0);
-      }
+      return thread.copyWith(
+        unreadCount: seenAt == null || thread.latestActivityAt.isAfter(seenAt)
+            ? 1
+            : 0,
+      );
     } catch (_) {
-      // If local storage is unavailable, retain the server count as a
-      // conservative fallback without writing any read fact remotely.
+      // If local storage is unavailable, do not invent a server-derived
+      // count; the next successful local read will restore the badge.
+      return thread.copyWith(unreadCount: 0);
     }
-    return thread;
   }
 
   Future<void> _loadAssistantPreview() async {

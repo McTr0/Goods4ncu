@@ -13,7 +13,6 @@ void main() {
           'image_base64': 'iVBORw0KGgoAAAANSUhEUg==',
           'audio_base64': 'SUQzBAAAAAAAI1RTU0U=',
           'sent_at': '2024-01-15T10:30:00Z',
-          'read_at': '2024-01-15T10:35:00Z',
           'status': 'delivered',
           'edited_at': '2024-01-15T11:00:00Z',
         };
@@ -27,7 +26,6 @@ void main() {
         expect(message.imageBase64, 'iVBORw0KGgoAAAANSUhEUg==');
         expect(message.audioBase64, 'SUQzBAAAAAAAI1RTU0U=');
         expect(message.sentAt, DateTime.parse('2024-01-15T10:30:00Z'));
-        expect(message.readAt, DateTime.parse('2024-01-15T10:35:00Z'));
         expect(message.status, 'sent');
         expect(message.editedAt, DateTime.parse('2024-01-15T11:00:00Z'));
       });
@@ -50,7 +48,6 @@ void main() {
         expect(message.sentAt, DateTime.parse('2024-01-15T10:00:00Z'));
         expect(message.imageBase64, isNull);
         expect(message.audioBase64, isNull);
-        expect(message.readAt, isNull);
         expect(message.status, 'sent'); // default
         expect(message.editedAt, isNull);
       });
@@ -278,7 +275,7 @@ void main() {
           conversation.lastMessageAt,
           DateTime.parse('2024-01-15T18:00:00Z'),
         );
-        expect(conversation.unreadCount, 3);
+        expect(conversation.unreadCount, 0);
         expect(conversation.isReceiver, true);
       });
 

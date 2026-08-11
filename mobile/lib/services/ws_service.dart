@@ -20,13 +20,10 @@ class WsNotification {
   /// 用于 connection_request 等事件
   final String? connectionId;
 
-  /// 用于 new_message 和 message_read 事件
+  /// 用于 new_message 和 message acknowledgement 事件
   final String? messageId;
 
-  /// 用于 typing 事件
   final String? conversationId;
-  final String? typingUserId;
-  final String? typingUsername;
   final String? conversationMode;
   final String? conversationState;
   final DateTime? expiresAt;
@@ -43,8 +40,6 @@ class WsNotification {
     this.connectionId,
     this.messageId,
     this.conversationId,
-    this.typingUserId,
-    this.typingUsername,
     this.conversationMode,
     this.conversationState,
     this.expiresAt,
@@ -65,8 +60,6 @@ class WsNotification {
       connectionId: json['connection_id']?.toString(),
       messageId: json['message_id']?.toString(),
       conversationId: json['conversation_id']?.toString(),
-      typingUserId: json['user_id']?.toString(),
-      typingUsername: json['username']?.toString(),
       conversationMode: json['mode']?.toString(),
       conversationState: json['state']?.toString(),
       expiresAt: json['expires_at'] == null

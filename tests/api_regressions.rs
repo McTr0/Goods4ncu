@@ -385,6 +385,15 @@ async fn insert_user(
     .execute(pool)
     .await
     .expect("insert test campus membership");
+    sqlx::query(
+        "INSERT INTO chat_connection_preferences (user_id, allow_strangers)
+         VALUES ($1, TRUE)
+         ON CONFLICT (user_id) DO UPDATE SET allow_strangers = TRUE",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .expect("insert chat connection preferences");
 }
 
 #[tokio::test]
@@ -1116,38 +1125,6 @@ async fn insert_hitl_request(pool: &sqlx::PgPool, fixture: HitlRequestFixture<'_
     .execute(pool)
     .await
     .expect("insert hitl request");
-}
-
-async fn insert_realtime_conversation(
-    pool: &sqlx::PgPool,
-    conversation_id: Uuid,
-    initiator_id: &str,
-    recipient_id: &str,
-    status: &str,
-) {
-    sqlx::query(
-        "INSERT INTO chat_conversations (
-            id, client_request_id, mode, state, initiator_id, recipient_id
-         ) VALUES ($1, $1, 'realtime', $2, $3, $4)",
-    )
-    .bind(conversation_id)
-    .bind(status)
-    .bind(initiator_id)
-    .bind(recipient_id)
-    .execute(pool)
-    .await
-    .expect("insert realtime conversation");
-
-    sqlx::query(
-        "INSERT INTO chat_conversation_members (conversation_id, user_id)
-         VALUES ($1, $2), ($1, $3)",
-    )
-    .bind(conversation_id)
-    .bind(initiator_id)
-    .bind(recipient_id)
-    .execute(pool)
-    .await
-    .expect("insert conversation members");
 }
 
 async fn insert_refresh_token(pool: &sqlx::PgPool, user_id: &str, token: &str) {
@@ -2212,21 +2189,9 @@ async fn buyer_reject_counter_finalizes_negotiation_without_order() {
 }
 
 #[tokio::test]
-async fn typing_indicator_is_a_compatibility_noop_for_any_conversation_state() {
+async fn typing_indicator_endpoint_is_removed_after_attention_migration() {
     with_test_pool(|pool| async move {
-        insert_user(&pool, "typing-user-a", "typing_a", "hash", "user", "active").await;
-        insert_user(&pool, "typing-user-b", "typing_b", "hash", "user", "active").await;
-
         let conversation_id = Uuid::new_v4();
-        insert_realtime_conversation(
-            &pool,
-            conversation_id,
-            "typing-user-a",
-            "typing-user-b",
-            "syn_sent",
-        )
-        .await;
-
         let state = build_state(pool.clone());
         let app = create_router(state, &[]);
         let (token, _jti, _exp) = generate_access_token(
@@ -2246,11 +2211,7 @@ async fn typing_indicator_is_a_compatibility_noop_for_any_conversation_state() {
             .unwrap();
 
         let resp = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(payload["sent"], false);
-        assert_eq!(payload["deprecated"], true);
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     })
     .await;
 }

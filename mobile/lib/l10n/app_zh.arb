@@ -25,6 +25,12 @@
   "confirmPassword": "确认密码",
   "connectionFailedRetry": "连接失败，请稍后重试",
   "connectionRequestSent": "已发送连接请求，等待对方接受",
+  "connectionPrivacyTitle": "连接隐私",
+  "connectionPrivacySubtitle": "选择谁可以用实时连接打断你。",
+  "allowStrangersTitle": "允许陌生人发起连接",
+  "allowStrangersSubtitle": "关闭后陌生人仍可留言，但不能直接发起实时连接。",
+  "busyModeTitle": "暂停实时连接一小时",
+  "busyModeSubtitle": "忙碌期间仍可接收留言。",
   "contactSeller": "联系卖家",
   "counterOfferAmount": "还价金额",
   "counterOfferBySeller": "卖家还价 ¥{amount}",
@@ -1186,19 +1192,9 @@
     }
   },
   "connectionRequestTitle": "连接请求",
-  "connectionRequestReadReceiptNotice": "{title}\n\n{body}\n\n确认后将开启消息已读功能",
-  "@connectionRequestReadReceiptNotice": {
-    "placeholders": {
-      "title": {
-        "type": "String"
-      },
-      "body": {
-        "type": "String"
-      }
-    }
-  },
   "offlineStatus": "离线",
   "onlineStatus": "在线",
+  "connectedStatus": "已连接",
   "pendingAcceptStatus": "待接受",
   "connectingStatus": "连接中...",
   "replyPreviewGeneric": "引用了一条消息",

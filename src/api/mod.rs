@@ -10,7 +10,7 @@ use axum::{
     extract::State,
     middleware,
     response::Response,
-    routing::{get, patch, post},
+    routing::{get, patch, post, put},
     Router,
 };
 pub mod admin;
@@ -346,8 +346,20 @@ impl MediaSigner {
     /// `None` for values that do not belong to our bucket — signing a foreign
     /// URL would produce a broken link and imply we vouch for it.
     pub fn sign(&self, stored: &str) -> Option<String> {
+        if let Ok(parsed) = reqwest::Url::parse(stored) {
+            if !matches!(parsed.scheme(), "http" | "https")
+                || !platform_media_host_matches(&parsed, &self.bucket.endpoint, &self.bucket.bucket)
+            {
+                return None;
+            }
+        } else if stored.contains("://") || stored.starts_with("//") {
+            return None;
+        }
         let key =
             crate::services::storage::object_key_from_stored_url(stored, &self.bucket.bucket)?;
+        if key.is_empty() {
+            return None;
+        }
         Some(self.bucket.presigned_get(&key, self.ttl_secs))
     }
 }
@@ -385,10 +397,102 @@ impl AppState {
     pub fn public_media_url(&self, stored: Option<String>) -> Option<String> {
         let stored = stored?;
         match self.infra.media_signer.as_ref() {
-            Some(signer) => signer.sign(&stored).or(Some(stored)),
+            // A private bucket is also the boundary for legacy rows: if a
+            // value cannot be mapped back to our bucket, do not hand an
+            // arbitrary foreign URL to a client that will auto-load it.
+            Some(signer) => signer.sign(&stored),
             None => Some(stored),
         }
     }
+
+    /// Media presentation for chat messages. Even when the legacy public
+    /// bucket mode is enabled, conversation bodies must not cause clients to
+    /// auto-load an arbitrary external URL.
+    pub fn public_chat_media_url(&self, stored: Option<String>) -> Option<String> {
+        let stored = stored?;
+        match self.infra.media_signer.as_ref() {
+            Some(signer) => signer.sign(&stored),
+            None if is_platform_media_reference(self, &stored) => Some(stored),
+            None => None,
+        }
+    }
+}
+
+fn is_platform_media_reference(state: &AppState, stored: &str) -> bool {
+    let stored = stored.trim();
+    if stored.is_empty() || stored.starts_with("//") {
+        return false;
+    }
+    let Ok(parsed) = reqwest::Url::parse(stored) else {
+        return !stored.contains("://");
+    };
+    matches!(parsed.scheme(), "http" | "https")
+        && platform_media_host_matches(
+            &parsed,
+            &state.secrets.oss_endpoint,
+            &state.secrets.oss_bucket,
+        )
+}
+
+/// Normalize a media URL only when it points at the configured platform
+/// storage. Chat messages must not turn an arbitrary third-party URL into a
+/// server-persisted, sender-visible media reference. Both virtual-host and
+/// path-style S3/OSS URLs are accepted because existing upload deployments use
+/// both forms; presigned query parameters are intentionally ignored here.
+pub(crate) fn normalize_platform_media_url(
+    state: &AppState,
+    value: Option<String>,
+    field: &str,
+) -> Result<Option<String>, ApiError> {
+    let value = value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if let Some(url) = value.as_deref() {
+        let parsed = reqwest::Url::parse(url)
+            .map_err(|_| ApiError::BadRequest(format!("{field} 格式无效")))?;
+        if !matches!(parsed.scheme(), "http" | "https")
+            || !platform_media_host_matches(
+                &parsed,
+                &state.secrets.oss_endpoint,
+                &state.secrets.oss_bucket,
+            )
+        {
+            return Err(ApiError::CodedConflict {
+                code: "media_external_url_blocked",
+                message: "聊天媒体必须先上传到平台存储".to_string(),
+            });
+        }
+    }
+    Ok(value)
+}
+
+fn platform_media_host_matches(parsed: &reqwest::Url, endpoint: &str, bucket: &str) -> bool {
+    let Some(endpoint) = reqwest::Url::parse(endpoint).ok() else {
+        return false;
+    };
+    let (Some(parsed_host), Some(endpoint_host)) = (parsed.host_str(), endpoint.host_str()) else {
+        return false;
+    };
+    if parsed.port_or_known_default() != endpoint.port_or_known_default()
+        || parsed.username() != ""
+        || parsed.password().is_some()
+    {
+        return false;
+    }
+
+    // Virtual-host style: https://{bucket}.{endpoint-host}/{key}
+    if parsed_host == format!("{bucket}.{endpoint_host}") {
+        return !parsed.path().trim_matches('/').is_empty();
+    }
+
+    // Path style: https://{endpoint-host}/{bucket}/{key}
+    parsed_host == endpoint_host
+        && parsed
+            .path()
+            .strip_prefix(&format!("/{bucket}/"))
+            .is_some_and(|key| !key.is_empty())
 }
 
 pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
@@ -753,14 +857,6 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             "/api/chat/conversations/{id}/messages",
             get(user_chat::get_conversation_messages).post(user_chat::send_conversation_message),
         )
-        .route(
-            "/api/chat/conversations/{id}/read",
-            post(user_chat::mark_conversation_read),
-        )
-        .route(
-            "/api/chat/conversations/{id}/read-preference",
-            post(user_chat::set_read_preference),
-        )
         .route("/api/chat/messages/{id}", patch(user_chat::edit_message))
         .route(
             "/api/chat/messages/{id}/reaction",
@@ -780,10 +876,6 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             post(user_chat::report_message),
         )
         .route(
-            "/api/chat/conversations/{id}/typing",
-            post(user_chat::typing_indicator),
-        )
-        .route(
             "/api/chat/conversations/{id}/reply-suggestions",
             post(user_chat::reply_suggestions),
         )
@@ -794,6 +886,18 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .route(
             "/api/chat/blocks/{id}",
             axum::routing::delete(user_chat::unblock_user),
+        )
+        .route(
+            "/api/chat/connection-preferences",
+            get(user_chat::get_connection_preferences).put(user_chat::set_connection_preferences),
+        )
+        .route(
+            "/api/chat/contacts",
+            get(user_chat::list_contact_permissions),
+        )
+        .route(
+            "/api/chat/contacts/{peer_user_id}",
+            put(user_chat::set_contact_permission).delete(user_chat::delete_contact_permission),
         )
         .route(
             "/api/chat/spaces",
@@ -1045,5 +1149,45 @@ mod tests {
 
         let addr = peer_addr_from_extensions(&extensions);
         assert_eq!(addr, Some(socket_addr));
+    }
+
+    #[test]
+    fn platform_media_urls_accept_both_oss_addressing_styles() {
+        let endpoint = "https://oss.example.com";
+        assert!(platform_media_host_matches(
+            &reqwest::Url::parse("https://goods.oss.example.com/chat/a.jpg?sig=1").unwrap(),
+            endpoint,
+            "goods"
+        ));
+        assert!(platform_media_host_matches(
+            &reqwest::Url::parse("https://oss.example.com/goods/chat/a.jpg").unwrap(),
+            endpoint,
+            "goods"
+        ));
+    }
+
+    #[test]
+    fn platform_media_urls_reject_foreign_hosts_and_bucket_roots() {
+        let endpoint = "https://oss.example.com";
+        assert!(!platform_media_host_matches(
+            &reqwest::Url::parse("https://cdn.example.com/chat/a.jpg").unwrap(),
+            endpoint,
+            "goods"
+        ));
+        assert!(!platform_media_host_matches(
+            &reqwest::Url::parse("https://oss.example.com/goods").unwrap(),
+            endpoint,
+            "goods"
+        ));
+        assert!(!platform_media_host_matches(
+            &reqwest::Url::parse("https://goods.evil.example.com/chat/a.jpg").unwrap(),
+            endpoint,
+            "goods"
+        ));
+        assert!(!platform_media_host_matches(
+            &reqwest::Url::parse("https://goods.oss.example.com/").unwrap(),
+            endpoint,
+            "goods"
+        ));
     }
 }
