@@ -15,15 +15,15 @@ pub async fn run_chat_expiry_worker(pool: PgPool, shutdown: ShutdownSignal) {
     {
         match service.expire_stale().await {
             Ok(expired) => {
-                for (conversation_id, initiator_id, recipient_id) in expired {
+                for (conversation_id, campus_id, initiator_id, recipient_id) in expired {
                     let payload = serde_json::json!({
                         "event": "conversation_state_changed",
                         "conversation_id": conversation_id,
                         "state": "expired",
                     })
                     .to_string();
-                    ws::broadcast_to_user(&initiator_id, &payload);
-                    ws::broadcast_to_user(&recipient_id, &payload);
+                    ws::broadcast_to_user_in_campus(&initiator_id, campus_id, &payload);
+                    ws::broadcast_to_user_in_campus(&recipient_id, campus_id, &payload);
                 }
             }
             Err(error) => tracing::error!(%error, "chat expiry worker failed"),

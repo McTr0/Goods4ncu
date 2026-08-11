@@ -13,7 +13,9 @@ use crate::api::error::ApiError;
 use crate::api::AppState;
 use crate::services::chat_conversation::ChatConversationService;
 
-use super::{authenticated_user, ReplySuggestion, ReplySuggestionsResponse};
+use super::{
+    authenticated_session, ensure_conversation_campus, ReplySuggestion, ReplySuggestionsResponse,
+};
 
 const REPLY_SUGGESTION_LIMIT_PER_MINUTE: u32 = 6;
 static REPLY_LIMITS: LazyLock<DashMap<String, (Instant, u32)>> = LazyLock::new(DashMap::new);
@@ -23,7 +25,9 @@ pub async fn reply_suggestions(
     headers: HeaderMap,
     Path(conversation_id): Path<Uuid>,
 ) -> Result<Json<ReplySuggestionsResponse>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    ensure_conversation_campus(&state, conversation_id, &session).await?;
+    let user_id = session.user_id;
     enforce_reply_limit(&user_id)?;
     let service = ChatConversationService::new(state.infra.db.clone());
     let conversation = service.get_conversation(conversation_id, &user_id).await?;

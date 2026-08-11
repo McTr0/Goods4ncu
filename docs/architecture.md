@@ -130,7 +130,7 @@ wanted matches 使用活动 campus、分类、预算、成色和 active 状态�
 
 自然语言入口先经过内容审核和 IntentRouter，再根据意图直接回答、检索或调用 Agent。Provider 支持 Gemini、MiniMax 和 OpenAI-compatible chat；embedding 当前仍主要依赖 Gemini 客户端和配置维度。
 
-市场 Agent 已挂载发布、搜索、详情、更新、删除、成交意向、议价和“我的发布”等工具。发布立即执行并进入撤销窗口；更新/删除使用 L2 ActionPlan，成交意向/议价使用独立两步 token 的 L3 ActionPlan。确认与业务事实已原子提交，但 listing 工具和 HTTP 的 command/审核入口仍需统一；新增写工具前必须阅读[Agent 系统设计](agent-system.md)。
+市场 Agent 已挂载发布、搜索、详情、更新、删除、成交意向、议价和“我的发布”等工具。发布立即执行并进入撤销窗口；更新/删除使用 L2 ActionPlan，成交意向/议价使用独立两步 token 的 L3 ActionPlan。确认与业务事实已原子提交，listing 工具和 HTTP 已共享 command/审核入口；资源版本快照仍待补齐。新增写工具前必须阅读[Agent 系统设计](agent-system.md)。
 
 回复助手是受限 agent，只生成三个不超过限制的草稿，不读取媒体，不自动发送，也不挂载成交工具。
 

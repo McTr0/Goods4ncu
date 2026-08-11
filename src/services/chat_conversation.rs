@@ -101,6 +101,7 @@ pub struct ConversationCapabilities {
 #[derive(Debug, Clone, Serialize)]
 pub struct ConversationView {
     pub id: String,
+    pub campus_id: Uuid,
     pub mode: ConversationMode,
     pub state: ConversationState,
     pub initiator_id: String,
@@ -803,6 +804,30 @@ impl ChatConversationService {
         cursor: Option<Uuid>,
         limit: i64,
     ) -> Result<(Vec<ConversationView>, Option<String>), ApiError> {
+        self.list_conversations_scoped(user_id, mode, cursor, limit, None)
+            .await
+    }
+
+    pub async fn list_conversations_for_campus(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+        mode: Option<ConversationMode>,
+        cursor: Option<Uuid>,
+        limit: i64,
+    ) -> Result<(Vec<ConversationView>, Option<String>), ApiError> {
+        self.list_conversations_scoped(user_id, mode, cursor, limit, Some(campus_id))
+            .await
+    }
+
+    async fn list_conversations_scoped(
+        &self,
+        user_id: &str,
+        mode: Option<ConversationMode>,
+        cursor: Option<Uuid>,
+        limit: i64,
+        campus_id: Option<Uuid>,
+    ) -> Result<(Vec<ConversationView>, Option<String>), ApiError> {
         let limit = limit.clamp(1, 50);
         let rows = sqlx::query(
             r#"
@@ -812,6 +837,7 @@ impl ChatConversationService {
               ON member.conversation_id = c.id AND member.user_id = $1
             WHERE member.archived_at IS NULL
               AND ($2::text IS NULL OR c.mode = $2)
+              AND ($5::uuid IS NULL OR c.campus_id = $5)
               AND (
                 $3::uuid IS NULL OR
                 (c.last_activity_at, c.id) < (
@@ -827,6 +853,7 @@ impl ChatConversationService {
         .bind(mode.map(ConversationMode::as_str))
         .bind(cursor)
         .bind(limit + 1)
+        .bind(campus_id)
         .fetch_all(&self.pool)
         .await
         .map_err(db_error)?;
@@ -854,6 +881,27 @@ impl ChatConversationService {
         user_id: &str,
         mode: Option<ConversationMode>,
         limit: i64,
+    ) -> Result<Vec<ChatThreadView>, ApiError> {
+        self.list_threads_scoped(user_id, mode, limit, None).await
+    }
+
+    pub async fn list_threads_for_campus(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+        mode: Option<ConversationMode>,
+        limit: i64,
+    ) -> Result<Vec<ChatThreadView>, ApiError> {
+        self.list_threads_scoped(user_id, mode, limit, Some(campus_id))
+            .await
+    }
+
+    async fn list_threads_scoped(
+        &self,
+        user_id: &str,
+        mode: Option<ConversationMode>,
+        limit: i64,
+        campus_id: Option<Uuid>,
     ) -> Result<Vec<ChatThreadView>, ApiError> {
         let limit = limit.clamp(1, 50);
         let rows = sqlx::query(
@@ -891,6 +939,7 @@ impl ChatConversationService {
                 ) latest ON TRUE
                 WHERE member.archived_at IS NULL
                   AND ($2::text IS NULL OR c.mode = $2)
+                  AND ($4::uuid IS NULL OR c.campus_id = $4)
             )
             SELECT visible.peer_user_id,
                    COALESCE(peer.username, '') AS peer_username,
@@ -928,6 +977,7 @@ impl ChatConversationService {
         .bind(user_id)
         .bind(mode.map(ConversationMode::as_str))
         .bind(limit)
+        .bind(campus_id)
         .fetch_all(&self.pool)
         .await
         .map_err(db_error)?;
@@ -958,7 +1008,31 @@ impl ChatConversationService {
         peer_user_id: &str,
         mode: Option<ConversationMode>,
     ) -> Result<ChatThreadDetail, ApiError> {
-        let mut threads = self.list_threads(user_id, mode, 50).await?;
+        self.get_thread_scoped(user_id, peer_user_id, mode, None)
+            .await
+    }
+
+    pub async fn get_thread_for_campus(
+        &self,
+        user_id: &str,
+        peer_user_id: &str,
+        campus_id: Uuid,
+        mode: Option<ConversationMode>,
+    ) -> Result<ChatThreadDetail, ApiError> {
+        self.get_thread_scoped(user_id, peer_user_id, mode, Some(campus_id))
+            .await
+    }
+
+    async fn get_thread_scoped(
+        &self,
+        user_id: &str,
+        peer_user_id: &str,
+        mode: Option<ConversationMode>,
+        campus_id: Option<Uuid>,
+    ) -> Result<ChatThreadDetail, ApiError> {
+        let mut threads = self
+            .list_threads_scoped(user_id, mode, 50, campus_id)
+            .await?;
         let thread = threads
             .drain(..)
             .find(|item| item.peer_user_id == peer_user_id)
@@ -972,6 +1046,7 @@ impl ChatConversationService {
               ON member.conversation_id = c.id AND member.user_id = $1
             WHERE member.archived_at IS NULL
               AND ($3::text IS NULL OR c.mode = $3)
+              AND ($4::uuid IS NULL OR c.campus_id = $4)
               AND (
                   CASE
                       WHEN c.initiator_id = $1 THEN c.recipient_id
@@ -985,6 +1060,7 @@ impl ChatConversationService {
         .bind(user_id)
         .bind(peer_user_id)
         .bind(mode.map(ConversationMode::as_str))
+        .bind(campus_id)
         .fetch_all(&self.pool)
         .await
         .map_err(db_error)?;
@@ -1014,7 +1090,8 @@ impl ChatConversationService {
 
         let metadata = sqlx::query(
             r#"
-            SELECT COALESCE(other_user.username, '') AS other_username,
+            SELECT c.campus_id,
+                   COALESCE(other_user.username, '') AS other_username,
                    inventory.title AS listing_title,
                    member.archived_at,
                    latest.content AS last_message,
@@ -1072,6 +1149,7 @@ impl ChatConversationService {
 
         Ok(ConversationView {
             id: row.id.to_string(),
+            campus_id: metadata.get("campus_id"),
             mode,
             state,
             initiator_id: row.initiator_id,
@@ -1697,7 +1775,7 @@ impl ChatConversationService {
             .collect())
     }
 
-    pub async fn expire_stale(&self) -> Result<Vec<(Uuid, String, String)>, ApiError> {
+    pub async fn expire_stale(&self) -> Result<Vec<(Uuid, Uuid, String, String)>, ApiError> {
         let mut tx = self.begin().await?;
         let rows = sqlx::query(
             "UPDATE chat_conversations
@@ -1712,7 +1790,7 @@ impl ChatConversationService {
              WHERE (state = 'syn_sent' AND invite_expires_at <= NOW())
                 OR (state = 'syn_ack' AND ack_expires_at <= NOW())
                 OR (state = 'active' AND idle_expires_at <= NOW())
-             RETURNING id, initiator_id, recipient_id",
+             RETURNING id, campus_id, initiator_id, recipient_id",
         )
         .fetch_all(&mut *tx)
         .await
@@ -1721,7 +1799,12 @@ impl ChatConversationService {
         for row in rows {
             let id: Uuid = row.get("id");
             insert_event(&mut tx, id, None, "conversation_expired", None, "expired").await?;
-            expired.push((id, row.get("initiator_id"), row.get("recipient_id")));
+            expired.push((
+                id,
+                row.get("campus_id"),
+                row.get("initiator_id"),
+                row.get("recipient_id"),
+            ));
         }
         tx.commit().await.map_err(commit_error)?;
         Ok(expired)
@@ -2513,13 +2596,7 @@ fn row_to_message(row: sqlx::postgres::PgRow, conversation_id: Uuid) -> Conversa
     let edited_at: Option<DateTime<Utc>> = row.get("edited_at");
     let client_message_id: Option<Uuid> = row.get("client_message_id");
     let raw_status: String = row.get("status");
-    let status = match raw_status.as_str() {
-        // Legacy facts are intentionally collapsed for new clients.  The
-        // database columns stay available during rollback, but the API never
-        // presents them as delivery or attention evidence.
-        "delivered" | "read" => "sent".to_string(),
-        _ => raw_status,
-    };
+    let status = normalize_message_status(&raw_status);
     let quote_kind: Option<String> = row.try_get("quote_kind").ok().flatten();
     let quote_ref_id: Option<String> = row.try_get("quote_ref_id").ok().flatten();
     let quote_snapshot: Value = row.try_get("quote_snapshot").unwrap_or_else(|_| json!({}));
@@ -2553,6 +2630,19 @@ fn row_to_message(row: sqlx::postgres::PgRow, conversation_id: Uuid) -> Conversa
         status,
         kind: row.get("kind"),
         edited_at: edited_at.map(|value| value.to_rfc3339()),
+    }
+}
+
+fn normalize_message_status(raw_status: &str) -> String {
+    match raw_status {
+        "sending" | "sent" | "failed" => raw_status.to_string(),
+        // Legacy facts are intentionally collapsed for new clients.  The
+        // database columns stay available during rollback, but the API never
+        // presents them as delivery or attention evidence.
+        "delivered" | "read" => "sent".to_string(),
+        // Keep the public vocabulary closed even if an old or malformed row
+        // contains an application-specific status.
+        _ => "sent".to_string(),
     }
 }
 
@@ -2632,5 +2722,15 @@ mod tests {
         assert!(ConversationState::Active.is_live_realtime());
         assert!(!ConversationState::Expired.is_live_realtime());
         assert!(!ConversationState::Closed.is_live_realtime());
+    }
+
+    #[test]
+    fn message_status_normalization_keeps_public_vocabulary_closed() {
+        for status in ["sending", "sent", "failed"] {
+            assert_eq!(normalize_message_status(status), status);
+        }
+        for status in ["delivered", "read", "pending", "unknown"] {
+            assert_eq!(normalize_message_status(status), "sent");
+        }
     }
 }

@@ -173,6 +173,28 @@ async fn threads_group_multiple_conversations_by_peer_without_merging_history() 
             .unwrap();
         assert_eq!(mail_threads.len(), 1);
         assert_eq!(mail_threads[0].conversation_count, 1);
+
+        let ncu = Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap();
+        let other_campus = Uuid::parse_str("c0000000-0000-0000-0000-000000000099").unwrap();
+        assert_eq!(
+            service
+                .list_threads_for_campus("user-b", ncu, None, 20)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(service
+            .list_threads_for_campus("user-b", other_campus, None, 20)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(service
+            .list_conversations_for_campus("user-b", other_campus, None, None, 20)
+            .await
+            .unwrap()
+            .0
+            .is_empty());
     })
     .await;
 }
@@ -626,9 +648,9 @@ async fn mail_thread_opens_immediately_allows_reply_and_member_archiving() {
 }
 
 #[tokio::test]
-async fn server_schema_has_no_direct_read_position_or_preference_columns() {
+async fn server_schema_keeps_retired_read_state_as_non_public_compatibility_shadows() {
     with_test_pool(|pool| async move {
-        let removed_columns: i64 = sqlx::query_scalar(
+        let shadow_columns: i64 = sqlx::query_scalar(
             "SELECT COUNT(*)
              FROM information_schema.columns
              WHERE table_schema = 'public'
@@ -640,7 +662,19 @@ async fn server_schema_has_no_direct_read_position_or_preference_columns() {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(removed_columns, 0);
+        assert_eq!(shadow_columns, 7);
+
+        let comment: String = sqlx::query_scalar(
+            "SELECT COALESCE(col_description(a.attrelid, a.attnum), '')
+             FROM pg_attribute a
+             WHERE a.attrelid = 'public.chat_messages'::regclass
+               AND a.attname = 'read_at'
+               AND NOT a.attisdropped",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(comment.contains("never written or exposed"));
     })
     .await;
 }

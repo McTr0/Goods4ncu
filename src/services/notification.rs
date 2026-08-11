@@ -160,6 +160,7 @@ impl NotificationService {
         if push {
             let push_payload = serde_json::json!({
                 "user_id": notification.user_id,
+                "campus_id": notification.campus_id,
                 "message": {
                     "id": id,
                     "event_type": notification.event_type,

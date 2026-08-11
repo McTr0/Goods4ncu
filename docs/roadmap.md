@@ -30,7 +30,7 @@
 当前能力还不是生产就绪。主要差距：
 
 - CampusMembership、核心资源校园作用域、后台审核队列、跨校园理由审计和统一 session extractor 已落地。当前 19 张租户表已启用 FORCE RLS（`0042` 及后续领域迁移，`app.campus_id` 事务级 GUC 触发，未设置时放行以保持应用层为主边界），隔离与写拒绝有集成测试；应用侧全请求 GUC 注入（fail-closed）与多副本租户验证仍属 Phase 4。
-- Agent 的更新/下架/成交意向/议价已接入 crash-safe ActionPlan（模型只能提出，L3 需独立 token 的二次确认）；发布采用立即执行 + 条件式撤销。listing command 统一化与资源版本快照仍待补。
+- Agent 的更新/下架/成交意向/议价已接入 crash-safe ActionPlan（模型只能提出，L3 需独立 token 的二次确认）；发布采用立即执行 + 条件式撤销。HTTP、Agent 和撤销路径已统一经过 `ListingCommandService`；资源版本快照仍待补。
 - 聊天隐私迁移已完成首阶段：留言/连接二分、服务端已发送、设备本地 `LOCALLY_SEEN`、主动 acknowledgement，以及陌生人/忙碌/联系人静音与重复请求抑制均由当前协议执行。
 - WebSocket 跨副本投递已具备（Redis fan-out，双实例端到端验证）；call signaling 多副本化与压测仍待做，typing 已从协议移除。outbox 基础与通知推送已持久化，其余事件消费者仍在进程内。
 - 媒体隔离、审核公开门槛、缩略图和 Base64 退出不完整；案件事实层已具备，但对象存储隔离仍需生产化。
@@ -180,9 +180,9 @@
 
 ### 沟通隐私迁移（Listing 收敛后）
 
-- [已实现] 消息公开状态收敛为 `sending | sent | failed`；`sent` 只表示服务器已持久化，不声称接收设备已收到。旧 `delivered/read` 映射为 `sent`，服务器 `read_at/read_by` 已删除。
+- [已实现] 消息公开状态收敛为 `sending | sent | failed`；`sent` 只表示服务器已持久化，不声称接收设备已收到。旧 `delivered/read` 映射为 `sent`，服务器不再写入或公开 `read_at/read_by`；首阶段仅保留兼容影子列供回滚，后续再清理。
 - [已实现] 稳定的 `received | will_review | completed` acknowledgement 每用户每消息最多一个，可替换或撤销；普通 reaction 保持独立语义，并通过 `message_acknowledgement_changed` 同步。
-- [已实现] 移动端已停止 read/typing 调用；旧路由、设置、字段和 WebSocket 事件已移除，新留言提示完全迁到设备本地。打开、Push、通知预览、解密、播放和输入都不会产生发送方可见状态。
+- [已实现] 移动端已停止 read/typing 调用；旧路由、设置和 WebSocket 事件已移除，旧数据库影子列不再写入，新留言提示完全迁到设备本地。打开、Push、通知预览、解密、播放和输入都不会产生发送方可见状态。
 - [已实现] `LOCALLY_SEEN` 只保存在设备本地；连接请求已加入权限、静音、忙碌、陌生人限制和按用户对重复抑制。群组临时讨论留在更后阶段。
 
 ### 安全与质量
@@ -261,7 +261,7 @@
 | Secret Chat | Phase 1 | [已实现] 新建默认 403（`SECRET_CHAT_NEW_SESSIONS_ENABLED` 仅迁移窗口可开），移动端入口已移除，历史会话可读有回归覆盖 |
 | 进程内事件 | Phase 4 | [部分完成] outbox 通知与专用 `embedding_jobs` listing 投影已迁移并有回归覆盖；审核投影等其余消费者仍待迁移 |
 | 单实例 WebSocket | Phase 4 | [部分完成] Redis fan-out 已实现并通过双实例端到端测试；断线补偿依赖既有 HTTP 拉取，压测仍待做 |
-| Agent 直接写工具 | Phase 3 | [部分完成] 发布已进入可撤销直接执行，四个计划动作使用 crash-safe ActionPlan；listing 校验/审核仍需收敛到统一 command service |
+| Agent 直接写工具 | Phase 3 | [部分完成] 发布已进入可撤销直接执行，四个计划动作使用 crash-safe ActionPlan；listing command 已统一，资源版本快照和完整行动审计仍待补 |
 
 ## 路线图维护规则
 

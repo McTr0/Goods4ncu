@@ -179,6 +179,7 @@ class MessageBubble extends StatelessWidget {
   final VoidCallback? onWithdrawAcknowledgement;
   final VoidCallback? onHide;
   final VoidCallback? onReport;
+  final VoidCallback? onRetry;
   final bool deliveryOnly;
 
   const MessageBubble({
@@ -193,6 +194,7 @@ class MessageBubble extends StatelessWidget {
     this.onWithdrawAcknowledgement,
     this.onHide,
     this.onReport,
+    this.onRetry,
     this.deliveryOnly = false,
   });
 
@@ -569,12 +571,17 @@ class MessageBubble extends StatelessWidget {
           color: isMe ? Colors.white70 : Colors.black45,
         );
       case 'failed':
-        return Tooltip(
-          message: AppLocalizations.of(context)!.sendFailedShort,
-          child: const Icon(
-            Icons.error_outline_rounded,
-            size: 14,
-            color: Colors.red,
+        return GestureDetector(
+          onTap: onRetry,
+          child: Tooltip(
+            message: onRetry == null
+                ? AppLocalizations.of(context)!.sendFailedShort
+                : AppLocalizations.of(context)!.retry,
+            child: const Icon(
+              Icons.error_outline_rounded,
+              size: 14,
+              color: Colors.red,
+            ),
           ),
         );
       default:
@@ -709,6 +716,7 @@ class UserChatMessageList extends StatelessWidget {
   final ValueChanged<ConversationMessage>? onWithdrawAcknowledgement;
   final ValueChanged<ConversationMessage>? onHideMessage;
   final ValueChanged<ConversationMessage>? onReportMessage;
+  final ValueChanged<ConversationMessage>? onRetryMessage;
   final bool allowEditing;
   final bool deliveryOnly;
 
@@ -728,6 +736,7 @@ class UserChatMessageList extends StatelessWidget {
     this.onWithdrawAcknowledgement,
     this.onHideMessage,
     this.onReportMessage,
+    this.onRetryMessage,
     this.allowEditing = true,
     this.deliveryOnly = false,
   });
@@ -792,6 +801,9 @@ class UserChatMessageList extends StatelessWidget {
               : null,
           onReport: msg.canReport && onReportMessage != null
               ? () => onReportMessage!(msg)
+              : null,
+          onRetry: isMe && msg.status == 'failed' && onRetryMessage != null
+              ? () => onRetryMessage!(msg)
               : null,
           onEdit: isMe && allowEditing && msg.canEdit && msg.kind == 'message'
               ? () => onEditMessage(msg)

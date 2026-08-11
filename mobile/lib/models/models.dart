@@ -1381,7 +1381,7 @@ class ConversationMessage {
       canReport: json['can_report'] != false,
       status: switch (json['status']?.toString()) {
         'delivered' || 'read' => 'sent',
-        final value when value != null && value.isNotEmpty => value,
+        'sending' || 'sent' || 'failed' => json['status']!.toString(),
         _ => 'sent',
       },
       editedAt: json['edited_at'] != null

@@ -1,4 +1,5 @@
 import 'package:state_notifier/state_notifier.dart';
+import 'package:uuid/uuid.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
 import '../services/chat_local_seen_storage.dart';
@@ -74,6 +75,8 @@ class ChatViewError extends ChatViewState {
 /// Chat state notifier — manages message list, connection status, explicit
 /// acknowledgements, and message editing for a single conversation.
 class ChatNotifier extends StateNotifier<ChatViewState> {
+  static const _uuid = Uuid();
+
   final ChatService _chatService;
   final UserService _userService;
   final String conversationId;
@@ -83,6 +86,7 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
   String? _currentUserId;
   String? _connectionStatus;
   Conversation? _conversation;
+  final Map<String, _PendingChatMessage> _pendingMessages = {};
 
   ChatNotifier({
     required this.conversationId,
@@ -275,7 +279,7 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
     }
 
     final tempMsg = ConversationMessage(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id: 'local-${_uuid.v4()}',
       conversationId: conversationId,
       senderId: currentState.currentUserId ?? '',
       content: content,
@@ -286,47 +290,96 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
       replyToMessageId: currentState.replyingToMessage?.id,
       sentAt: DateTime.now(),
       status: 'sending',
+      clientMessageId: _uuid.v4(),
     );
+
+    final pending = _PendingChatMessage(
+      content: content,
+      quote: quote,
+      imageBase64: imageBase64,
+      audioBase64: audioBase64,
+      imageUrl: imageUrl,
+      audioUrl: audioUrl,
+      replyToMessageId: currentState.replyingToMessage?.id,
+      clientMessageId: tempMsg.clientMessageId!,
+    );
+    _pendingMessages[tempMsg.id] = pending;
 
     state = currentState.copyWith(
       messages: [...currentState.messages, tempMsg],
       isSending: true,
     );
 
+    return _sendPendingMessage(tempMsg, pending, clearReply: true);
+  }
+
+  /// Retry a locally failed send. The original client id is reused so a
+  /// request that reached the server before the network failed is resolved by
+  /// the server's idempotency lookup instead of creating a duplicate message.
+  Future<void> retryMessage(ConversationMessage message) async {
+    final pending = _pendingMessages[message.id];
+    if (pending == null || state is! ChatViewData) return;
+    final currentState = state as ChatViewData;
+    if (currentState.isSending) return;
+    final idx = currentState.messages.indexWhere(
+      (item) => item.id == message.id,
+    );
+    if (idx < 0) return;
+    final sending = List<ConversationMessage>.from(currentState.messages);
+    sending[idx] = message.copyWith(status: 'sending');
+    state = currentState.copyWith(messages: sending, isSending: true);
+    await _sendPendingMessage(sending[idx], pending, clearReply: false);
+  }
+
+  Future<void> _sendPendingMessage(
+    ConversationMessage tempMsg,
+    _PendingChatMessage pending, {
+    required bool clearReply,
+  }) async {
     try {
       final reply = await _chatService.sendMessage(
         conversationId,
-        content: content,
-        quote: quote,
-        imageBase64: imageBase64,
-        audioBase64: audioBase64,
-        imageUrl: imageUrl,
-        audioUrl: audioUrl,
-        replyToMessageId: currentState.replyingToMessage?.id,
+        content: pending.content,
+        clientMessageId: pending.clientMessageId,
+        quote: pending.quote,
+        imageBase64: pending.imageBase64,
+        audioBase64: pending.audioBase64,
+        imageUrl: pending.imageUrl,
+        audioUrl: pending.audioUrl,
+        replyToMessageId: pending.replyToMessageId,
       );
       if (_conversation?.state == ConversationState.synAck) {
-        await hydrateConnectionStatus();
+        // The message is already durably accepted. A best-effort conversation
+        // refresh must not turn that successful send into a local failure.
+        try {
+          await hydrateConnectionStatus();
+        } catch (_) {}
       }
       if (!mounted) return;
       if (state is ChatViewData) {
         final s = state as ChatViewData;
         final idx = s.messages.indexWhere((m) => m.id == tempMsg.id);
         final newMessages = List<ConversationMessage>.from(s.messages);
-        if (idx >= 0) newMessages[idx] = reply;
+        if (idx >= 0) {
+          newMessages[idx] = reply;
+        }
+        _pendingMessages.remove(tempMsg.id);
         state = s.copyWith(
           messages: newMessages,
           isSending: false,
-          clearReply: true,
+          clearReply: clearReply,
         );
       }
     } catch (e) {
       if (!mounted) return;
       if (state is ChatViewData) {
         final s = state as ChatViewData;
-        state = s.copyWith(
-          messages: s.messages.where((m) => m.id != tempMsg.id).toList(),
-          isSending: false,
-        );
+        final idx = s.messages.indexWhere((m) => m.id == tempMsg.id);
+        final newMessages = List<ConversationMessage>.from(s.messages);
+        if (idx >= 0) {
+          newMessages[idx] = newMessages[idx].copyWith(status: 'failed');
+        }
+        state = s.copyWith(messages: newMessages, isSending: false);
       }
       rethrow;
     }
@@ -452,4 +505,26 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
         break;
     }
   }
+}
+
+class _PendingChatMessage {
+  const _PendingChatMessage({
+    required this.content,
+    required this.clientMessageId,
+    this.quote,
+    this.imageBase64,
+    this.audioBase64,
+    this.imageUrl,
+    this.audioUrl,
+    this.replyToMessageId,
+  });
+
+  final String content;
+  final Map<String, String>? quote;
+  final String? imageBase64;
+  final String? audioBase64;
+  final String? imageUrl;
+  final String? audioUrl;
+  final String? replyToMessageId;
+  final String clientMessageId;
 }

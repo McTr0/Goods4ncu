@@ -289,6 +289,7 @@ async fn notification_create_enqueues_push_atomically() {
             .expect("notification push event dispatched");
         assert_eq!(push.1["message"]["id"], notification_id);
         assert_eq!(push.1["message"]["event_type"], "outbox_test");
+        assert_eq!(push.1["campus_id"], campus_id.to_string());
 
         // And the notification row itself committed alongside it.
         let exists: bool =

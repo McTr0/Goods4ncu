@@ -41,7 +41,7 @@
 
 `active` 表示双方同意正在进行这次交流，不等于全局在线。进入连接后无需依赖 typing、last seen 或被动已读来证明注意力；结束后再发内容回到留言语义。连接请求必须可被静音、拒绝、限流和按联系人控制，陌生人默认不能用连接请求强行打断。
 
-当前 realtime 不再保存自动/手动已读或 typing 设置；read/typing 路由、事件和数据库字段已删除。移动端只维护设备本地 `LOCALLY_SEEN`，服务端公开状态仅为可验证的发送事实和用户主动 acknowledgement；连接隐私通过陌生人开关、busy 截止时间和联系人权限控制。
+当前 realtime 不再保存自动/手动已读或 typing 设置；read/typing 路由和事件已删除，旧数据库列在兼容窗口内只作影子保留且不再写入。移动端只维护设备本地 `LOCALLY_SEEN`，服务端公开状态仅为可验证的发送事实和用户主动 acknowledgement；连接隐私通过陌生人开关、busy 截止时间和联系人权限控制。
 
 ## “出”与“收”的哲学
 
@@ -192,7 +192,7 @@ Agent 权限等级和确认协议见 [Agent 系统设计](agent-system.md)。
 | 联系人线程与 realtime/mail | [已实现] | 底层会话独立，收件箱按联系人聚合 |
 | 群组、频道、通话 | [实验中] | 已有 API 和 UI，生产权限与弱网能力仍不足 |
 | 线下成交记录 | [已实现] | 不托管资金，不追踪支付和物流 |
-| Agent 搜索和工具 | [部分完成] | 发布已是即时可撤销；更新/下架使用 L2 ActionPlan，成交意向/议价使用独立 token 的 L3 双重确认；listing command 统一化与资源版本快照仍待补 |
+| Agent 搜索和工具 | [部分完成] | 发布已是即时可撤销；更新/下架使用 L2 ActionPlan，成交意向/议价使用独立 token 的 L3 双重确认；listing command 已统一，资源版本快照仍待补 |
 | 多校园 membership | [部分完成] | membership、活动校园 session、核心资源作用域与 RLS 已落地；资格续期和多副本生产验证仍待完成 |
 | 解释型 Feed 与用户反馈 | [部分完成] | 首页商品、相似商品、listing wanted matches 与 intent feed/matches 已有解释、精确隐藏、泛化降权、个性化开关和清除；真实质量/公平评估仍待完成 |
 | Secret Chat E2EE | [实验中][待弃用] | 不进入生产承诺，迁移方向见信任安全设计 |

@@ -26,14 +26,22 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::interval;
 
 use crate::api::auth::{
-    ensure_token_not_revoked, ensure_user_not_banned, extract_user_id_from_token_str_with_fallback,
+    ensure_token_not_revoked, ensure_user_not_banned,
+    extract_auth_session_from_token_str_with_fallback,
 };
 use crate::api::AppState;
+use crate::services::campus::CampusService;
 
-/// Connection table: user_id → list of tx channels (one per connected device).
+/// Connection table: user_id → list of device-scoped channels.
 /// DashMap handles concurrent access from multiple tokio tasks.
 /// Dead senders are pruned on broadcast or heartbeat timeout.
-pub type WsConnections = DashMap<String, Vec<mpsc::Sender<Message>>>;
+pub type WsConnections = DashMap<String, Vec<WsConnection>>;
+
+#[derive(Clone)]
+pub struct WsConnection {
+    sender: mpsc::Sender<Message>,
+    campus_id: Option<uuid::Uuid>,
+}
 
 /// Global WebSocket connections registry.
 /// Uses LazyLock so it is initialized on first access (at startup, not lazily per request).
@@ -47,8 +55,9 @@ pub fn new_ws_state() -> Arc<WsConnections> {
 /// Fanout publisher: when installed (Redis configured), broadcasts route
 /// through pub/sub so every replica delivers to its own sockets.
 #[cfg(feature = "redis")]
-static FANOUT_TX: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<(String, String)>> =
-    std::sync::OnceLock::new();
+static FANOUT_TX: std::sync::OnceLock<
+    tokio::sync::mpsc::UnboundedSender<(String, Option<uuid::Uuid>, String)>,
+> = std::sync::OnceLock::new();
 
 /// Install the Redis-backed fanout publisher. Spawns a forwarding task that
 /// owns the connection; broadcast callers stay synchronous. On publish failure
@@ -56,18 +65,20 @@ static FANOUT_TX: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<(String
 /// semantics, never silently dropped.
 #[cfg(feature = "redis")]
 pub fn install_fanout_publisher(mut conn: redis::aio::ConnectionManager) {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(String, String)>();
+    let (tx, mut rx) =
+        tokio::sync::mpsc::unbounded_channel::<(String, Option<uuid::Uuid>, String)>();
     if FANOUT_TX.set(tx).is_err() {
         tracing::warn!("WS fanout publisher already installed");
         return;
     }
     tokio::spawn(async move {
-        while let Some((user_id, payload)) = rx.recv().await {
+        while let Some((user_id, campus_id, payload)) = rx.recv().await {
             if let Err(error) =
-                crate::services::ws_fanout::publish(&mut conn, &user_id, &payload).await
+                crate::services::ws_fanout::publish_scoped(&mut conn, &user_id, campus_id, &payload)
+                    .await
             {
                 tracing::warn!(%error, user_id = %user_id, "WS fanout publish failed; delivering locally");
-                deliver_local(&user_id, &payload);
+                deliver_local_scoped(&user_id, campus_id, &payload);
             }
         }
     });
@@ -77,14 +88,28 @@ pub fn install_fanout_publisher(mut conn: redis::aio::ConnectionManager) {
 /// Redis and delivery happens on every replica (including this one) through
 /// the subscription; without it, it delivers to local sockets directly.
 pub fn broadcast_to_user(user_id: &str, payload: &str) {
+    broadcast_to_user_scoped(user_id, None, payload);
+}
+
+/// Broadcast a chat event only to sockets authenticated for the conversation's
+/// active campus. Legacy sockets without a campus claim are intentionally not
+/// included; they can recover the durable event through the HTTP API.
+pub fn broadcast_to_user_in_campus(user_id: &str, campus_id: uuid::Uuid, payload: &str) {
+    broadcast_to_user_scoped(user_id, Some(campus_id), payload);
+}
+
+fn broadcast_to_user_scoped(user_id: &str, campus_id: Option<uuid::Uuid>, payload: &str) {
     #[cfg(feature = "redis")]
     if let Some(tx) = FANOUT_TX.get() {
-        if tx.send((user_id.to_string(), payload.to_string())).is_ok() {
+        if tx
+            .send((user_id.to_string(), campus_id, payload.to_string()))
+            .is_ok()
+        {
             return;
         }
         tracing::warn!("WS fanout channel closed; delivering locally");
     }
-    deliver_local(user_id, payload);
+    deliver_local_scoped(user_id, campus_id, payload);
 }
 
 /// Register a bare connection sender for a user — the same registration the
@@ -93,23 +118,45 @@ pub fn broadcast_to_user(user_id: &str, payload: &str) {
 #[doc(hidden)]
 #[allow(dead_code)] // used from the lib crate by integration tests
 pub fn register_test_connection(user_id: &str) -> mpsc::Receiver<Message> {
+    register_test_connection_for_campus(user_id, None)
+}
+
+#[doc(hidden)]
+pub fn register_test_connection_for_campus(
+    user_id: &str,
+    campus_id: Option<uuid::Uuid>,
+) -> mpsc::Receiver<Message> {
     let (tx, rx) = mpsc::channel(16);
     WS_CONNECTIONS
         .entry(user_id.to_string())
         .or_default()
-        .push(tx);
+        .push(WsConnection {
+            sender: tx,
+            campus_id,
+        });
     rx
 }
 
 /// Deliver a payload to this instance's active connections for a user.
 /// Automatically removes dead senders (channel closed).
 pub fn deliver_local(user_id: &str, payload: &str) {
+    deliver_local_scoped(user_id, None, payload);
+}
+
+pub fn deliver_local_for_campus(user_id: &str, campus_id: uuid::Uuid, payload: &str) {
+    deliver_local_scoped(user_id, Some(campus_id), payload);
+}
+
+fn deliver_local_scoped(user_id: &str, campus_id: Option<uuid::Uuid>, payload: &str) {
     let metrics = crate::api::metrics::GLOBAL_METRICS.get().cloned();
 
     if let Some(connections) = WS_CONNECTIONS.get(user_id) {
         let mut dead_indices = vec![];
-        for (i, tx) in connections.value().iter().enumerate() {
-            match tx.try_send(Message::Text(payload.into())) {
+        for (i, connection) in connections.value().iter().enumerate() {
+            if campus_id.is_some() && connection.campus_id != campus_id {
+                continue;
+            }
+            match connection.sender.try_send(Message::Text(payload.into())) {
                 Ok(_) => {}
                 Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                     dead_indices.push(i);
@@ -186,14 +233,14 @@ pub async fn ws_handler(
             .into_response();
     }
 
-    let user_id = match extract_user_id_from_token_str_with_fallback(
+    let session = match extract_auth_session_from_token_str_with_fallback(
         token,
         &state.secrets.jwt_secret,
         state.secrets.jwt_secret_old.as_deref(),
     ) {
-        Ok(uid) => uid,
+        Ok(session) => session,
         Err(err) => {
-            tracing::warn!(err = %err, "WS auth failed");
+            tracing::warn!(err = %err, "WS auth session extraction failed");
             return (
                 StatusCode::UNAUTHORIZED,
                 axum::response::Json(serde_json::json!({
@@ -203,13 +250,21 @@ pub async fn ws_handler(
                 .into_response();
         }
     };
-    if let Err(err) = ensure_user_not_banned(&state, &user_id).await {
-        tracing::warn!(user_id = %user_id, "WS auth failed: user is not active");
+    if let Err(err) = ensure_user_not_banned(&state, &session.user_id).await {
+        tracing::warn!(user_id = %session.user_id, "WS auth failed: user is not active");
         return err.into_response();
+    }
+    if let Some(campus_id) = session.campus_id {
+        if let Err(error) = CampusService::new(state.infra.db.clone())
+            .require_tenant_context_for_session(&session.user_id, Some(campus_id))
+            .await
+        {
+            return error.into_response();
+        }
     }
 
     ws.on_upgrade(move |socket| async move {
-        handle_socket(socket, user_id).await;
+        handle_socket(socket, session.user_id, session.campus_id).await;
     })
 }
 
@@ -233,7 +288,7 @@ fn extract_bearer_token(headers: &HeaderMap) -> Result<&str, ()> {
 ///   Detects connection death and signals sender to exit.
 /// - A oneshot channel signals the sender when the receiver closes.
 /// - On close, this specific connection tx is removed from WS_CONNECTIONS.
-async fn handle_socket(socket: WebSocket, user_id: String) {
+async fn handle_socket(socket: WebSocket, user_id: String, campus_id: Option<uuid::Uuid>) {
     let (ws_sender, mut ws_receiver) = socket.split();
 
     // Channel for relaying ping data from recv task to sender task.
@@ -246,7 +301,10 @@ async fn handle_socket(socket: WebSocket, user_id: String) {
     WS_CONNECTIONS
         .entry(user_id.clone())
         .or_default()
-        .push(tx.clone());
+        .push(WsConnection {
+            sender: tx.clone(),
+            campus_id,
+        });
 
     tracing::debug!(
         user_id = %user_id,
@@ -322,7 +380,9 @@ async fn handle_socket(socket: WebSocket, user_id: String) {
     // Socket closed. Clean up: remove this specific tx from the user's connection list.
     if let Some(mut connections) = WS_CONNECTIONS.get_mut(&user_id) {
         let before = connections.value().len();
-        connections.value_mut().retain(|t| !t.is_closed());
+        connections
+            .value_mut()
+            .retain(|connection| !connection.sender.is_closed());
         let pruned = before.saturating_sub(connections.value().len());
         if pruned > 0 {
             if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {
@@ -374,5 +434,25 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("Authorization", "Token abc".parse().expect("header"));
         assert!(extract_bearer_token(&headers).is_err());
+    }
+
+    #[tokio::test]
+    async fn campus_scoped_broadcast_does_not_cross_device_tenants() {
+        let user_id = format!("ws-scope-{}", uuid::Uuid::new_v4().simple());
+        let campus_a = uuid::Uuid::new_v4();
+        let campus_b = uuid::Uuid::new_v4();
+        let mut campus_a_rx = register_test_connection_for_campus(&user_id, Some(campus_a));
+        let mut campus_b_rx = register_test_connection_for_campus(&user_id, Some(campus_b));
+        let payload = "{\"event\":\"message_acknowledgement_changed\"}";
+
+        broadcast_to_user_in_campus(&user_id, campus_a, payload);
+
+        let received = campus_a_rx.recv().await.expect("campus A receives event");
+        assert!(matches!(received, Message::Text(text) if text.as_str() == payload));
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), campus_b_rx.recv())
+                .await
+                .is_err()
+        );
     }
 }

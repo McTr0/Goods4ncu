@@ -1589,7 +1589,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get modeMail => '留言';
 
   @override
-  String get conversationStateDelivered => '已送达';
+  String get conversationStateDelivered => '已发送';
 
   @override
   String get conversationStateSynSent => '等待对方接通';
@@ -1644,7 +1644,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get contactModeMailTitle => '写封留言';
 
   @override
-  String get contactModeMailDescription => '直接送达，不显示在线、输入中和已读状态';
+  String get contactModeMailDescription => '直接发送，不显示在线、输入中和已读状态';
 
   @override
   String get contactOpeningRequired => '请先写下你想说的话';
@@ -1677,7 +1677,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get contactRealtimeOpeningHint => '你好，请问这件商品现在还在吗？';
 
   @override
-  String get contactMailSubmit => '送达留言';
+  String get contactMailSubmit => '发送留言';
 
   @override
   String get contactRealtimeSubmit => '等待对方接通';
@@ -2322,7 +2322,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mailFallbackTitle => '留言';
 
   @override
-  String get mailProtocolSubtitle => '异步送达 · 不显示在线、输入中和已读状态';
+  String get mailProtocolSubtitle => '异步发送 · 不显示在线、输入中和已读状态';
 
   @override
   String get incomingRealtimeTitle => '对方想现在聊聊';
@@ -2345,7 +2345,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get waitingPeerTitle => '正在等待对方接通';
 
   @override
-  String get invitationDelivered => '邀请已送达';
+  String get invitationDelivered => '邀请已发送';
 
   @override
   String timeRemaining(String remaining) {
@@ -2440,7 +2440,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get messageReadStatus => '已读';
 
   @override
-  String get messageDeliveredStatus => '已送达';
+  String get messageDeliveredStatus => '已发送';
 
   @override
   String get acknowledgementReceived => '收到';

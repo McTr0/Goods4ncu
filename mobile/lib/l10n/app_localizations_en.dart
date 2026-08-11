@@ -1660,7 +1660,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get modeMail => 'Mail';
 
   @override
-  String get conversationStateDelivered => 'Delivered';
+  String get conversationStateDelivered => 'Sent';
 
   @override
   String get conversationStateSynSent => 'Waiting for them to connect';
@@ -1719,7 +1719,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get contactModeMailDescription =>
-      'Deliver it directly without online, typing, or read indicators.';
+      'Send it directly without online, typing, or read indicators.';
 
   @override
   String get contactOpeningRequired =>
@@ -1755,7 +1755,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get contactRealtimeOpeningHint => 'Hi, is this item still available?';
 
   @override
-  String get contactMailSubmit => 'Deliver message';
+  String get contactMailSubmit => 'Send message';
 
   @override
   String get contactRealtimeSubmit => 'Wait for them to connect';
@@ -2435,7 +2435,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get mailProtocolSubtitle =>
-      'Async delivery · no online, typing, or read status';
+      'Async sending · no online, typing, or read status';
 
   @override
   String get incomingRealtimeTitle => 'They want to chat now';
@@ -2458,7 +2458,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get waitingPeerTitle => 'Waiting for them to connect';
 
   @override
-  String get invitationDelivered => 'Invitation delivered';
+  String get invitationDelivered => 'Invitation sent';
 
   @override
   String timeRemaining(String remaining) {
@@ -2558,7 +2558,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get messageReadStatus => 'Read';
 
   @override
-  String get messageDeliveredStatus => 'Delivered';
+  String get messageDeliveredStatus => 'Sent';
 
   @override
   String get acknowledgementReceived => 'Received';

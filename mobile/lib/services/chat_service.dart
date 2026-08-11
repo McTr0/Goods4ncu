@@ -360,6 +360,7 @@ class ChatService extends BaseService {
   Future<ConversationMessage> sendMessage(
     String conversationId, {
     required String content,
+    String? clientMessageId,
     String? replyToMessageId,
     Map<String, String>? quote,
     String? imageBase64,
@@ -369,7 +370,7 @@ class ChatService extends BaseService {
   }) async {
     final headers = await authHeaders();
     final body = <String, dynamic>{
-      'client_message_id': _uuid.v4(),
+      'client_message_id': clientMessageId ?? _uuid.v4(),
       'content': content,
       'reply_to_message_id': ?int.tryParse(replyToMessageId ?? ''),
       'quote': ?quote,

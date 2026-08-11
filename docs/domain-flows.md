@@ -84,7 +84,7 @@ Embedding provider 调用发生在 listing 提交之后。provider 超时、限�
 
 `wanted`：价格是预算上限，成色是最低可接受成色，owner 是需求方。没有品牌偏好时当前客户端可提交“不限”，生产目标应改为显式可选字段而不是把展示词当真实品牌。
 
-Agent 发布当前是低风险即时动作，并在小帮页提供撤销窗口；它仍必须经过与表单相同的审核和校验。当前 Agent/HTTP 的 listing command 入口尚未完全统一，这是必须收敛的已知缺口。
+Agent 发布当前是低风险即时动作，并在小帮页提供撤销窗口；它仍必须经过与表单相同的审核和校验。Agent、HTTP 和撤销路径已统一经过 `ListingCommandService`；资源版本快照仍属于后续生产化工作。
 
 ### 状态
 
@@ -223,7 +223,7 @@ Mail 创建后进入 open，主题 1–120 字、正文 1–2000 字，无需接
 
 ### 已读、确认与注意力隐私
 
-服务器不再保存阅读位置、read preference 或 typing 状态；旧数据库字段已在迁移中删除，旧 read/typing 路由也不再注册。`LOCALLY_SEEN` 只存在于接收端设备，不写入发送方可见事实，也不由服务器推断。公开消息状态收敛为 `sending | sent | failed`；只有接收者主动选择 `received | will_review | completed` 才产生可见 acknowledgement。打开会话、查看通知、接收 Push、解密内容、播放媒体、回复或普通 reaction 都不自动生成 acknowledgement。
+服务器不再写入或公开阅读位置、read preference 或 typing 状态；旧数据库列在首阶段只作为兼容影子保留，旧 read/typing 路由也不再注册。`LOCALLY_SEEN` 只存在于接收端设备，不写入发送方可见事实，也不由服务器推断。公开消息状态收敛为 `sending | sent | failed`；只有接收者主动选择 `received | will_review | completed` 才产生可见 acknowledgement。打开会话、查看通知、接收 Push、解密内容、播放媒体、回复或普通 reaction 都不自动生成 acknowledgement。
 
 realtime 的 `active` 只表示这一段会话已经接通，不是全局在线、last seen 或注意力证明。移动端不发送 read/typing，WebSocket 也不广播这些事件。连接隐私由 `allow_strangers`、busy 截止时间和联系人权限控制；静音只抑制打扰通知，不改变历史或生成已读事实。
 

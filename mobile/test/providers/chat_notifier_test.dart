@@ -26,6 +26,8 @@ class FakeChatService extends ChatService {
   String? sentAudioBase64;
   String? sentImageUrl;
   String? sentAudioUrl;
+  String? sentClientMessageId;
+  bool throwOnSend = false;
   int loadMessagesCalls = 0;
 
   @override
@@ -51,6 +53,7 @@ class FakeChatService extends ChatService {
   Future<ConversationMessage> sendMessage(
     String conversationId, {
     required String content,
+    String? clientMessageId,
     String? replyToMessageId,
     String? imageBase64,
     String? audioBase64,
@@ -58,7 +61,9 @@ class FakeChatService extends ChatService {
     String? audioUrl,
     Map<String, String>? quote,
   }) async {
+    if (throwOnSend) throw Exception('send failed');
     sentContent = content;
+    sentClientMessageId = clientMessageId;
     sentImageBase64 = imageBase64;
     sentAudioBase64 = audioBase64;
     sentImageUrl = imageUrl;
@@ -176,6 +181,45 @@ void main() {
     expect(state.messages.single.imageBase64, isNull);
     notifier.dispose();
   });
+
+  test(
+    'failed sends remain visible and retry with the same client id',
+    () async {
+      final chatService = FakeChatService();
+      final notifier = ChatNotifier(
+        conversationId: 'conv-1',
+        chatService: chatService,
+        userService: FakeUserService({'user_id': 'user-me'}),
+      );
+
+      await flushAsync();
+      notifier.setConnectionStatus('connected');
+      chatService.throwOnSend = true;
+
+      await expectLater(
+        notifier.sendMessage(content: 'please retry'),
+        throwsA(isA<Exception>()),
+      );
+      var state = notifier.currentState as ChatViewData;
+      expect(state.messages, hasLength(1));
+      expect(state.messages.single.status, 'failed');
+      final failedId = state.messages.single.id;
+
+      chatService.throwOnSend = false;
+      await notifier.retryMessage(state.messages.single);
+
+      state = notifier.currentState as ChatViewData;
+      expect(state.messages.single.status, 'sent');
+      expect(state.messages.single.content, 'please retry');
+      expect(state.messages.single.id, 'server-1');
+      expect(chatService.sentClientMessageId, isNotNull);
+      expect(
+        state.messages.where((message) => message.id == failedId),
+        isEmpty,
+      );
+      notifier.dispose();
+    },
+  );
 
   test(
     'connection_established reloads messages and marks conversation connected',

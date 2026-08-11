@@ -40,6 +40,7 @@ class _FakeChatService extends ChatService {
   Future<ConversationMessage> sendMessage(
     String conversationId, {
     required String content,
+    String? clientMessageId,
     String? replyToMessageId,
     String? imageBase64,
     String? audioBase64,

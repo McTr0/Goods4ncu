@@ -513,6 +513,7 @@ void main() {
     });
 
     testWidgets('shows failed status', (tester) async {
+      var retryCount = 0;
       final message = ConversationMessage(
         id: '1',
         conversationId: 'conv-1',
@@ -529,11 +530,14 @@ void main() {
             isMe: true,
             isConnected: true,
             onEdit: null,
+            onRetry: () => retryCount += 1,
           ),
         ),
       );
 
       expect(find.byIcon(Icons.error_outline_rounded), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.error_outline_rounded));
+      expect(retryCount, 1);
     });
 
     testWidgets('shows delivery status even when not connected', (

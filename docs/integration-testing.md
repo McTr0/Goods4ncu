@@ -132,8 +132,10 @@ GOOD4NCU_API_BASE=http://127.0.0.1:3000 \
 | 实时三次握手 | `buyer1` 发起 | `seller1` 接通 | `syn_sent -> syn_ack -> active`，文案是“接通”，不是“好友申请”。 |
 | 现在不方便 | `buyer1` 等待 | `seller1` decline | 浏览器显示“这次没有接通”，只能重新联系。 |
 | 邮件留言 | `buyer1` 发送留言 | `seller1` 稍后回复 | 新客户端显示“发送中 → 已发送”；不展示在线、输入中、已读，也不把服务器提交解释成设备送达。 |
+| 发送失败重试 | `buyer1` 断网后重试失败消息 | API driver 恢复网络 | 失败消息仍留在本地并显示重试；重试复用同一 `client_message_id`，服务端成功前不显示“已发送”。 |
 | 本地查看不回执 | `seller1` 打开留言、查看 Push 或通知预览 | `buyer1` 观察消息 | 不产生发送方可见的 `read_at`/read 事件；`LOCALLY_SEEN` 只留在接收设备。 |
 | 主动确认 | `seller1` 对消息选择“收到 / 我会看 / 已处理” | `buyer1` 观察消息 | 只有显式动作产生对应 acknowledgement 和 `message_acknowledgement_changed`，可替换或撤销；打开消息不自动确认。 |
+| 跨校园确认隔离 | 同一账号的设备分别停在两个校园 | A 校园接收 acknowledgement | 只有 A 校园 socket 收到事件；B 校园只能通过自己的 HTTP 会话看到自己的会话，不能收到 A 的消息或确认。 |
 | 连接不是在线 | `buyer1` 发起连接，`seller1` 接受并结束 | 双方观察状态 | 只显示 `请求连接 -> 已连接 -> 已结束`；不额外显示 online、last seen 或 typing。 |
 | 回复引用 | `buyer1` 长按回复 | `seller1` 发一条消息 | 引用气泡展示原发送者和摘要。 |
 | 表情反应 | `buyer1` 添加反应 | 无 | 反应出现在气泡下方，自己的反应高亮。 |

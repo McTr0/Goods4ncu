@@ -78,6 +78,19 @@ void main() {
       expect(message.editedAt, isNull);
     });
 
+    test('fromJson keeps message status vocabulary closed', () {
+      final message = ConversationMessage.fromJson({
+        'id': '123',
+        'conversation_id': 'conv-456',
+        'sender': 'user-789',
+        'content': 'Hello!',
+        'sent_at': '2024-01-15T10:30:00Z',
+        'status': 'pending',
+      });
+
+      expect(message.status, 'sent');
+    });
+
     test('fromJson falls back to timestamp field when sent_at is missing', () {
       final json = {
         'id': '123',

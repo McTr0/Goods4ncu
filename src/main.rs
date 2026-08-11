@@ -158,9 +158,16 @@ async fn main() -> Result<(), anyhow::Error> {
                         .as_str()
                         .ok_or_else(|| anyhow::anyhow!("missing user_id"))?;
                     let message = payload["message"].to_string();
+                    let campus_id = payload["campus_id"]
+                        .as_str()
+                        .and_then(|value| uuid::Uuid::parse_str(value).ok());
                     // Idempotent for our purposes: re-delivery re-sends the
                     // same notification id, which clients key on.
-                    api::ws::broadcast_to_user(user_id, &message);
+                    if let Some(campus_id) = campus_id {
+                        api::ws::broadcast_to_user_in_campus(user_id, campus_id, &message);
+                    } else {
+                        api::ws::broadcast_to_user(user_id, &message);
+                    }
                     Ok(())
                 }
                 other => {

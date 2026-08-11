@@ -439,7 +439,9 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 `sent` 只表示消息已经持久化到服务器。没有设备 ACK 时，API 不称其为“已送达”。接收端的 `LOCALLY_SEEN` 由设备本地维护，不上传、不广播，也不会产生发送方可查询的 `read_at`。
 
-公共会话字段包括 `id`、`mode`、`state`、`initiator_id`、`recipient_id`、`other_user_id`、`other_username`、`listing_id`、`subject`、`last_message`、`archived`、`expires_at`、`is_blocked` 和 `capabilities`。新消息提示由接收设备本地维护；服务端不返回阅读位置或 read preference。`capabilities` 告诉移动端当前用户是否可以 `respond`、`ack`、`send`、`close`、`archive` 或 `restart`。
+公共会话字段包括 `id`、`campus_id`、`mode`、`state`、`initiator_id`、`recipient_id`、`other_user_id`、`other_username`、`listing_id`、`subject`、`last_message`、`archived`、`expires_at`、`is_blocked` 和 `capabilities`。新消息提示由接收设备本地维护；服务端不返回阅读位置或 read preference。`capabilities` 告诉移动端当前用户是否可以 `respond`、`ack`、`send`、`close`、`archive` 或 `restart`。
+
+带活动校园的 access token 只能读取或修改该校园中的直聊会话和消息；切换校园后，另一校园的会话按 `campus_scope_mismatch` 拒绝。旧的无校园 claim token 在兼容窗口内仍按成员权限工作，但新客户端应使用带活动校园的 token。
 
 非法状态转换返回 `409 invalid_conversation_state`。重复创建和重复发送依赖客户端 UUID 幂等。
 
@@ -750,7 +752,7 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 
 ### GET `/api/ws`
 
-使用 `Authorization: Bearer <jwt>` 建连。服务端会验证 token 未撤销、用户未封禁。连接用于通知推送、聊天消息提示、会话状态和主动 acknowledgement 变更。WebSocket 的连接本身不表示用户在线，服务端也不发送 read/typing 注意力事件。客户端收到事件后仍应回查 HTTP 列表，因为数据库才是最终事实；`LOCALLY_SEEN` 继续只留在设备。
+使用 `Authorization: Bearer <jwt>` 建连。服务端会验证 token 未撤销、用户未封禁和活动校园 membership。连接用于通知推送、聊天消息提示、会话状态和主动 acknowledgement 变更；直聊事件只投递到该会话校园的同校园 socket。WebSocket 的连接本身不表示用户在线，服务端也不发送 read/typing 注意力事件。客户端收到事件后仍应回查 HTTP 列表，因为数据库才是最终事实；`LOCALLY_SEEN` 继续只留在设备。
 
 ## Deal Records（当前路径仍为 Orders）
 

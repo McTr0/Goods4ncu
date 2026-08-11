@@ -12,9 +12,10 @@ use crate::services::chat_conversation::{
 };
 
 use super::{
-    authenticated_user, moderate_text, EditMessageBody, HideMessageResponse,
-    MessageAcknowledgementBody, MessageListQuery, MessageListResponse, MessageReactionBody,
-    ReportMessageBody, ReportMessageResponse, SendMessageBody,
+    authenticated_session, ensure_conversation_campus, ensure_message_campus, moderate_text,
+    EditMessageBody, HideMessageResponse, MessageAcknowledgementBody, MessageListQuery,
+    MessageListResponse, MessageReactionBody, ReportMessageBody, ReportMessageResponse,
+    SendMessageBody,
 };
 
 async fn conversation_campus_id(state: &AppState, conversation_id: Uuid) -> Result<Uuid, ApiError> {
@@ -32,7 +33,9 @@ pub async fn get_conversation_messages(
     Path(conversation_id): Path<Uuid>,
     Query(query): Query<MessageListQuery>,
 ) -> Result<Json<MessageListResponse>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    ensure_conversation_campus(&state, conversation_id, &session).await?;
+    let user_id = session.user_id;
     let service = ChatConversationService::new(state.infra.db.clone());
     let (messages, total) = service
         .get_messages(
@@ -59,7 +62,9 @@ pub async fn send_conversation_message(
     Path(conversation_id): Path<Uuid>,
     Json(body): Json<SendMessageBody>,
 ) -> Result<Json<ConversationMessageRecord>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    ensure_conversation_campus(&state, conversation_id, &session).await?;
+    let user_id = session.user_id;
     let content = body.content.trim().to_string();
     moderate_text(&state, &content)?;
     let image_url = normalize_platform_media_url(&state, body.image_url, "image_url")?;
@@ -131,7 +136,7 @@ pub async fn send_conversation_message(
         "reactions": message.reactions,
     })
     .to_string();
-    ws::broadcast_to_user(other_user_id, &payload);
+    ws::broadcast_to_user_in_campus(other_user_id, conversation.campus_id, &payload);
     state.infra.metrics.record_chat_message();
     if has_url_media {
         state.infra.metrics.record_chat_media_url_message();
@@ -148,7 +153,9 @@ pub async fn set_message_acknowledgement(
     Path(message_id): Path<i64>,
     Json(body): Json<MessageAcknowledgementBody>,
 ) -> Result<Json<ConversationMessageRecord>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    let _ = ensure_message_campus(&state, message_id, &session).await?;
+    let user_id = session.user_id;
     let service = ChatConversationService::new(state.infra.db.clone());
     let message = service
         .set_message_acknowledgement(message_id, &user_id, body.kind)
@@ -162,7 +169,9 @@ pub async fn delete_message_acknowledgement(
     headers: HeaderMap,
     Path(message_id): Path<i64>,
 ) -> Result<Json<ConversationMessageRecord>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    let _ = ensure_message_campus(&state, message_id, &session).await?;
+    let user_id = session.user_id;
     let service = ChatConversationService::new(state.infra.db.clone());
     let message = service
         .delete_message_acknowledgement(message_id, &user_id)
@@ -177,7 +186,9 @@ pub async fn edit_message(
     Path(message_id): Path<i64>,
     Json(body): Json<EditMessageBody>,
 ) -> Result<Json<ConversationMessageRecord>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    let _ = ensure_message_campus(&state, message_id, &session).await?;
+    let user_id = session.user_id;
     let content = body.content.trim().to_string();
     moderate_text(&state, &content)?;
     let service = ChatConversationService::new(state.infra.db.clone());
@@ -191,7 +202,9 @@ pub async fn set_message_reaction(
     Path(message_id): Path<i64>,
     Json(body): Json<MessageReactionBody>,
 ) -> Result<Json<ConversationMessageRecord>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    let _ = ensure_message_campus(&state, message_id, &session).await?;
+    let user_id = session.user_id;
     let service = ChatConversationService::new(state.infra.db.clone());
     let message = service
         .set_reaction(message_id, &user_id, &body.emoji)
@@ -205,7 +218,9 @@ pub async fn delete_message_reaction(
     headers: HeaderMap,
     Path(message_id): Path<i64>,
 ) -> Result<Json<ConversationMessageRecord>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    let _ = ensure_message_campus(&state, message_id, &session).await?;
+    let user_id = session.user_id;
     let service = ChatConversationService::new(state.infra.db.clone());
     let message = service.delete_reaction(message_id, &user_id).await?;
     broadcast_message_update(&service, &user_id, &message, "message_reaction_changed").await?;
@@ -217,7 +232,9 @@ pub async fn hide_message(
     headers: HeaderMap,
     Path(message_id): Path<i64>,
 ) -> Result<Json<HideMessageResponse>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    let campus_id = ensure_message_campus(&state, message_id, &session).await?;
+    let user_id = session.user_id;
     let service = ChatConversationService::new(state.infra.db.clone());
     service.hide_message(message_id, &user_id).await?;
     let payload = serde_json::json!({
@@ -225,7 +242,10 @@ pub async fn hide_message(
         "message_id": message_id,
     })
     .to_string();
-    ws::broadcast_to_user(&user_id, &payload);
+    match campus_id {
+        Some(campus_id) => ws::broadcast_to_user_in_campus(&user_id, campus_id, &payload),
+        None => ws::broadcast_to_user(&user_id, &payload),
+    }
     Ok(Json(HideMessageResponse {
         message_id,
         hidden: true,
@@ -238,7 +258,9 @@ pub async fn report_message(
     Path(message_id): Path<i64>,
     Json(body): Json<ReportMessageBody>,
 ) -> Result<Json<ReportMessageResponse>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    let campus_id = ensure_message_campus(&state, message_id, &session).await?;
+    let user_id = session.user_id;
     let service = ChatConversationService::new(state.infra.db.clone());
     let report_id = service
         .report_message(message_id, &user_id, &body.reason, body.details.as_deref())
@@ -249,7 +271,10 @@ pub async fn report_message(
         "report_id": report_id,
     })
     .to_string();
-    ws::broadcast_to_user(&user_id, &payload);
+    match campus_id {
+        Some(campus_id) => ws::broadcast_to_user_in_campus(&user_id, campus_id, &payload),
+        None => ws::broadcast_to_user(&user_id, &payload),
+    }
     Ok(Json(ReportMessageResponse {
         report_id: report_id.to_string(),
     }))
@@ -270,9 +295,13 @@ async fn broadcast_acknowledgement(
         "acknowledgements": message.acknowledgements,
     })
     .to_string();
-    ws::broadcast_to_user(&conversation.initiator_id, &payload);
+    ws::broadcast_to_user_in_campus(&conversation.initiator_id, conversation.campus_id, &payload);
     if conversation.recipient_id != conversation.initiator_id {
-        ws::broadcast_to_user(&conversation.recipient_id, &payload);
+        ws::broadcast_to_user_in_campus(
+            &conversation.recipient_id,
+            conversation.campus_id,
+            &payload,
+        );
     }
     Ok(())
 }
@@ -293,8 +322,8 @@ async fn broadcast_message_update(
         "reactions": message.reactions,
     })
     .to_string();
-    ws::broadcast_to_user(&conversation.initiator_id, &payload);
-    ws::broadcast_to_user(&conversation.recipient_id, &payload);
+    ws::broadcast_to_user_in_campus(&conversation.initiator_id, conversation.campus_id, &payload);
+    ws::broadcast_to_user_in_campus(&conversation.recipient_id, conversation.campus_id, &payload);
     Ok(())
 }
 

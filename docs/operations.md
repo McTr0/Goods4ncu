@@ -360,7 +360,7 @@ RETURNING listing_id, campus_id, desired_revision;
 | `chat_conversation_members` | 每个成员的 `archived_at`；新消息提示的本地查看位置不在数据库。 |
 | `chat_conversation_events` | 握手、ACK、关闭、过期等状态事件时间线。 |
 | `chat_blocks` | blocker/blocked 屏蔽关系。 |
-| `chat_messages` | conversation_id、direct_conversation_id、sender、receiver、媒体 URL/Base64、edited_at；不保存 `read_at/read_by`。 |
+| `chat_messages` | conversation_id、direct_conversation_id、sender、receiver、媒体 URL/Base64、edited_at；`read_at/read_by` 仅作为首阶段兼容影子保留，不写入、不公开。 |
 | `chat_message_acknowledgements` | 每条消息每个用户最多一条主动确认，`received/will_review/completed` 及创建/更新时间。 |
 | `chat_spaces` 及成员/消息表 | group/channel、owner、成员角色、发言权限和更新时间。 |
 | `chat_secret_sessions` 及消息表 | [实验中][待弃用] 密文、参与者、过期时间和兼容读取。 |

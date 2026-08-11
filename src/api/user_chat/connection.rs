@@ -200,16 +200,32 @@ pub async fn list_conversations(
     headers: HeaderMap,
     Query(query): Query<ConversationListQuery>,
 ) -> Result<Json<ConversationListResponse>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    let campus_id = ensure_active_campus(&state, &session).await?;
     let service = ChatConversationService::new(state.infra.db.clone());
-    let (items, next_cursor) = service
-        .list_conversations(
-            &user_id,
-            query.mode,
-            query.cursor,
-            query.limit.unwrap_or(30),
-        )
-        .await?;
+    let (items, next_cursor) = match campus_id {
+        Some(campus_id) => {
+            service
+                .list_conversations_for_campus(
+                    &session.user_id,
+                    campus_id,
+                    query.mode,
+                    query.cursor,
+                    query.limit.unwrap_or(30),
+                )
+                .await?
+        }
+        None => {
+            service
+                .list_conversations(
+                    &session.user_id,
+                    query.mode,
+                    query.cursor,
+                    query.limit.unwrap_or(30),
+                )
+                .await?
+        }
+    };
     Ok(Json(ConversationListResponse { items, next_cursor }))
 }
 
@@ -218,12 +234,27 @@ pub async fn list_threads(
     headers: HeaderMap,
     Query(query): Query<ThreadListQuery>,
 ) -> Result<Json<ThreadListResponse>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    let campus_id = ensure_active_campus(&state, &session).await?;
     let mode = parse_thread_mode(query.mode.as_deref())?;
     let service = ChatConversationService::new(state.infra.db.clone());
-    let items = service
-        .list_threads(&user_id, mode, query.limit.unwrap_or(50))
-        .await?;
+    let items = match campus_id {
+        Some(campus_id) => {
+            service
+                .list_threads_for_campus(
+                    &session.user_id,
+                    campus_id,
+                    mode,
+                    query.limit.unwrap_or(50),
+                )
+                .await?
+        }
+        None => {
+            service
+                .list_threads(&session.user_id, mode, query.limit.unwrap_or(50))
+                .await?
+        }
+    };
     Ok(Json(ThreadListResponse { items }))
 }
 
@@ -233,15 +264,23 @@ pub async fn get_thread(
     Path(peer_user_id): Path<String>,
     Query(query): Query<ThreadListQuery>,
 ) -> Result<Json<ThreadDetailResponse>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    let campus_id = ensure_active_campus(&state, &session).await?;
     let mode = parse_thread_mode(query.mode.as_deref())?;
     let service = ChatConversationService::new(state.infra.db.clone());
-    Ok(Json(
-        service
-            .get_thread(&user_id, &peer_user_id, mode)
-            .await?
-            .into(),
-    ))
+    let detail = match campus_id {
+        Some(campus_id) => {
+            service
+                .get_thread_for_campus(&session.user_id, &peer_user_id, campus_id, mode)
+                .await?
+        }
+        None => {
+            service
+                .get_thread(&session.user_id, &peer_user_id, mode)
+                .await?
+        }
+    };
+    Ok(Json(detail.into()))
 }
 
 pub async fn get_conversation(
@@ -249,10 +288,13 @@ pub async fn get_conversation(
     headers: HeaderMap,
     Path(conversation_id): Path<Uuid>,
 ) -> Result<Json<ConversationView>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    ensure_conversation_campus(&state, conversation_id, &session).await?;
     let service = ChatConversationService::new(state.infra.db.clone());
     Ok(Json(
-        service.get_conversation(conversation_id, &user_id).await?,
+        service
+            .get_conversation(conversation_id, &session.user_id)
+            .await?,
     ))
 }
 
@@ -271,10 +313,11 @@ pub async fn respond_conversation(
     Path(conversation_id): Path<Uuid>,
     Json(body): Json<RespondConversationBody>,
 ) -> Result<Json<ConversationView>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    ensure_conversation_campus(&state, conversation_id, &session).await?;
     let service = ChatConversationService::new(state.infra.db.clone());
     let conversation = service
-        .respond(conversation_id, &user_id, body.decision)
+        .respond(conversation_id, &session.user_id, body.decision)
         .await?;
     broadcast_conversation("conversation_state_changed", &conversation);
     Ok(Json(conversation))
@@ -285,9 +328,12 @@ pub async fn acknowledge_conversation(
     headers: HeaderMap,
     Path(conversation_id): Path<Uuid>,
 ) -> Result<Json<ConversationView>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    ensure_conversation_campus(&state, conversation_id, &session).await?;
     let service = ChatConversationService::new(state.infra.db.clone());
-    let conversation = service.acknowledge(conversation_id, &user_id).await?;
+    let conversation = service
+        .acknowledge(conversation_id, &session.user_id)
+        .await?;
     broadcast_conversation("conversation_state_changed", &conversation);
     Ok(Json(conversation))
 }
@@ -297,9 +343,10 @@ pub async fn close_conversation(
     headers: HeaderMap,
     Path(conversation_id): Path<Uuid>,
 ) -> Result<Json<ConversationView>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    ensure_conversation_campus(&state, conversation_id, &session).await?;
     let service = ChatConversationService::new(state.infra.db.clone());
-    let conversation = service.close(conversation_id, &user_id).await?;
+    let conversation = service.close(conversation_id, &session.user_id).await?;
     broadcast_conversation("conversation_state_changed", &conversation);
     Ok(Json(conversation))
 }
@@ -310,11 +357,12 @@ pub async fn archive_conversation(
     Path(conversation_id): Path<Uuid>,
     Json(body): Json<ArchiveConversationBody>,
 ) -> Result<Json<ConversationView>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let session = authenticated_session(&state, &headers)?;
+    ensure_conversation_campus(&state, conversation_id, &session).await?;
     let service = ChatConversationService::new(state.infra.db.clone());
     Ok(Json(
         service
-            .set_archived(conversation_id, &user_id, body.archived)
+            .set_archived(conversation_id, &session.user_id, body.archived)
             .await?,
     ))
 }
@@ -475,6 +523,68 @@ pub(crate) fn authenticated_session(
     .map_err(|_| ApiError::Unauthorized)
 }
 
+/// Active-campus tokens must not be able to read or mutate a conversation
+/// created under another campus. Legacy tokens without an active campus keep
+/// the pre-migration behavior during the compatibility window.
+pub(crate) async fn ensure_active_campus(
+    state: &AppState,
+    session: &AuthSessionContext,
+) -> Result<Option<Uuid>, ApiError> {
+    let Some(campus_id) = session.campus_id else {
+        return Ok(None);
+    };
+    CampusService::new(state.infra.db.clone())
+        .require_tenant_context_for_session(&session.user_id, Some(campus_id))
+        .await?;
+    Ok(Some(campus_id))
+}
+
+pub(crate) async fn ensure_conversation_campus(
+    state: &AppState,
+    conversation_id: Uuid,
+    session: &AuthSessionContext,
+) -> Result<(), ApiError> {
+    let Some(campus_id) = ensure_active_campus(state, session).await? else {
+        return Ok(());
+    };
+    let conversation_campus: Option<Uuid> =
+        sqlx::query_scalar("SELECT campus_id FROM chat_conversations WHERE id = $1")
+            .bind(conversation_id)
+            .fetch_optional(&state.infra.db)
+            .await
+            .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+    match conversation_campus {
+        Some(value) if value == campus_id => Ok(()),
+        Some(_) => Err(ApiError::CampusScopeMismatch),
+        None => Err(ApiError::NotFound),
+    }
+}
+
+pub(crate) async fn ensure_message_campus(
+    state: &AppState,
+    message_id: i64,
+    session: &AuthSessionContext,
+) -> Result<Option<Uuid>, ApiError> {
+    let Some(campus_id) = ensure_active_campus(state, session).await? else {
+        return Ok(None);
+    };
+    let message_campus: Option<Uuid> = sqlx::query_scalar(
+        "SELECT c.campus_id
+         FROM chat_messages m
+         JOIN chat_conversations c ON c.id = m.direct_conversation_id
+         WHERE m.id = $1",
+    )
+    .bind(message_id)
+    .fetch_optional(&state.infra.db)
+    .await
+    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+    match message_campus {
+        Some(value) if value == campus_id => Ok(Some(value)),
+        Some(_) => Err(ApiError::CampusScopeMismatch),
+        None => Err(ApiError::NotFound),
+    }
+}
+
 pub(crate) fn moderate_text(state: &AppState, content: &str) -> Result<(), ApiError> {
     let result = state.infra.moderation.check_text(content);
     if result.passed {
@@ -501,5 +611,5 @@ fn broadcast_conversation_to_user(event: &str, conversation: &ConversationView, 
         "version": conversation.version,
     })
     .to_string();
-    ws::broadcast_to_user(user_id, &payload);
+    ws::broadcast_to_user_in_campus(user_id, conversation.campus_id, &payload);
 }

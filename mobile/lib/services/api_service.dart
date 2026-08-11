@@ -83,6 +83,7 @@ class ApiService extends BaseService {
   Future<ConversationMessage> sendMessage(
     String conversationId, {
     required String content,
+    String? clientMessageId,
     String? replyToMessageId,
     String? imageBase64,
     String? audioBase64,
@@ -92,6 +93,7 @@ class ApiService extends BaseService {
   }) => _chatService.sendMessage(
     conversationId,
     content: content,
+    clientMessageId: clientMessageId,
     replyToMessageId: replyToMessageId,
     imageBase64: imageBase64,
     audioBase64: audioBase64,

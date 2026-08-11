@@ -29,18 +29,31 @@ const CHANNEL: &str = "goods4ncu:ws:fanout";
 #[derive(Serialize, Deserialize)]
 struct FanoutMessage {
     user_id: String,
+    #[serde(default)]
+    campus_id: Option<uuid::Uuid>,
     payload: String,
 }
 
 /// Publish a payload for a user via Redis. Returns Err when Redis is
 /// unavailable so the caller can fall back to local delivery.
+#[allow(dead_code)] // retained for callers that publish unscoped notifications
 pub async fn publish(
     conn: &mut redis::aio::ConnectionManager,
     user_id: &str,
     payload: &str,
 ) -> anyhow::Result<()> {
+    publish_scoped(conn, user_id, None, payload).await
+}
+
+pub async fn publish_scoped(
+    conn: &mut redis::aio::ConnectionManager,
+    user_id: &str,
+    campus_id: Option<uuid::Uuid>,
+    payload: &str,
+) -> anyhow::Result<()> {
     let message = serde_json::to_string(&FanoutMessage {
         user_id: user_id.to_string(),
+        campus_id,
         payload: payload.to_string(),
     })?;
     let _: () = conn.publish(CHANNEL, message).await?;
@@ -122,7 +135,15 @@ async fn subscribe_loop(client: &redis::Client, shutdown: &ShutdownSignal) -> an
                 };
                 match serde_json::from_str::<FanoutMessage>(&raw) {
                     Ok(fanout) => {
-                        crate::api::ws::deliver_local(&fanout.user_id, &fanout.payload);
+                        if let Some(campus_id) = fanout.campus_id {
+                            crate::api::ws::deliver_local_for_campus(
+                                &fanout.user_id,
+                                campus_id,
+                                &fanout.payload,
+                            );
+                        } else {
+                            crate::api::ws::deliver_local(&fanout.user_id, &fanout.payload);
+                        }
                     }
                     Err(error) => {
                         tracing::warn!(%error, "WS fanout: malformed message");

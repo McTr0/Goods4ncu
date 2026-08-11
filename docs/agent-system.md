@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 适用读者 | AI/后端工程师、产品经理、安全工程师、测试工程师和 Agent 工具维护者 |
-| 当前状态 | 已有意图路由、耐久 RAG 投影、多个 LLM provider 和市场工具；ActionPlan 已 crash-safe，统一 AgentRun/审计与 ListingCommandService 仍是目标态 |
+| 当前状态 | 已有意图路由、耐久 RAG 投影、多个 LLM provider 和市场工具；ActionPlan 与 ListingCommandService 已落地，统一 AgentRun/审计和资源版本快照仍是目标态 |
 | 事实来源 | `src/agents/`、`src/llm/`、聊天 API、工具测试、LLM metrics 和 Flutter 小帮入口 |
 | 最后核对范围 | 搜索、发布、更新、删除、成交意向、议价、回复建议和流式回复 |
 
@@ -27,7 +27,7 @@ Agent 的价值是把用户意图翻译为可理解、可检查、可撤销的�
 
 [已实现] 可恢复的发布会立即执行并提供撤销窗口；更新/删除生成 L2 ActionPlan，成交意向/议价生成使用独立两步 token 的 L3 ActionPlan。确认锁、业务事实、适用时的通知/outbox 和计划终态原子提交，commit 前中断可安全重试。
 
-[风险] Agent listing 创建/更新与 HTTP 路径仍未收敛到同一 command service，文本审核、分类/空白规范化和金额类型存在漂移。资源版本快照、提案幂等、版本化风险文案和统一 AgentRun/审计也仍待补齐。
+[已实现] Agent listing 创建/更新与 HTTP 路径已收敛到同一 `ListingCommandService`，共享文本审核、分类/空白规范化、金额类型和事务入口。资源版本快照、提案幂等、版本化风险文案和统一 AgentRun/审计仍待补齐。
 
 ## 权限等级
 

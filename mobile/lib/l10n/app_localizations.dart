@@ -3129,7 +3129,7 @@ abstract class AppLocalizations {
   /// No description provided for @conversationStateDelivered.
   ///
   /// In en, this message translates to:
-  /// **'Delivered'**
+  /// **'Sent'**
   String get conversationStateDelivered;
 
   /// No description provided for @conversationStateSynSent.
@@ -4509,7 +4509,7 @@ abstract class AppLocalizations {
   /// No description provided for @invitationDelivered.
   ///
   /// In en, this message translates to:
-  /// **'Invitation delivered'**
+  /// **'Invitation sent'**
   String get invitationDelivered;
 
   /// No description provided for @timeRemaining.
@@ -4683,7 +4683,7 @@ abstract class AppLocalizations {
   /// No description provided for @messageDeliveredStatus.
   ///
   /// In en, this message translates to:
-  /// **'Delivered'**
+  /// **'Sent'**
   String get messageDeliveredStatus;
 
   /// No description provided for @acknowledgementReceived.

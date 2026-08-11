@@ -396,6 +396,15 @@ class _UserChatPageState extends State<UserChatPage> {
     }
   }
 
+  Future<void> _retryMessage(ConversationMessage message) async {
+    final l = AppLocalizations.of(context)!;
+    try {
+      await _chatNotifier.retryMessage(message);
+    } catch (error) {
+      if (mounted) _showSnackBar(l.messageSendFailed(error.toString()));
+    }
+  }
+
   /// 确认编辑
   Future<void> _confirmEdit() async {
     try {
@@ -764,6 +773,7 @@ class _UserChatPageState extends State<UserChatPage> {
             onWithdrawAcknowledgement: _withdrawMessageAcknowledgement,
             onHideMessage: _hideMessage,
             onReportMessage: _reportMessage,
+            onRetryMessage: _retryMessage,
             allowEditing:
                 !_isMail && _conversation?.state == ConversationState.active,
             deliveryOnly: _isMail,
