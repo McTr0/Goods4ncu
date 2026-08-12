@@ -56,7 +56,7 @@ Usage:
 Commands:
   health       Check /api/health.
   personas     Print seed persona usernames and ids.
-  r2-chat      Exercise the two-user mail/realtime privacy journey and explicit acknowledgements.
+  r2-chat      Exercise mail/realtime privacy, acknowledgements, and authoritative file/link objects.
   p0-chat      Prepare and assert one active buyer/seller chat with reply, reaction, hide, report.
   spaces       Prepare and assert one group plus one channel permission check.
   call-secret  Prepare and assert WebRTC signaling MVP plus Secret Chat ciphertext path.
@@ -369,14 +369,138 @@ async function runR2Chat(baseUrl) {
   );
   assertNoAttentionFields(mailCreated);
 
+  const mailConversationId = mailCreated.conversation.id;
+  const sharedFile = await request(
+    baseUrl,
+    'POST',
+    `/api/chat/conversations/${mailConversationId}/shared-objects`,
+    buyer.token,
+    {
+      kind: 'file',
+      title: `R2 handout ${label}.pdf`,
+      mime_type: 'application/pdf',
+      size_bytes: 4096,
+      canonical_url: null,
+    },
+  );
+  assert(
+    sharedFile.kind === 'file' &&
+      sharedFile.status === 'active' &&
+      sharedFile.upload_key?.startsWith('chat/') &&
+      sharedFile.download_path,
+    'file shared object should be server-owned and active',
+    sharedFile,
+  );
+
+  const sharedLink = await request(
+    baseUrl,
+    'POST',
+    `/api/chat/conversations/${mailConversationId}/shared-objects`,
+    buyer.token,
+    {
+      kind: 'link',
+      title: 'R2 course page',
+      canonical_url: 'https://example.com/course#week-1',
+    },
+  );
+  assert(
+    sharedLink.kind === 'link' &&
+      sharedLink.status === 'active' &&
+      sharedLink.canonical_url === 'https://example.com/course',
+    'link shared object should be normalized without external fetching',
+    sharedLink,
+  );
+
+  const fileQuote = await request(
+    baseUrl,
+    'POST',
+    `/api/chat/conversations/${mailConversationId}/messages`,
+    buyer.token,
+    {
+      client_message_id: randomUUID(),
+      content: '资料在这里，慢慢看。',
+      quote: { kind: 'file', ref_id: sharedFile.id },
+      reply_to_message_id: null,
+      image_base64: null,
+      audio_base64: null,
+      image_url: null,
+      audio_url: null,
+    },
+  );
+  assert(fileQuote.quote?.kind === 'file', 'active file object should be quotable', fileQuote);
+
+  const linkQuote = await request(
+    baseUrl,
+    'POST',
+    `/api/chat/conversations/${mailConversationId}/messages`,
+    buyer.token,
+    {
+      client_message_id: randomUUID(),
+      content: '课程主页也在这里。',
+      quote: { kind: 'link', ref_id: sharedLink.id },
+      reply_to_message_id: null,
+      image_base64: null,
+      audio_base64: null,
+      image_url: null,
+      audio_url: null,
+    },
+  );
+  assert(linkQuote.quote?.kind === 'link', 'active link object should be quotable', linkQuote);
+
+  const forbiddenRevoke = await request(
+    baseUrl,
+    'DELETE',
+    `/api/chat/shared-objects/${sharedFile.id}`,
+    seller.token,
+    undefined,
+    [403],
+  );
+  assert(forbiddenRevoke._status === 403, 'non-creator cannot revoke shared object', forbiddenRevoke);
+
+  const revokedFile = await request(
+    baseUrl,
+    'DELETE',
+    `/api/chat/shared-objects/${sharedFile.id}`,
+    buyer.token,
+  );
+  assert(revokedFile.status === 'revoked', 'creator revoke should be idempotent and visible', revokedFile);
+
+  const mailMessages = await request(
+    baseUrl,
+    'GET',
+    `/api/chat/conversations/${mailConversationId}/messages?limit=50&offset=0`,
+    seller.token,
+  );
+  const fileHistory = mailMessages.messages.find((item) => item.id === fileQuote.id);
+  assert(fileHistory && !fileHistory.quote, 'revoked file quote should disappear from history projection', mailMessages);
+
+  const space = await request(
+    baseUrl,
+    'GET',
+    `/api/chat/threads/${buyer.id}/space-events?limit=50`,
+    seller.token,
+  );
+  assert(
+    space.shared_objects?.length === 1 && space.shared_objects[0].kind === 'link',
+    'relationship space should retain the active link and remove the revoked file',
+    space,
+  );
+  assertNoAttentionFields({ sharedFile, sharedLink, fileQuote, linkQuote, revokedFile, space });
+
   return {
     command: 'r2-chat',
     ok: true,
     realtimeConversationId: realtime.id,
     messageId: message.id,
-    mailConversationId: mailCreated.conversation.id,
+    mailConversationId,
     finalRealtimeState: closed.state,
     acknowledgementLifecycle: ['received', 'completed', 'withdrawn'],
+    sharedObjectLifecycle: {
+      fileId: sharedFile.id,
+      linkId: sharedLink.id,
+      revokedFileId: revokedFile.id,
+      retainedSpaceKinds: space.shared_objects.map((item) => item.kind),
+    },
   };
 }
 

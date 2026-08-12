@@ -417,6 +417,26 @@ impl AppState {
             None => None,
         }
     }
+
+    /// Return an explicit platform URL for a server-owned object key. Private
+    /// deployments receive a short-lived signature; public deployments use
+    /// the same virtual-host addressing shape as the existing upload client.
+    pub fn public_platform_media_url(&self, object_key: &str) -> Option<String> {
+        let key = object_key.trim().trim_start_matches('/');
+        if key.is_empty() || key.contains("..") || key.contains('?') || key.contains('#') {
+            return None;
+        }
+        if let Some(signer) = self.infra.media_signer.as_ref() {
+            return signer.sign(key);
+        }
+        let endpoint = reqwest::Url::parse(&self.secrets.oss_endpoint).ok()?;
+        let host = endpoint.host_str()?;
+        let authority = match endpoint.port() {
+            Some(port) => format!("{}.{}:{}", self.secrets.oss_bucket, host, port),
+            None => format!("{}.{}", self.secrets.oss_bucket, host),
+        };
+        Some(format!("{}://{}/{}", endpoint.scheme(), authority, key))
+    }
 }
 
 fn is_platform_media_reference(state: &AppState, stored: &str) -> bool {
@@ -853,6 +873,18 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .route(
             "/api/chat/threads/{peer_user_id}/space-events",
             get(user_chat::get_relationship_space),
+        )
+        .route(
+            "/api/chat/conversations/{id}/shared-objects",
+            post(user_chat::create_shared_object),
+        )
+        .route(
+            "/api/chat/shared-objects/{id}",
+            get(user_chat::get_shared_object).delete(user_chat::revoke_shared_object),
+        )
+        .route(
+            "/api/chat/shared-objects/{id}/media",
+            get(user_chat::get_shared_object_media),
         )
         .route(
             "/api/chat/conversations/{id}",

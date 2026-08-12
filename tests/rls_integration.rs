@@ -383,6 +383,7 @@ async fn rls_policies_exist_on_all_tenant_tables() {
             "social_personas",
             "social_persona_audits",
             "chat_relationship_pins",
+            "chat_shared_objects",
         ];
         for table in expected {
             let (enabled, forced): (bool, bool) = sqlx::query_as(

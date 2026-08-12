@@ -1,7 +1,10 @@
 //! Relationship Space projections must remain derived from existing messages
 //! while explicit Pin actions stay idempotent, reversible, and campus-scoped.
 
-use goods4ncu::services::chat_conversation::ChatConversationService;
+use goods4ncu::services::chat_conversation::{
+    ChatConversationService, CreateSharedObjectInput, SendConversationMessageInput,
+    SharedObjectKind, StructuredQuoteInput, StructuredQuoteKind,
+};
 use goods4ncu::test_infra::with_test_pool;
 use sqlx::Row;
 use uuid::Uuid;
@@ -196,6 +199,158 @@ async fn pending_realtime_is_not_projected_as_connected() {
             .find(|thread| thread.peer_user_id == bob)
             .expect("active thread");
         assert!(active.has_active_realtime);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn shared_file_and_link_objects_are_authoritative_and_revokeable() {
+    with_test_pool(|pool| async move {
+        let campus_id = campus(&pool).await;
+        let alice = user(&pool, "object-alice").await;
+        let bob = user(&pool, "object-bob").await;
+        let conversation_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO chat_conversations (
+                 id, client_request_id, campus_id, mode, state,
+                 initiator_id, recipient_id, subject
+             ) VALUES ($1, $2, $3, 'mail', 'open', $4, $5, '权威对象测试')",
+        )
+        .bind(conversation_id)
+        .bind(Uuid::new_v4())
+        .bind(campus_id)
+        .bind(&alice)
+        .bind(&bob)
+        .execute(&pool)
+        .await
+        .expect("insert conversation");
+        for member in [&alice, &bob] {
+            sqlx::query(
+                "INSERT INTO chat_conversation_members (conversation_id, user_id)
+                 VALUES ($1, $2)",
+            )
+            .bind(conversation_id)
+            .bind(member)
+            .execute(&pool)
+            .await
+            .expect("insert member");
+        }
+
+        let service = ChatConversationService::new(pool.clone());
+        let file = service
+            .create_shared_object(CreateSharedObjectInput {
+                conversation_id,
+                campus_id,
+                created_by: alice.clone(),
+                kind: SharedObjectKind::File,
+                title: "课程讲义.pdf".to_string(),
+                mime_type: Some("application/pdf".to_string()),
+                size_bytes: Some(4096),
+                canonical_url: None,
+            })
+            .await
+            .expect("create file object");
+        assert_eq!(file.kind, "file");
+        assert!(file
+            .upload_key
+            .as_deref()
+            .is_some_and(|key| key.starts_with(&format!("chat/{campus_id}/"))));
+
+        let link = service
+            .create_shared_object(CreateSharedObjectInput {
+                conversation_id,
+                campus_id,
+                created_by: alice.clone(),
+                kind: SharedObjectKind::Link,
+                title: "课程主页".to_string(),
+                mime_type: None,
+                size_bytes: None,
+                canonical_url: Some("https://example.com/course#week-1".to_string()),
+            })
+            .await
+            .expect("create link object");
+        assert_eq!(
+            link.canonical_url.as_deref(),
+            Some("https://example.com/course")
+        );
+
+        let quoted = service
+            .send_message(SendConversationMessageInput {
+                client_message_id: Uuid::new_v4(),
+                conversation_id,
+                sender_id: bob.clone(),
+                content: "我会看这份资料".to_string(),
+                reply_to_message_id: None,
+                quote: Some(StructuredQuoteInput {
+                    kind: StructuredQuoteKind::File,
+                    ref_id: file.id.clone(),
+                }),
+                image_data: None,
+                audio_data: None,
+                image_url: None,
+                audio_url: None,
+            })
+            .await;
+        let quoted = quoted.expect("participant can quote an active shared object");
+        assert_eq!(
+            quoted.quote.as_ref().map(|quote| quote.kind.as_str()),
+            Some("file")
+        );
+
+        let (messages, _) = service
+            .get_messages(conversation_id, &bob, 50, 0)
+            .await
+            .expect("read quoted message");
+        assert_eq!(
+            messages[0]
+                .quote
+                .as_ref()
+                .map(|quote| quote.ref_id.as_str()),
+            Some(file.id.as_str())
+        );
+
+        service
+            .send_message(SendConversationMessageInput {
+                client_message_id: Uuid::new_v4(),
+                conversation_id,
+                sender_id: alice.clone(),
+                content: "课程主页也在这里".to_string(),
+                reply_to_message_id: None,
+                quote: Some(StructuredQuoteInput {
+                    kind: StructuredQuoteKind::Link,
+                    ref_id: link.id.clone(),
+                }),
+                image_data: None,
+                audio_data: None,
+                image_url: None,
+                audio_url: None,
+            })
+            .await
+            .expect("quote active link object");
+
+        assert!(service
+            .revoke_shared_object(Uuid::parse_str(&file.id).expect("file id"), &bob)
+            .await
+            .is_err());
+        let revoked = service
+            .revoke_shared_object(Uuid::parse_str(&file.id).expect("file id"), &alice)
+            .await
+            .expect("creator revokes object");
+        assert_eq!(revoked.status, "revoked");
+
+        let (messages, _) = service
+            .get_messages(conversation_id, &bob, 50, 0)
+            .await
+            .expect("read after revoke");
+        assert!(messages
+            .iter()
+            .any(|message| message.content == "我会看这份资料" && message.quote.is_none()));
+        let space = service
+            .get_relationship_space(&bob, &alice, Some(campus_id), None, 50)
+            .await
+            .expect("space after revoke");
+        assert_eq!(space.shared_objects.len(), 1);
+        assert_eq!(space.shared_objects[0].kind, "link");
     })
     .await;
 }

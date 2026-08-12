@@ -5,7 +5,7 @@
 | 适用读者 | 产品经理、后端工程师、数据工程师、测试工程师和需要理解状态机的移动端工程师 |
 | 当前状态 | 统一意图、活动校园 session、审核案件/申诉、管理员 MFA、RLS 与显式信息流反馈均已实现；全请求 fail-closed tenant context 和真实用户质量评估仍待完成 |
 | 事实来源 | `migrations/`、repository 查询、service 状态转换和 API JSON 模型 |
-| 最后核对范围 | 迁移 `0001` 至 `0064`，商品、意图、信息流、聊天、成交、通知、审核、管理和 Agent 相关代码 |
+| 最后核对范围 | 迁移 `0001` 至 `0065`，商品、意图、信息流、聊天、成交、通知、审核、管理和 Agent 相关代码 |
 
 这篇文档定义平台中“什么是事实、事实如何变化、哪些对象可以互相引用”。API 字段见 [API 参考](api-reference.md)，用户流程见 [业务流程](domain-flows.md)。
 
@@ -207,9 +207,9 @@ RelationshipSpace
 └── MemoryIndex projections
 ```
 
-`SpaceEvent` 统一描述可以回放的空间变化，例如 `message.sent`、`connection.started`、`connection.ended`、`file.shared`、`link.shared`、`memory.pinned`、`acknowledgement.changed` 和 `shared_object.updated`。首阶段它从 `chat_messages`、`chat_conversation_events`、quote、reaction 和领域对象派生只读投影；唯一新增的关系空间事实是 `0064_relationship_space_pins` 中用户明确执行的 Pin，它保存动作本身而不复制消息。若后续成为通用写模型，必须具备全局事件 id、aggregate/version、campus、actor、source reference、幂等键和 cursor，并与业务写入同事务提交。
+`SpaceEvent` 统一描述可以回放的空间变化，例如 `message.sent`、`connection.started`、`connection.ended`、`file.shared`、`link.shared`、`memory.pinned`、`acknowledgement.changed` 和 `shared_object.updated`。首阶段时间线仍从 `chat_messages`、`chat_conversation_events`、quote、reaction 和领域对象派生只读投影；`0064_relationship_space_pins` 保存用户明确执行的 Pin，`0065_chat_shared_objects` 保存 file/link 的平台权威引用，但两者都不复制消息正文。若后续成为通用写模型，必须具备全局事件 id、aggregate/version、campus、actor、source reference、幂等键和 cursor，并与业务写入同事务提交。
 
-`SharedObject` 是双方围绕某件事互动的稳定入口，可以引用商品、文件、链接、地点或约定。它不复制权威业务状态：listing 价格与状态从 `IntentItem/inventory` 读取，成交从 `DealRecord` 读取，双方共识必须记录谁明确采纳。模型从对话抽取出的地点、时间或价格只能先形成 proposal，不能直接写成 agreed value。
+`SharedObject` 是双方围绕某件事互动的稳定入口，可以引用商品、文件、链接、地点或约定。当前 file/link 通过 `0065_chat_shared_objects` 保存同校园、同会话、可撤销的权威引用：文件只存平台 storage key，链接只存规范化 URL，平台不自动抓取外部内容。它不复制权威业务状态：listing 价格与状态从 `IntentItem/inventory` 读取，成交从 `DealRecord` 读取，双方共识必须记录谁明确采纳。模型从对话抽取出的地点、时间或价格只能先形成 proposal，不能直接写成 agreed value。
 
 `MemoryIndex` 有两层：
 

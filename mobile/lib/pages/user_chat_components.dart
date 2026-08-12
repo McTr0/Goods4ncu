@@ -695,6 +695,8 @@ class _StructuredQuoteCard extends StatelessWidget {
       'listing' => l.quoteListing,
       'order' => l.quoteOrder,
       'hitl_offer' => l.quoteHitlOffer,
+      'file' => l.relationshipSpaceObjectFile,
+      'link' => l.relationshipSpaceObjectLink,
       _ => l.quoteGeneric,
     };
     final foreground = isMe ? Colors.white : AppTheme.textPrimary;

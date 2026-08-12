@@ -231,6 +231,73 @@ class ChatService extends BaseService {
     );
   }
 
+  /// Create a server-owned file/link reference. File objects return an
+  /// upload key for the platform storage flow; link objects return only a
+  /// normalized URL and are never auto-fetched by the chat UI.
+  Future<ChatSharedObject> createSharedObject(
+    String conversationId, {
+    required String kind,
+    required String title,
+    String? mimeType,
+    int? sizeBytes,
+    String? canonicalUrl,
+  }) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse(
+        '$baseUrl/api/chat/conversations/$conversationId/shared-objects',
+      ),
+      headers,
+      jsonEncode({
+        'kind': kind,
+        'title': title,
+        'mime_type': ?mimeType,
+        'size_bytes': ?sizeBytes,
+        'canonical_url': ?canonicalUrl,
+      }),
+    );
+    return handleResponse(
+      response,
+      (data) => ChatSharedObject.fromJson(data as Map<String, dynamic>),
+    );
+  }
+
+  Future<ChatSharedObject> getSharedObject(String objectId) async {
+    final headers = await authHeaders();
+    final response = await get(
+      Uri.parse('$baseUrl/api/chat/shared-objects/$objectId'),
+      headers,
+    );
+    return handleResponse(
+      response,
+      (data) => ChatSharedObject.fromJson(data as Map<String, dynamic>),
+    );
+  }
+
+  Future<ChatSharedObjectMedia> getSharedObjectMedia(String objectId) async {
+    final headers = await authHeaders();
+    final response = await get(
+      Uri.parse('$baseUrl/api/chat/shared-objects/$objectId/media'),
+      headers,
+    );
+    return handleResponse(
+      response,
+      (data) => ChatSharedObjectMedia.fromJson(data as Map<String, dynamic>),
+    );
+  }
+
+  Future<ChatSharedObject> revokeSharedObject(String objectId) async {
+    final headers = await authHeaders();
+    final response = await delete(
+      Uri.parse('$baseUrl/api/chat/shared-objects/$objectId'),
+      headers,
+    );
+    return handleResponse(
+      response,
+      (data) => ChatSharedObject.fromJson(data as Map<String, dynamic>),
+    );
+  }
+
   /// POST /api/chat/messages/{id}/pin — an explicit shared memory marker.
   /// Pinning is a social action; opening, scrolling, push delivery and typing
   /// never call this method.

@@ -242,7 +242,12 @@ class _UserChatPageState extends State<UserChatPage> {
         break;
 
       case 'relationship_pin_changed':
-        _loadRelationshipSpace();
+      case 'shared_object_created':
+      case 'shared_object_revoked':
+        if (notif.conversationId == null ||
+            notif.conversationId == widget.conversationId) {
+          _loadRelationshipSpace();
+        }
         break;
     }
   }

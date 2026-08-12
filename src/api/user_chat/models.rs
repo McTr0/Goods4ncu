@@ -2,10 +2,11 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::services::chat_conversation::{
-    AcknowledgementKind, ChatThreadDetail, ChatThreadView, ConversationDecision,
-    ConversationMessageRecord, ConversationMode, ConversationView, RelationshipSpaceConnectionView,
-    RelationshipSpaceEventView, RelationshipSpacePinView, RelationshipSpaceSharedObjectView,
-    RelationshipSpaceView,
+    AcknowledgementKind, ChatSharedObjectView, ChatThreadDetail, ChatThreadView,
+    ConversationDecision, ConversationMessageRecord, ConversationMode, ConversationView,
+    RelationshipSpaceConnectionView, RelationshipSpaceEventView, RelationshipSpacePinView,
+    RelationshipSpaceSharedObjectView, RelationshipSpaceView, SharedObjectKind,
+    StructuredQuoteInput,
 };
 
 #[derive(Debug, Deserialize)]
@@ -71,6 +72,24 @@ pub struct RelationshipSpaceResponse {
     pub shared_objects: Vec<RelationshipSpaceSharedObjectView>,
     pub recent_connection: Option<RelationshipSpaceConnectionView>,
     pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateSharedObjectBody {
+    pub kind: SharedObjectKind,
+    pub title: String,
+    pub mime_type: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub canonical_url: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SharedObjectResponse {
+    #[serde(flatten)]
+    pub object: ChatSharedObjectView,
+    /// A relative media endpoint.  The endpoint performs the participant,
+    /// status and platform-storage checks before returning a short-lived URL.
+    pub download_path: Option<String>,
 }
 
 impl From<RelationshipSpaceView> for RelationshipSpaceResponse {
@@ -197,4 +216,3 @@ pub struct ReplySuggestion {
 pub struct ReplySuggestionsResponse {
     pub suggestions: Vec<ReplySuggestion>,
 }
-use crate::services::chat_conversation::StructuredQuoteInput;

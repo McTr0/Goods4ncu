@@ -1319,6 +1319,87 @@ class RelationshipSpace {
   }
 }
 
+/// A server-owned file/link reference.  The message quote is only a pointer
+/// to this object; a revoked object must not be opened or rendered as active.
+class ChatSharedObject {
+  const ChatSharedObject({
+    required this.id,
+    required this.campusId,
+    required this.conversationId,
+    required this.createdBy,
+    required this.kind,
+    required this.title,
+    required this.mimeType,
+    required this.sizeBytes,
+    required this.status,
+    required this.uploadKey,
+    required this.canonicalUrl,
+    required this.createdAt,
+    required this.updatedAt,
+    this.downloadPath,
+  });
+
+  final String id;
+  final String campusId;
+  final String conversationId;
+  final String createdBy;
+  final String kind;
+  final String title;
+  final String? mimeType;
+  final int? sizeBytes;
+  final String status;
+  final String? uploadKey;
+  final String? canonicalUrl;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final String? downloadPath;
+
+  bool get isActive => status == 'active';
+
+  factory ChatSharedObject.fromJson(Map<String, dynamic> json) {
+    return ChatSharedObject(
+      id: json['id']?.toString() ?? '',
+      campusId: json['campus_id']?.toString() ?? '',
+      conversationId: json['conversation_id']?.toString() ?? '',
+      createdBy: json['created_by']?.toString() ?? '',
+      kind: json['kind']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      mimeType: json['mime_type']?.toString(),
+      sizeBytes: (json['size_bytes'] as num?)?.toInt(),
+      status: json['status']?.toString() ?? 'active',
+      uploadKey: json['upload_key']?.toString(),
+      canonicalUrl: json['canonical_url']?.toString(),
+      createdAt:
+          DateTime.tryParse(json['created_at']?.toString() ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt:
+          DateTime.tryParse(json['updated_at']?.toString() ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      downloadPath: json['download_path']?.toString(),
+    );
+  }
+}
+
+class ChatSharedObjectMedia {
+  const ChatSharedObjectMedia({
+    required this.objectId,
+    required this.url,
+    this.expiresInSeconds,
+  });
+
+  final String objectId;
+  final String url;
+  final int? expiresInSeconds;
+
+  factory ChatSharedObjectMedia.fromJson(Map<String, dynamic> json) {
+    return ChatSharedObjectMedia(
+      objectId: json['object_id']?.toString() ?? '',
+      url: json['url']?.toString() ?? '',
+      expiresInSeconds: (json['expires_in_seconds'] as num?)?.toInt(),
+    );
+  }
+}
+
 /// User-controlled role presentation. This is intentionally a presentation
 /// layer: it contains only selected tokens and explicit labels, never inferred
 /// presence, typing, read, or personality state.

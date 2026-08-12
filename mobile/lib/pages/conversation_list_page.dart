@@ -64,6 +64,8 @@ class _ConversationListPageState extends State<ConversationListPage> {
         'conversation_state_changed',
         'new_message',
         'message_acknowledgement_changed',
+        'shared_object_created',
+        'shared_object_revoked',
         'space_message_created',
         'space_member_changed',
       }.contains(notification.eventType)) {

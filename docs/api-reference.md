@@ -495,10 +495,36 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 需要登录。按 `cursor` 和 `limit` 返回同一 Thread 的只读 Relationship Space 时间轨迹。事件由现有 `chat_conversation_events` 与当前用户可见的 `chat_messages` 确定性投影而来，包含 `source_type/source_id`、事件类型、会话、行动者和发生时间。响应另外返回：
 
 - `pins`：双方可见的显式 Pin，每个用户对同一消息最多一个，包含 `actor_id`；隐藏或失去权限的源消息不会进入当前设备的投影。
-- `shared_objects`：从现有消息 `quote_kind/quote_ref_id/quote_snapshot` 派生的最新商品、订单或议价引用，不复制业务权威状态。
+- `shared_objects`：商品、订单或议价引用仍从现有消息快照派生；`file`/`link` 必须指向活动的 `chat_shared_objects` 权威对象。对象被撤销、删除、隐藏或失权后不会进入当前投影。
 - `recent_connection`：最近一次已建立 realtime Conversation 的起止时间，用于恢复上次连接位置；不是在线或最后上线信号。
 
 消息正文和媒体仍通过既有资源接口读取。返回的 `next_cursor` 只用于继续读取，不写入阅读位置，也不会因为打开或滚动而广播注意力状态。旧客户端忽略新增字段即可。
+
+### POST `/api/chat/conversations/{id}/shared-objects`
+
+需要登录、活动校园和会话成员权限。创建一个可被双方引用的权威文件或链接对象。`kind` 只能是 `file` 或 `link`：文件由服务端生成 `upload_key`（形如 `chat/{campus_id}/{object_id}`），上传必须使用平台存储；链接只接受规范化的 `http/https` URL，片段会被丢弃，平台不会抓取页面或生成预览。响应包含 `download_path`（仅文件），客户端仍须显式请求它才能获得媒体 URL。
+
+```json
+{
+  "kind": "link",
+  "title": "课程主页",
+  "canonical_url": "https://example.com/course#week-1"
+}
+```
+
+文件可以提供 `mime_type` 与 `size_bytes`，服务端限制标题、类型和 2 GiB 大小上限。对象创建、引用和消息发送分开；客户端先创建对象，再用消息 `quote: { "kind": "file|link", "ref_id": "object-id" }` 引用。服务端忽略客户端传入的 URL、标题或状态快照。
+
+### GET `/api/chat/shared-objects/{id}`
+
+需要登录且必须是源会话成员，并通过当前活动校园边界。返回对象的 `kind/title/status`、来源会话和规范化链接；`revoked` 只作为历史解释保留，不能继续引用。对象不是在线、已读或送达事实。
+
+### GET `/api/chat/shared-objects/{id}/media`
+
+仅适用于活动文件对象。需要登录且必须是源会话成员；服务端再次检查校园、对象状态和平台存储 key，私有 bucket 返回短时签名 URL，公共 bucket 返回平台 bucket URL。外部 URL、已撤销对象和任意自造 key 都不会被代理或签名。客户端不得在消息正文中自动加载它。
+
+### DELETE `/api/chat/shared-objects/{id}`
+
+仅对象创建者可以撤销；撤销幂等，返回 `status=revoked`。原消息仍是历史，但其 `file/link` quote 和 Relationship Space 投影立即失效；双方会收到 `shared_object_revoked` 实时事件并可回查上述 GET 接口。撤销不生成 read、typing、online 或其他注意力事实。
 
 ### POST `/api/chat/messages/{message_id}/pin`
 
@@ -595,7 +621,7 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 }
 ```
 
-`reply_to_message_id` 用于回复同一会话内的历史消息。`quote` 用于引用结构化事实，`kind` 可为 `listing`、`order` 或 `hitl_offer`。前端只提交 `kind/ref_id`，服务端会校验权限并生成快照，例如商品标题、价格、状态和主图；前端传入的伪造快照会被忽略。快照是发送时事实，不会因后续商品价格、订单状态或议价状态变化而改写。
+`reply_to_message_id` 用于回复同一会话内的历史消息。`quote` 用于引用结构化事实，`kind` 可为 `listing`、`order`、`hitl_offer`、`file` 或 `link`。前端只提交 `kind/ref_id`，服务端会校验权限并生成快照；商品类快照是发送时事实，不会因后续商品价格、订单状态或议价状态变化而改写；文件/链接快照只在对应 `chat_shared_objects.status=active` 时生成，撤销后消息正文保留但 quote 不再作为可用对象展示。
 
 媒体 URL 必须先通过平台上传接口获得，且 host 必须属于配置的 OSS/S3 bucket（支持 virtual-host 和 path-style URL）；任意第三方 URL 返回 `409 media_external_url_blocked`。服务端不会因为 Push、解密、页面打开或媒体播放产生注意力状态。
 

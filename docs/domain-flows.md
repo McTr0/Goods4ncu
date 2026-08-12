@@ -222,7 +222,7 @@ AI 只能生成候选外观、资料草稿或单次回复草稿；不能自动�
   -> 文件、链接、商品、地点或明确约定成为可回到的共享对象
 ```
 
-第一阶段不改变消息服务器写模型：移动端以 `Thread + Conversation + Message` 为事实源生成空间投影。当前 API 已提供活动校园作用域的稳定 `relationship_key` 与只读 `space-events` cursor；`0064_relationship_space_pins` 只保存用户明确执行的 Pin，引用和商品对象继续从现有 Message/Quote 派生。通用 Event Log 必须等双写、回放、幂等和旧客户端兼容方案完成后再成为权威写模型。
+第一阶段不把通用 Event Log 变成消息服务器写模型：移动端以 `Thread + Conversation + Message` 为事实源生成空间投影。当前 API 已提供活动校园作用域的稳定 `relationship_key` 与只读 `space-events` cursor；`0064_relationship_space_pins` 保存用户明确执行的 Pin，`0065_chat_shared_objects` 保存 file/link 的平台权威引用，商品对象继续从现有 Message/Quote 派生。通用 Event Log 必须等双写、回放、幂等和旧客户端兼容方案完成后再成为权威写模型。
 
 `Memory Rail` 首版仅索引时间与用户 Pin。连接开始/结束、文件、链接、结构化 quote、主动 acknowledgement 和共享对象变更可以形成确定性节点；普通正文不会因为模型“觉得重要”就自动变成记忆。可选语义主题必须保留来源事件标识，删除、隐藏、权限变化或源事件不可见时同步失效。
 
@@ -269,7 +269,7 @@ realtime 的 `active` 只表示这一段会话已经接通，不是全局在线�
 
 `reply_to_message_id` 引用同一 Conversation 的消息，响应返回 reply preview。跨 Conversation reply 拒绝。
 
-结构化 quote 支持 listing、order/deal record 和 hitl_offer。客户端只提交 kind/ref_id，服务端验证参与者和可见性并生成事实快照。客户端传入的价格、状态或标题快照必须被忽略。
+结构化 quote 支持 listing、order/deal record、hitl_offer、file 和 link。客户端只提交 kind/ref_id，服务端验证参与者、校园和对象状态并生成事实快照；file 只能指向平台生成的 storage key，link 只能指向规范化的显式 URL。客户端传入的价格、状态、标题或媒体 URL 快照必须被忽略。对象撤销后，消息仍保留为历史，但 quote 和 Memory Rail 投影失效。
 
 展示顺序固定为：消息回复预览在上，结构化 quote 卡片在下，正文最后。Secret Chat 实验路径不支持结构化 quote。
 

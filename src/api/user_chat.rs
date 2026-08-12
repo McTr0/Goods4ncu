@@ -4,6 +4,7 @@ mod connection;
 mod message;
 mod models;
 mod reply;
+mod shared_object;
 mod telegram;
 
 pub use connection::{
@@ -19,6 +20,9 @@ pub use message::{
     send_conversation_message, set_message_acknowledgement, set_message_reaction, unpin_message,
 };
 pub use reply::reply_suggestions;
+pub use shared_object::{
+    create_shared_object, get_shared_object, get_shared_object_media, revoke_shared_object,
+};
 pub use telegram::{
     add_space_member, answer_call, create_call, create_secret_session, create_space, end_call,
     get_space, list_secret_messages, list_space_messages, list_spaces, remove_space_member,
@@ -26,7 +30,7 @@ pub use telegram::{
 };
 
 pub(crate) use connection::{
-    authenticated_session, authenticated_user, ensure_conversation_campus, ensure_message_campus,
-    moderate_text,
+    authenticated_session, authenticated_user, ensure_active_campus, ensure_conversation_campus,
+    ensure_message_campus, moderate_text,
 };
 pub(crate) use models::*;

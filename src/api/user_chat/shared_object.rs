@@ -1,0 +1,148 @@
+use axum::{
+    extract::{Path, State},
+    http::HeaderMap,
+    Json,
+};
+use uuid::Uuid;
+
+use crate::api::error::ApiError;
+use crate::api::{ws, AppState};
+use crate::services::chat_conversation::{
+    ChatConversationService, CreateSharedObjectInput, SharedObjectKind,
+};
+
+use super::{
+    authenticated_session, ensure_active_campus, ensure_conversation_campus,
+    CreateSharedObjectBody, SharedObjectResponse,
+};
+
+pub async fn create_shared_object(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(conversation_id): Path<Uuid>,
+    Json(body): Json<CreateSharedObjectBody>,
+) -> Result<Json<SharedObjectResponse>, ApiError> {
+    let session = authenticated_session(&state, &headers)?;
+    ensure_conversation_campus(&state, conversation_id, &session).await?;
+    let campus_id = ensure_active_campus(&state, &session)
+        .await?
+        .ok_or(ApiError::CampusVerificationRequired)?;
+    let object = ChatConversationService::new(state.infra.db.clone())
+        .create_shared_object(CreateSharedObjectInput {
+            conversation_id,
+            campus_id,
+            created_by: session.user_id,
+            kind: body.kind,
+            title: body.title,
+            mime_type: body.mime_type,
+            size_bytes: body.size_bytes,
+            canonical_url: body.canonical_url,
+        })
+        .await?;
+    broadcast_shared_object(&state, &object, "shared_object_created").await?;
+    Ok(Json(shared_object_response(object)))
+}
+
+pub async fn get_shared_object(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(object_id): Path<Uuid>,
+) -> Result<Json<SharedObjectResponse>, ApiError> {
+    let session = authenticated_session(&state, &headers)?;
+    let campus_id = ensure_active_campus(&state, &session).await?;
+    let object = ChatConversationService::new(state.infra.db.clone())
+        .get_shared_object(object_id, &session.user_id)
+        .await?;
+    if campus_id.is_some_and(|campus| campus.to_string() != object.campus_id) {
+        return Err(ApiError::CampusScopeMismatch);
+    }
+    Ok(Json(shared_object_response(object)))
+}
+
+pub async fn get_shared_object_media(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(object_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = authenticated_session(&state, &headers)?;
+    let campus_id = ensure_active_campus(&state, &session).await?;
+    let object = ChatConversationService::new(state.infra.db.clone())
+        .get_shared_object(object_id, &session.user_id)
+        .await?;
+    if campus_id.is_some_and(|campus| campus.to_string() != object.campus_id) {
+        return Err(ApiError::CampusScopeMismatch);
+    }
+    if object.kind != SharedObjectKind::File.as_str() || object.status != "active" {
+        return Err(ApiError::NotFound);
+    }
+    let key = object.upload_key.as_deref().ok_or(ApiError::NotFound)?;
+    let url = state
+        .public_platform_media_url(key)
+        .ok_or_else(|| ApiError::NotImplemented("平台文件服务未配置".to_string()))?;
+    Ok(Json(serde_json::json!({
+        "object_id": object.id,
+        "url": url,
+        "expires_in_seconds": state.infra.media_signer.as_ref().map(|signer| signer.ttl_secs),
+    })))
+}
+
+pub async fn revoke_shared_object(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(object_id): Path<Uuid>,
+) -> Result<Json<SharedObjectResponse>, ApiError> {
+    let session = authenticated_session(&state, &headers)?;
+    let campus_id = ensure_active_campus(&state, &session).await?;
+    let object = ChatConversationService::new(state.infra.db.clone())
+        .revoke_shared_object(object_id, &session.user_id)
+        .await?;
+    if campus_id.is_some_and(|campus| campus.to_string() != object.campus_id) {
+        return Err(ApiError::CampusScopeMismatch);
+    }
+    broadcast_shared_object(&state, &object, "shared_object_revoked").await?;
+    Ok(Json(shared_object_response(object)))
+}
+
+async fn broadcast_shared_object(
+    state: &AppState,
+    object: &crate::services::chat_conversation::ChatSharedObjectView,
+    event: &str,
+) -> Result<(), ApiError> {
+    let (initiator_id, recipient_id): (String, String) =
+        sqlx::query_as(
+            "SELECT initiator_id, recipient_id
+         FROM chat_conversations
+         WHERE id = $1",
+        )
+        .bind(Uuid::parse_str(&object.conversation_id).map_err(|error| {
+            ApiError::Internal(anyhow::anyhow!("invalid conversation id: {error}"))
+        })?)
+        .fetch_optional(&state.infra.db)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?
+        .ok_or(ApiError::NotFound)?;
+    let payload = serde_json::json!({
+        "event": event,
+        "object_id": object.id,
+        "conversation_id": object.conversation_id,
+        "kind": object.kind,
+        "status": object.status,
+    })
+    .to_string();
+    let campus_id = Uuid::parse_str(&object.campus_id)
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("invalid campus id: {error}")))?;
+    ws::broadcast_to_user_in_campus(&initiator_id, campus_id, &payload);
+    ws::broadcast_to_user_in_campus(&recipient_id, campus_id, &payload);
+    Ok(())
+}
+
+fn shared_object_response(
+    object: crate::services::chat_conversation::ChatSharedObjectView,
+) -> SharedObjectResponse {
+    let download_path = (object.kind == SharedObjectKind::File.as_str())
+        .then(|| format!("/api/chat/shared-objects/{}/media", object.id));
+    SharedObjectResponse {
+        object,
+        download_path,
+    }
+}

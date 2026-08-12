@@ -55,43 +55,46 @@ void main() {
       expect(space.nextCursor, '2026-08-12T10:00:00Z|message|42');
     });
 
-    test('parses explicit pins, quote projections, and connection recovery', () {
-      final space = RelationshipSpace.fromJson({
-        'relationship_key': 'relationship:v1:campus:user-a:user-b',
-        'events': const [],
-        'pins': [
-          {
-            'id': 'pin-1',
-            'message_id': 42,
+    test(
+      'parses explicit pins, quote projections, and connection recovery',
+      () {
+        final space = RelationshipSpace.fromJson({
+          'relationship_key': 'relationship:v1:campus:user-a:user-b',
+          'events': const [],
+          'pins': [
+            {
+              'id': 'pin-1',
+              'message_id': 42,
+              'conversation_id': 'conversation-1',
+              'actor_id': 'user-b',
+              'created_at': '2026-08-12T10:01:00Z',
+            },
+          ],
+          'shared_objects': [
+            {
+              'key': 'listing:item-1',
+              'kind': 'listing',
+              'ref_id': 'item-1',
+              'snapshot': {'title': '教材'},
+              'source_message_id': 42,
+              'conversation_id': 'conversation-1',
+              'actor_id': 'user-a',
+              'created_at': '2026-08-12T10:00:00Z',
+            },
+          ],
+          'recent_connection': {
             'conversation_id': 'conversation-1',
-            'actor_id': 'user-b',
-            'created_at': '2026-08-12T10:01:00Z',
+            'started_at': '2026-08-12T09:00:00Z',
+            'ended_at': '2026-08-12T09:30:00Z',
           },
-        ],
-        'shared_objects': [
-          {
-            'key': 'listing:item-1',
-            'kind': 'listing',
-            'ref_id': 'item-1',
-            'snapshot': {'title': '教材'},
-            'source_message_id': 42,
-            'conversation_id': 'conversation-1',
-            'actor_id': 'user-a',
-            'created_at': '2026-08-12T10:00:00Z',
-          },
-        ],
-        'recent_connection': {
-          'conversation_id': 'conversation-1',
-          'started_at': '2026-08-12T09:00:00Z',
-          'ended_at': '2026-08-12T09:30:00Z',
-        },
-      });
+        });
 
-      expect(space.pins.single.messageId, 42);
-      expect(space.pins.single.actorId, 'user-b');
-      expect(space.sharedObjects.single.snapshot['title'], '教材');
-      expect(space.recentConnection?.endedAt, isNotNull);
-    });
+        expect(space.pins.single.messageId, 42);
+        expect(space.pins.single.actorId, 'user-b');
+        expect(space.sharedObjects.single.snapshot['title'], '教材');
+        expect(space.recentConnection?.endedAt, isNotNull);
+      },
+    );
 
     test('keeps older responses compatible', () {
       final space = RelationshipSpace.fromJson({
@@ -153,6 +156,49 @@ void main() {
         });
       },
     );
+  });
+
+  group('ChatSharedObject', () {
+    test('parses an active file reference without treating it as a URL', () {
+      final object = ChatSharedObject.fromJson({
+        'id': 'object-1',
+        'campus_id': 'campus-1',
+        'conversation_id': 'conversation-1',
+        'created_by': 'user-a',
+        'kind': 'file',
+        'title': '讲义.pdf',
+        'mime_type': 'application/pdf',
+        'size_bytes': 4096,
+        'status': 'active',
+        'upload_key': 'chat/campus-1/object-1',
+        'download_path': '/api/chat/shared-objects/object-1/media',
+        'created_at': '2026-08-12T10:00:00Z',
+        'updated_at': '2026-08-12T10:00:00Z',
+      });
+
+      expect(object.isActive, isTrue);
+      expect(object.uploadKey, 'chat/campus-1/object-1');
+      expect(object.downloadPath, contains('/media'));
+      expect(object.canonicalUrl, isNull);
+    });
+
+    test('keeps revoked links visible as history but inactive', () {
+      final object = ChatSharedObject.fromJson({
+        'id': 'object-2',
+        'campus_id': 'campus-1',
+        'conversation_id': 'conversation-1',
+        'created_by': 'user-a',
+        'kind': 'link',
+        'title': '课程主页',
+        'canonical_url': 'https://example.com/course',
+        'status': 'revoked',
+        'created_at': '2026-08-12T10:00:00Z',
+        'updated_at': '2026-08-12T10:01:00Z',
+      });
+
+      expect(object.isActive, isFalse);
+      expect(object.canonicalUrl, 'https://example.com/course');
+    });
   });
 
   group('ConversationMessage', () {
