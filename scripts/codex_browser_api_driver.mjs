@@ -40,6 +40,7 @@ const IDS = {
 const SUPPORTED_COMMANDS = [
   'health',
   'personas',
+  'r2-chat',
   'p0-chat',
   'spaces',
   'call-secret',
@@ -55,6 +56,7 @@ Usage:
 Commands:
   health       Check /api/health.
   personas     Print seed persona usernames and ids.
+  r2-chat      Exercise the two-user mail/realtime privacy journey and explicit acknowledgements.
   p0-chat      Prepare and assert one active buyer/seller chat with reply, reaction, hide, report.
   spaces       Prepare and assert one group plus one channel permission check.
   call-secret  Prepare and assert WebRTC signaling MVP plus Secret Chat ciphertext path.
@@ -220,6 +222,161 @@ async function ensureActiveRealtime(baseUrl) {
     conversation,
     created: Boolean(created.created),
     mutualOpen: Boolean(created.mutual_open),
+  };
+}
+
+function assertNoAttentionFields(value, path = '$') {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoAttentionFields(item, `${path}[${index}]`));
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  for (const [key, nested] of Object.entries(value)) {
+    assert(
+      !['read_at', 'read_by', 'typing', 'online', 'last_seen'].includes(key),
+      `privacy response must not expose ${key}`,
+      { path: `${path}.${key}` },
+    );
+    assertNoAttentionFields(nested, `${path}.${key}`);
+  }
+}
+
+async function runR2Chat(baseUrl) {
+  const buyer = await login(baseUrl, 'buyer1');
+  const seller = await login(baseUrl, 'seller1');
+  const label = nowLabel();
+
+  const realtimeCreated = await request(
+    baseUrl,
+    'POST',
+    '/api/chat/conversations',
+    buyer.token,
+    {
+      client_request_id: randomUUID(),
+      recipient_id: seller.id,
+      listing_id: IDS.iphoneListing,
+      mode: 'realtime',
+      subject: null,
+      content: `R2 connection ${label}`,
+    },
+  );
+  let realtime = realtimeCreated.conversation;
+  assert(realtime?.id, 'R2 realtime creation should return a conversation', realtimeCreated);
+  if (realtime.state === 'syn_sent') {
+    realtime = await request(
+      baseUrl,
+      'POST',
+      `/api/chat/conversations/${realtime.id}/respond`,
+      seller.token,
+      { decision: 'accept' },
+    );
+  }
+  if (realtime.state === 'syn_ack') {
+    realtime = await request(
+      baseUrl,
+      'POST',
+      `/api/chat/conversations/${realtime.id}/ack`,
+      buyer.token,
+      {},
+    );
+  }
+  assert(realtime.state === 'active', 'R2 realtime should be active after accept/ack', realtime);
+
+  const message = await request(
+    baseUrl,
+    'POST',
+    `/api/chat/conversations/${realtime.id}/messages`,
+    buyer.token,
+    {
+      client_message_id: randomUUID(),
+      content: `R2 explicit acknowledgement ${label}`,
+      reply_to_message_id: null,
+      image_base64: null,
+      audio_base64: null,
+      image_url: null,
+      audio_url: null,
+    },
+  );
+  assert(message.status === 'sent', 'server-accepted message should be sent', message);
+  assertNoAttentionFields(message);
+
+  let acknowledged = await request(
+    baseUrl,
+    'POST',
+    `/api/chat/messages/${message.id}/acknowledgement`,
+    seller.token,
+    { kind: 'received' },
+  );
+  assert(
+    acknowledged.acknowledgements?.some(
+      (item) => item.user_id === seller.id && item.kind === 'received',
+    ),
+    'recipient should explicitly acknowledge receipt',
+    acknowledged,
+  );
+  acknowledged = await request(
+    baseUrl,
+    'POST',
+    `/api/chat/messages/${message.id}/acknowledgement`,
+    seller.token,
+    { kind: 'completed' },
+  );
+  assert(
+    acknowledged.acknowledgements?.filter((item) => item.user_id === seller.id).length === 1 &&
+      acknowledged.acknowledgements[0]?.kind === 'completed',
+    'acknowledgement replacement should remain one explicit action',
+    acknowledged,
+  );
+  const withdrawn = await request(
+    baseUrl,
+    'DELETE',
+    `/api/chat/messages/${message.id}/acknowledgement`,
+    seller.token,
+  );
+  assert(
+    !withdrawn.acknowledgements?.some((item) => item.user_id === seller.id),
+    'recipient should be able to withdraw the acknowledgement',
+    withdrawn,
+  );
+
+  const closed = await request(
+    baseUrl,
+    'POST',
+    `/api/chat/conversations/${realtime.id}/close`,
+    buyer.token,
+    {},
+  );
+  assert(closed.state === 'closed', 'explicit end should close the realtime session', closed);
+
+  const mailCreated = await request(
+    baseUrl,
+    'POST',
+    '/api/chat/conversations',
+    buyer.token,
+    {
+      client_request_id: randomUUID(),
+      recipient_id: seller.id,
+      listing_id: IDS.iphoneListing,
+      mode: 'mail',
+      subject: `R2 mail ${label}`,
+      content: 'No rush; please reply when convenient.',
+    },
+  );
+  assert(
+    mailCreated.conversation?.mode === 'mail',
+    'mail should remain a separate asynchronous conversation',
+    mailCreated,
+  );
+  assertNoAttentionFields(mailCreated);
+
+  return {
+    command: 'r2-chat',
+    ok: true,
+    realtimeConversationId: realtime.id,
+    messageId: message.id,
+    mailConversationId: mailCreated.conversation.id,
+    finalRealtimeState: closed.state,
+    acknowledgementLifecycle: ['received', 'completed', 'withdrawn'],
   };
 }
 
@@ -521,6 +678,9 @@ async function main() {
       break;
     case 'personas':
       result = personas();
+      break;
+    case 'r2-chat':
+      result = await runR2Chat(options.baseUrl);
       break;
     case 'p0-chat':
       result = await runP0Chat(options.baseUrl);

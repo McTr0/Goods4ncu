@@ -66,11 +66,14 @@ node scripts/codex_browser_api_driver.mjs --help
 
 ```bash
 node scripts/codex_browser_api_driver.mjs health
+node scripts/codex_browser_api_driver.mjs r2-chat --json
 node scripts/codex_browser_api_driver.mjs p0-chat
 node scripts/codex_browser_api_driver.mjs spaces
 node scripts/codex_browser_api_driver.mjs call-secret
 node scripts/codex_browser_api_driver.mjs all
 ```
+
+`r2-chat` 是关系空间隐私旅程的最小双账号脚本：buyer1 创建 realtime，seller1 接受，buyer1 确认并结束；同一条消息由 seller1 显式执行 `received → completed → 撤销`，随后再创建独立 mail。脚本还递归拒绝 `read_at`、`read_by`、`typing`、`online` 和 `last_seen` 字段，避免协议回归把注意力状态重新带回响应。
 
 如果后端不是默认地址：
 
