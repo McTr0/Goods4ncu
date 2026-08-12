@@ -45,4 +45,21 @@ void main() {
     expect(find.text('Connected'), findsOneWidget);
     expect(find.text('Leave a message'), findsNothing);
   });
+
+  testWidgets('shows deterministic memory rail counts', (tester) async {
+    await tester.pumpWidget(
+      _host(
+        const RelationshipSpacePreview(
+          otherName: 'Alice',
+          pinCount: 2,
+          sharedObjectCount: 1,
+          hasRecentConnection: true,
+        ),
+      ),
+    );
+
+    expect(find.text('2 个 Pin'), findsOneWidget);
+    expect(find.text('1 个共享对象'), findsOneWidget);
+    expect(find.text('时间轨迹'), findsWidgets);
+  });
 }

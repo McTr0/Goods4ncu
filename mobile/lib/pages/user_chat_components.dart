@@ -180,6 +180,8 @@ class MessageBubble extends StatelessWidget {
   final VoidCallback? onHide;
   final VoidCallback? onReport;
   final VoidCallback? onRetry;
+  final bool isPinned;
+  final VoidCallback? onTogglePin;
   final bool deliveryOnly;
 
   const MessageBubble({
@@ -195,6 +197,8 @@ class MessageBubble extends StatelessWidget {
     this.onHide,
     this.onReport,
     this.onRetry,
+    this.isPinned = false,
+    this.onTogglePin,
     this.deliveryOnly = false,
   });
 
@@ -299,6 +303,19 @@ class MessageBubble extends StatelessWidget {
                 ),
               if (message.quote != null)
                 _StructuredQuoteCard(quote: message.quote!, isMe: isMe),
+              if (isPinned)
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Icon(
+                      Icons.push_pin,
+                      size: 14,
+                      color: isMe ? Colors.white70 : AppTheme.primary,
+                      semanticLabel: l.relationshipSpaceUnpin,
+                    ),
+                  ),
+                ),
               Text(
                 message.content,
                 style: TextStyle(
@@ -421,6 +438,7 @@ class MessageBubble extends StatelessWidget {
         onAcknowledge != null ||
         onWithdrawAcknowledgement != null ||
         onEdit != null ||
+        onTogglePin != null ||
         onHide != null ||
         onReport != null;
     if (!actionsAvailable) return;
@@ -511,6 +529,19 @@ class MessageBubble extends StatelessWidget {
                 onTap: () {
                   Navigator.pop(context);
                   onEdit?.call();
+                },
+              ),
+            if (onTogglePin != null)
+              ListTile(
+                leading: Icon(
+                  isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                ),
+                title: Text(
+                  isPinned ? l.relationshipSpaceUnpin : l.relationshipSpacePin,
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  onTogglePin?.call();
                 },
               ),
             if (onHide != null)
@@ -717,6 +748,8 @@ class UserChatMessageList extends StatelessWidget {
   final ValueChanged<ConversationMessage>? onHideMessage;
   final ValueChanged<ConversationMessage>? onReportMessage;
   final ValueChanged<ConversationMessage>? onRetryMessage;
+  final ValueChanged<ConversationMessage>? onTogglePinMessage;
+  final bool Function(ConversationMessage message)? isPinned;
   final bool allowEditing;
   final bool deliveryOnly;
 
@@ -737,6 +770,8 @@ class UserChatMessageList extends StatelessWidget {
     this.onHideMessage,
     this.onReportMessage,
     this.onRetryMessage,
+    this.onTogglePinMessage,
+    this.isPinned,
     this.allowEditing = true,
     this.deliveryOnly = false,
   });
@@ -775,6 +810,7 @@ class UserChatMessageList extends StatelessWidget {
       itemBuilder: (context, index) {
         final msg = messages[index];
         final isMe = msg.isFrom(currentUserId ?? '');
+        final canPin = int.tryParse(msg.id) != null && msg.status == 'sent';
         return MessageBubble(
           message: msg,
           isMe: isMe,
@@ -805,6 +841,10 @@ class UserChatMessageList extends StatelessWidget {
           onRetry: isMe && msg.status == 'failed' && onRetryMessage != null
               ? () => onRetryMessage!(msg)
               : null,
+          isPinned: isPinned?.call(msg) ?? false,
+          onTogglePin: !canPin || onTogglePinMessage == null
+              ? null
+              : () => onTogglePinMessage!(msg),
           onEdit: isMe && allowEditing && msg.canEdit && msg.kind == 'message'
               ? () => onEditMessage(msg)
               : null,

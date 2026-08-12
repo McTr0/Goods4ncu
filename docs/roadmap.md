@@ -189,11 +189,11 @@
 
 该方向是目标态产品迁移，不改变当前 API 参考中的已实现事实。按以下顺序推进：
 
-当前进度：[部分完成] R0 的 Flutter 共同空间静态投影已接入联系人线程和独立私聊；只读取现有 Thread/Conversation 事实，`active` 只显示为“已连接”，没有新增后端状态。R1 已落地 `SocialPersona` v1 的受控 token、草稿/发布/归档、同校园公开读取、审计和普通头像回退；图片资产、照片风格化和人工审核队列仍待实现。R2 已先补上只读的同校园无序用户对 `relationship_key` 与由现有会话事件/消息派生的 `space-events` cursor；Pin、共享对象和真实浏览器的联系人空间旅程仍待验收。
+当前进度：[部分完成] R0 的 Flutter 共同空间静态投影已接入联系人线程和独立私聊；只读取现有 Thread/Conversation 事实，`active` 只显示为“已连接”，没有新增后端状态。R1 已落地 `SocialPersona` v1 的受控 token、草稿/发布/归档、同校园公开读取、审计和普通头像回退；图片资产、照片风格化和人工审核队列仍待实现。R2 已落地同校园无序用户对 `relationship_key`、`space-events` cursor、显式幂等 Pin、最近连接恢复点，以及从既有 quote 派生的共享对象入口；真实数据库和浏览器的联系人空间旅程仍待验收。
 
 1. **R0：体验原型与词义测试。** 用真实移动端尺寸验证“对方左上 / 自己右下”、留言/连接切换、角色缩放和 Memory Rail；确认用户不会把角色姿态理解成在线、已读或 Agent 参与。此阶段不改后端。
 2. **R1：静态角色身份层。** [部分完成] `0063_social_personas` 与 `/api/user/persona`、`/api/users/{id}/persona` 已支持统一风格 token、草稿、显式发布/归档、同校园边界和审计；Flutter 个人资料和公开主页已提供创建/预览/编辑入口。下一步补充 24/48/160 资产、深浅色与 reduced-motion fallback、媒体审核和照片风格化，不能把生成图当作身份认证。
-3. **R2：只读 Relationship Space 投影。** 复用 `Thread / Conversation / Message / Quote`，为同校园无序用户对提供稳定 relationship key 和 cursor；先实现“时间 + Pin”、最近连接恢复点，以及文件、链接、商品 quote 的共享对象入口。不得先建第二套消息事实。
+3. **R2：Relationship Space 投影（消息只读，Pin 显式写入）。** [部分完成] 复用 `Thread / Conversation / Message / Quote`，为同校园无序用户对提供稳定 relationship key 和 cursor；已实现“时间 + Pin”、最近连接恢复点，以及文件、链接、商品 quote 的共享对象入口。Pin 通过 `0064_relationship_space_pins` 保存为用户主动、可撤销的共享事实，仍不建立第二套消息事实。下一步补真实数据库/浏览器旅程和更完整的文件/链接展示。
 4. **R3：连接空间化。** 留言状态拉开角色并强调历史；请求/接受连接只由明确状态机驱动，连接期间弱化角色与 Rail。实现发送方“普通留言 / 希望今天处理 / 请求连接”的克制时间尺度，以及接收方主动的可留言、可连接、忙和稍后规则；接收方规则始终优先，不引入 online、typing、last seen 或 read。
 5. **R4：可选语义增强。** 主题聚类、自然语言回忆与共识提议必须携带 `source_event_ids`；模型不可用时自动退回确定性时间、Pin、文件和搜索。共享约定只有用户明确采纳后才生效。
 

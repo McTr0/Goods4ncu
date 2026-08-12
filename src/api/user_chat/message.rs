@@ -8,14 +8,15 @@ use uuid::Uuid;
 use crate::api::error::ApiError;
 use crate::api::{normalize_platform_media_url, ws, AppState};
 use crate::services::chat_conversation::{
-    ChatConversationService, ConversationMessageRecord, SendConversationMessageInput,
+    ChatConversationService, ConversationMessageRecord, RelationshipSpacePinView,
+    SendConversationMessageInput,
 };
 
 use super::{
     authenticated_session, ensure_conversation_campus, ensure_message_campus, moderate_text,
     EditMessageBody, HideMessageResponse, MessageAcknowledgementBody, MessageListQuery,
-    MessageListResponse, MessageReactionBody, ReportMessageBody, ReportMessageResponse,
-    SendMessageBody,
+    MessageListResponse, MessageReactionBody, RelationshipPinResponse, ReportMessageBody,
+    ReportMessageResponse, SendMessageBody,
 };
 
 async fn conversation_campus_id(state: &AppState, conversation_id: Uuid) -> Result<Uuid, ApiError> {
@@ -252,6 +253,39 @@ pub async fn hide_message(
     }))
 }
 
+pub async fn pin_message(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(message_id): Path<i64>,
+) -> Result<Json<RelationshipSpacePinView>, ApiError> {
+    let session = authenticated_session(&state, &headers)?;
+    let _ = ensure_message_campus(&state, message_id, &session).await?;
+    let user_id = session.user_id;
+    let service = ChatConversationService::new(state.infra.db.clone());
+    let pin = service.pin_message(message_id, &user_id).await?;
+    broadcast_relationship_pin(&service, &pin, true).await?;
+    Ok(Json(pin))
+}
+
+pub async fn unpin_message(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(message_id): Path<i64>,
+) -> Result<Json<RelationshipPinResponse>, ApiError> {
+    let session = authenticated_session(&state, &headers)?;
+    let _ = ensure_message_campus(&state, message_id, &session).await?;
+    let user_id = session.user_id;
+    let service = ChatConversationService::new(state.infra.db.clone());
+    let removed = service.unpin_message(message_id, &user_id).await?;
+    if let Some(pin) = removed.as_ref() {
+        broadcast_relationship_pin(&service, pin, false).await?;
+    }
+    Ok(Json(RelationshipPinResponse {
+        message_id,
+        pinned: false,
+    }))
+}
+
 pub async fn report_message(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -320,6 +354,31 @@ async fn broadcast_message_update(
         "conversation_id": conversation_id,
         "message_id": message.id,
         "reactions": message.reactions,
+    })
+    .to_string();
+    ws::broadcast_to_user_in_campus(&conversation.initiator_id, conversation.campus_id, &payload);
+    ws::broadcast_to_user_in_campus(&conversation.recipient_id, conversation.campus_id, &payload);
+    Ok(())
+}
+
+async fn broadcast_relationship_pin(
+    service: &ChatConversationService,
+    pin: &RelationshipSpacePinView,
+    pinned: bool,
+) -> Result<(), ApiError> {
+    let conversation_id = Uuid::parse_str(&pin.conversation_id)
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("invalid conversation id: {error}")))?;
+    let conversation = service
+        .get_conversation(conversation_id, &pin.actor_id)
+        .await?;
+    let payload = serde_json::json!({
+        "event": "relationship_pin_changed",
+        "conversation_id": conversation_id,
+        "message_id": pin.message_id,
+        "pin_id": pin.id,
+        "actor_id": pin.actor_id,
+        "pinned": pinned,
+        "created_at": pin.created_at,
     })
     .to_string();
     ws::broadcast_to_user_in_campus(&conversation.initiator_id, conversation.campus_id, &payload);

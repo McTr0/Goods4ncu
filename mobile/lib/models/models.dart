@@ -1188,15 +1188,110 @@ class RelationshipSpaceEvent {
   }
 }
 
+class RelationshipSpacePin {
+  const RelationshipSpacePin({
+    required this.id,
+    required this.messageId,
+    required this.conversationId,
+    required this.actorId,
+    required this.createdAt,
+  });
+
+  final String id;
+  final int messageId;
+  final String conversationId;
+  final String actorId;
+  final DateTime createdAt;
+
+  factory RelationshipSpacePin.fromJson(Map<String, dynamic> json) {
+    return RelationshipSpacePin(
+      id: json['id']?.toString() ?? '',
+      messageId: (json['message_id'] as num?)?.toInt() ?? 0,
+      conversationId: json['conversation_id']?.toString() ?? '',
+      actorId: json['actor_id']?.toString() ?? '',
+      createdAt:
+          DateTime.tryParse(json['created_at']?.toString() ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
+class RelationshipSpaceSharedObject {
+  const RelationshipSpaceSharedObject({
+    required this.key,
+    required this.kind,
+    required this.refId,
+    required this.snapshot,
+    required this.sourceMessageId,
+    required this.conversationId,
+    required this.actorId,
+    required this.createdAt,
+  });
+
+  final String key;
+  final String kind;
+  final String refId;
+  final Map<String, dynamic> snapshot;
+  final int sourceMessageId;
+  final String conversationId;
+  final String actorId;
+  final DateTime createdAt;
+
+  factory RelationshipSpaceSharedObject.fromJson(Map<String, dynamic> json) {
+    return RelationshipSpaceSharedObject(
+      key: json['key']?.toString() ?? '',
+      kind: json['kind']?.toString() ?? '',
+      refId: json['ref_id']?.toString() ?? '',
+      snapshot:
+          (json['snapshot'] as Map?)?.cast<String, dynamic>() ??
+          const <String, dynamic>{},
+      sourceMessageId: (json['source_message_id'] as num?)?.toInt() ?? 0,
+      conversationId: json['conversation_id']?.toString() ?? '',
+      actorId: json['actor_id']?.toString() ?? '',
+      createdAt:
+          DateTime.tryParse(json['created_at']?.toString() ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
+class RelationshipSpaceConnection {
+  const RelationshipSpaceConnection({
+    required this.conversationId,
+    required this.startedAt,
+    required this.endedAt,
+  });
+
+  final String conversationId;
+  final DateTime startedAt;
+  final DateTime? endedAt;
+
+  factory RelationshipSpaceConnection.fromJson(Map<String, dynamic> json) {
+    return RelationshipSpaceConnection(
+      conversationId: json['conversation_id']?.toString() ?? '',
+      startedAt:
+          DateTime.tryParse(json['started_at']?.toString() ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      endedAt: DateTime.tryParse(json['ended_at']?.toString() ?? ''),
+    );
+  }
+}
+
 class RelationshipSpace {
   const RelationshipSpace({
     required this.relationshipKey,
     required this.events,
+    this.pins = const [],
+    this.sharedObjects = const [],
+    this.recentConnection,
     this.nextCursor,
   });
 
   final String relationshipKey;
   final List<RelationshipSpaceEvent> events;
+  final List<RelationshipSpacePin> pins;
+  final List<RelationshipSpaceSharedObject> sharedObjects;
+  final RelationshipSpaceConnection? recentConnection;
   final String? nextCursor;
 
   factory RelationshipSpace.fromJson(Map<String, dynamic> json) {
@@ -1206,6 +1301,19 @@ class RelationshipSpace {
           .whereType<Map<String, dynamic>>()
           .map(RelationshipSpaceEvent.fromJson)
           .toList(),
+      pins: (json['pins'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(RelationshipSpacePin.fromJson)
+          .toList(),
+      sharedObjects: (json['shared_objects'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(RelationshipSpaceSharedObject.fromJson)
+          .toList(),
+      recentConnection: json['recent_connection'] is Map
+          ? RelationshipSpaceConnection.fromJson(
+              (json['recent_connection'] as Map).cast<String, dynamic>(),
+            )
+          : null,
       nextCursor: json['next_cursor']?.toString(),
     );
   }

@@ -231,6 +231,32 @@ class ChatService extends BaseService {
     );
   }
 
+  /// POST /api/chat/messages/{id}/pin — an explicit shared memory marker.
+  /// Pinning is a social action; opening, scrolling, push delivery and typing
+  /// never call this method.
+  Future<RelationshipSpacePin> pinMessage(String messageId) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/chat/messages/$messageId/pin'),
+      headers,
+      jsonEncode({}),
+    );
+    return handleResponse(
+      response,
+      (data) => RelationshipSpacePin.fromJson(data as Map<String, dynamic>),
+    );
+  }
+
+  /// DELETE /api/chat/messages/{id}/pin — removes only this user's marker.
+  Future<void> unpinMessage(String messageId) async {
+    final headers = await authHeaders();
+    final response = await delete(
+      Uri.parse('$baseUrl/api/chat/messages/$messageId/pin'),
+      headers,
+    );
+    handleResponse(response, (_) {});
+  }
+
   Future<Conversation> getConversation(String conversationId) async {
     final headers = await authHeaders();
     final response = await get(

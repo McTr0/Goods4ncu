@@ -2087,6 +2087,22 @@ class AppLocalizationsEn extends AppLocalizations {
   String get relationshipSpaceNoEvent => 'No shared events yet';
 
   @override
+  String get relationshipSpacePin => 'Pin to shared space';
+
+  @override
+  String get relationshipSpaceUnpin => 'Remove from shared space';
+
+  @override
+  String relationshipSpacePinsCount(int count) {
+    return '$count pins';
+  }
+
+  @override
+  String relationshipSpaceObjectsCount(int count) {
+    return '$count shared objects';
+  }
+
+  @override
   String conversationRealtimeCount(int count) {
     return 'Realtime $count';
   }

@@ -207,7 +207,7 @@ RelationshipSpace
 └── MemoryIndex projections
 ```
 
-`SpaceEvent` 统一描述可以回放的空间变化，例如 `message.sent`、`connection.started`、`connection.ended`、`file.shared`、`link.shared`、`memory.pinned`、`acknowledgement.changed` 和 `shared_object.updated`。首阶段它只是从 `chat_messages`、`chat_conversation_events`、quote、reaction 和领域对象派生的只读投影，不另建一套可能与原表分叉的事实。若后续成为通用写模型，必须具备全局事件 id、aggregate/version、campus、actor、source reference、幂等键和 cursor，并与业务写入同事务提交。
+`SpaceEvent` 统一描述可以回放的空间变化，例如 `message.sent`、`connection.started`、`connection.ended`、`file.shared`、`link.shared`、`memory.pinned`、`acknowledgement.changed` 和 `shared_object.updated`。首阶段它从 `chat_messages`、`chat_conversation_events`、quote、reaction 和领域对象派生只读投影；唯一新增的关系空间事实是 `0064_relationship_space_pins` 中用户明确执行的 Pin，它保存动作本身而不复制消息。若后续成为通用写模型，必须具备全局事件 id、aggregate/version、campus、actor、source reference、幂等键和 cursor，并与业务写入同事务提交。
 
 `SharedObject` 是双方围绕某件事互动的稳定入口，可以引用商品、文件、链接、地点或约定。它不复制权威业务状态：listing 价格与状态从 `IntentItem/inventory` 读取，成交从 `DealRecord` 读取，双方共识必须记录谁明确采纳。模型从对话抽取出的地点、时间或价格只能先形成 proposal，不能直接写成 agreed value。
 

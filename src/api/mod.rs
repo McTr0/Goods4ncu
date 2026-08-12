@@ -893,6 +893,10 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             post(user_chat::hide_message),
         )
         .route(
+            "/api/chat/messages/{id}/pin",
+            post(user_chat::pin_message).delete(user_chat::unpin_message),
+        )
+        .route(
             "/api/chat/messages/{id}/report",
             post(user_chat::report_message),
         )

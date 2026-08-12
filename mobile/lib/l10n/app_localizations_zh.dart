@@ -1988,6 +1988,22 @@ class AppLocalizationsZh extends AppLocalizations {
   String get relationshipSpaceNoEvent => '还没有共同记录';
 
   @override
+  String get relationshipSpacePin => 'Pin 到共同空间';
+
+  @override
+  String get relationshipSpaceUnpin => '从共同空间移除 Pin';
+
+  @override
+  String relationshipSpacePinsCount(int count) {
+    return '$count 个 Pin';
+  }
+
+  @override
+  String relationshipSpaceObjectsCount(int count) {
+    return '$count 个共享对象';
+  }
+
+  @override
   String conversationRealtimeCount(int count) {
     return '实时 $count';
   }

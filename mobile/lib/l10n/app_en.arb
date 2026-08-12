@@ -909,6 +909,24 @@
   "relationshipSpaceConnected": "Connected",
   "relationshipSpaceTimeline": "Timeline",
   "relationshipSpaceNoEvent": "No shared events yet",
+  "relationshipSpacePin": "Pin to shared space",
+  "relationshipSpaceUnpin": "Remove from shared space",
+  "relationshipSpacePinsCount": "{count} pins",
+  "@relationshipSpacePinsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "relationshipSpaceObjectsCount": "{count} shared objects",
+  "@relationshipSpaceObjectsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "conversationRealtimeCount": "Realtime {count}",
   "@conversationRealtimeCount": {
     "placeholders": {

@@ -93,6 +93,7 @@ class _UserChatPageState extends State<UserChatPage> {
   String? get _currentUserId => _chatData?.currentUserId;
 
   Agreement? _agreement;
+  RelationshipSpace? _relationshipSpace;
   bool _awaitingHandoff = false;
   late final AgreementService _agreementService;
   late final ReputationService _reputationService;
@@ -163,7 +164,10 @@ class _UserChatPageState extends State<UserChatPage> {
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _conversation?.expiresAt != null) setState(() {});
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadArrangement());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadArrangement();
+      _loadRelationshipSpace();
+    });
   }
 
   @override
@@ -235,6 +239,10 @@ class _UserChatPageState extends State<UserChatPage> {
           messageId: notif.messageId,
           conversationId: notif.conversationId,
         );
+        break;
+
+      case 'relationship_pin_changed':
+        _loadRelationshipSpace();
         break;
     }
   }
@@ -699,9 +707,11 @@ class _UserChatPageState extends State<UserChatPage> {
     if (oldWidget.conversationId != widget.conversationId) {
       setState(() {
         _agreement = null;
+        _relationshipSpace = null;
         _awaitingHandoff = false;
       });
       _loadArrangement();
+      _loadRelationshipSpace();
     }
   }
 
@@ -726,6 +736,44 @@ class _UserChatPageState extends State<UserChatPage> {
     } catch (_) {}
   }
 
+  Future<void> _loadRelationshipSpace() async {
+    try {
+      final space = await _chatService.getRelationshipSpace(widget.otherUserId);
+      if (!mounted) return;
+      setState(() => _relationshipSpace = space);
+    } catch (_) {
+      // The message path remains usable when the projection is unavailable;
+      // this is an additive rail, never a second chat dependency.
+    }
+  }
+
+  bool _isMessagePinnedByMe(ConversationMessage message) {
+    final currentUserId = _currentUserId;
+    final messageId = int.tryParse(message.id);
+    if (currentUserId == null ||
+        messageId == null ||
+        _relationshipSpace == null) {
+      return false;
+    }
+    return _relationshipSpace!.pins.any(
+      (pin) => pin.messageId == messageId && pin.actorId == currentUserId,
+    );
+  }
+
+  Future<void> _togglePinMessage(ConversationMessage message) async {
+    final l = AppLocalizations.of(context)!;
+    try {
+      if (_isMessagePinnedByMe(message)) {
+        await _chatService.unpinMessage(message.id);
+      } else {
+        await _chatService.pinMessage(message.id);
+      }
+      await _loadRelationshipSpace();
+    } catch (error) {
+      if (mounted) _showSnackBar('${l.relationshipSpacePin}: $error');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final body = Column(
@@ -736,6 +784,9 @@ class _UserChatPageState extends State<UserChatPage> {
             otherName: _displayName,
             latestEvent: _messages.isEmpty ? null : _messages.last.content,
             isConnected: _conversation?.state == ConversationState.active,
+            pinCount: _relationshipSpace?.pins.length ?? 0,
+            sharedObjectCount: _relationshipSpace?.sharedObjects.length ?? 0,
+            hasRecentConnection: _relationshipSpace?.recentConnection != null,
             compact: true,
           ),
         // Pinned above the messages: the whole point is that "how much, when,
@@ -782,6 +833,8 @@ class _UserChatPageState extends State<UserChatPage> {
             onHideMessage: _hideMessage,
             onReportMessage: _reportMessage,
             onRetryMessage: _retryMessage,
+            onTogglePinMessage: _togglePinMessage,
+            isPinned: _isMessagePinnedByMe,
             allowEditing:
                 !_isMail && _conversation?.state == ConversationState.active,
             deliveryOnly: _isMail,

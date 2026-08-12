@@ -165,9 +165,45 @@ pub struct RelationshipSpaceEventView {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct RelationshipSpacePinView {
+    pub id: String,
+    pub message_id: i64,
+    pub conversation_id: String,
+    pub actor_id: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RelationshipSpaceSharedObjectView {
+    pub key: String,
+    pub kind: String,
+    pub ref_id: String,
+    pub snapshot: Value,
+    pub source_message_id: i64,
+    pub conversation_id: String,
+    pub actor_id: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RelationshipSpaceConnectionView {
+    pub conversation_id: String,
+    pub started_at: String,
+    pub ended_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct RelationshipSpaceView {
     pub relationship_key: String,
     pub events: Vec<RelationshipSpaceEventView>,
+    /// Explicit pins are returned separately from the cursor timeline so the
+    /// legacy event cursor remains stable and numeric.  The client may merge
+    /// these facts into its local Memory Rail without creating a read marker.
+    pub pins: Vec<RelationshipSpacePinView>,
+    /// Quotes are a read-only projection of the existing message quote fields;
+    /// they never copy or replace listing/order/offer authority.
+    pub shared_objects: Vec<RelationshipSpaceSharedObjectView>,
+    pub recent_connection: Option<RelationshipSpaceConnectionView>,
     pub next_cursor: Option<String>,
 }
 
@@ -1254,11 +1290,277 @@ impl ChatConversationService {
             None
         };
 
+        let pins = self
+            .list_relationship_pins(user_id, peer_user_id, campus_id)
+            .await?;
+        let shared_objects = self
+            .list_relationship_shared_objects(user_id, peer_user_id, campus_id)
+            .await?;
+        let recent_connection = self
+            .get_recent_relationship_connection(user_id, peer_user_id, campus_id)
+            .await?;
+
         Ok(RelationshipSpaceView {
             relationship_key: relationship_key(campus_id, user_id, peer_user_id),
             events,
+            pins,
+            shared_objects,
+            recent_connection,
             next_cursor,
         })
+    }
+
+    /// Pin an existing visible direct message as an explicit, shared
+    /// relationship-space fact.  Repeating the request is idempotent and never
+    /// writes a second marker.
+    pub async fn pin_message(
+        &self,
+        message_id: i64,
+        user_id: &str,
+    ) -> Result<RelationshipSpacePinView, ApiError> {
+        let context = load_visible_direct_message_context(&self.pool, message_id, user_id).await?;
+        if pair_is_blocked_pool(&self.pool, user_id, &context.other_user_id).await? {
+            return Err(ApiError::Conflict("conversation_unavailable".to_string()));
+        }
+        if let Some(row) = sqlx::query(
+            "SELECT id, message_id, conversation_id, user_id, created_at
+             FROM chat_relationship_pins
+             WHERE message_id = $1 AND user_id = $2",
+        )
+        .bind(message_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_error)?
+        {
+            return row_to_relationship_pin(row);
+        }
+        let row = sqlx::query(
+            "INSERT INTO chat_relationship_pins (
+                 campus_id, conversation_id, message_id, user_id
+             )
+             SELECT c.campus_id, c.id, m.id, $2
+             FROM chat_messages m
+             JOIN chat_conversations c ON c.id = m.direct_conversation_id
+             WHERE m.id = $1
+             ON CONFLICT (user_id, message_id) DO NOTHING
+             RETURNING id, message_id, conversation_id, user_id, created_at",
+        )
+        .bind(message_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_error)?;
+        match row {
+            Some(row) => row_to_relationship_pin(row),
+            None => sqlx::query(
+                "SELECT id, message_id, conversation_id, user_id, created_at
+                 FROM chat_relationship_pins
+                 WHERE message_id = $1 AND user_id = $2",
+            )
+            .bind(message_id)
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_error)?
+            .map(row_to_relationship_pin)
+            .transpose()?
+            .ok_or(ApiError::Conflict("pin_conflict".to_string())),
+        }
+    }
+
+    /// Remove only the current user's marker.  A participant may unpin a
+    /// message that the other participant pinned without affecting the other
+    /// marker; absence is an idempotent no-op.
+    pub async fn unpin_message(
+        &self,
+        message_id: i64,
+        user_id: &str,
+    ) -> Result<Option<RelationshipSpacePinView>, ApiError> {
+        load_visible_direct_message_context(&self.pool, message_id, user_id).await?;
+        let existing = sqlx::query(
+            "SELECT id, message_id, conversation_id, user_id, created_at
+             FROM chat_relationship_pins
+             WHERE message_id = $1 AND user_id = $2",
+        )
+        .bind(message_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_error)?
+        .map(row_to_relationship_pin)
+        .transpose()?;
+        sqlx::query(
+            "DELETE FROM chat_relationship_pins
+             WHERE message_id = $1 AND user_id = $2",
+        )
+        .bind(message_id)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await
+        .map_err(db_error)?;
+        Ok(existing)
+    }
+
+    async fn list_relationship_pins(
+        &self,
+        user_id: &str,
+        peer_user_id: &str,
+        campus_id: Option<Uuid>,
+    ) -> Result<Vec<RelationshipSpacePinView>, ApiError> {
+        let rows = sqlx::query(
+            r#"
+            WITH visible_conversations AS (
+                SELECT c.id
+                FROM chat_conversations c
+                JOIN chat_conversation_members member
+                  ON member.conversation_id = c.id AND member.user_id = $1
+                WHERE member.archived_at IS NULL
+                  AND ($3::uuid IS NULL OR c.campus_id = $3)
+                  AND (
+                      (c.initiator_id = $1 AND c.recipient_id = $2)
+                      OR (c.initiator_id = $2 AND c.recipient_id = $1)
+                  )
+            )
+            SELECT pin.id, pin.message_id, pin.conversation_id,
+                   pin.user_id, pin.created_at
+            FROM chat_relationship_pins pin
+            JOIN visible_conversations visible
+              ON visible.id = pin.conversation_id
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM chat_message_hidden_members hidden
+                WHERE hidden.message_id = pin.message_id AND hidden.user_id = $1
+            )
+            ORDER BY pin.created_at DESC, pin.id DESC
+            LIMIT 100
+            "#,
+        )
+        .bind(user_id)
+        .bind(peer_user_id)
+        .bind(campus_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_error)?;
+        rows.into_iter().map(row_to_relationship_pin).collect()
+    }
+
+    async fn list_relationship_shared_objects(
+        &self,
+        user_id: &str,
+        peer_user_id: &str,
+        campus_id: Option<Uuid>,
+    ) -> Result<Vec<RelationshipSpaceSharedObjectView>, ApiError> {
+        let rows = sqlx::query(
+            r#"
+            WITH visible_conversations AS (
+                SELECT c.id
+                FROM chat_conversations c
+                JOIN chat_conversation_members member
+                  ON member.conversation_id = c.id AND member.user_id = $1
+                WHERE member.archived_at IS NULL
+                  AND ($3::uuid IS NULL OR c.campus_id = $3)
+                  AND (
+                      (c.initiator_id = $1 AND c.recipient_id = $2)
+                      OR (c.initiator_id = $2 AND c.recipient_id = $1)
+                  )
+            ), ranked AS (
+                SELECT message.id AS source_message_id,
+                       message.direct_conversation_id AS conversation_id,
+                       message.sender AS actor_id,
+                       message.quote_kind AS kind,
+                       message.quote_ref_id AS ref_id,
+                       message.quote_snapshot AS snapshot,
+                       message.timestamp AS created_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY message.quote_kind, message.quote_ref_id
+                           ORDER BY message.timestamp DESC, message.id DESC
+                       ) AS rank
+                FROM chat_messages message
+                JOIN visible_conversations visible
+                  ON visible.id = message.direct_conversation_id
+                WHERE message.quote_kind IS NOT NULL
+                  AND message.quote_ref_id IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM chat_message_hidden_members hidden
+                      WHERE hidden.message_id = message.id AND hidden.user_id = $1
+                  )
+            )
+            SELECT source_message_id, conversation_id, actor_id, kind, ref_id,
+                   snapshot, created_at
+            FROM ranked
+            WHERE rank = 1
+            ORDER BY created_at DESC, source_message_id DESC
+            LIMIT 100
+            "#,
+        )
+        .bind(user_id)
+        .bind(peer_user_id)
+        .bind(campus_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_error)?;
+        rows.into_iter()
+            .map(|row| {
+                let kind: String = row.get("kind");
+                let ref_id: String = row.get("ref_id");
+                let created_at: DateTime<Utc> = row.get("created_at");
+                Ok(RelationshipSpaceSharedObjectView {
+                    key: format!("{kind}:{ref_id}"),
+                    kind,
+                    ref_id,
+                    snapshot: row.get("snapshot"),
+                    source_message_id: row.get("source_message_id"),
+                    conversation_id: row.get::<Uuid, _>("conversation_id").to_string(),
+                    actor_id: row.get("actor_id"),
+                    created_at: created_at.to_rfc3339(),
+                })
+            })
+            .collect()
+    }
+
+    async fn get_recent_relationship_connection(
+        &self,
+        user_id: &str,
+        peer_user_id: &str,
+        campus_id: Option<Uuid>,
+    ) -> Result<Option<RelationshipSpaceConnectionView>, ApiError> {
+        let row = sqlx::query(
+            r#"
+            SELECT c.id, c.established_at, c.closed_at
+            FROM chat_conversations c
+            JOIN chat_conversation_members member
+              ON member.conversation_id = c.id AND member.user_id = $1
+            WHERE member.archived_at IS NULL
+              AND c.mode = 'realtime'
+              AND c.established_at IS NOT NULL
+              AND ($3::uuid IS NULL OR c.campus_id = $3)
+              AND (
+                  (c.initiator_id = $1 AND c.recipient_id = $2)
+                  OR (c.initiator_id = $2 AND c.recipient_id = $1)
+              )
+            ORDER BY COALESCE(c.closed_at, c.established_at) DESC, c.id DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(user_id)
+        .bind(peer_user_id)
+        .bind(campus_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_error)?;
+        row.map(|row| {
+            let started_at: DateTime<Utc> = row.get("established_at");
+            Ok(RelationshipSpaceConnectionView {
+                conversation_id: row.get::<Uuid, _>("id").to_string(),
+                started_at: started_at.to_rfc3339(),
+                ended_at: row
+                    .get::<Option<DateTime<Utc>>, _>("closed_at")
+                    .map(|value| value.to_rfc3339()),
+            })
+        })
+        .transpose()
     }
 
     pub async fn get_conversation(
@@ -2863,6 +3165,18 @@ fn row_to_message(row: sqlx::postgres::PgRow, conversation_id: Uuid) -> Conversa
         kind: row.get("kind"),
         edited_at: edited_at.map(|value| value.to_rfc3339()),
     }
+}
+
+fn row_to_relationship_pin(
+    row: sqlx::postgres::PgRow,
+) -> Result<RelationshipSpacePinView, ApiError> {
+    Ok(RelationshipSpacePinView {
+        id: row.get::<Uuid, _>("id").to_string(),
+        message_id: row.get("message_id"),
+        conversation_id: row.get::<Uuid, _>("conversation_id").to_string(),
+        actor_id: row.get("user_id"),
+        created_at: row.get::<DateTime<Utc>, _>("created_at").to_rfc3339(),
+    })
 }
 
 fn normalize_message_status(raw_status: &str) -> String {

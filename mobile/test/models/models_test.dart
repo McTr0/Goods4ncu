@@ -54,6 +54,55 @@ void main() {
       );
       expect(space.nextCursor, '2026-08-12T10:00:00Z|message|42');
     });
+
+    test('parses explicit pins, quote projections, and connection recovery', () {
+      final space = RelationshipSpace.fromJson({
+        'relationship_key': 'relationship:v1:campus:user-a:user-b',
+        'events': const [],
+        'pins': [
+          {
+            'id': 'pin-1',
+            'message_id': 42,
+            'conversation_id': 'conversation-1',
+            'actor_id': 'user-b',
+            'created_at': '2026-08-12T10:01:00Z',
+          },
+        ],
+        'shared_objects': [
+          {
+            'key': 'listing:item-1',
+            'kind': 'listing',
+            'ref_id': 'item-1',
+            'snapshot': {'title': '教材'},
+            'source_message_id': 42,
+            'conversation_id': 'conversation-1',
+            'actor_id': 'user-a',
+            'created_at': '2026-08-12T10:00:00Z',
+          },
+        ],
+        'recent_connection': {
+          'conversation_id': 'conversation-1',
+          'started_at': '2026-08-12T09:00:00Z',
+          'ended_at': '2026-08-12T09:30:00Z',
+        },
+      });
+
+      expect(space.pins.single.messageId, 42);
+      expect(space.pins.single.actorId, 'user-b');
+      expect(space.sharedObjects.single.snapshot['title'], '教材');
+      expect(space.recentConnection?.endedAt, isNotNull);
+    });
+
+    test('keeps older responses compatible', () {
+      final space = RelationshipSpace.fromJson({
+        'relationship_key': 'legacy',
+        'events': const [],
+      });
+
+      expect(space.pins, isEmpty);
+      expect(space.sharedObjects, isEmpty);
+      expect(space.recentConnection, isNull);
+    });
   });
 
   group('SocialPersona', () {

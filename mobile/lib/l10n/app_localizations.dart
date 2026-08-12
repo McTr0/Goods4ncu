@@ -3900,6 +3900,30 @@ abstract class AppLocalizations {
   /// **'No shared events yet'**
   String get relationshipSpaceNoEvent;
 
+  /// No description provided for @relationshipSpacePin.
+  ///
+  /// In en, this message translates to:
+  /// **'Pin to shared space'**
+  String get relationshipSpacePin;
+
+  /// No description provided for @relationshipSpaceUnpin.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove from shared space'**
+  String get relationshipSpaceUnpin;
+
+  /// No description provided for @relationshipSpacePinsCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} pins'**
+  String relationshipSpacePinsCount(int count);
+
+  /// No description provided for @relationshipSpaceObjectsCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} shared objects'**
+  String relationshipSpaceObjectsCount(int count);
+
   /// No description provided for @conversationRealtimeCount.
   ///
   /// In en, this message translates to:

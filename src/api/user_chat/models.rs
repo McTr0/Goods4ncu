@@ -3,7 +3,8 @@ use uuid::Uuid;
 
 use crate::services::chat_conversation::{
     AcknowledgementKind, ChatThreadDetail, ChatThreadView, ConversationDecision,
-    ConversationMessageRecord, ConversationMode, ConversationView, RelationshipSpaceEventView,
+    ConversationMessageRecord, ConversationMode, ConversationView, RelationshipSpaceConnectionView,
+    RelationshipSpaceEventView, RelationshipSpacePinView, RelationshipSpaceSharedObjectView,
     RelationshipSpaceView,
 };
 
@@ -66,6 +67,9 @@ pub struct SpaceEventQuery {
 pub struct RelationshipSpaceResponse {
     pub relationship_key: String,
     pub events: Vec<RelationshipSpaceEventView>,
+    pub pins: Vec<RelationshipSpacePinView>,
+    pub shared_objects: Vec<RelationshipSpaceSharedObjectView>,
+    pub recent_connection: Option<RelationshipSpaceConnectionView>,
     pub next_cursor: Option<String>,
 }
 
@@ -74,6 +78,9 @@ impl From<RelationshipSpaceView> for RelationshipSpaceResponse {
         Self {
             relationship_key: value.relationship_key,
             events: value.events,
+            pins: value.pins,
+            shared_objects: value.shared_objects,
+            recent_connection: value.recent_connection,
             next_cursor: value.next_cursor,
         }
     }
@@ -133,6 +140,12 @@ pub struct MessageAcknowledgementBody {
 pub struct HideMessageResponse {
     pub message_id: i64,
     pub hidden: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RelationshipPinResponse {
+    pub message_id: i64,
+    pub pinned: bool,
 }
 
 #[derive(Debug, Deserialize)]

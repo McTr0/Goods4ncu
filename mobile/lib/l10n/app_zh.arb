@@ -882,6 +882,24 @@
   "relationshipSpaceConnected": "已连接",
   "relationshipSpaceTimeline": "时间轨迹",
   "relationshipSpaceNoEvent": "还没有共同记录",
+  "relationshipSpacePin": "Pin 到共同空间",
+  "relationshipSpaceUnpin": "从共同空间移除 Pin",
+  "relationshipSpacePinsCount": "{count} 个 Pin",
+  "@relationshipSpacePinsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "relationshipSpaceObjectsCount": "{count} 个共享对象",
+  "@relationshipSpaceObjectsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "conversationRealtimeCount": "实时 {count}",
   "@conversationRealtimeCount": {
     "placeholders": {

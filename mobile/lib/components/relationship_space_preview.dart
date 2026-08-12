@@ -17,6 +17,9 @@ class RelationshipSpacePreview extends StatelessWidget {
     this.otherAvatarUrl,
     this.latestEvent,
     this.isConnected = false,
+    this.pinCount = 0,
+    this.sharedObjectCount = 0,
+    this.hasRecentConnection = false,
     this.compact = false,
   });
 
@@ -24,6 +27,9 @@ class RelationshipSpacePreview extends StatelessWidget {
   final String? otherAvatarUrl;
   final String? latestEvent;
   final bool isConnected;
+  final int pinCount;
+  final int sharedObjectCount;
+  final bool hasRecentConnection;
   final bool compact;
 
   @override
@@ -132,9 +138,98 @@ class RelationshipSpacePreview extends StatelessWidget {
                   ),
                 ],
               ),
+              if (pinCount > 0 ||
+                  sharedObjectCount > 0 ||
+                  hasRecentConnection) ...[
+                const SizedBox(height: AppTheme.sp8),
+                Wrap(
+                  spacing: AppTheme.sp6,
+                  runSpacing: AppTheme.sp6,
+                  children: [
+                    if (pinCount > 0)
+                      _RailChip(
+                        icon: Icons.push_pin_outlined,
+                        label: l.relationshipSpacePinsCount(pinCount),
+                      ),
+                    if (sharedObjectCount > 0)
+                      _RailChip(
+                        icon: Icons.link_rounded,
+                        label: l.relationshipSpaceObjectsCount(
+                          sharedObjectCount,
+                        ),
+                      ),
+                    if (hasRecentConnection)
+                      _RailChip(
+                        icon: Icons.history_rounded,
+                        label: l.relationshipSpaceTimeline,
+                      ),
+                  ],
+                ),
+              ],
+            ],
+            if (compact &&
+                (pinCount > 0 ||
+                    sharedObjectCount > 0 ||
+                    hasRecentConnection)) ...[
+              const SizedBox(height: AppTheme.sp6),
+              Wrap(
+                spacing: AppTheme.sp4,
+                runSpacing: AppTheme.sp4,
+                children: [
+                  if (pinCount > 0)
+                    _RailChip(
+                      icon: Icons.push_pin_outlined,
+                      label: l.relationshipSpacePinsCount(pinCount),
+                    ),
+                  if (sharedObjectCount > 0)
+                    _RailChip(
+                      icon: Icons.link_rounded,
+                      label: l.relationshipSpaceObjectsCount(sharedObjectCount),
+                    ),
+                  if (hasRecentConnection)
+                    _RailChip(
+                      icon: Icons.history_rounded,
+                      label: l.relationshipSpaceTimeline,
+                    ),
+                ],
+              ),
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _RailChip extends StatelessWidget {
+  const _RailChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: scheme.secondaryContainer.withValues(alpha: .55),
+        borderRadius: BorderRadius.circular(AppTheme.radiusXl),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: scheme.onSecondaryContainer),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: scheme.onSecondaryContainer,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       ),
     );
   }

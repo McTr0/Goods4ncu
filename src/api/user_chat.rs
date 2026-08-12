@@ -15,8 +15,8 @@ pub use connection::{
 };
 pub use message::{
     delete_message_acknowledgement, delete_message_reaction, edit_message,
-    get_conversation_messages, hide_message, report_message, send_conversation_message,
-    set_message_acknowledgement, set_message_reaction,
+    get_conversation_messages, hide_message, pin_message, report_message,
+    send_conversation_message, set_message_acknowledgement, set_message_reaction, unpin_message,
 };
 pub use reply::reply_suggestions;
 pub use telegram::{

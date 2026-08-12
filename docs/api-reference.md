@@ -492,7 +492,21 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 ### GET `/api/chat/threads/{peer_user_id}/space-events`
 
-需要登录。按 `cursor` 和 `limit` 返回同一 Thread 的只读 Relationship Space 时间轨迹。事件由现有 `chat_conversation_events` 与当前用户可见的 `chat_messages` 确定性投影而来，包含 `source_type/source_id`、事件类型、会话、行动者和发生时间；消息正文、媒体、Pin 与共享对象仍分别通过既有资源接口处理。返回的 `next_cursor` 只用于继续读取，不写入阅读位置，也不会因为打开或滚动而广播注意力状态。
+需要登录。按 `cursor` 和 `limit` 返回同一 Thread 的只读 Relationship Space 时间轨迹。事件由现有 `chat_conversation_events` 与当前用户可见的 `chat_messages` 确定性投影而来，包含 `source_type/source_id`、事件类型、会话、行动者和发生时间。响应另外返回：
+
+- `pins`：双方可见的显式 Pin，每个用户对同一消息最多一个，包含 `actor_id`；隐藏或失去权限的源消息不会进入当前设备的投影。
+- `shared_objects`：从现有消息 `quote_kind/quote_ref_id/quote_snapshot` 派生的最新商品、订单或议价引用，不复制业务权威状态。
+- `recent_connection`：最近一次已建立 realtime Conversation 的起止时间，用于恢复上次连接位置；不是在线或最后上线信号。
+
+消息正文和媒体仍通过既有资源接口读取。返回的 `next_cursor` 只用于继续读取，不写入阅读位置，也不会因为打开或滚动而广播注意力状态。旧客户端忽略新增字段即可。
+
+### POST `/api/chat/messages/{message_id}/pin`
+
+需要登录。对当前用户可见的直聊消息执行一次明确的共享 Pin 动作。响应返回 `id/message_id/conversation_id/actor_id/created_at`。重复调用幂等，不产生第二条 Pin；Pin 不是已读、送达、在线或输入中状态，也不会由打开消息自动触发。
+
+### DELETE `/api/chat/messages/{message_id}/pin`
+
+需要登录。撤销当前用户在该消息上的 Pin；另一位参与者的 Pin 不受影响。不存在时按幂等成功返回 `{ "message_id": ..., "pinned": false }`。源消息隐藏、删除、跨校园或当前用户失去会话权限后，Pin 不再出现在关系空间投影中。
 
 ### POST `/api/chat/conversations`
 
