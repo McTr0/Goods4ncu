@@ -187,6 +187,15 @@ grep -q "development marker" "$SCRATCH/badboot.log" \
     || fail "expected secret-hygiene rejection, got: $(tail -1 "$SCRATCH/badboot.log")"
 say "  ✓ dev-grade secret rejected at boot"
 
+say "check 0b: production mode refuses public media serving"
+if env "${PROD_ENV[@]}" MEDIA_PRIVATE_BUCKET=false SERVER_PORT=4291 \
+    "$BIN" > "$SCRATCH/public-media-boot.log" 2>&1; then
+    fail "production boot accepted MEDIA_PRIVATE_BUCKET=false"
+fi
+grep -q "MEDIA_PRIVATE_BUCKET=true" "$SCRATCH/public-media-boot.log" \
+    || fail "expected private-media rejection, got: $(tail -1 "$SCRATCH/public-media-boot.log")"
+say "  ✓ public media fallback rejected at boot"
+
 # --- Check 1: empty-DB production bootstrap, two replicas ---------------------
 say "check 1: two production-mode replicas boot an empty database"
 start_replica "$PORT_A" "$SCRATCH/a.log"; PID_A=$STARTED_PID

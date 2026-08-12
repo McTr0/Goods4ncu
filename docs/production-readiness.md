@@ -28,7 +28,7 @@
 | 门槛 | 证据 |
 | --- | --- |
 | API 层媒体隔离：pending/rejected/failed 不经任何公开接口输出 | `migrations/0041` + `tests/api_regressions.rs::unapproved_media_is_not_served_publicly` |
-| 存储层媒体隔离：私有 bucket + presigned serving（匿名 403/篡改拒绝/过期拒绝，对真实 S3 验证） | `src/services/storage.rs` + `tests/storage_acl_integration.rs` + 生产演练 check 2b |
+| 存储层媒体隔离：生产强制私有 bucket + presigned serving（匿名 403/篡改拒绝/过期拒绝，对真实 S3 验证） | `src/config.rs::validate_media_storage_config` fail-fast + `src/services/storage.rs` + `tests/storage_acl_integration.rs` + 生产演练 check 2b |
 | 提交审核与资源置 pending 同事务（崩溃不产生“永不审核却公开”） | `tests/api_regressions.rs::image_submission_quarantines_resource_with_job` |
 | 生产图片审核配置不完整时 fail-fast | `src/config.rs::validate_image_moderation_config` 单元回归；`scripts/production_rehearsal.sh` 明确关闭未接入的外部 provider |
 | 审核 worker 崩溃恢复与低基数可观测性 | `0069_moderation_job_leases.sql`、`tests/moderation_worker_integration.rs`；`src/api/metrics.rs` 暴露 job outcome、provider latency、pending/processing depth 和 oldest age，且不含 job/campus/provider 高基数标签；`scripts/production_rehearsal.sh` check 1 验证双副本实际暴露队列 gauge |

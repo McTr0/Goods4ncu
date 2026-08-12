@@ -44,6 +44,7 @@
 | `MODERATION_IMAGE_ENABLED` | 可选 | 是否启用图片审核；生产开启时必须同时提供合法的 provider URL 和 key。 |
 | `MODERATION_IMAGE_API_URL` | 生产图片审核开启时必需 | 图片审核 API URL；生产启动会校验为 `http(s)` URL。 |
 | `MODERATION_IMAGE_API_KEY` | 生产图片审核开启时必需 | 图片审核 API key；生产启动会拒绝空值或过短 key。 |
+| `MEDIA_PRIVATE_BUCKET` | 生产必需为 `true` | 私有 bucket + presigned serving 开关；生产启动会拒绝公开媒体退化路径，并同时要求 OSS endpoint/bucket/凭据。开发和测试可关闭。 |
 | `OSS_ENDPOINT`、`OSS_BUCKET` | 可选 | OSS 直传非敏感配置。 |
 | `OSS_ROLE_ARN`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET` | 上传需要 | 获取 OSS STS 临时凭证需要的配置。 |
 | `CONFIG_FILE` | 可选 | 指定 TOML 配置文件路径。 |

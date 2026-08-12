@@ -511,6 +511,15 @@ impl AppConfig {
             .unwrap_or(false);
         let media_region =
             read_non_empty_env("MEDIA_REGION").unwrap_or_else(|| "us-east-1".to_string());
+        validate_media_storage_config(
+            running_in_production(),
+            media_private_bucket,
+            &oss_endpoint,
+            &oss_bucket,
+            oss_access_key_id.as_deref(),
+            oss_access_key_secret.as_deref(),
+        )
+        .unwrap_or_else(|message| panic!("{message}"));
 
         // Secret Chat is deprecated: default OFF, opt-in only during the
         // migration window. env > file > default like the other flags.
@@ -730,6 +739,48 @@ fn validate_image_moderation_config(
     Ok(())
 }
 
+fn validate_media_storage_config(
+    production: bool,
+    private_bucket: bool,
+    endpoint: &str,
+    bucket: &str,
+    access_key_id: Option<&str>,
+    access_key_secret: Option<&str>,
+) -> Result<(), String> {
+    if production && !private_bucket {
+        return Err(
+            "MEDIA_PRIVATE_BUCKET=true is required in production; public media serving is disabled"
+                .to_string(),
+        );
+    }
+    if !private_bucket {
+        return Ok(());
+    }
+    let parsed = reqwest::Url::parse(endpoint)
+        .map_err(|_| "OSS_ENDPOINT must be a valid http(s) URL".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("OSS_ENDPOINT must be a valid http(s) URL".to_string());
+    }
+    if bucket.trim().is_empty() {
+        return Err("OSS_BUCKET must be non-empty when private media is enabled".to_string());
+    }
+    if access_key_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_none()
+        || access_key_secret
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+    {
+        return Err(
+            "MEDIA_PRIVATE_BUCKET=true requires OSS_ACCESS_KEY_ID and OSS_ACCESS_KEY_SECRET"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -926,5 +977,46 @@ mod tests {
         );
         assert!(validate_image_moderation_config(true, false, None, None).is_ok());
         assert!(validate_image_moderation_config(false, true, None, None).is_ok());
+    }
+
+    #[test]
+    fn production_requires_private_media_storage() {
+        assert!(validate_media_storage_config(
+            true,
+            false,
+            "https://oss.example.test",
+            "goods4ncu",
+            None,
+            None,
+        )
+        .is_err());
+        assert!(validate_media_storage_config(
+            true,
+            true,
+            "https://oss.example.test",
+            "goods4ncu",
+            Some("access"),
+            Some("secret"),
+        )
+        .is_ok());
+        assert!(validate_media_storage_config(
+            true,
+            true,
+            "not-a-url",
+            "goods4ncu",
+            Some("access"),
+            Some("secret"),
+        )
+        .is_err());
+        assert!(validate_media_storage_config(false, false, "not-a-url", "", None, None,).is_ok());
+        assert!(validate_media_storage_config(
+            false,
+            true,
+            "https://oss.example.test",
+            "goods4ncu",
+            None,
+            None,
+        )
+        .is_err());
     }
 }
