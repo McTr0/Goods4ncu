@@ -12,7 +12,7 @@
 #   * rolling restart: one replica drains and returns while the other serves
 #     load with zero failures
 #   * private object storage: real S3 (MinIO) with a private bucket, proving
-#     anonymous direct access is refused and presigned serving works
+#     anonymous direct access is refused and presigned PUT/serving works
 #   * point-in-time-recovery drill
 #
 # Everything runs against throwaway resources (rehearsal DB, scratch Redis,
@@ -238,7 +238,7 @@ BASE_URL="$BASE_URL" ./scripts/load_smoke.sh 200 16 \
     || fail "SLO smoke failed"
 
 # --- Check 2b: object-storage ACL boundary ------------------------------------
-say "check 2b: private bucket refuses anonymous access; presigned serving works"
+say "check 2b: private bucket refuses anonymous access; presigned PUT/serving works"
 grep -q "Private media bucket enabled" "$SCRATCH/a.log" \
     || fail "replica A did not enable private-bucket media serving"
 raw_code=$(curl -s -o /dev/null -w '%{http_code}' \
@@ -248,10 +248,11 @@ say "  ✓ anonymous direct object access refused (403)"
 S3_TEST_ENDPOINT="http://127.0.0.1:$S3_PORT" S3_TEST_BUCKET="$S3_BUCKET" \
     S3_TEST_ACCESS_KEY=rehearsal S3_TEST_SECRET_KEY=rehearsal-secret-key \
     S3_TEST_OBJECT=media-probe.txt \
+    S3_TEST_PUT_OBJECT="put-probe-$$.bin" \
     S3_TEST_DELETE_OBJECT=cleanup-probe.txt \
     cargo test --test storage_acl_integration -- --test-threads=1 >/dev/null 2>&1 \
     || fail "storage ACL integration tests failed against the rehearsal bucket"
-say "  ✓ presigned serving verified against the live bucket"
+say "  ✓ presigned PUT/serving verified against the live bucket"
 
 # --- Check 2c: durable shared-object cleanup ---------------------------------
 say "check 2c: revoked shared objects are deleted by the worker"

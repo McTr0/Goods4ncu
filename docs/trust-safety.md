@@ -87,7 +87,7 @@ flowchart TD
 
 [已实现] listing 首次提交含图片时，listing 行的首次 commit、资源 `pending` 状态和 `moderation_jobs` 在同一数据库事务中提交，不再存在 listing 已提交但首个审核任务丢失的窗口。公开读取路径只在 `approved` 时返回媒体 URL，pending/rejected/failed 一律不返回（所有者可见自己的待审图）。审核关闭的部署显式标记 review-exempt。
 
-[已实现] 对象存储层面：bucket 私有（无匿名读），服务端只对 approved 媒体下发短期 presigned URL，因此已知直链在存储层同样不可访问。对真实 S3 实现验证过匿名 403、篡改签名拒绝、过期拒绝。[目标态] CDN 前置与缩略图派生仍待接入。
+[已实现] 对象存储层面：bucket 私有（无匿名读），角色素材在私有部署使用只绑定服务器 key 的 presigned PUT，服务端只对 approved 媒体下发短期 presigned GET，因此已知直链在存储层同样不可访问。对真实 S3 实现验证过匿名 403、篡改签名拒绝、过期拒绝和 presigned PUT。[目标态] CDN 前置与缩略图派生仍待接入。
 
 下载和审核服务要限制：
 

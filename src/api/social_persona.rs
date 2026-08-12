@@ -58,6 +58,16 @@ pub struct SocialPersonaAssetResponse {
     pub asset: SocialPersonaAssetView,
 }
 
+#[derive(Debug, Serialize)]
+pub struct SocialPersonaAssetUploadTargetResponse {
+    pub asset_id: String,
+    pub upload_key: String,
+    /// Present when private media signing is configured.  A null value keeps
+    /// local/public-bucket deployments on the existing STS fallback path.
+    pub upload_url: Option<String>,
+    pub expires_in_seconds: Option<u32>,
+}
+
 /// GET /api/user/persona
 pub async fn get_persona(
     State(state): State<AppState>,
@@ -165,6 +175,38 @@ pub async fn create_asset(
         )
         .await?;
     Ok(Json(SocialPersonaAssetResponse { asset }))
+}
+
+/// POST /api/user/persona/assets/:id/upload-target — issue a PUT URL scoped
+/// to the server-generated key.  The target is owner- and campus-scoped; a
+/// client cannot choose a different object key or reuse it for another asset.
+pub async fn upload_target(
+    State(state): State<AppState>,
+    tenant: VerifiedTenant,
+    Path(asset_id): Path<Uuid>,
+) -> Result<Json<SocialPersonaAssetUploadTargetResponse>, ApiError> {
+    let asset = SocialPersonaService::new(state.infra.db.clone())
+        .get_asset(&tenant.session.user_id, tenant.campus_id, asset_id)
+        .await?;
+    if asset.status != "pending_upload" {
+        return Err(ApiError::Conflict("角色图片当前不可上传".to_string()));
+    }
+    let upload_key = asset.upload_key.ok_or(ApiError::NotFound)?;
+    let (upload_url, expires_in_seconds) = match state.infra.media_signer.as_ref() {
+        Some(signer) => {
+            let url = signer
+                .sign_put_key(&upload_key)
+                .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("invalid persona upload key")))?;
+            (Some(url), Some(signer.ttl_secs))
+        }
+        None => (None, None),
+    };
+    Ok(Json(SocialPersonaAssetUploadTargetResponse {
+        asset_id: asset.id,
+        upload_key,
+        upload_url,
+        expires_in_seconds,
+    }))
 }
 
 /// POST /api/user/persona/assets/:id/complete — probe the platform object and

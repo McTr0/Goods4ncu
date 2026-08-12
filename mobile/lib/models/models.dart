@@ -1521,6 +1521,32 @@ class SocialPersonaAsset {
   }
 }
 
+/// Owner-scoped upload target for one persona asset. A private deployment
+/// returns a single-object presigned PUT URL; a public/development deployment
+/// may leave it null so the legacy STS uploader can be used.
+class SocialPersonaAssetUploadTarget {
+  const SocialPersonaAssetUploadTarget({
+    required this.assetId,
+    required this.uploadKey,
+    this.uploadUrl,
+    this.expiresInSeconds,
+  });
+
+  final String assetId;
+  final String uploadKey;
+  final String? uploadUrl;
+  final int? expiresInSeconds;
+
+  factory SocialPersonaAssetUploadTarget.fromJson(Map<String, dynamic> json) {
+    return SocialPersonaAssetUploadTarget(
+      assetId: json['asset_id']?.toString() ?? '',
+      uploadKey: json['upload_key']?.toString() ?? '',
+      uploadUrl: json['upload_url']?.toString(),
+      expiresInSeconds: (json['expires_in_seconds'] as num?)?.toInt(),
+    );
+  }
+}
+
 class SocialPersona {
   const SocialPersona({
     this.id,

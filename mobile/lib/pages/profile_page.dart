@@ -214,11 +214,28 @@ class _ProfilePageState extends State<ProfilePage> {
       if (uploadKey == null || uploadKey.trim().isEmpty) {
         throw Exception(l.socialPersonaAssetUploadTargetMissing);
       }
-      await _uploadService.uploadBytesToObjectKey(
-        bytes,
-        objectKey: uploadKey,
-        contentType: contentType,
+      final target = await _apiService.getSocialPersonaAssetUploadTarget(
+        created.id,
       );
+      if (target.assetId != created.id || target.uploadKey != uploadKey) {
+        throw Exception(l.socialPersonaAssetUploadTargetMissing);
+      }
+      final targetUrl = target.uploadUrl;
+      if (targetUrl != null && targetUrl.trim().isNotEmpty) {
+        await _uploadService.uploadBytesToPresignedUrl(
+          bytes,
+          uploadUrl: targetUrl,
+          contentType: contentType,
+        );
+      } else {
+        // Public/development deployments retain the existing STS path; the
+        // server-generated key and complete probe remain mandatory there too.
+        await _uploadService.uploadBytesToObjectKey(
+          bytes,
+          objectKey: target.uploadKey,
+          contentType: contentType,
+        );
+      }
       final completed = await _apiService.completeSocialPersonaAsset(
         created.id,
       );

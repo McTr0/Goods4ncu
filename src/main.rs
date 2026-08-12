@@ -285,7 +285,7 @@ async fn main() -> Result<(), anyhow::Error> {
         tracing::info!(
             bucket = %config.oss_bucket,
             ttl_secs = config.media_url_ttl_secs,
-            "Private media bucket enabled; approved media served via presigned URLs"
+            "Private media bucket enabled; persona uploads and approved media use presigned URLs"
         );
         Some(Arc::new(api::MediaSigner {
             bucket: services::storage::PrivateBucket {

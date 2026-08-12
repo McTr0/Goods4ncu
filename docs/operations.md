@@ -44,7 +44,7 @@
 | `MODERATION_IMAGE_ENABLED` | 可选 | 是否启用图片审核；生产开启时必须同时提供合法的 provider URL 和 key。 |
 | `MODERATION_IMAGE_API_URL` | 生产图片审核开启时必需 | 图片审核 API URL；生产启动会校验为 `http(s)` URL。 |
 | `MODERATION_IMAGE_API_KEY` | 生产图片审核开启时必需 | 图片审核 API key；生产启动会拒绝空值或过短 key。 |
-| `MEDIA_PRIVATE_BUCKET` | 生产必需为 `true` | 私有 bucket + presigned serving 开关；生产启动会拒绝公开媒体退化路径，并同时要求 OSS endpoint/bucket/凭据。开发和测试可关闭。 |
+| `MEDIA_PRIVATE_BUCKET` | 生产必需为 `true` | 私有 bucket + presigned PUT/serving 开关；生产启动会拒绝公开媒体退化路径，并同时要求 OSS endpoint/bucket/凭据。开发和测试可关闭。 |
 | `OSS_ENDPOINT`、`OSS_BUCKET` | 可选 | OSS 直传非敏感配置。 |
 | `OSS_ROLE_ARN`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET` | 上传需要 | 获取 OSS STS 临时凭证需要的配置。 |
 | `CONFIG_FILE` | 可选 | 指定 TOML 配置文件路径。 |
@@ -174,7 +174,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3999/api/readyz   # 50
 2. 双副本对空库完成生产模式引导（迁移、pgvector 扩展带 advisory lock 串行化——该演练发现并修复了双副本并发 `CREATE EXTENSION` 的真实竞态）。
 3. Redis 分布式限流与 WS fan-out 激活确认。
 4. SLO 负载冒烟（`scripts/load_smoke.sh`，普通 API p95<300ms、Feed<500ms）。
-5. 私有 MinIO/OSS bucket 验收：匿名直连拒绝、presigned serving、共享文件 `/complete` probe、撤销后的 signed DELETE 与远端清理审计（rehearsal checks 2b–2c）。
+5. 私有 MinIO/OSS bucket 验收：匿名直连拒绝、角色素材单对象 presigned PUT、presigned serving、共享文件 `/complete` probe、撤销后的 signed DELETE 与远端清理审计（rehearsal checks 2b–2c）。
 6. 滚动重启：B 副本排空并回归期间，A 副本承载负载零失败请求。
 7. PITR 恢复演练（`scripts/backup_pitr_drill.sh`）。
 8. 双副本按序排空。

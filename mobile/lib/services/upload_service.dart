@@ -14,6 +14,37 @@ class UploadService extends BaseService {
   final UserService _userService;
   final Uuid _uuid = const Uuid();
 
+  /// Upload bytes to an owner-scoped presigned PUT URL. No application or STS
+  /// credentials are sent to the object store; the server already bound the
+  /// URL to one persona asset key. The completion API still probes the object
+  /// before it can enter review or become selectable.
+  Future<String> uploadBytesToPresignedUrl(
+    List<int> bytes, {
+    required String uploadUrl,
+    required String contentType,
+  }) async {
+    final uri = Uri.tryParse(uploadUrl);
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
+      throw NetworkException('文件上传目标无效');
+    }
+    if (uri.scheme != 'http' && uri.scheme != 'https') {
+      throw NetworkException('文件上传目标无效');
+    }
+    final response = await http
+        .put(
+          uri,
+          headers: {'Content-Type': contentType},
+          body: bytes,
+        )
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200 &&
+        response.statusCode != 201 &&
+        response.statusCode != 204) {
+      throw NetworkException('文件上传失败: ${response.statusCode}');
+    }
+    return uploadUrl;
+  }
+
   /// Upload bytes to a server-generated shared-object key. The key is never
   /// chosen by the client; callers must use `ChatSharedObject.uploadKey` and
   /// then call the API completion endpoint so the server probes the object.

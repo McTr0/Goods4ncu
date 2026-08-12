@@ -28,7 +28,7 @@
 | 门槛 | 证据 |
 | --- | --- |
 | API 层媒体隔离：pending/rejected/failed 不经任何公开接口输出 | `migrations/0041` + `tests/api_regressions.rs::unapproved_media_is_not_served_publicly` |
-| 存储层媒体隔离：生产强制私有 bucket + presigned serving（匿名 403/篡改拒绝/过期拒绝，对真实 S3 验证） | `src/config.rs::validate_media_storage_config` fail-fast + `src/services/storage.rs` + `tests/storage_acl_integration.rs` + 生产演练 check 2b |
+| 存储层媒体隔离：生产强制私有 bucket + presigned PUT/serving（匿名 403/篡改拒绝/过期拒绝，对真实 S3 验证） | `src/config.rs::validate_media_storage_config` fail-fast + `src/services/storage.rs` + `tests/storage_acl_integration.rs` + 生产演练 check 2b |
 | 提交审核与资源置 pending 同事务（崩溃不产生“永不审核却公开”） | `tests/api_regressions.rs::image_submission_quarantines_resource_with_job` |
 | 生产图片审核配置不完整时 fail-fast | `src/config.rs::validate_image_moderation_config` 单元回归；`scripts/production_rehearsal.sh` 明确关闭未接入的外部 provider |
 | SocialPersona 图片候选不越过对象/审核门槛 | `0070_social_persona_assets`、`0071_social_persona_asset_upload_expiry`、`tests/social_persona_integration.rs::persona_assets_require_verified_upload_review_and_explicit_selection`；服务器 key、真实大小/MIME、pending review、显式选择/撤销、过期孤儿上传撤销和公开回退均由服务端约束 |
@@ -81,7 +81,7 @@
 
 | 待办 | 为什么必须在部署环境 | 就绪的验收程序 |
 | --- | --- | --- |
-| 生产 bucket 开通 + CDN 前置 | 需 OSS 账号；私有 bucket 与 presigned 机制已实现并对真实 S3 验证，剩下的是把 endpoint/凭据指向生产 bucket 并确认其 ACL 为私有 | `MEDIA_PRIVATE_BUCKET=true` + `tests/storage_acl_integration.rs`（对生产 endpoint 运行即验收） |
+| 生产 bucket 开通 + CDN 前置 | 需 OSS 账号；私有 bucket、角色素材单对象 presigned PUT 和 presigned serving 已实现并对真实 S3 验证，剩下的是把 endpoint/凭据指向生产 bucket、确认其 ACL/CORS 为私有部署所需配置，并接入 CDN/缩略图派生 | `MEDIA_PRIVATE_BUCKET=true` + `tests/storage_acl_integration.rs`（对生产 endpoint 运行即验收） |
 | 真实图片审核 provider 开通与回写验收 | 需 provider 账号、数据处理协议和真实审核样本；代码侧已 fail-fast 校验配置并在异步 worker 中隔离失败，不能用本地 stub 代替供应商验收 | `MODERATION_IMAGE_ENABLED=true` + `MODERATION_IMAGE_API_URL`/`MODERATION_IMAGE_API_KEY`，再运行图片提交、approved/rejected/failed 与 ModerationCase 旅程 |
 | staging/production 独立实例的生产开通 | 需部署平台的实例与 secret manager；隔离模型本身已用两套真实独立集群 + 每校园独立 bucket 验证 | `scripts/tenant_isolation_drill.sh`（对生产端点重跑即验收）+ `.env.staging.example` / `.env.production.example` |
 | 生产级持续压测（数百 RPS、真实行为分布） | 需生产硬件与真实流量形态 | `scripts/load_smoke.sh` / `scripts/capacity_drill.sh` 作为基线与门槛 |

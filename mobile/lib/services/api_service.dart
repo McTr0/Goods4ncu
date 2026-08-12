@@ -188,6 +188,11 @@ class ApiService extends BaseService {
     declaredSizeBytes: declaredSizeBytes,
   );
 
+  Future<SocialPersonaAssetUploadTarget> getSocialPersonaAssetUploadTarget(
+    String assetId,
+  ) =>
+      _userService.getSocialPersonaAssetUploadTarget(assetId);
+
   Future<SocialPersonaAsset> completeSocialPersonaAsset(String assetId) =>
       _userService.completeSocialPersonaAsset(assetId);
 

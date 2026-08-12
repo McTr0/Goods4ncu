@@ -183,6 +183,28 @@ class UserService extends BaseService {
     return _parseSocialPersonaAssetEnvelope(response);
   }
 
+  /// Request an owner-scoped direct PUT target for one server-generated key.
+  /// Private deployments return a presigned URL; development deployments may
+  /// return null and let the caller use the legacy STS fallback.
+  Future<SocialPersonaAssetUploadTarget> getSocialPersonaAssetUploadTarget(
+    String assetId,
+  ) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse(
+        '$baseUrl/api/user/persona/assets/${Uri.encodeComponent(assetId)}/upload-target',
+      ),
+      headers,
+      '{}',
+    );
+    return handleResponse(
+      response,
+      (data) => SocialPersonaAssetUploadTarget.fromJson(
+        (data as Map).cast<String, dynamic>(),
+      ),
+    );
+  }
+
   /// Confirm a direct upload. The server probes the object and applies the
   /// moderation gate before it can become selectable.
   Future<SocialPersonaAsset> completeSocialPersonaAsset(String assetId) async {

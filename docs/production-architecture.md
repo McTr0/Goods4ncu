@@ -176,17 +176,20 @@ WebSocket 连接由各 API replica 本地维护，事件经 Redis channel 按用
 生产媒体路径：
 
 ```text
-client asks upload policy
-  -> uploads to private quarantine prefix
-  -> API stores object reference and moderation job
+client asks for an owner-scoped upload target
+  -> private deployment PUTs to one server-generated object key
+  -> API probes the object and stores the verified reference
   -> worker validates/decode/moderates
-  -> approved object copied/promoted to public delivery prefix
-  -> CDN serves immutable variant URLs
+  -> approved object is served through a short-lived signed GET
 ```
+
+这是当前仓库的真实路径；生产 CDN 前置、缩略图派生和 quarantine-to-delivery
+对象复制仍是部署侧/后续阶段，不应在 API 响应或验收记录中提前宣称已接入。
 
 要求：
 
 - 使用短期、最小 scope 的上传凭证。
+- Web 端直传时，bucket CORS 只允许已登记的 `CORS_ORIGINS` 对应来源、`PUT` 和 `Content-Type`；不使用 `*`，移动端不依赖 CORS。
 - 文件名不作为权限或 MIME 来源。
 - 原图、缩略图、头像、商品图、聊天媒体和收款码使用不同策略。
 - 对象 key 不包含完整邮箱、学号或用户名。

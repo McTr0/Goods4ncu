@@ -251,11 +251,15 @@ Content-Type: application/json
 
 [已实现] 创建服务器生成 key 的图片候选。body 为 `{ "asset_type": "illustration|photo_stylized", "declared_mime_type": "image/png|image/jpeg|image/webp", "declared_size_bytes": 1..10485760 }`。服务端不接受客户端自选 storage key，也不把创建记录当作上传成功。
 
+### POST `/api/user/persona/assets/{id}/upload-target`
+
+[已实现] 仅候选 owner 可调用。私有媒体部署返回只绑定该 `upload_key` 的 presigned PUT URL 和有效期；开发/公开 bucket 部署返回 `upload_url: null`，客户端才回退到现有 verified-membership STS 流程。两条路径都必须随后调用 `complete`，服务端不会把 PUT 的 HTTP 成功当作审核或公开事实。
+
 ### POST `/api/user/persona/assets/{id}/complete`
 
 [已实现] 服务端对生成的 key 做平台对象探测，核对真实大小、MIME 和 PNG/JPEG/WebP 文件头。图片审核开启时进入 `pending_review`，否则进入 `active`；审核前不能选择或公开。重复调用在已验证对象上幂等返回，不会重新宣称上传成功。
 
-客户端上传顺序是：创建候选 → 使用同一会话的 `/api/upload/token` 将图片 PUT 到返回的 `upload_key` → 调用 `complete`。Profile 页只允许用户主动选择本地图片/相机来源，并在完成探测后展示审核事实；它不会把本地预览、上传请求或图片加载成功当作公开状态。若候选在 24 小时内仍未完成上传，后台 cleanup worker 会将其撤销并进入远端清理，不会继续等待或公开。
+客户端上传顺序是：创建候选 → 请求 `upload-target` → 私有部署用单对象 presigned PUT（否则使用同一会话的 `/api/upload/token` PUT 到返回的 `upload_key`）→ 调用 `complete`。Profile 页只允许用户主动选择本地图片/相机来源，并在完成探测后展示审核事实；它不会把本地预览、上传请求或图片加载成功当作公开状态。若候选在 24 小时内仍未完成上传，后台 cleanup worker 会将其撤销并进入远端清理，不会继续等待或公开。
 
 ### POST `/api/user/persona/assets/{id}/select` 与 `/revoke`
 

@@ -8,6 +8,7 @@
 //!     app, is the authority)
 //!   * a server-issued presigned GET is honoured (our SigV4 implementation is
 //!     accepted by a real S3 implementation, not just by our own unit tests)
+//!   * an opt-in server-issued presigned PUT is accepted for one exact key
 //!   * a tampered signature is refused
 //!   * an expired presigned URL is refused
 //!
@@ -87,6 +88,57 @@ async fn presigned_get_is_accepted_by_a_real_s3_server() {
     );
     let body = response.text().await.expect("body");
     assert!(!body.is_empty(), "presigned GET returned an empty object");
+}
+
+/// Opt-in destructive check for the direct-upload authority. The test writes
+/// one fixture key, verifies it through a signed GET, then removes it again.
+#[tokio::test]
+async fn presigned_put_uploads_opt_in_object() {
+    let Some(bucket) = bucket_from_env() else {
+        eprintln!("skipping: set S3_TEST_* to run storage ACL tests");
+        return;
+    };
+    let Some(object) = std::env::var("S3_TEST_PUT_OBJECT").ok() else {
+        eprintln!("skipping: set S3_TEST_PUT_OBJECT for presigned PUT check");
+        return;
+    };
+    let body = b"presigned put probe";
+    let response = client()
+        .put(bucket.presigned_put(&object, 300))
+        .header("Content-Type", "image/png")
+        .body(body.to_vec())
+        .send()
+        .await
+        .expect("presigned PUT request");
+    assert!(
+        response.status().is_success(),
+        "presigned PUT must be honoured (got {} for {})",
+        response.status(),
+        object
+    );
+    let verify = client()
+        .get(bucket.presigned_get(&object, 300))
+        .send()
+        .await
+        .expect("verify uploaded object");
+    assert!(
+        verify.status().is_success(),
+        "uploaded object must be readable"
+    );
+    assert_eq!(
+        verify.bytes().await.expect("uploaded body").as_ref(),
+        body.as_slice()
+    );
+    let deleted = client()
+        .delete(bucket.presigned_delete(&object, 300))
+        .send()
+        .await
+        .expect("cleanup uploaded object");
+    assert!(
+        deleted.status().is_success() || deleted.status() == reqwest::StatusCode::NOT_FOUND,
+        "presigned PUT fixture cleanup failed with {}",
+        deleted.status()
+    );
 }
 
 #[tokio::test]

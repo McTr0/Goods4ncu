@@ -33,6 +33,12 @@ class _RecordingUserService extends UserService {
   }) async {
     lastUri = url;
     lastBody = body;
+    if (url.path.endsWith('/upload-target')) {
+      return http.Response(
+        '{"asset_id":"asset-1","upload_key":"persona/campus/persona/asset-1","upload_url":"https://oss.example.test/put","expires_in_seconds":300}',
+        200,
+      );
+    }
     if (url.path.endsWith('/select')) {
       return http.Response(
         '{"persona":{"representation_mode":"role_character","style_version":"v1","appearance_config":{},"self_descriptions":[],"contact_posture":"leave_message","status":"draft"}}',
@@ -113,6 +119,16 @@ void main() {
       expect(created.id, 'asset-1');
       expect(service.lastUri?.path, '/api/user/persona/assets');
       expect(service.lastBody, contains('"declared_size_bytes":1024'));
+
+      final target = await service.getSocialPersonaAssetUploadTarget(created.id);
+      expect(target.assetId, created.id);
+      expect(target.uploadKey, 'persona/campus/persona/asset-1');
+      expect(target.uploadUrl, 'https://oss.example.test/put');
+      expect(target.expiresInSeconds, 300);
+      expect(
+        service.lastUri?.path,
+        '/api/user/persona/assets/asset-1/upload-target',
+      );
 
       await service.completeSocialPersonaAsset('asset/1');
       expect(

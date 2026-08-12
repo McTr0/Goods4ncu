@@ -4,15 +4,16 @@
 //! the raw `https://{bucket}.{endpoint}/{key}` URL. The API-layer moderation
 //! gate can stop that URL from appearing in responses, but it cannot stop
 //! anyone who already holds the link from fetching the object — the bucket
-//! itself is the authority. So production keeps the bucket **private** and the
-//! server hands out short-lived presigned GET URLs, and only for media whose
-//! moderation status is `approved`.
+//! itself is the authority. So production keeps the bucket **private**: the
+//! server hands out short-lived, one-object presigned PUT URLs for server-
+//! generated upload keys, and short-lived presigned GET URLs only for media
+//! whose moderation status is `approved`.
 //!
 //! Signing is implemented directly on `hmac`/`sha2` (already in the tree)
-//! rather than pulling an AWS SDK: presigned GET is a well-specified ~60 lines,
-//! and it is verified against a real S3-compatible server (MinIO) in
-//! `tests/storage_acl_integration.rs` — including that an unsigned request is
-//! refused and a tampered signature is rejected.
+//! rather than pulling an AWS SDK: the GET/PUT/DELETE variants share a
+//! well-specified signer, and are verified against a real S3-compatible server
+//! (MinIO) in `tests/storage_acl_integration.rs` — including that an unsigned
+//! request is refused and a tampered signature is rejected.
 
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
@@ -114,6 +115,15 @@ impl PrivateBucket {
     /// idempotent even after a partial delete.
     pub fn presigned_delete(&self, object_key: &str, expires_in_secs: u32) -> String {
         self.presigned_request_at("DELETE", object_key, expires_in_secs, chrono::Utc::now())
+    }
+
+    /// Presigned PUT URL valid for `expires_in_secs` from now.
+    ///
+    /// The caller must obtain the object key from a server-owned row.  The
+    /// signature is intentionally scoped to one exact key; the completion
+    /// endpoint still probes the resulting object and validates its bytes.
+    pub fn presigned_put(&self, object_key: &str, expires_in_secs: u32) -> String {
+        self.presigned_request_at("PUT", object_key, expires_in_secs, chrono::Utc::now())
     }
 
     fn presigned_request_at(
@@ -281,6 +291,18 @@ mod tests {
         assert!(delete.contains("X-Amz-Signature="));
         assert_ne!(delete, get, "HTTP method must be part of the signature");
         assert!(delete.contains("/media/chat/object.bin?"));
+    }
+
+    #[test]
+    fn presigned_put_uses_put_method_and_same_object_scope() {
+        let at = chrono::DateTime::from_timestamp(1_700_000_000, 0)
+            .expect("timestamp")
+            .to_utc();
+        let put = bucket().presigned_request_at("PUT", "persona/candidate.png", 300, at);
+        let get = bucket().presigned_get_at("persona/candidate.png", 300, at);
+        assert!(put.contains("X-Amz-Signature="));
+        assert_ne!(put, get, "HTTP method must be part of the signature");
+        assert!(put.contains("/media/persona/candidate.png?"));
     }
 
     #[test]
