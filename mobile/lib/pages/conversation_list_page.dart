@@ -929,6 +929,12 @@ class _ConversationSegmentCard extends StatelessWidget {
                 _conversationStateLabel(l, conversation),
                 style: TextStyle(color: scheme.onSurfaceVariant),
               ),
+              if (conversation.mode == ConversationMode.mail &&
+                  conversation.mailExpectation == MailExpectation.today)
+                Text(
+                  '· ${l.contactMailExpectationToday}',
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
               if (conversation.lastMessage != null)
                 Text(
                   '· ${conversation.lastMessage}',

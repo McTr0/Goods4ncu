@@ -573,12 +573,15 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
   "recipient_id": "seller-user-id",
   "listing_id": "optional-listing-id",
   "mode": "realtime",
+  "mail_expectation": "ordinary",
   "subject": null,
   "content": "你好，我想问下这个还在吗？"
 }
 ```
 
-邮件必须填写 `subject`，长度 1 到 120 字；正文长度 1 到 2000 字。实时模式不使用主题。
+邮件必须填写 `subject`，长度 1 到 120 字；正文长度 1 到 2000 字。`mail_expectation` 可为 `ordinary`（有空时看）或 `today`（希望今天处理），省略时为 `ordinary`。它只是发件人声明的时间尺度，不改变接收方通知优先级，也不是已送达、在线或已读事实。实时模式不使用主题或 `mail_expectation`。
+
+响应中的 `conversation.mail_expectation` 会把这个用户声明展示给会话参与者；忙碌、陌生人和联系人静音规则仍由接收方控制。
 
 ### GET `/api/chat/conversations`
 

@@ -4,9 +4,9 @@ use uuid::Uuid;
 use crate::services::chat_conversation::{
     AcknowledgementKind, ChatSharedObjectView, ChatThreadDetail, ChatThreadView,
     ConversationDecision, ConversationMessageRecord, ConversationMode, ConversationView,
-    RelationshipSpaceConnectionView, RelationshipSpaceEventView, RelationshipSpacePinView,
-    RelationshipSpaceSharedObjectView, RelationshipSpaceView, SharedObjectKind,
-    StructuredQuoteInput,
+    MailExpectation, RelationshipSpaceConnectionView, RelationshipSpaceEventView,
+    RelationshipSpacePinView, RelationshipSpaceSharedObjectView, RelationshipSpaceView,
+    SharedObjectKind, StructuredQuoteInput,
 };
 
 #[derive(Debug, Deserialize)]
@@ -15,6 +15,7 @@ pub struct CreateConversationBody {
     pub recipient_id: String,
     pub listing_id: Option<String>,
     pub mode: ConversationMode,
+    pub mail_expectation: Option<MailExpectation>,
     pub subject: Option<String>,
     pub content: String,
 }

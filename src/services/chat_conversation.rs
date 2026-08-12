@@ -41,6 +41,36 @@ impl ConversationMode {
     }
 }
 
+/// A sender-declared handling horizon for an asynchronous mail conversation.
+/// This is a request about expected timing, never a delivery, read, online or
+/// notification-priority fact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MailExpectation {
+    #[default]
+    Ordinary,
+    Today,
+}
+
+impl MailExpectation {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ordinary => "ordinary",
+            Self::Today => "today",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, ApiError> {
+        match value {
+            "ordinary" => Ok(Self::Ordinary),
+            "today" => Ok(Self::Today),
+            _ => Err(ApiError::Internal(anyhow::anyhow!(
+                "unknown mail expectation"
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConversationState {
@@ -104,6 +134,7 @@ pub struct ConversationView {
     pub id: String,
     pub campus_id: Uuid,
     pub mode: ConversationMode,
+    pub mail_expectation: MailExpectation,
     pub state: ConversationState,
     pub initiator_id: String,
     pub recipient_id: String,
@@ -244,6 +275,7 @@ pub struct CreateConversationInput {
     pub recipient_id: String,
     pub listing_id: Option<String>,
     pub mode: ConversationMode,
+    pub mail_expectation: MailExpectation,
     pub subject: Option<String>,
     pub content: String,
 }
@@ -464,6 +496,7 @@ struct ConversationRow {
     recipient_id: String,
     listing_id: Option<String>,
     subject: Option<String>,
+    mail_expectation: String,
     invite_expires_at: Option<DateTime<Utc>>,
     ack_expires_at: Option<DateTime<Utc>>,
     idle_expires_at: Option<DateTime<Utc>>,
@@ -486,6 +519,10 @@ impl ConversationRow {
 
     fn state(&self) -> Result<ConversationState, ApiError> {
         ConversationState::parse(&self.state)
+    }
+
+    fn mail_expectation(&self) -> Result<MailExpectation, ApiError> {
+        MailExpectation::parse(&self.mail_expectation)
     }
 
     fn ensure_participant(&self, user_id: &str) -> Result<(), ApiError> {
@@ -871,8 +908,9 @@ impl ChatConversationService {
         sqlx::query(
             "INSERT INTO chat_conversations (
                 id, client_request_id, campus_id, mode, state, initiator_id, recipient_id,
-                listing_id, subject, invite_expires_at, last_activity_at, created_at, updated_at
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $11)",
+                listing_id, subject, mail_expectation, invite_expires_at,
+                last_activity_at, created_at, updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $12)",
         )
         .bind(conversation_id)
         .bind(input.client_request_id)
@@ -883,6 +921,7 @@ impl ChatConversationService {
         .bind(&input.recipient_id)
         .bind(input.listing_id.as_deref())
         .bind(input.subject.as_deref())
+        .bind(input.mail_expectation.as_str())
         .bind(invite_expires_at)
         .bind(now)
         .execute(&mut *tx)
@@ -2073,6 +2112,7 @@ impl ChatConversationService {
             id: row.id.to_string(),
             campus_id: metadata.get("campus_id"),
             mode,
+            mail_expectation: row.mail_expectation()?,
             state,
             initiator_id: row.initiator_id,
             recipient_id: row.recipient_id,
@@ -2793,8 +2833,13 @@ fn validate_create_input(input: &CreateConversationInput) -> Result<(), ApiError
         ));
     }
     match input.mode {
-        ConversationMode::Realtime if input.subject.is_some() => {
-            Err(ApiError::BadRequest("实时会话不使用主题".to_string()))
+        ConversationMode::Realtime
+            if input.subject.is_some()
+                || !matches!(input.mail_expectation, MailExpectation::Ordinary) =>
+        {
+            Err(ApiError::BadRequest(
+                "实时会话不使用主题或留言处理时间".to_string(),
+            ))
         }
         ConversationMode::Mail => {
             let subject_len = input
@@ -2819,6 +2864,7 @@ fn validate_create_input(input: &CreateConversationInput) -> Result<(), ApiError
 async fn load_conversation(pool: &PgPool, id: Uuid) -> Result<ConversationRow, ApiError> {
     sqlx::query_as::<_, ConversationRow>(
         "SELECT id, mode, state, initiator_id, recipient_id, listing_id, subject,
+                mail_expectation,
                 invite_expires_at, ack_expires_at, idle_expires_at, established_at,
                 closed_at, close_reason, version, created_at, updated_at
          FROM chat_conversations WHERE id = $1",
@@ -2836,6 +2882,7 @@ async fn load_conversation_for_update(
 ) -> Result<ConversationRow, ApiError> {
     sqlx::query_as::<_, ConversationRow>(
         "SELECT id, mode, state, initiator_id, recipient_id, listing_id, subject,
+                mail_expectation,
                 invite_expires_at, ack_expires_at, idle_expires_at, established_at,
                 closed_at, close_reason, version, created_at, updated_at
          FROM chat_conversations WHERE id = $1 FOR UPDATE",
@@ -2856,6 +2903,7 @@ async fn find_live_realtime(
 ) -> Result<Option<ConversationRow>, ApiError> {
     sqlx::query_as::<_, ConversationRow>(
         "SELECT id, mode, state, initiator_id, recipient_id, listing_id, subject,
+                mail_expectation,
                 invite_expires_at, ack_expires_at, idle_expires_at, established_at,
                 closed_at, close_reason, version, created_at, updated_at
          FROM chat_conversations
@@ -3830,6 +3878,7 @@ mod tests {
             recipient_id: "seller".to_string(),
             listing_id: Some("listing".to_string()),
             mode: ConversationMode::Realtime,
+            mail_expectation: MailExpectation::Ordinary,
             subject: None,
             content: "请问还在吗？".to_string(),
         }
@@ -3847,6 +3896,17 @@ mod tests {
         let mut input = realtime_input();
         input.mode = ConversationMode::Mail;
         assert!(validate_create_input(&input).is_err());
+        input.subject = Some("关于商品".to_string());
+        assert!(validate_create_input(&input).is_ok());
+    }
+
+    #[test]
+    fn mail_expectation_is_allowed_only_for_mail() {
+        let mut input = realtime_input();
+        input.mail_expectation = MailExpectation::Today;
+        assert!(validate_create_input(&input).is_err());
+
+        input.mode = ConversationMode::Mail;
         input.subject = Some("关于商品".to_string());
         assert!(validate_create_input(&input).is_ok());
     }

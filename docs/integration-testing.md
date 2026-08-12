@@ -138,6 +138,7 @@ GOOD4NCU_API_BASE=http://127.0.0.1:3000 \
 | 实时三次握手 | `buyer1` 发起 | `seller1` 接通 | `syn_sent -> syn_ack -> active`，文案是“接通”，不是“好友申请”。 |
 | 现在不方便 | `buyer1` 等待 | `seller1` decline | 浏览器显示“这次没有接通”，只能重新联系。 |
 | 邮件留言 | `buyer1` 发送留言 | `seller1` 稍后回复 | 新客户端显示“发送中 → 已发送”；不展示在线、输入中、已读，也不把服务器提交解释成设备送达。 |
+| 留言时间尺度 | `buyer1` 发送 `mail_expectation=today` | `seller1` 查看留言卡片 | 双方看到“希望今天处理”这一主动声明；通知是否打扰仍由接收方静音/忙碌规则决定，不产生 urgent、online、read 或 typing 事实。 |
 | 发送失败重试 | `buyer1` 断网后重试失败消息 | API driver 恢复网络 | 失败消息仍留在本地并显示重试；重试复用同一 `client_message_id`，服务端成功前不显示“已发送”。 |
 | 本地查看不回执 | `seller1` 打开留言、查看 Push 或通知预览 | `buyer1` 观察消息 | 不产生发送方可见的 `read_at`/read 事件；`LOCALLY_SEEN` 只留在接收设备。 |
 | 旧注意力协议已退役 | 旧客户端请求 conversation `read`、`read-preference` 或 `typing` 路由 | 服务端回归与数据库 schema | 路由统一 `404`，不广播、不写入注意力事实；迁移 `0068` 后旧 read/typing 兼容字段不存在。 |

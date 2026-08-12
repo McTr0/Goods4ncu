@@ -15,7 +15,7 @@ use crate::api::{ws, AppState};
 use crate::services::campus::CampusService;
 use crate::services::chat_conversation::{
     ChatConversationService, ConversationMode, ConversationView, CreateConversationInput,
-    CreateConversationResult,
+    CreateConversationResult, MailExpectation,
 };
 use crate::services::notification::NewNotification;
 
@@ -61,6 +61,7 @@ pub async fn create_conversation(
             recipient_id: body.recipient_id,
             listing_id: body.listing_id,
             mode: body.mode,
+            mail_expectation: body.mail_expectation.unwrap_or_default(),
             subject,
             content,
         })
@@ -158,6 +159,7 @@ pub async fn open_conversation_for_intent(
             recipient_id: recipient_id.to_string(),
             listing_id: None,
             mode: crate::services::chat_conversation::ConversationMode::Mail,
+            mail_expectation: MailExpectation::Ordinary,
             subject: Some(subject.to_string()),
             content: content.to_string(),
         })

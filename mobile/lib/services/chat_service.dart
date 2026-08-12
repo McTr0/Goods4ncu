@@ -128,6 +128,7 @@ class ChatService extends BaseService {
     required String content,
     String? listingId,
     String? subject,
+    MailExpectation? mailExpectation,
     String? clientRequestId,
   }) async {
     final headers = await authHeaders();
@@ -138,6 +139,7 @@ class ChatService extends BaseService {
       'content': content,
       'listing_id': ?listingId,
       'subject': ?subject,
+      'mail_expectation': ?mailExpectation?.wireValue,
     };
     final response = await post(
       Uri.parse('$baseUrl/api/chat/conversations'),

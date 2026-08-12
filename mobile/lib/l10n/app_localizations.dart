@@ -3288,6 +3288,24 @@ abstract class AppLocalizations {
   /// **'e.g. Asking about condition'**
   String get contactMailSubjectHint;
 
+  /// No description provided for @contactMailExpectationLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'When would you like them to look? (optional)'**
+  String get contactMailExpectationLabel;
+
+  /// No description provided for @contactMailExpectationOrdinary.
+  ///
+  /// In en, this message translates to:
+  /// **'Whenever convenient'**
+  String get contactMailExpectationOrdinary;
+
+  /// No description provided for @contactMailExpectationToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Hopefully today'**
+  String get contactMailExpectationToday;
+
   /// No description provided for @contactMailBodyLabel.
   ///
   /// In en, this message translates to:

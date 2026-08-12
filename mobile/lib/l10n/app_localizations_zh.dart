@@ -1665,6 +1665,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get contactMailSubjectHint => '例如：想了解一下成色';
 
   @override
+  String get contactMailExpectationLabel => '希望对方何时处理（可选）';
+
+  @override
+  String get contactMailExpectationOrdinary => '有空时看';
+
+  @override
+  String get contactMailExpectationToday => '希望今天看';
+
+  @override
   String get contactMailBodyLabel => '正文';
 
   @override

@@ -50,6 +50,7 @@ class _ContactConversationSheetState extends State<_ContactConversationSheet> {
   final _subjectController = TextEditingController();
   final _contentController = TextEditingController();
   ConversationMode? _mode;
+  MailExpectation _mailExpectation = MailExpectation.ordinary;
   bool _submitting = false;
   String? _error;
 
@@ -83,6 +84,9 @@ class _ContactConversationSheetState extends State<_ContactConversationSheet> {
         listingId: widget.listingId,
         mode: mode,
         subject: mode == ConversationMode.mail ? subject : null,
+        mailExpectation: mode == ConversationMode.mail
+            ? _mailExpectation
+            : null,
         content: content,
       );
       if (mounted) Navigator.of(context).pop(conversation);
@@ -212,6 +216,39 @@ class _ContactConversationSheetState extends State<_ContactConversationSheet> {
               hintText: l.contactMailSubjectHint,
               prefixIcon: const Icon(Icons.subject),
             ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            l.contactMailExpectationLabel,
+            style: TextStyle(
+              color: scheme.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ChoiceChip(
+                label: Text(l.contactMailExpectationOrdinary),
+                selected: _mailExpectation == MailExpectation.ordinary,
+                onSelected: _submitting
+                    ? null
+                    : (_) => setState(
+                        () => _mailExpectation = MailExpectation.ordinary,
+                      ),
+              ),
+              ChoiceChip(
+                label: Text(l.contactMailExpectationToday),
+                selected: _mailExpectation == MailExpectation.today,
+                onSelected: _submitting
+                    ? null
+                    : (_) => setState(
+                        () => _mailExpectation = MailExpectation.today,
+                      ),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
         ],

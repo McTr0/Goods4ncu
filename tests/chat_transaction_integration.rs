@@ -3,8 +3,8 @@
 use goods4ncu::api::error::ApiError;
 use goods4ncu::services::chat_conversation::{
     AcknowledgementKind, ChatConversationService, ConversationDecision, ConversationMode,
-    ConversationState, CreateConversationInput, SendConversationMessageInput, StructuredQuoteInput,
-    StructuredQuoteKind,
+    ConversationState, CreateConversationInput, MailExpectation, SendConversationMessageInput,
+    StructuredQuoteInput, StructuredQuoteKind,
 };
 use goods4ncu::test_infra::with_test_pool;
 use sqlx::Row;
@@ -50,6 +50,7 @@ fn realtime_input(
         recipient_id: recipient_id.to_string(),
         listing_id: None,
         mode: ConversationMode::Realtime,
+        mail_expectation: MailExpectation::Ordinary,
         subject: None,
         content: content.to_string(),
     }
@@ -68,6 +69,7 @@ fn mail_input(
         recipient_id: recipient_id.to_string(),
         listing_id: None,
         mode: ConversationMode::Mail,
+        mail_expectation: MailExpectation::Ordinary,
         subject: Some(subject.to_string()),
         content: content.to_string(),
     }
@@ -720,6 +722,45 @@ async fn mail_thread_opens_immediately_allows_reply_and_member_archiving() {
             .unwrap();
         assert_eq!(user_b_items.len(), 1);
         assert!(!user_b_items[0].archived);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn mail_expectation_round_trips_without_becoming_notification_priority() {
+    with_test_pool(|pool| async move {
+        insert_user(&pool, "expectation-a", "alice").await;
+        insert_user(&pool, "expectation-b", "bob").await;
+        let service = ChatConversationService::new(pool.clone());
+        let mut input = mail_input(
+            "expectation-a",
+            "expectation-b",
+            "今天方便吗",
+            "如果可以，希望今天看一下；不方便也没关系。",
+        );
+        input.mail_expectation = MailExpectation::Today;
+
+        let created = service.create_conversation(input).await.unwrap();
+        assert_eq!(
+            created.conversation.mail_expectation,
+            MailExpectation::Today
+        );
+        assert!(created.notify_recipient);
+
+        let conversation_id = Uuid::parse_str(&created.conversation.id).unwrap();
+        let receiver_view = service
+            .get_conversation(conversation_id, "expectation-b")
+            .await
+            .unwrap();
+        assert_eq!(receiver_view.mail_expectation, MailExpectation::Today);
+
+        let persisted: String =
+            sqlx::query_scalar("SELECT mail_expectation FROM chat_conversations WHERE id = $1")
+                .bind(conversation_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(persisted, "today");
     })
     .await;
 }

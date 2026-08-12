@@ -899,6 +899,22 @@ void main() {
       expect(conversation.unreadCount, 0);
     });
 
+    test('parses sender-declared mail expectation without attention fields', () {
+      final conversation = Conversation.fromJson({
+        'id': 'conv-mail',
+        'mode': 'mail',
+        'state': 'open',
+        'initiator_id': 'user-001',
+        'recipient_id': 'user-002',
+        'other_user_id': 'user-001',
+        'other_username': 'alice',
+        'mail_expectation': 'today',
+      });
+
+      expect(conversation.mailExpectation, MailExpectation.today);
+      expect(conversation.unreadCount, 0);
+    });
+
     test(
       'parses connection privacy controls without online presence fields',
       () {

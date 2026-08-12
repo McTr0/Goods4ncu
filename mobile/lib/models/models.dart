@@ -826,6 +826,18 @@ enum ConversationMode {
       value == 'mail' ? ConversationMode.mail : ConversationMode.realtime;
 }
 
+/// A sender-declared handling horizon for an asynchronous mail. It is not a
+/// delivery receipt, notification priority, online state, or read signal.
+enum MailExpectation {
+  ordinary,
+  today;
+
+  String get wireValue => name;
+
+  static MailExpectation parse(Object? value) =>
+      value == 'today' ? MailExpectation.today : MailExpectation.ordinary;
+}
+
 enum ConversationState {
   synSent('syn_sent'),
   synAck('syn_ack'),
@@ -950,6 +962,7 @@ class Conversation {
     required this.otherUserId,
     required this.otherUsername,
     ConversationMode? mode,
+    this.mailExpectation = MailExpectation.ordinary,
     ConversationState? state,
     String? status,
     this.listingId,
@@ -991,6 +1004,7 @@ class Conversation {
 
   final String id;
   final ConversationMode mode;
+  final MailExpectation mailExpectation;
   final ConversationState state;
   final String initiatorId;
   final String recipientId;
@@ -1027,6 +1041,7 @@ class Conversation {
     return Conversation(
       id: json['id']?.toString() ?? '',
       mode: ConversationMode.parse(json['mode']),
+      mailExpectation: MailExpectation.parse(json['mail_expectation']),
       state: ConversationState.parse(json['state'] ?? json['status']),
       initiatorId:
           json['initiator_id']?.toString() ??

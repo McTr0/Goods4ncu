@@ -118,6 +118,8 @@ struct CreateConversationBody {
     mode: String,
     subject: Option<String>,
     content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mail_expectation: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -141,6 +143,7 @@ struct ConversationEntry {
     initiator_id: String,
     recipient_id: String,
     is_initiator: bool,
+    mail_expectation: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -294,6 +297,7 @@ async fn create_realtime_conversation(
             mode: "realtime".to_string(),
             subject: None,
             content: content.to_string(),
+            mail_expectation: None,
         })
         .send()
         .await?;
@@ -518,6 +522,67 @@ async fn test_realtime_conversation_lifecycle() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+async fn test_mail_expectation_is_explicit_and_not_attention_state() -> anyhow::Result<()> {
+    let database_url = db_safety::resolve_test_database_url();
+    let pool = PgPool::connect(&database_url).await?;
+    let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
+    let Some(base_url) = resolve_base_url(&client).await? else {
+        return Ok(());
+    };
+
+    let user_a = create_test_user(&client, &base_url, "mail_a").await?;
+    let user_b = create_test_user(&client, &base_url, "mail_b").await?;
+    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
+
+    let response = client
+        .post(format!("{}/api/chat/conversations", base_url))
+        .headers(auth_headers(&user_a.token))
+        .json(&CreateConversationBody {
+            client_request_id: Uuid::new_v4().to_string(),
+            recipient_id: user_b.user_id.clone(),
+            listing_id: None,
+            mode: "mail".to_string(),
+            subject: Some("今天方便看一下吗？".to_string()),
+            content: "这是一个异步留言。".to_string(),
+            mail_expectation: Some("today".to_string()),
+        })
+        .send()
+        .await?;
+
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "Create mail conversation failed: {:?}",
+        response.text().await?
+    );
+    let created = response.json::<CreateConversationResponse>().await?;
+    assert!(created.created);
+    assert_eq!(created.conversation.mode, "mail");
+    assert_eq!(created.conversation.state, "open");
+    assert_eq!(
+        created.conversation.mail_expectation.as_deref(),
+        Some("today")
+    );
+
+    let list_response = client
+        .get(format!("{}/api/chat/conversations?mode=mail", base_url))
+        .headers(auth_headers(&user_b.token))
+        .send()
+        .await?;
+    assert_eq!(list_response.status(), StatusCode::OK);
+    let conversations = list_response.json::<ConversationListResponse>().await?;
+    let found = conversations
+        .items
+        .iter()
+        .find(|item| item.id == created.conversation.id)
+        .expect("receiver should see the mail conversation");
+    assert_eq!(found.mail_expectation.as_deref(), Some("today"));
+
+    cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_message_sending() -> anyhow::Result<()> {
     let database_url = db_safety::resolve_test_database_url();
     let pool = PgPool::connect(&database_url).await?;
@@ -697,6 +762,7 @@ async fn test_cannot_create_self_conversation() -> anyhow::Result<()> {
             mode: "realtime".to_string(),
             subject: None,
             content: "Trying to talk to myself".to_string(),
+            mail_expectation: None,
         })
         .send()
         .await?;

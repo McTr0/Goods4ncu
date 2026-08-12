@@ -1741,6 +1741,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get contactMailSubjectHint => 'e.g. Asking about condition';
 
   @override
+  String get contactMailExpectationLabel =>
+      'When would you like them to look? (optional)';
+
+  @override
+  String get contactMailExpectationOrdinary => 'Whenever convenient';
+
+  @override
+  String get contactMailExpectationToday => 'Hopefully today';
+
+  @override
   String get contactMailBodyLabel => 'Body';
 
   @override

@@ -164,7 +164,7 @@ round_state = closed
 
 | 概念 | 是否持久化 | 作用 |
 | --- | --- | --- |
-| Conversation | 是 | 保存参与者、模式、状态、商品上下文、主题和过期时间 |
+| Conversation | 是 | 保存参与者、模式、状态、商品上下文、主题、留言处理时间尺度和过期时间 |
 | ConversationMember | 是 | 保存成员级归档；旧 read API 兼容字段已在 `0068` 清理 |
 | MessageAcknowledgement | 是 | 接收方主动选择的收到/我会看/已处理；每消息每用户最多一条，可替换或撤销 |
 | ConversationEvent | 是 | 记录握手、关闭和过期等转换 |
@@ -175,7 +175,7 @@ round_state = closed
 
 Conversation 终止后不可复活。重新联系会创建新 Conversation，但仍显示在同一个 Thread 中。
 
-目标态下，`Conversation` 仍然是一次留言或连接的边界；`Thread` 只是关系级查询聚合。服务器只公开消息已成功持久化的技术事实和用户主动发出的 acknowledgement，不从页面打开、Push、解密、媒体播放或键盘活动推导“已读”。多设备可以各自维护 `LocalSeen`，因此设备间的新留言提示允许暂时不同步，以换取更清晰的隐私边界。
+目标态下，`Conversation` 仍然是一次留言或连接的边界；`Thread` 只是关系级查询聚合。Mail 可保存发件人主动选择的 `mail_expectation = ordinary | today`，它描述希望对方何时方便处理，不改变接收方通知规则，也不表示设备已收到或已读。服务器只公开消息已成功持久化的技术事实和用户主动发出的 acknowledgement，不从页面打开、Push、解密、媒体播放或键盘活动推导“已读”。多设备可以各自维护 `LocalSeen`，因此设备间的新留言提示允许暂时不同步，以换取更清晰的隐私边界。
 
 ### SocialPersona、RelationshipSpace 与 SpaceEvent
 
