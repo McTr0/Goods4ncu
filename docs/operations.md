@@ -151,7 +151,7 @@ liveness 故意不查数据库。如果 liveness 依赖数据库，一次数据�
 
 编排器的终止宽限期必须大于 `SHUTDOWN_DRAIN_SECS + SHUTDOWN_TIMEOUT_SECS`（默认 30s），否则进程会在排空中途被 SIGKILL，优雅停机等于没做。Compose 默认宽限期只有 10s，仓库里的 `docker-compose.yml` 已显式设置 `stop_grace_period: 40s`；Kubernetes 对应 `terminationGracePeriodSeconds: 40`。
 
-Worker 不再被 `abort()`。HITL 过期、订单、媒体审核、token 清理和会话过期都在两次迭代之间检查停机标志，因此不会出现事务提交到一半被切断，也不会有媒体审核任务卡在 `processing`。
+Worker 不再被 `abort()`。HITL 过期、订单、媒体审核、token 清理和会话过期都在两次迭代之间检查停机标志，因此不会出现事务提交到一半被切断。媒体审核的 `processing` 任务由 `0069` 写入 `locked_by/locked_until` lease；进程硬退出后到期可由下一副本重领，不需要人工把任务从 processing 改回 pending。
 
 验证方式：
 
@@ -370,14 +370,14 @@ RETURNING listing_id, campus_id, desired_revision;
 | `watchlist` | 用户和商品关系，是否收藏自己的商品。 |
 | `notifications` | `campus_id`、unread、event_type、related_order/listing、是否已推送但未读。 |
 | `admin_audit_logs` | campus_id、管理员操作、target、scope_reason；跨校园读取和写入是否都有审计。 |
-| `moderation_jobs` | campus_id、资源归属，以及 pending、processing、approved、rejected、failed 状态。 |
+| `moderation_jobs` | campus_id、资源归属、pending/processing/approved/rejected/failed 状态，以及 processing 期间的 `locked_by/locked_until` lease；到期任务可重领，终态会清空 lease。 |
 | `chat_shared_objects` | file/link 权威对象、`pending_upload`/审核/撤销状态；文件撤销后的远端清理请求、尝试次数、下一次重试、错误与完成时间也保存在同一行。 |
 | `moderation_cases` | campus_id、subject、来源、状态、公开原因、resolution 和 pending appeal；普通用户接口不得返回 internal_details。 |
 | `moderation_case_events` | 案件创建、复核、处置、恢复和申诉状态转换的时间线。 |
 | `moderation_appeals` | 每个案件每个当事人一次申诉、独立复核者、决定和公开说明。 |
 | `listing_restriction_effects` | 每个 listing/case 的独立限制；`released_at IS NULL` 表示 active。排查时核对 campus、case、创建/释放 actor，不能只看 `inventory.status`。 |
 
-[已实现] `0029_core_tenant_scope.sql` 给核心市场与通信事实增加 `campus_id` 和关联约束，`0031_active_campus_sessions.sql` 给 refresh session 增加活动校园并回填旧会话，`0032_notification_tenant_scope.sql` 给通知建立校园归属，`0033_admin_moderation_tenant_scope.sql` 给管理审计和媒体审核任务建立校园归属并修正 Worker 的 `processing` 状态约束。当前 NCU default 仅为单校园兼容；第二校园接入前仍必须移除数据库默认值、完成空库/升级库隔离演练并评估 RLS。
+[已实现] `0029_core_tenant_scope.sql` 给核心市场与通信事实增加 `campus_id` 和关联约束，`0031_active_campus_sessions.sql` 给 refresh session 增加活动校园并回填旧会话，`0032_notification_tenant_scope.sql` 给通知建立校园归属，`0033_admin_moderation_tenant_scope.sql` 给管理审计和媒体审核任务建立校园归属并修正 Worker 的 `processing` 状态约束，`0069_moderation_job_leases.sql` 为 processing 任务增加可回收 lease。当前 NCU default 仅为单校园兼容；第二校园接入前仍必须移除数据库默认值、完成空库/升级库隔离演练并评估 RLS。
 
 [已实现] `0030_normalize_money_bigint.sql` 修复历史升级库可能遗留的 `INT4` 金额列，将商品价格、成交价和议价金额统一为 `BIGINT`。若空库测试正常但现有环境列表接口出现金额 decode 错误，先检查 migration 是否已经执行到 0030，不要在应用层把金额退回 32 位。
 
@@ -389,7 +389,7 @@ RETURNING listing_id, campus_id, desired_revision;
 
 本地政策词、校内临时专项词或法务要求的词不要写死进源码，优先通过 `BLOCKED_KEYWORDS` 或 `[moderation].blocked_keywords` 配置。返回给用户的错误只说明类别，不暴露具体命中词，避免教用户绕过。
 
-图片审核仍是异步任务：listing 首次 commit 会把媒体 URL、资源 `pending` 状态和 `moderation_jobs` 原子写入，并从 listing、conversation 或用户 session 继承校园，客户端不能提交校园。后台 Worker 调外部图片审核 API 并回写资源状态；拒绝结果与资源状态、ModerationCase 在同一事务中提交。生产环境开启图片审核时，启动会 fail-fast 校验 `MODERATION_IMAGE_API_URL` 和 `MODERATION_IMAGE_API_KEY`，避免 provider 缺失时任务静默失败；本地生产 rehearsal 明确关闭该外部依赖，不代表真实 provider 已验收。校园运营可以在 `GET /api/admin/moderation/jobs?status=pending` 和 `GET /api/admin/moderation/cases?status=open` 查看本校积压；平台管理员跨校排查或处置必须同时提交 `campus_id` 和 `reason`。
+图片审核仍是异步任务：listing 首次 commit 会把媒体 URL、资源 `pending` 状态和 `moderation_jobs` 原子写入，并从 listing、conversation 或用户 session 继承校园，客户端不能提交校园。后台 Worker 调外部图片审核 API 并回写资源状态；拒绝结果与资源状态、ModerationCase 在同一事务中提交。`0069` 之后，Worker 认领任务时写入唯一 `locked_by` 和过期时间 `locked_until`；只有持有 lease 的副本能重试或提交终态，租约到期的 processing 行才会被下一副本回收。生产环境开启图片审核时，启动会 fail-fast 校验 `MODERATION_IMAGE_API_URL` 和 `MODERATION_IMAGE_API_KEY`，避免 provider 缺失时任务静默失败；本地生产 rehearsal 明确关闭该外部依赖，不代表真实 provider 已验收。校园运营可以在 `GET /api/admin/moderation/jobs?status=pending` 和 `GET /api/admin/moderation/cases?status=open` 查看本校积压；排查时同时观察 `locked_by/locked_until` 和 `last_error`；平台管理员跨校排查或处置必须同时提交 `campus_id` 和 `reason`。
 
 ## 常见排错
 
@@ -533,8 +533,8 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 
 ## 审核积压 Runbook [目标态]
 
-1. 先确认活动校园，再检查该 `campus_id` 下 `moderation_jobs`/ModerationCase 的 oldest pending、processing 卡住时长、重试和 last_error。
-2. 判断是 provider、网络、格式、配额还是 worker lease 问题。
+1. 先确认活动校园，再检查该 `campus_id` 下 `moderation_jobs`/ModerationCase 的 oldest pending、processing 卡住时长、`locked_by/locked_until`、重试和 last_error。
+2. 判断是 provider、网络、格式、配额还是 worker lease 问题；未到期的 processing 不得被人工抢占，已过期行会由下一轮自动认领。
 3. 保持媒体 pending 和私有隔离，不因积压自动公开。
 4. 可安全重试的任务使用指数退避；不可解码内容直接进入拒绝/人工队列。
 5. 超过阈值进入 dead-letter，并提供受审计的批量重放。

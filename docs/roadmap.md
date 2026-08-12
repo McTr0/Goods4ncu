@@ -33,7 +33,7 @@
 - Agent 的更新/下架/成交意向/议价已接入 crash-safe ActionPlan（模型只能提出，L3 需独立 token 的二次确认）；发布采用立即执行 + 条件式撤销。HTTP、Agent 和撤销路径已统一经过 `ListingCommandService`；资源版本快照仍待补。
 - 聊天隐私迁移已完成首阶段：留言/连接二分、服务端已发送、设备本地 `LOCALLY_SEEN`、主动 acknowledgement，以及陌生人/忙碌/联系人静音与重复请求抑制均由当前协议执行。
 - WebSocket 跨副本投递已具备（Redis fan-out，双实例端到端验证）；call signaling 多副本化与压测仍待做，typing 已从协议移除。outbox 基础与通知推送已持久化，其余事件消费者仍在进程内。
-- 媒体隔离、审核公开门槛、缩略图和 Base64 退出不完整；案件事实层已具备，对象存储隔离已用真实 MinIO 完成生产模式演练，生产 bucket/CDN、图片审核 provider 和人工运营仍需部署侧验收。
+- 媒体隔离、审核公开门槛、缩略图和 Base64 退出不完整；案件事实层已具备，对象存储隔离已用真实 MinIO 完成生产模式演练，媒体审核队列已通过 `0069` 增加可回收 lease，生产 bucket/CDN、图片审核 provider 和人工运营仍需部署侧验收。
 - API 缺少统一版本和 cursor；[已实现] 未版本化接口已有兼容旧客户端的稳定错误字段、服务端 request ID，以及 listing 发布、wanted response 和成交确认幂等，其他写接口仍需收敛。
 - 首页商品 feed、相似商品、listing wanted matches 与意图撮合均已有统一解释和显式反馈控制；离线质量评估、公平性指标与跨表达软排序仍不足。
 - Secret Chat 与服务器可治理通信目标冲突。
@@ -92,7 +92,7 @@
 
 ### 媒体与审核
 
-- [已实现] 媒体审核任务继承资源 campus，后台队列按校园和状态读取；Worker 的 processing 状态已纳入数据库约束。
+- [已实现] 媒体审核任务继承资源 campus，后台队列按校园和状态读取；Worker 的 processing 状态已纳入数据库约束，`0069_moderation_job_leases` 为每次领取写入 `locked_by/locked_until`，硬退出后可安全回收过期任务。
 - [已实现] 媒体隔离已覆盖 API 与对象存储两层。API 层（`0041`）：提交审核与资源置 `pending` 同事务；商品图与头像在所有公开读取路径按 `approved` 门槛输出，pending/rejected/failed 返回 null，所有者仍可见自己的待审图。存储层（`src/services/storage.rs`）：bucket 私有，服务端按 SigV4 生成短期 presigned URL，仅对 approved 媒体下发；`MEDIA_PRIVATE_BUCKET=true` 启用。已对真实 S3 实现（MinIO）验证：匿名直连 403、未上传 key 亦拒绝、presigned 可取、签名篡改与过期均被拒（`tests/storage_acl_integration.rs`，并纳入生产演练 check 2b）。
 - 校验文件头、MIME、尺寸和解码，审核通过后生成公开 URL 和缩略图。
 - Base64 fallback 加指标和 feature flag，不再作为新客户端主路径。
@@ -189,10 +189,10 @@
 
 该方向是目标态产品迁移，不改变当前 API 参考中的已实现事实。按以下顺序推进：
 
-当前进度：[部分完成] R0 的 Flutter 共同空间静态投影已接入联系人线程和独立私聊；只读取现有 Thread/Conversation 事实，`active` 只显示为“已连接”，没有新增后端状态。R1 已落地 `SocialPersona` v1 的受控 token、草稿/发布/归档、同校园公开读取、审计和普通头像回退；图片资产、照片风格化和人工审核队列仍待实现。R2 已落地同校园无序用户对 `relationship_key`、`space-events` cursor、显式幂等 Pin、最近连接恢复点，以及从既有 quote 派生的共享对象入口；`0065_chat_shared_objects`、`0066_shared_object_upload_lifecycle` 与 `0067_shared_object_storage_cleanup` 现在为 file/link 提供同校园、同会话、可撤销的平台权威引用、上传审核边界和耐久远端清理。真实生产拓扑演练已在 `0068` 后重跑并通过：双副本、Redis fan-out、SLO、MinIO 私有 bucket、signed DELETE、撤销审计、worker 清理、RLS、滚动重启、PITR 和有序排空均有断言；生产 bucket/CDN、图片审核 provider 和实体设备仍需部署侧验收。私有代理失效已有 API 回归：活动文件可获取短期签名 URL，撤销后同一媒体入口返回 404；旧客户端兼容窗口已结束，`0068_remove_chat_attention_compat_shadow` 清除了回滚影子列。2026-08-12 已在全新隔离数据库上通过双账号 `realtime -> accept -> acknowledge -> close`、主动确认 `received -> completed -> withdraw` 和独立 `mail` 的真实 API 旅程；同日真实 Flutter Web 已验收留言/连接入口，且页面没有在线、正在输入或已读提示。Flutter 已把商品/成交/文件/链接等共享引用显示为不加载资源的只读 rail，并增加共享对象 API 模型。`MessageBubble` 已在 `390×844` widget 视口回归中确认 acknowledgement 菜单可达；实体 390×844 设备验收仍未完成，不把视口测试或未验证的对象存在性冒充为上传成功。
+当前进度：[部分完成] R0 的 Flutter 共同空间静态投影已接入联系人线程和独立私聊；只读取现有 Thread/Conversation 事实，`active` 只显示为“已连接”，没有新增后端状态。R1 已落地 `SocialPersona` v1 的受控 token、草稿/发布/归档、同校园公开读取、审计和普通头像回退；图片资产、照片风格化和人工审核队列仍待实现，审核 worker 已在 `0069` 增加可回收 lease。R2 已落地同校园无序用户对 `relationship_key`、`space-events` cursor、显式幂等 Pin、最近连接恢复点，以及从既有 quote 派生的共享对象入口；`0065_chat_shared_objects`、`0066_shared_object_upload_lifecycle` 与 `0067_shared_object_storage_cleanup` 现在为 file/link 提供同校园、同会话、可撤销的平台权威引用、上传审核边界和耐久远端清理。真实生产拓扑演练已在 `0069` 后重跑并通过：双副本、Redis fan-out、SLO、MinIO 私有 bucket、signed DELETE、撤销审计、worker 清理、RLS、滚动重启、PITR 和有序排空均有断言；生产 bucket/CDN、图片审核 provider 和实体设备仍需部署侧验收。私有代理失效已有 API 回归：活动文件可获取短期签名 URL，撤销后同一媒体入口返回 404；旧客户端兼容窗口已结束，`0068_remove_chat_attention_compat_shadow` 清除了回滚影子列。2026-08-12 已在全新隔离数据库上通过双账号 `realtime -> accept -> acknowledge -> close`、主动确认 `received -> completed -> withdraw` 和独立 `mail` 的真实 API 旅程；同日真实 Flutter Web 已验收留言/连接入口，且页面没有在线、正在输入或已读提示。Flutter 已把商品/成交/文件/链接等共享引用显示为不加载资源的只读 rail，并增加共享对象 API 模型。`MessageBubble` 已在 `390×844` widget 视口回归中确认 acknowledgement 菜单可达；实体 390×844 设备验收仍未完成，不把视口测试或未验证的对象存在性冒充为上传成功。
 
 1. **R0：体验原型与词义测试。** 用真实移动端尺寸验证“对方左上 / 自己右下”、留言/连接切换、角色缩放和 Memory Rail；确认用户不会把角色姿态理解成在线、已读或 Agent 参与。此阶段不改后端。
-2. **R1：静态角色身份层。** [部分完成] `0063_social_personas` 与 `/api/user/persona`、`/api/users/{id}/persona` 已支持统一风格 token、草稿、显式发布/归档、同校园边界和审计；Flutter 个人资料和公开主页已提供创建/预览/编辑入口。下一步补充 24/48/160 资产、深浅色与 reduced-motion fallback、媒体审核和照片风格化，不能把生成图当作身份认证。
+2. **R1：静态角色身份层。** [部分完成] `0063_social_personas` 与 `/api/user/persona`、`/api/users/{id}/persona` 已支持统一风格 token、草稿、显式发布/归档、同校园边界和审计；Flutter 个人资料和公开主页已提供创建/预览/编辑入口。下一步补充 24/48/160 资产、深浅色与 reduced-motion fallback、真实媒体审核 provider 和照片风格化，不能把生成图当作身份认证；`0069` 已先解决审核 worker 崩溃后的可恢复性。
 3. **R2：Relationship Space 投影（消息只读，Pin/对象显式写入）。** [部分完成] 复用 `Thread / Conversation / Message / Quote`，为同校园无序用户对提供稳定 relationship key 和 cursor；已实现“时间 + Pin”、最近连接恢复点，以及商品 quote 和 file/link 权威对象的只读共享对象入口。Pin 通过 `0064_relationship_space_pins` 保存为用户主动、可撤销的共享事实，`0065_chat_shared_objects`/`0066_shared_object_upload_lifecycle`/`0067_shared_object_storage_cleanup` 保存平台 key/规范化链接、来源会话、创建者、上传/审核和 `pending_upload -> pending_review/active -> revoked/deleted` 生命周期；撤销后的文件由耐久 worker 以 signed DELETE 清理并保留重试审计，不建立第二套消息事实。回归已覆盖对象创建、服务端完成上传状态转换、同会话引用、未完成文件引用拒绝、非创建者撤销拒绝、撤销后消息 quote/space 投影失效、链接片段规范化和 API 媒体入口在撤销后返回 404；真实生产演练已通过 MinIO `/complete`、签名删除和远端不存在断言；Flutter API 模型、上传到服务端 key 的方法与共享 rail 已覆盖只读显示，外部 URL 仍不得由消息正文直接加载。下一步是生产 bucket/CDN、图片审核 provider 和实体设备验收。
 4. **R3：连接空间化。** [部分完成] 留言状态已拉开角色并强调历史；请求/接受/结束连接由明确状态机驱动，连接期间弱化角色与 Rail。发送方的留言/连接入口、接收方主动确认和可留言/可连接/忙/稍后规则已接入现有协议；2026-08-12 已在干净种子账号上完成真实 Flutter Web 双账号“发起 → 接通 → 确认 → 结束”旅程，另验证了接收消息的无障碍“打开消息操作 → 我会看 → 撤销主动确认”菜单，页面保留历史且没有在线/输入中/已读事实。`MessageBubble` 的 `390×844` widget 回归已覆盖三种 acknowledgement 动作的窄屏可达性；下一步仍需实体设备上的 acknowledgement 替换、撤销与跨设备实时同步截图。Flutter widget、API driver 和后端回归已覆盖语义与权限。接收方规则始终优先，不引入 online、typing、last seen 或 read。
 5. **R4：可选语义增强。** 主题聚类、自然语言回忆与共识提议必须携带 `source_event_ids`；模型不可用时自动退回确定性时间、Pin、文件和搜索。共享约定只有用户明确采纳后才生效。

@@ -349,7 +349,7 @@ countered
 
 ## 审核、举报与申诉
 
-当前文本在持久化或调用 LLM 前同步审核，图片进入异步 `moderation_jobs`。任务从 listing、conversation 或用户当前校园继承 `campus_id`，Worker 可使用 `processing` 作为领取中的状态。校园运营通过 `/api/admin/moderation/jobs` 只能查看本校园队列。本地可配置关键词用于学校或运营策略。
+当前文本在持久化或调用 LLM 前同步审核，图片进入异步 `moderation_jobs`。任务从 listing、conversation 或用户当前校园继承 `campus_id`，Worker 使用 `processing + locked_by/locked_until` 作为可恢复的领取状态，租约到期后允许下一副本重领。校园运营通过 `/api/admin/moderation/jobs` 只能查看本校园队列。本地可配置关键词用于学校或运营策略。
 
 [目标态] 流程为：
 

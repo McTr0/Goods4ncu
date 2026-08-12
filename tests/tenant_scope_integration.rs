@@ -218,7 +218,7 @@ async fn upgraded_money_columns_use_bigint_consistently() {
 }
 
 #[tokio::test]
-async fn moderation_jobs_require_campus_and_allow_worker_processing_state() {
+async fn moderation_jobs_require_campus_and_worker_leases_for_processing_state() {
     with_test_pool(|pool| async move {
         let ncu_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
             .fetch_one(&pool)
@@ -245,14 +245,18 @@ async fn moderation_jobs_require_campus_and_allow_worker_processing_state() {
 
         sqlx::query(
             "INSERT INTO moderation_jobs (
-                id, campus_id, resource_type, resource_id, image_url, status
-             ) VALUES ($1, $2, 'avatar', 'user', 'https://example.test/a.jpg', 'processing')",
+                id, campus_id, resource_type, resource_id, image_url, status,
+                locked_by, locked_until
+             ) VALUES (
+                $1, $2, 'avatar', 'user', 'https://example.test/a.jpg', 'processing',
+                'tenant-test-worker', NOW() + INTERVAL '5 minutes'
+             )",
         )
         .bind(&processing_job_id)
         .bind(ncu_id)
         .execute(&pool)
         .await
-        .expect("worker processing state should satisfy the status constraint");
+        .expect("worker processing state with a live lease should satisfy the status constraint");
 
         let campus_id: Uuid =
             sqlx::query_scalar("SELECT campus_id FROM moderation_jobs WHERE id = $1")

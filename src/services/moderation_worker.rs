@@ -6,6 +6,7 @@
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use std::time::Duration;
+use uuid::Uuid;
 
 use crate::lifecycle::{sleep_or_shutdown, ShutdownSignal};
 use crate::services::moderation_case::create_case_for_rejected_job;
@@ -18,6 +19,11 @@ const MAX_JOBS_PER_CYCLE: i64 = 20;
 
 /// Maximum retry attempts before marking a job as failed.
 const MAX_RETRIES: i32 = 3;
+
+/// A worker can spend up to one provider timeout per claimed job. Keep the
+/// lease longer than a full sequential batch so a second replica cannot
+/// reclaim a job merely because it is waiting behind another provider call.
+const LEASE_SECS: i64 = 300;
 
 #[derive(Clone)]
 pub struct ModerationApiConfig {
@@ -43,10 +49,11 @@ pub async fn run_moderation_worker(db: PgPool, cfg: ModerationApiConfig, shutdow
     if !cfg.enabled {
         tracing::info!("Image moderation is disabled by configuration");
     }
+    let worker_id = format!("moderation-{}", Uuid::new_v4());
     let mut backoff_secs = POLL_INTERVAL_SECS;
     let max_backoff_secs = 60;
     loop {
-        match process_pending_jobs(&db, &cfg).await {
+        match process_pending_jobs_once(&db, &cfg, &worker_id).await {
             Ok(count) => {
                 if count > 0 {
                     tracing::debug!(count, "moderation jobs processed");
@@ -61,8 +68,8 @@ pub async fn run_moderation_worker(db: PgPool, cfg: ModerationApiConfig, shutdow
             }
         }
         // Finish the batch already claimed, then stop before claiming more.
-        // Jobs left in `processing` by a hard kill need manual recovery, so the
-        // cycle boundary is the only safe place to exit.
+        // A hard kill leaves only an expiring lease; the next worker can
+        // reclaim the row instead of requiring manual database intervention.
         if !sleep_or_shutdown(Duration::from_secs(backoff_secs), &shutdown)
             .await
             .should_continue()
@@ -74,28 +81,41 @@ pub async fn run_moderation_worker(db: PgPool, cfg: ModerationApiConfig, shutdow
     tracing::info!("Moderation worker stopped");
 }
 
-/// Fetch and process up to MAX_JOBS_PER_CYCLE pending jobs.
-async fn process_pending_jobs(db: &PgPool, cfg: &ModerationApiConfig) -> anyhow::Result<i64> {
-    // Claim jobs by updating status from 'pending' → 'processing' atomically.
-    // This prevents multiple workers from claiming the same job.
+/// Claim and process one moderation batch for a named worker, up to
+/// `MAX_JOBS_PER_CYCLE` jobs.
+///
+/// This is public so the integration suite and a future operator tool can
+/// drive one deterministic cycle without starting the long-lived loop.
+pub async fn process_pending_jobs_once(
+    db: &PgPool,
+    cfg: &ModerationApiConfig,
+    worker_id: &str,
+) -> anyhow::Result<i64> {
+    // Claim pending jobs and expired processing jobs atomically. The owner and
+    // expiry are persisted so another worker cannot finalize an old attempt.
     let rows = sqlx::query_as::<_, (String, String, String, String, i32)>(
         r#"
         WITH claimed AS (
             SELECT id, resource_type, resource_id, image_url, retry_count
             FROM moderation_jobs
-            WHERE status = 'pending'
+            WHERE status IN ('pending', 'processing')
+              AND (status = 'pending' OR locked_until <= NOW())
             ORDER BY created_at ASC
             LIMIT $1
             FOR UPDATE SKIP LOCKED
         )
         UPDATE moderation_jobs m
-        SET status = 'processing'
+        SET status = 'processing',
+            locked_by = $2,
+            locked_until = NOW() + make_interval(secs => $3)
         FROM claimed c
         WHERE m.id = c.id
         RETURNING m.id, c.resource_type, c.resource_id, c.image_url, c.retry_count
         "#,
     )
     .bind(MAX_JOBS_PER_CYCLE)
+    .bind(worker_id)
+    .bind(LEASE_SECS as f64)
     .fetch_all(db)
     .await?;
 
@@ -116,9 +136,14 @@ async fn process_pending_jobs(db: &PgPool, cfg: &ModerationApiConfig) -> anyhow:
                 } else {
                     // Increment retry count and put back to pending.
                     if let Err(e) = sqlx::query(
-                        "UPDATE moderation_jobs SET status = 'pending', retry_count = retry_count + 1 WHERE id = $1",
+                        "UPDATE moderation_jobs
+                         SET status = 'pending', retry_count = retry_count + 1,
+                             locked_by = NULL, locked_until = NULL
+                         WHERE id = $1 AND status = 'processing' AND locked_by = $2
+                           AND locked_until > NOW()",
                     )
                     .bind(&id)
+                    .bind(worker_id)
                     .execute(db)
                     .await
                     {
@@ -136,6 +161,7 @@ async fn process_pending_jobs(db: &PgPool, cfg: &ModerationApiConfig) -> anyhow:
             &resource_id,
             new_status,
             reject_reason.as_deref(),
+            worker_id,
         )
         .await
         {
@@ -153,22 +179,30 @@ async fn finalize_job(
     resource_id: &str,
     status: &str,
     reject_reason: Option<&str>,
+    worker_id: &str,
 ) -> anyhow::Result<()> {
     let mut tx = db.begin().await?;
     // Keep the lock order aligned with shared-object job submission: resource
     // first, moderation job second. This prevents a completion retry holding
     // the object row from deadlocking a worker finalizing the same job.
     update_resource_status(&mut tx, resource_type, resource_id, status).await?;
-    sqlx::query(
+    let updated = sqlx::query(
         "UPDATE moderation_jobs
-         SET status = $1, reject_reason = $2, processed_at = CURRENT_TIMESTAMP
-         WHERE id = $3",
+         SET status = $1, reject_reason = $2, processed_at = CURRENT_TIMESTAMP,
+             locked_by = NULL, locked_until = NULL
+         WHERE id = $3 AND status = 'processing' AND locked_by = $4
+           AND locked_until > NOW()",
     )
     .bind(status)
     .bind(reject_reason)
     .bind(job_id)
+    .bind(worker_id)
     .execute(&mut *tx)
     .await?;
+    anyhow::ensure!(
+        updated.rows_affected() == 1,
+        "moderation job {job_id} lease was lost before finalization"
+    );
     if status == "rejected" {
         create_case_for_rejected_job(&mut tx, job_id)
             .await
