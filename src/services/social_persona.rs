@@ -37,8 +37,41 @@ pub struct SocialPersonaView {
     pub contact_posture: String,
     pub status: String,
     pub published_at: Option<String>,
+    pub selected_asset_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SocialPersonaAssetView {
+    pub id: String,
+    pub persona_id: String,
+    pub asset_type: String,
+    pub declared_mime_type: String,
+    pub declared_size_bytes: i64,
+    pub uploaded_size_bytes: Option<i64>,
+    pub uploaded_mime_type: Option<String>,
+    pub storage_verified_at: Option<String>,
+    pub moderation_status: String,
+    pub status: String,
+    pub reject_reason: Option<String>,
+    /// Present only in the owner's private response while the client uploads.
+    pub upload_key: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicSocialPersonaAssetView {
+    pub id: String,
+    pub asset_type: String,
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Internal projection field. It is populated by the SQL read and removed
+    /// by serde before a public response is serialized. The API decorates it
+    /// into a short-lived platform URL when storage is configured.
+    #[serde(skip_serializing)]
+    pub storage_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +82,7 @@ pub struct PublicSocialPersonaView {
     pub self_descriptions: Vec<String>,
     pub contact_posture: String,
     pub published_at: String,
+    pub asset: Option<PublicSocialPersonaAssetView>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +101,20 @@ struct NormalizedPersonaInput {
     appearance_config: Value,
     self_descriptions: Vec<String>,
     contact_posture: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateSocialPersonaAssetInput {
+    pub asset_type: String,
+    pub declared_mime_type: String,
+    pub declared_size_bytes: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompleteSocialPersonaAssetInput {
+    pub uploaded_size_bytes: i64,
+    pub uploaded_mime_type: String,
+    pub moderation_required: bool,
 }
 
 #[derive(Clone)]
@@ -88,6 +136,323 @@ impl SocialPersonaService {
         Ok(row.map(|row| row_to_view(&row)))
     }
 
+    pub async fn list_assets(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+    ) -> Result<Vec<SocialPersonaAssetView>, ApiError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, persona_id, asset_type, declared_mime_type,
+                   declared_size_bytes, uploaded_size_bytes, uploaded_mime_type,
+                   storage_verified_at, moderation_status, status, reject_reason,
+                   storage_key, created_at, updated_at
+            FROM social_persona_assets
+            WHERE user_id = $1 AND campus_id = $2
+            ORDER BY created_at DESC, id DESC
+            LIMIT 20
+            "#,
+        )
+        .bind(user_id)
+        .bind(campus_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_error)?;
+        Ok(rows.into_iter().map(asset_row_to_view).collect())
+    }
+
+    pub async fn get_asset(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+        asset_id: Uuid,
+    ) -> Result<SocialPersonaAssetView, ApiError> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, persona_id, asset_type, declared_mime_type,
+                   declared_size_bytes, uploaded_size_bytes, uploaded_mime_type,
+                   storage_verified_at, moderation_status, status, reject_reason,
+                   storage_key, created_at, updated_at
+            FROM social_persona_assets
+            WHERE id = $1 AND user_id = $2 AND campus_id = $3
+            "#,
+        )
+        .bind(asset_id)
+        .bind(user_id)
+        .bind(campus_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_error)?
+        .ok_or(ApiError::NotFound)?;
+        Ok(asset_row_to_view(row))
+    }
+
+    pub async fn create_asset(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+        input: CreateSocialPersonaAssetInput,
+    ) -> Result<SocialPersonaAssetView, ApiError> {
+        let asset_type = normalize_asset_type(&input.asset_type)?;
+        let mime_type = normalize_asset_mime_type(&input.declared_mime_type)?;
+        validate_asset_size(input.declared_size_bytes)?;
+
+        let mut tx = self.pool.begin().await.map_err(db_error)?;
+        let persona_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM social_personas
+             WHERE user_id = $1 AND campus_id = $2 FOR UPDATE",
+        )
+        .bind(user_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?
+        .ok_or(ApiError::NotFound)?;
+        let asset_id = Uuid::new_v4();
+        let storage_key = format!("persona/{campus_id}/{persona_id}/{asset_id}");
+        let row = sqlx::query(
+            r#"
+            INSERT INTO social_persona_assets (
+                id, persona_id, user_id, campus_id, asset_type, storage_key,
+                declared_mime_type, declared_size_bytes
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id, persona_id, asset_type, declared_mime_type,
+                      declared_size_bytes, uploaded_size_bytes, uploaded_mime_type,
+                      storage_verified_at, moderation_status, status, reject_reason,
+                      storage_key, created_at, updated_at
+            "#,
+        )
+        .bind(asset_id)
+        .bind(persona_id)
+        .bind(user_id)
+        .bind(campus_id)
+        .bind(asset_type)
+        .bind(&storage_key)
+        .bind(mime_type)
+        .bind(input.declared_size_bytes)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        insert_asset_audit(
+            &mut tx,
+            persona_id,
+            user_id,
+            campus_id,
+            "asset_created",
+            &row,
+        )
+        .await?;
+        tx.commit().await.map_err(db_error)?;
+        Ok(asset_row_to_view(row))
+    }
+
+    pub async fn complete_asset(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+        asset_id: Uuid,
+        input: CompleteSocialPersonaAssetInput,
+    ) -> Result<SocialPersonaAssetView, ApiError> {
+        validate_asset_size(input.uploaded_size_bytes)?;
+        let uploaded_mime_type = normalize_asset_mime_type(&input.uploaded_mime_type)?;
+        let mut tx = self.pool.begin().await.map_err(db_error)?;
+        let row = sqlx::query(
+            r#"
+            SELECT id, persona_id, asset_type, declared_mime_type,
+                   declared_size_bytes, uploaded_size_bytes, uploaded_mime_type,
+                   storage_verified_at, moderation_status, status, reject_reason,
+                   storage_key, created_at, updated_at
+            FROM social_persona_assets
+            WHERE id = $1 AND user_id = $2 AND campus_id = $3
+            FOR UPDATE
+            "#,
+        )
+        .bind(asset_id)
+        .bind(user_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?
+        .ok_or(ApiError::NotFound)?;
+        let current = asset_row_to_view(row);
+        if current.status == "active" || current.status == "pending_review" {
+            // A completion retry is idempotent once the server has recorded a
+            // verified object. Do not re-probe or regress an in-flight review.
+            if current.storage_verified_at.is_some() {
+                tx.commit().await.map_err(db_error)?;
+                return Ok(current);
+            }
+        }
+        if current.status != "pending_upload" {
+            return Err(ApiError::Conflict("角色图片当前不可完成上传".to_string()));
+        }
+        if current.declared_size_bytes != input.uploaded_size_bytes {
+            return Err(ApiError::CodedConflict {
+                code: "persona_asset_size_mismatch",
+                message: "上传图片大小与声明不一致".to_string(),
+            });
+        }
+        if current.declared_mime_type != uploaded_mime_type {
+            return Err(ApiError::CodedConflict {
+                code: "persona_asset_mime_mismatch",
+                message: "上传图片类型与声明不一致".to_string(),
+            });
+        }
+        let (status, moderation_status) = if input.moderation_required {
+            ("pending_review", "pending")
+        } else {
+            ("active", "not_required")
+        };
+        let row = sqlx::query(
+            r#"
+            UPDATE social_persona_assets
+            SET uploaded_size_bytes = $1,
+                uploaded_mime_type = $2,
+                storage_verified_at = NOW(),
+                moderation_status = $3,
+                status = $4,
+                updated_at = NOW()
+            WHERE id = $5 AND user_id = $6 AND campus_id = $7
+            RETURNING id, persona_id, asset_type, declared_mime_type,
+                      declared_size_bytes, uploaded_size_bytes, uploaded_mime_type,
+                      storage_verified_at, moderation_status, status, reject_reason,
+                      storage_key, created_at, updated_at
+            "#,
+        )
+        .bind(input.uploaded_size_bytes)
+        .bind(&uploaded_mime_type)
+        .bind(moderation_status)
+        .bind(status)
+        .bind(asset_id)
+        .bind(user_id)
+        .bind(campus_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        tx.commit().await.map_err(db_error)?;
+        Ok(asset_row_to_view(row))
+    }
+
+    pub async fn select_asset(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+        asset_id: Uuid,
+    ) -> Result<SocialPersonaView, ApiError> {
+        let mut tx = self.pool.begin().await.map_err(db_error)?;
+        let asset = sqlx::query(
+            "SELECT persona_id, status, moderation_status, storage_verified_at
+             FROM social_persona_assets
+             WHERE id = $1 AND user_id = $2 AND campus_id = $3
+             FOR UPDATE",
+        )
+        .bind(asset_id)
+        .bind(user_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?
+        .ok_or(ApiError::NotFound)?;
+        let persona_id: Uuid = asset.get("persona_id");
+        let status: String = asset.get("status");
+        let moderation_status: String = asset.get("moderation_status");
+        let verified: Option<DateTime<Utc>> = asset.get("storage_verified_at");
+        if status != "active"
+            || !matches!(moderation_status.as_str(), "approved" | "not_required")
+            || verified.is_none()
+        {
+            return Err(ApiError::Conflict("角色图片尚未通过审核".to_string()));
+        }
+        let row = sqlx::query(
+            r#"
+            UPDATE social_personas
+            SET selected_asset_id = $1,
+                status = CASE WHEN status = 'published' THEN 'draft' ELSE status END,
+                published_at = CASE WHEN status = 'published' THEN NULL ELSE published_at END,
+                updated_at = NOW()
+            WHERE id = $2 AND user_id = $3 AND campus_id = $4
+            RETURNING id, user_id, campus_id, representation_mode, style_version,
+                      appearance_config, self_descriptions, contact_posture,
+                      status, published_at, selected_asset_id, created_at, updated_at
+            "#,
+        )
+        .bind(asset_id)
+        .bind(persona_id)
+        .bind(user_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?
+        .ok_or(ApiError::NotFound)?;
+        let view = row_to_view(&row);
+        insert_audit(&mut tx, &view, "edited").await?;
+        tx.commit().await.map_err(db_error)?;
+        Ok(view)
+    }
+
+    pub async fn revoke_asset(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+        asset_id: Uuid,
+    ) -> Result<SocialPersonaAssetView, ApiError> {
+        let mut tx = self.pool.begin().await.map_err(db_error)?;
+        let row = sqlx::query(
+            r#"
+            UPDATE social_persona_assets
+            SET status = CASE WHEN status = 'deleted' THEN status ELSE 'revoked' END,
+                revoked_at = COALESCE(revoked_at, NOW()),
+                cleanup_requested_at = COALESCE(cleanup_requested_at, NOW()),
+                cleanup_next_attempt_at = NULL,
+                updated_at = NOW()
+            WHERE id = $1 AND user_id = $2 AND campus_id = $3
+            RETURNING id, persona_id, asset_type, declared_mime_type,
+                      declared_size_bytes, uploaded_size_bytes, uploaded_mime_type,
+                      storage_verified_at, moderation_status, status, reject_reason,
+                      storage_key, created_at, updated_at
+            "#,
+        )
+        .bind(asset_id)
+        .bind(user_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?
+        .ok_or(ApiError::NotFound)?;
+        let persona_id: Uuid = row.get("persona_id");
+        insert_asset_audit(
+            &mut tx,
+            persona_id,
+            user_id,
+            campus_id,
+            "asset_revoked",
+            &row,
+        )
+        .await?;
+        let view = asset_row_to_view(row);
+        sqlx::query(
+            "UPDATE social_personas
+             SET selected_asset_id = NULL,
+                 status = CASE WHEN status = 'published' THEN 'draft' ELSE status END,
+                 published_at = CASE WHEN status = 'published' THEN NULL ELSE published_at END,
+                 updated_at = NOW()
+             WHERE id = $1 AND user_id = $2 AND campus_id = $3
+               AND selected_asset_id = $4",
+        )
+        .bind(
+            Uuid::parse_str(&view.persona_id)
+                .map_err(|_| ApiError::Internal(anyhow::anyhow!("invalid persona id")))?,
+        )
+        .bind(user_id)
+        .bind(campus_id)
+        .bind(asset_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        tx.commit().await.map_err(db_error)?;
+        Ok(view)
+    }
+
     pub async fn get_published_for_user(
         &self,
         user_id: &str,
@@ -96,7 +461,12 @@ impl SocialPersonaService {
         let row = sqlx::query(
             r#"
             SELECT p.representation_mode, p.style_version, p.appearance_config,
-                   p.self_descriptions, p.contact_posture, p.published_at
+                   p.self_descriptions, p.contact_posture, p.published_at,
+                   CASE WHEN asset.id IS NULL THEN NULL ELSE json_build_object(
+                       'id', asset.id,
+                       'asset_type', asset.asset_type,
+                       'storage_key', asset.storage_key
+                   ) END AS asset
             FROM social_personas p
             JOIN users user_account
               ON user_account.id = p.user_id
@@ -107,6 +477,12 @@ impl SocialPersonaService {
              AND membership.status = 'verified'
             JOIN campuses campus
               ON campus.id = p.campus_id AND campus.status = 'active'
+            LEFT JOIN social_persona_assets asset
+              ON asset.id = p.selected_asset_id
+             AND asset.persona_id = p.id
+             AND asset.status = 'active'
+             AND asset.moderation_status IN ('approved', 'not_required')
+             AND asset.storage_verified_at IS NOT NULL
             WHERE p.user_id = $1 AND p.campus_id = $2 AND p.status = 'published'
             "#,
         )
@@ -123,6 +499,11 @@ impl SocialPersonaService {
             self_descriptions: parse_descriptions(row.get("self_descriptions")),
             contact_posture: row.get("contact_posture"),
             published_at: format_optional_timestamp(row.get("published_at")).unwrap_or_default(),
+            asset: row
+                .try_get::<Option<Value>, _>("asset")
+                .ok()
+                .flatten()
+                .and_then(|value| serde_json::from_value(value).ok()),
         }))
     }
 
@@ -165,7 +546,7 @@ impl SocialPersonaService {
                 updated_at = NOW()
             RETURNING id, user_id, campus_id, representation_mode, style_version,
                       appearance_config, self_descriptions, contact_posture,
-                      status, published_at, created_at, updated_at
+                      status, published_at, selected_asset_id, created_at, updated_at
             "#,
         )
         .bind(user_id)
@@ -197,7 +578,7 @@ impl SocialPersonaService {
             WHERE user_id = $1 AND campus_id = $2
             RETURNING id, user_id, campus_id, representation_mode, style_version,
                       appearance_config, self_descriptions, contact_posture,
-                      status, published_at, created_at, updated_at
+                      status, published_at, selected_asset_id, created_at, updated_at
             "#,
         )
         .bind(user_id)
@@ -225,7 +606,7 @@ impl SocialPersonaService {
             WHERE user_id = $1 AND campus_id = $2
             RETURNING id, user_id, campus_id, representation_mode, style_version,
                       appearance_config, self_descriptions, contact_posture,
-                      status, published_at, created_at, updated_at
+                      status, published_at, selected_asset_id, created_at, updated_at
             "#,
         )
         .bind(user_id)
@@ -248,7 +629,7 @@ impl SocialPersonaService {
         sqlx::query(
             "SELECT id, user_id, campus_id, representation_mode, style_version,
                     appearance_config, self_descriptions, contact_posture,
-                    status, published_at, created_at, updated_at
+                    status, published_at, selected_asset_id, created_at, updated_at
              FROM social_personas
              WHERE user_id = $1 AND campus_id = $2",
         )
@@ -285,6 +666,36 @@ async fn insert_audit(
     Ok(())
 }
 
+async fn insert_asset_audit(
+    tx: &mut Transaction<'_, Postgres>,
+    persona_id: Uuid,
+    user_id: &str,
+    campus_id: Uuid,
+    action: &str,
+    row: &sqlx::postgres::PgRow,
+) -> Result<(), ApiError> {
+    let snapshot = serde_json::json!({
+        "asset_id": row.get::<Uuid, _>("id"),
+        "asset_type": row.get::<String, _>("asset_type"),
+        "status": row.get::<String, _>("status"),
+        "moderation_status": row.get::<String, _>("moderation_status"),
+    });
+    sqlx::query(
+        "INSERT INTO social_persona_audits
+            (persona_id, user_id, campus_id, action, snapshot)
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(persona_id)
+    .bind(user_id)
+    .bind(campus_id)
+    .bind(action)
+    .bind(snapshot)
+    .execute(&mut **tx)
+    .await
+    .map_err(db_error)?;
+    Ok(())
+}
+
 fn row_to_view(row: &sqlx::postgres::PgRow) -> SocialPersonaView {
     SocialPersonaView {
         id: row.get::<Uuid, _>("id").to_string(),
@@ -297,6 +708,30 @@ fn row_to_view(row: &sqlx::postgres::PgRow) -> SocialPersonaView {
         contact_posture: row.get("contact_posture"),
         status: row.get("status"),
         published_at: format_optional_timestamp(row.get("published_at")),
+        selected_asset_id: row
+            .try_get::<Option<Uuid>, _>("selected_asset_id")
+            .ok()
+            .flatten()
+            .map(|id| id.to_string()),
+        created_at: format_timestamp(row.get("created_at")),
+        updated_at: format_timestamp(row.get("updated_at")),
+    }
+}
+
+fn asset_row_to_view(row: sqlx::postgres::PgRow) -> SocialPersonaAssetView {
+    SocialPersonaAssetView {
+        id: row.get::<Uuid, _>("id").to_string(),
+        persona_id: row.get::<Uuid, _>("persona_id").to_string(),
+        asset_type: row.get("asset_type"),
+        declared_mime_type: row.get("declared_mime_type"),
+        declared_size_bytes: row.get("declared_size_bytes"),
+        uploaded_size_bytes: row.get("uploaded_size_bytes"),
+        uploaded_mime_type: row.get("uploaded_mime_type"),
+        storage_verified_at: format_optional_timestamp(row.get("storage_verified_at")),
+        moderation_status: row.get("moderation_status"),
+        status: row.get("status"),
+        reject_reason: row.get("reject_reason"),
+        upload_key: Some(row.get("storage_key")),
         created_at: format_timestamp(row.get("created_at")),
         updated_at: format_timestamp(row.get("updated_at")),
     }
@@ -351,6 +786,36 @@ fn normalize_input(input: SocialPersonaInput) -> Result<NormalizedPersonaInput, 
         self_descriptions,
         contact_posture,
     })
+}
+
+fn normalize_asset_type(value: &str) -> Result<String, ApiError> {
+    let value = value.trim();
+    if matches!(value, "illustration" | "photo_stylized") {
+        Ok(value.to_string())
+    } else {
+        Err(ApiError::BadRequest("不支持的角色图片类型".to_string()))
+    }
+}
+
+fn normalize_asset_mime_type(value: &str) -> Result<String, ApiError> {
+    let value = value.trim().to_ascii_lowercase();
+    if matches!(value.as_str(), "image/png" | "image/jpeg" | "image/webp") {
+        Ok(value)
+    } else {
+        Err(ApiError::BadRequest(
+            "角色图片类型必须是 PNG、JPEG 或 WebP".to_string(),
+        ))
+    }
+}
+
+fn validate_asset_size(size_bytes: i64) -> Result<(), ApiError> {
+    if (1..=10 * 1024 * 1024).contains(&size_bytes) {
+        Ok(())
+    } else {
+        Err(ApiError::BadRequest(
+            "角色图片大小必须在 1B 到 10MiB 之间".to_string(),
+        ))
+    }
 }
 
 fn normalize_appearance(value: Value) -> Result<Value, ApiError> {

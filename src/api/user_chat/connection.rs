@@ -256,6 +256,12 @@ pub async fn list_threads(
                 .await?
         }
     };
+    let mut items = items;
+    for item in &mut items {
+        if let Some(persona) = item.persona.as_mut() {
+            crate::api::social_persona::decorate_public_persona_media(&state, persona);
+        }
+    }
     Ok(Json(ThreadListResponse { items }))
 }
 
@@ -269,7 +275,7 @@ pub async fn get_thread(
     let campus_id = ensure_active_campus(&state, &session).await?;
     let mode = parse_thread_mode(query.mode.as_deref())?;
     let service = ChatConversationService::new(state.infra.db.clone());
-    let detail = match campus_id {
+    let mut detail = match campus_id {
         Some(campus_id) => {
             service
                 .get_thread_for_campus(&session.user_id, &peer_user_id, campus_id, mode)
@@ -281,6 +287,9 @@ pub async fn get_thread(
                 .await?
         }
     };
+    if let Some(persona) = detail.thread.persona.as_mut() {
+        crate::api::social_persona::decorate_public_persona_media(&state, persona);
+    }
     Ok(Json(detail.into()))
 }
 

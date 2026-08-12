@@ -4,10 +4,11 @@ import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
 
-/// A deterministic, token-based preview for a user's role presentation.
+/// A token-based preview for a user's role presentation.
 ///
-/// This intentionally does not load generated images or display presence
-/// signals. The same selected tokens render the same preview on every device.
+/// Approved platform-hosted assets may be shown when the server explicitly
+/// projects one. Until then (or if the short-lived URL expires), the same
+/// selected tokens render a deterministic fallback on every device.
 class SocialPersonaPreviewCard extends StatelessWidget {
   const SocialPersonaPreviewCard({
     super.key,
@@ -97,8 +98,9 @@ class SocialPersonaPreviewCard extends StatelessWidget {
   }
 }
 
-/// Deterministic role token used at list (24), profile (48), and card/space
-/// (160) scales. It is deliberately static: a role token never reflects
+/// Role token used at list (24), profile (48), and card/space (160) scales.
+/// The fallback is deliberately static, and an approved asset is only shown
+/// when the server explicitly projects it; neither representation reflects
 /// online, typing, read, push, or background activity.
 class SocialPersonaAvatar extends StatelessWidget {
   const SocialPersonaAvatar({
@@ -130,6 +132,28 @@ class SocialPersonaAvatar extends StatelessWidget {
     final accessorySize = (size * 0.21).clamp(7.0, 16.0).toDouble();
     final accessoryInset = (size * 0.07).clamp(2.0, 6.0).toDouble();
     final accessoryPadding = (size * 0.04).clamp(1.0, 3.0).toDouble();
+    final assetUrl = persona.asset?.url;
+    final fallback = Stack(
+      alignment: Alignment.center,
+      children: [
+        Icon(Icons.face_rounded, size: size * 0.62, color: color),
+        Positioned(
+          right: accessoryInset,
+          bottom: accessoryInset,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              shape: BoxShape.circle,
+              border: Border.all(color: color.withValues(alpha: 0.28)),
+            ),
+            child: Padding(
+              padding: EdgeInsets.all(accessoryPadding),
+              child: Icon(accessory, size: accessorySize, color: color),
+            ),
+          ),
+        ),
+      ],
+    );
 
     return Semantics(
       label: semanticLabel ?? l.socialPersonaPreviewRole,
@@ -142,27 +166,19 @@ class SocialPersonaAvatar extends StatelessWidget {
           borderRadius: BorderRadius.circular(radius),
           border: Border.all(color: color.withValues(alpha: 0.42)),
         ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Icon(Icons.face_rounded, size: size * 0.62, color: color),
-            Positioned(
-              right: accessoryInset,
-              bottom: accessoryInset,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).cardColor,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: color.withValues(alpha: 0.28)),
-                ),
-                child: Padding(
-                  padding: EdgeInsets.all(accessoryPadding),
-                  child: Icon(accessory, size: accessorySize, color: color),
+        child: assetUrl == null || assetUrl.trim().isEmpty
+            ? fallback
+            : ClipRRect(
+                borderRadius: BorderRadius.circular(radius),
+                child: Image.network(
+                  assetUrl,
+                  width: size,
+                  height: size,
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.medium,
+                  errorBuilder: (context, error, stackTrace) => fallback,
                 ),
               ),
-            ),
-          ],
-        ),
       ),
     );
   }

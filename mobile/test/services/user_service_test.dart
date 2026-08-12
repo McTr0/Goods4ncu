@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 class _RecordingUserService extends UserService {
   Uri? lastUri;
+  String? lastBody;
 
   @override
   String get baseUrl => 'https://api.test';
@@ -17,7 +18,31 @@ class _RecordingUserService extends UserService {
   @override
   Future<http.Response> get(Uri url, Map<String, String> headers) async {
     lastUri = url;
+    if (url.path == '/api/user/persona/assets') {
+      return http.Response('{"assets":[]}', 200);
+    }
     return http.Response('{"items":[],"total":0}', 200);
+  }
+
+  @override
+  Future<http.Response> post(
+    Uri url,
+    Map<String, String> headers,
+    String body, {
+    bool allowAuthRetry = true,
+  }) async {
+    lastUri = url;
+    lastBody = body;
+    if (url.path.endsWith('/select')) {
+      return http.Response(
+        '{"persona":{"representation_mode":"role_character","style_version":"v1","appearance_config":{},"self_descriptions":[],"contact_posture":"leave_message","status":"draft"}}',
+        200,
+      );
+    }
+    return http.Response(
+      '{"asset":{"id":"asset-1","asset_type":"illustration","declared_mime_type":"image/png","declared_size_bytes":1024,"moderation_status":"not_required","status":"pending_upload"}}',
+      200,
+    );
   }
 }
 
@@ -64,6 +89,46 @@ void main() {
       expect(service.lastUri?.queryParameters['limit'], '20');
       expect(service.lastUri?.queryParameters['offset'], '0');
       expect(service.lastUri?.queryParameters.containsKey('status'), isFalse);
+    });
+  });
+
+  group('persona assets', () {
+    test('lists private candidates without inventing public URLs', () async {
+      final service = _RecordingUserService();
+
+      final assets = await service.getSocialPersonaAssets();
+
+      expect(assets, isEmpty);
+      expect(service.lastUri?.path, '/api/user/persona/assets');
+    });
+
+    test('uses server-keyed create/complete/select/revoke routes', () async {
+      final service = _RecordingUserService();
+
+      final created = await service.createSocialPersonaAsset(
+        assetType: 'illustration',
+        declaredMimeType: 'image/png',
+        declaredSizeBytes: 1024,
+      );
+      expect(created.id, 'asset-1');
+      expect(service.lastUri?.path, '/api/user/persona/assets');
+      expect(service.lastBody, contains('"declared_size_bytes":1024'));
+
+      await service.completeSocialPersonaAsset('asset/1');
+      expect(
+        service.lastUri?.path,
+        '/api/user/persona/assets/asset%2F1/complete',
+      );
+      await service.selectSocialPersonaAsset('asset/1');
+      expect(
+        service.lastUri?.path,
+        '/api/user/persona/assets/asset%2F1/select',
+      );
+      await service.revokeSocialPersonaAsset('asset/1');
+      expect(
+        service.lastUri?.path,
+        '/api/user/persona/assets/asset%2F1/revoke',
+      );
     });
   });
 }

@@ -243,6 +243,22 @@ Content-Type: application/json
 
 `representation_mode` 当前为 `trait_mapped|role_character`；`self_descriptions` 最多三个且必须来自固定标签；外观字段不能扩展或写入自由文本。保存会把已发布记录退回 `draft`，旧发布不会继续公开，并写入 `social_persona_audits`。
 
+### GET `/api/user/persona/assets`
+
+[已实现] 仅本人可读当前校园的图片候选及其私有生命周期。返回的 `upload_key` 只用于向平台私有 bucket 上传，不是公开 URL。
+
+### POST `/api/user/persona/assets`
+
+[已实现] 创建服务器生成 key 的图片候选。body 为 `{ "asset_type": "illustration|photo_stylized", "declared_mime_type": "image/png|image/jpeg|image/webp", "declared_size_bytes": 1..10485760 }`。服务端不接受客户端自选 storage key，也不把创建记录当作上传成功。
+
+### POST `/api/user/persona/assets/{id}/complete`
+
+[已实现] 服务端对生成的 key 做平台对象探测，核对真实大小和 MIME。图片审核开启时进入 `pending_review`，否则进入 `active`；审核前不能选择或公开。重复调用在已验证对象上幂等返回，不会重新宣称上传成功。
+
+### POST `/api/user/persona/assets/{id}/select` 与 `/revoke`
+
+[已实现] 只有本人可以显式选择已审核的 `active` 候选或撤销候选。选择新素材会把已发布 persona 退回私有 `draft`，仍需再次显式发布；撤销会清除选中引用、停止公开投影，并交给耐久清理 worker 删除远端对象。图片只是角色呈现，不是身份认证；照片风格化也不会声称与真人一一对应。
+
 ### POST `/api/user/persona/publish`
 
 [已实现] 需要同一 verified campus 下已有 persona。显式发布当前草稿，返回 `status=published`；同校园公开主页才会展示它。发布不会产生任何 online、read、typing 或 Agent 参与事实。
@@ -257,7 +273,7 @@ Content-Type: application/json
 
 ### GET `/api/users/{id}/persona`
 
-[已实现] 游客或登录用户均可读取，但校园由当前登录 session 的活动校园解析，游客使用默认公开校园。响应为 `{ "persona": null | {...} }`；只有目标用户在该校园有 verified membership 且明确 `published` 时才返回角色配置。草稿、归档、非活动校园和未认证成员统一返回 `persona: null`，不泄漏存在性。响应只包含 `representation_mode`、`style_version`、受控 `appearance_config`、用户标签、主动 `contact_posture` 和 `published_at`，不包含账号、认证或注意力状态。
+[已实现] 游客或登录用户均可读取，但校园由当前登录 session 的活动校园解析，游客使用默认公开校园。响应为 `{ "persona": null | {...} }`；只有目标用户在该校园有 verified membership 且明确 `published` 时才返回角色配置。草稿、归档、非活动校园和未认证成员统一返回 `persona: null`，不泄漏存在性。响应包含受控 token、用户标签、主动 `contact_posture`、`published_at`，以及在 `selected_asset_id` 对应候选已通过对象探测和审核时的短期平台 `asset.url`；不返回 storage key、账号、认证或注意力状态。URL 失效或素材撤销后客户端应回退 token，不把图片加载失败解释为在线或已读信号。
 
 ### POST `/api/users/{id}/report`
 

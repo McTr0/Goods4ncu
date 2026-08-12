@@ -1,4 +1,5 @@
-//! Durable cleanup for remote files referenced by shared chat objects.
+//! Durable cleanup for remote files referenced by shared chat objects and
+//! revoked SocialPersona assets.
 //!
 //! Database revocation is the user-visible authority. The object-store DELETE
 //! is deliberately asynchronous so a slow provider cannot hold the revoke
@@ -72,6 +73,15 @@ pub async fn run(db: PgPool, config: SharedObjectCleanupConfig, shutdown: Shutdo
 }
 
 async fn process_cycle(db: &PgPool, config: &SharedObjectCleanupConfig) -> anyhow::Result<i64> {
+    let shared_objects = process_shared_object_cycle(db, config).await?;
+    let persona_assets = process_persona_asset_cycle(db, config).await?;
+    Ok(shared_objects + persona_assets)
+}
+
+async fn process_shared_object_cycle(
+    db: &PgPool,
+    config: &SharedObjectCleanupConfig,
+) -> anyhow::Result<i64> {
     let bucket = config
         .bucket
         .as_ref()
@@ -156,6 +166,90 @@ async fn process_cycle(db: &PgPool, config: &SharedObjectCleanupConfig) -> anyho
     Ok(count)
 }
 
+async fn process_persona_asset_cycle(
+    db: &PgPool,
+    config: &SharedObjectCleanupConfig,
+) -> anyhow::Result<i64> {
+    let bucket = config
+        .bucket
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("persona asset cleanup storage is disabled"))?;
+    let claims = sqlx::query_as::<_, CleanupClaim>(
+        "WITH candidates AS (
+             SELECT id
+             FROM social_persona_assets
+             WHERE status IN ('revoked', 'deleted')
+               AND cleanup_requested_at IS NOT NULL
+               AND cleanup_completed_at IS NULL
+               AND (
+                   cleanup_next_attempt_at IS NULL
+                   OR cleanup_next_attempt_at <= NOW()
+               )
+             ORDER BY cleanup_requested_at ASC, id ASC
+             LIMIT $1
+             FOR UPDATE SKIP LOCKED
+         )
+         UPDATE social_persona_assets asset
+         SET cleanup_attempts = asset.cleanup_attempts + 1,
+             cleanup_next_attempt_at = NOW() + ($2 * INTERVAL '1 second'),
+             cleanup_last_error = NULL,
+             updated_at = NOW()
+         FROM candidates c
+         WHERE asset.id = c.id
+         RETURNING asset.id, asset.storage_key, asset.cleanup_attempts",
+    )
+    .bind(MAX_CLAIMS_PER_CYCLE)
+    .bind(CLAIM_LEASE_SECS)
+    .fetch_all(db)
+    .await?;
+
+    let count = claims.len() as i64;
+    for claim in claims {
+        let result = if is_valid_persona_asset_key(&claim.storage_key) {
+            delete_remote_object(bucket, &claim.storage_key, config.request_timeout_secs).await
+        } else {
+            Err("拒绝删除不符合 persona asset 约束的 storage key".to_string())
+        };
+        match result {
+            Ok(()) => {
+                sqlx::query(
+                    "UPDATE social_persona_assets
+                     SET status = 'deleted', cleanup_completed_at = NOW(),
+                         cleanup_next_attempt_at = NULL, cleanup_last_error = NULL,
+                         updated_at = NOW()
+                     WHERE id = $1 AND cleanup_completed_at IS NULL",
+                )
+                .bind(claim.id)
+                .execute(db)
+                .await?;
+                tracing::info!(asset_id = %claim.id, "persona asset remote cleanup completed");
+            }
+            Err(error) => {
+                let delay_secs = retry_delay_secs(claim.cleanup_attempts);
+                let message = truncate_error(&error);
+                sqlx::query(
+                    "UPDATE social_persona_assets
+                     SET cleanup_next_attempt_at = NOW() + ($2 * INTERVAL '1 second'),
+                         cleanup_last_error = $3, updated_at = NOW()
+                     WHERE id = $1 AND cleanup_completed_at IS NULL",
+                )
+                .bind(claim.id)
+                .bind(delay_secs)
+                .bind(&message)
+                .execute(db)
+                .await?;
+                tracing::warn!(
+                    asset_id = %claim.id,
+                    retry_after_secs = delay_secs,
+                    error = %message,
+                    "persona asset remote cleanup will retry"
+                );
+            }
+        }
+    }
+    Ok(count)
+}
+
 async fn delete_remote_object(
     bucket: &PrivateBucket,
     object_key: &str,
@@ -193,6 +287,24 @@ fn is_valid_shared_object_key(object_key: &str) -> bool {
         && parts.next().is_none()
 }
 
+fn is_valid_persona_asset_key(object_key: &str) -> bool {
+    let mut parts = object_key.split('/');
+    matches!(parts.next(), Some("persona"))
+        && parts
+            .next()
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .is_some()
+        && parts
+            .next()
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .is_some()
+        && parts
+            .next()
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .is_some()
+        && parts.next().is_none()
+}
+
 fn retry_delay_secs(attempts: i32) -> i64 {
     let exponent = attempts.saturating_sub(1).clamp(0, 7) as u32;
     (30_i64.saturating_mul(1_i64 << exponent)).min(MAX_BACKOFF_SECS)
@@ -218,6 +330,21 @@ mod tests {
             "chat/{campus}/{object}/extra"
         )));
         assert!(!is_valid_shared_object_key("https://evil.example/object"));
+    }
+
+    #[test]
+    fn persona_asset_keys_are_strictly_scoped() {
+        let campus = Uuid::new_v4();
+        let persona = Uuid::new_v4();
+        let asset = Uuid::new_v4();
+        assert!(is_valid_persona_asset_key(&format!(
+            "persona/{campus}/{persona}/{asset}"
+        )));
+        assert!(!is_valid_persona_asset_key("persona/../../secrets"));
+        assert!(!is_valid_persona_asset_key(&format!(
+            "persona/{campus}/{persona}/{asset}/extra"
+        )));
+        assert!(!is_valid_persona_asset_key("https://evil.example/object"));
     }
 
     #[test]

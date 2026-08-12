@@ -193,6 +193,27 @@ void main() {
 
       expect(persona.isPublished, isTrue);
     });
+
+    test('parses only an approved platform asset for public projection', () {
+      final persona = SocialPersona.fromJson({
+        'representation_mode': 'role_character',
+        'style_version': 'v1',
+        'appearance_config': <String, dynamic>{},
+        'self_descriptions': <dynamic>[],
+        'contact_posture': 'leave_message',
+        'published_at': '2026-08-12T10:00:00Z',
+        'asset': {
+          'id': 'asset-1',
+          'asset_type': 'illustration',
+          'url': 'https://media.example.test/signed',
+          'storage_key': 'persona/campus/persona/asset',
+        },
+      });
+
+      expect(persona.asset, isNotNull);
+      expect(persona.asset!.isReady, isTrue);
+      expect(persona.asset!.url, 'https://media.example.test/signed');
+    });
   });
 
   group('ChatSharedObject', () {

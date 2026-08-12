@@ -1455,6 +1455,71 @@ class SocialPersonaAppearance {
   };
 }
 
+class SocialPersonaAsset {
+  const SocialPersonaAsset({
+    required this.id,
+    this.personaId,
+    required this.assetType,
+    this.declaredMimeType,
+    this.declaredSizeBytes,
+    this.uploadedSizeBytes,
+    this.uploadedMimeType,
+    this.storageVerifiedAt,
+    required this.moderationStatus,
+    required this.status,
+    this.rejectReason,
+    this.uploadKey,
+    this.url,
+    this.createdAt,
+    this.updatedAt,
+  });
+
+  final String id;
+  final String? personaId;
+  final String assetType;
+  final String? declaredMimeType;
+  final int? declaredSizeBytes;
+  final int? uploadedSizeBytes;
+  final String? uploadedMimeType;
+  final DateTime? storageVerifiedAt;
+  final String moderationStatus;
+  final String status;
+  final String? rejectReason;
+  final String? uploadKey;
+  final String? url;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+
+  bool get isReady =>
+      status == 'active' &&
+      (moderationStatus == 'approved' || moderationStatus == 'not_required');
+
+  factory SocialPersonaAsset.fromJson(Map<String, dynamic> json) {
+    return SocialPersonaAsset(
+      id: json['id']?.toString() ?? '',
+      personaId: json['persona_id']?.toString(),
+      assetType: json['asset_type']?.toString() ?? 'illustration',
+      declaredMimeType: json['declared_mime_type']?.toString(),
+      declaredSizeBytes: (json['declared_size_bytes'] as num?)?.toInt(),
+      uploadedSizeBytes: (json['uploaded_size_bytes'] as num?)?.toInt(),
+      uploadedMimeType: json['uploaded_mime_type']?.toString(),
+      storageVerifiedAt: DateTime.tryParse(
+        json['storage_verified_at']?.toString() ?? '',
+      ),
+      moderationStatus: json['moderation_status']?.toString() ?? 'approved',
+      // Public projections only contain assets that the server has already
+      // filtered to active/approved; private upload responses include the
+      // explicit lifecycle fields.
+      status: json['status']?.toString() ?? 'active',
+      rejectReason: json['reject_reason']?.toString(),
+      uploadKey: json['upload_key']?.toString(),
+      url: json['url']?.toString(),
+      createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
+      updatedAt: DateTime.tryParse(json['updated_at']?.toString() ?? ''),
+    );
+  }
+}
+
 class SocialPersona {
   const SocialPersona({
     this.id,
@@ -1466,6 +1531,8 @@ class SocialPersona {
     required this.selfDescriptions,
     required this.contactPosture,
     required this.status,
+    this.selectedAssetId,
+    this.asset,
     this.publishedAt,
     this.createdAt,
     this.updatedAt,
@@ -1480,6 +1547,8 @@ class SocialPersona {
   final List<String> selfDescriptions;
   final String contactPosture;
   final String status;
+  final String? selectedAssetId;
+  final SocialPersonaAsset? asset;
   final String? publishedAt;
   final String? createdAt;
   final String? updatedAt;
@@ -1511,6 +1580,12 @@ class SocialPersona {
       status:
           json['status']?.toString() ??
           (json['published_at'] == null ? 'draft' : 'published'),
+      selectedAssetId: json['selected_asset_id']?.toString(),
+      asset: (json['asset'] as Map?) == null
+          ? null
+          : SocialPersonaAsset.fromJson(
+              (json['asset'] as Map).cast<String, dynamic>(),
+            ),
       publishedAt: json['published_at']?.toString(),
       createdAt: json['created_at']?.toString(),
       updatedAt: json['updated_at']?.toString(),

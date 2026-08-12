@@ -382,6 +382,7 @@ async fn rls_policies_exist_on_all_tenant_tables() {
             "refresh_tokens",
             "social_personas",
             "social_persona_audits",
+            "social_persona_assets",
             "chat_relationship_pins",
             "chat_shared_objects",
         ];

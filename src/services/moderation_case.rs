@@ -1215,6 +1215,7 @@ pub async fn create_case_for_rejected_job(
                        WHEN job.resource_type = 'listing_image' THEN listing.owner_id
                        WHEN job.resource_type = 'chat_image' THEN message.sender
                        WHEN job.resource_type = 'avatar' THEN job.resource_id
+                       WHEN job.resource_type = 'social_persona_asset' THEN persona_asset.user_id
                        ELSE NULL
                    END,
                    job.resource_type, job.resource_id, 'machine', job.id,
@@ -1228,6 +1229,9 @@ pub async fn create_case_for_rejected_job(
               ON job.resource_type = 'listing_image' AND listing.id = job.resource_id
             LEFT JOIN chat_messages message
               ON job.resource_type = 'chat_image' AND message.id::text = job.resource_id
+            LEFT JOIN social_persona_assets persona_asset
+              ON job.resource_type = 'social_persona_asset'
+             AND persona_asset.id::text = job.resource_id
             WHERE job.id = $1 AND job.status = 'rejected'
             ON CONFLICT (source_type, source_ref_id) DO UPDATE
             SET public_reason = EXCLUDED.public_reason,
@@ -1410,6 +1414,33 @@ async fn update_resource_status(
             )
             .bind(status)
             .bind(object_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(db_error)?;
+        }
+        "social_persona_asset" => {
+            let asset_id = resource_id.parse::<Uuid>().map_err(|_| {
+                ApiError::Internal(anyhow::anyhow!("invalid persona asset resource id"))
+            })?;
+            sqlx::query(
+                "UPDATE social_persona_assets
+                 SET moderation_status = $1,
+                     status = CASE
+                         WHEN status IN ('revoked', 'deleted') THEN status
+                         WHEN $1 = 'approved' AND storage_verified_at IS NOT NULL THEN 'active'
+                         WHEN $1 = 'rejected' THEN 'rejected'
+                         ELSE status
+                     END,
+                     reject_reason = CASE
+                         WHEN $1 = 'approved' THEN NULL
+                         WHEN $1 = 'rejected' THEN COALESCE(reject_reason, '图片内容不合规')
+                         ELSE reject_reason
+                     END,
+                     updated_at = NOW()
+                 WHERE id = $2",
+            )
+            .bind(status)
+            .bind(asset_id)
             .execute(&mut **tx)
             .await
             .map_err(db_error)?;

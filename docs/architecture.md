@@ -146,7 +146,7 @@ Message / ConversationEvent / Quote / Listing / Acknowledgement
 
 Flutter 的空间布局保持稳定的“对方左上 / 自己右下”映射，但角色尺寸由本地视口、滚动密度和无障碍设置决定，绝不订阅 typing/read/online。连接开始时可以缩细 Rail、弱化角色；这是本地投影状态，不是对外 presence 事件。
 
-`SocialPersona` 是独立的受审核展示资源。校园认证徽标仍从 membership 读取，公开接近方式从用户显式设置读取；Agent 头像、Agent 参与提示与用户角色资产使用不同组件和事件，避免把“用户分身出现”误解为“AI 已进入私聊”。
+`SocialPersona` 是独立的受审核展示资源。校园认证徽标仍从 membership 读取，公开接近方式从用户显式设置读取；`0070_social_persona_assets` 的图片候选必须经过服务器对象探测、必要审核和用户显式选择，撤销后由私有 bucket cleanup worker 清理。Agent 头像、Agent 参与提示与用户角色资产使用不同组件和事件，避免把“用户分身出现”误解为“AI 已进入私聊”。
 
 ## 当前 Agent 与 RAG
 

@@ -848,6 +848,22 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             get(social_persona::get_persona).put(social_persona::upsert_persona),
         )
         .route(
+            "/api/user/persona/assets",
+            get(social_persona::list_assets).post(social_persona::create_asset),
+        )
+        .route(
+            "/api/user/persona/assets/{id}/complete",
+            post(social_persona::complete_asset),
+        )
+        .route(
+            "/api/user/persona/assets/{id}/select",
+            post(social_persona::select_asset),
+        )
+        .route(
+            "/api/user/persona/assets/{id}/revoke",
+            post(social_persona::revoke_asset),
+        )
+        .route(
             "/api/user/persona/publish",
             post(social_persona::publish_persona),
         )
