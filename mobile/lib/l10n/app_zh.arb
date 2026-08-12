@@ -900,6 +900,11 @@
       }
     }
   },
+  "relationshipSpaceSharedObjectsTitle": "共享对象",
+  "relationshipSpaceSharedObjectsReadOnly": "只读引用，不改变原始事实",
+  "relationshipSpaceObjectFile": "文件",
+  "relationshipSpaceObjectLink": "链接",
+  "relationshipSpaceObjectReference": "引用",
   "conversationRealtimeCount": "实时 {count}",
   "@conversationRealtimeCount": {
     "placeholders": {

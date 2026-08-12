@@ -2004,6 +2004,21 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get relationshipSpaceSharedObjectsTitle => '共享对象';
+
+  @override
+  String get relationshipSpaceSharedObjectsReadOnly => '只读引用，不改变原始事实';
+
+  @override
+  String get relationshipSpaceObjectFile => '文件';
+
+  @override
+  String get relationshipSpaceObjectLink => '链接';
+
+  @override
+  String get relationshipSpaceObjectReference => '引用';
+
+  @override
   String conversationRealtimeCount(int count) {
     return '实时 $count';
   }

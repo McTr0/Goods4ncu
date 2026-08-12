@@ -786,6 +786,7 @@ class _UserChatPageState extends State<UserChatPage> {
             isConnected: _conversation?.state == ConversationState.active,
             pinCount: _relationshipSpace?.pins.length ?? 0,
             sharedObjectCount: _relationshipSpace?.sharedObjects.length ?? 0,
+            sharedObjects: _relationshipSpace?.sharedObjects ?? const [],
             hasRecentConnection: _relationshipSpace?.recentConnection != null,
             compact: true,
           ),

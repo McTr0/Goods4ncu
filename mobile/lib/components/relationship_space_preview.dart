@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
+import '../models/models.dart';
 import '../theme/app_theme.dart';
 
 /// A small, deterministic projection of a one-to-one relationship.
@@ -19,6 +20,7 @@ class RelationshipSpacePreview extends StatelessWidget {
     this.isConnected = false,
     this.pinCount = 0,
     this.sharedObjectCount = 0,
+    this.sharedObjects = const [],
     this.hasRecentConnection = false,
     this.compact = false,
   });
@@ -29,6 +31,7 @@ class RelationshipSpacePreview extends StatelessWidget {
   final bool isConnected;
   final int pinCount;
   final int sharedObjectCount;
+  final List<RelationshipSpaceSharedObject> sharedObjects;
   final bool hasRecentConnection;
   final bool compact;
 
@@ -194,6 +197,157 @@ class RelationshipSpacePreview extends StatelessWidget {
                 ],
               ),
             ],
+            if (sharedObjects.isNotEmpty) ...[
+              const SizedBox(height: AppTheme.sp8),
+              _SharedObjectRail(objects: sharedObjects),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SharedObjectRail extends StatelessWidget {
+  const _SharedObjectRail({required this.objects});
+
+  final List<RelationshipSpaceSharedObject> objects;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    final visible = objects.take(4).toList(growable: false);
+    final hiddenCount = objects.length - visible.length;
+    return Semantics(
+      container: true,
+      label: l.relationshipSpaceSharedObjectsTitle,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.link_rounded,
+                size: 15,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 5),
+              Text(
+                l.relationshipSpaceSharedObjectsTitle,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(
+                  l.relationshipSpaceSharedObjectsReadOnly,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 10,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Wrap(
+            spacing: 5,
+            runSpacing: 5,
+            children: [
+              for (final object in visible) _SharedObjectChip(object: object),
+              if (hiddenCount > 0)
+                _RailChip(
+                  icon: Icons.more_horiz_rounded,
+                  label: '+$hiddenCount',
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SharedObjectChip extends StatelessWidget {
+  const _SharedObjectChip({required this.object});
+
+  final RelationshipSpaceSharedObject object;
+
+  String _label(AppLocalizations l) {
+    switch (object.kind) {
+      case 'listing':
+        return l.quoteListing;
+      case 'order':
+        return l.quoteOrder;
+      case 'file':
+        return l.relationshipSpaceObjectFile;
+      case 'link':
+        return l.relationshipSpaceObjectLink;
+      default:
+        return l.relationshipSpaceObjectReference;
+    }
+  }
+
+  IconData _icon() {
+    switch (object.kind) {
+      case 'listing':
+        return Icons.inventory_2_outlined;
+      case 'order':
+        return Icons.receipt_long_outlined;
+      case 'file':
+        return Icons.insert_drive_file_outlined;
+      case 'link':
+        return Icons.link_outlined;
+      default:
+        return Icons.bookmark_border_rounded;
+    }
+  }
+
+  String _title() {
+    final snapshot = object.snapshot;
+    for (final key in const ['title', 'listing_title', 'filename', 'label']) {
+      final value = snapshot[key]?.toString().trim();
+      if (value != null && value.isNotEmpty) return value;
+    }
+    return object.refId;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    final label = _label(l);
+    final title = _title();
+    return Semantics(
+      label: '$label: $title',
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 260),
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+        decoration: BoxDecoration(
+          color: Theme.of(
+            context,
+          ).colorScheme.secondaryContainer.withValues(alpha: .55),
+          borderRadius: BorderRadius.circular(AppTheme.radiusXl),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(_icon(), size: 14),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                '$label · $title',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
           ],
         ),
       ),

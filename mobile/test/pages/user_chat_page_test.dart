@@ -288,6 +288,42 @@ void main() {
       expect(find.text('Hello, World!'), findsOneWidget);
     });
 
+    testWidgets(
+      'offers explicit acknowledgement actions for received messages',
+      (tester) async {
+        MessageAcknowledgementKind? selected;
+        final message = ConversationMessage(
+          id: '1',
+          conversationId: 'conv-1',
+          senderId: 'user-other',
+          content: '请确认收到这条留言',
+          sentAt: DateTime.now(),
+          status: 'sent',
+        );
+
+        await tester.pumpWidget(
+          buildTestableWidget(
+            MessageBubble(
+              message: message,
+              isMe: false,
+              isConnected: false,
+              onEdit: null,
+              onAcknowledge: (kind) => selected = kind,
+            ),
+          ),
+        );
+
+        await tester.longPress(find.text('请确认收到这条留言'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('收到'), findsOneWidget);
+        expect(find.text('我会看'), findsOneWidget);
+        expect(find.text('已处理'), findsOneWidget);
+        await tester.tap(find.text('我会看'));
+        expect(selected, MessageAcknowledgementKind.willReview);
+      },
+    );
+
     testWidgets('displays timestamp', (tester) async {
       final message = ConversationMessage(
         id: '1',

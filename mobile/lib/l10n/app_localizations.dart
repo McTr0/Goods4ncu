@@ -3924,6 +3924,36 @@ abstract class AppLocalizations {
   /// **'{count} shared objects'**
   String relationshipSpaceObjectsCount(int count);
 
+  /// No description provided for @relationshipSpaceSharedObjectsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Shared objects'**
+  String get relationshipSpaceSharedObjectsTitle;
+
+  /// No description provided for @relationshipSpaceSharedObjectsReadOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Read-only references; original facts stay authoritative'**
+  String get relationshipSpaceSharedObjectsReadOnly;
+
+  /// No description provided for @relationshipSpaceObjectFile.
+  ///
+  /// In en, this message translates to:
+  /// **'File'**
+  String get relationshipSpaceObjectFile;
+
+  /// No description provided for @relationshipSpaceObjectLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Link'**
+  String get relationshipSpaceObjectLink;
+
+  /// No description provided for @relationshipSpaceObjectReference.
+  ///
+  /// In en, this message translates to:
+  /// **'Reference'**
+  String get relationshipSpaceObjectReference;
+
   /// No description provided for @conversationRealtimeCount.
   ///
   /// In en, this message translates to:

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/components/relationship_space_preview.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
+import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/theme/app_theme.dart';
 
 Widget _host(Widget child, {Locale locale = const Locale('zh')}) {
@@ -62,4 +63,45 @@ void main() {
     expect(find.text('1 个共享对象'), findsOneWidget);
     expect(find.text('时间轨迹'), findsWidgets);
   });
+
+  testWidgets(
+    'shows shared object references without loading their resources',
+    (tester) async {
+      await tester.pumpWidget(
+        _host(
+          RelationshipSpacePreview(
+            otherName: 'Alice',
+            sharedObjects: [
+              RelationshipSpaceSharedObject(
+                key: 'listing:listing-1',
+                kind: 'listing',
+                refId: 'listing-1',
+                snapshot: const {'title': '数据库教材'},
+                sourceMessageId: 7,
+                conversationId: 'conv-1',
+                actorId: 'user-1',
+                createdAt: DateTime.utc(2026, 1, 1),
+              ),
+              RelationshipSpaceSharedObject(
+                key: 'link:link-1',
+                kind: 'link',
+                refId: 'link-1',
+                snapshot: const {'label': '交接地点'},
+                sourceMessageId: 8,
+                conversationId: 'conv-1',
+                actorId: 'user-2',
+                createdAt: DateTime.utc(2026, 1, 2),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      expect(find.text('共享对象'), findsOneWidget);
+      expect(find.textContaining('商品 · 数据库教材'), findsOneWidget);
+      expect(find.textContaining('链接 · 交接地点'), findsOneWidget);
+      expect(find.textContaining('只读引用'), findsOneWidget);
+      expect(find.byType(Image), findsNothing);
+    },
+  );
 }

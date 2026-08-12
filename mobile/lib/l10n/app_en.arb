@@ -927,6 +927,11 @@
       }
     }
   },
+  "relationshipSpaceSharedObjectsTitle": "Shared objects",
+  "relationshipSpaceSharedObjectsReadOnly": "Read-only references; original facts stay authoritative",
+  "relationshipSpaceObjectFile": "File",
+  "relationshipSpaceObjectLink": "Link",
+  "relationshipSpaceObjectReference": "Reference",
   "conversationRealtimeCount": "Realtime {count}",
   "@conversationRealtimeCount": {
     "placeholders": {

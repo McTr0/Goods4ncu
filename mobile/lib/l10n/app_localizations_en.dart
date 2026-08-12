@@ -2103,6 +2103,22 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get relationshipSpaceSharedObjectsTitle => 'Shared objects';
+
+  @override
+  String get relationshipSpaceSharedObjectsReadOnly =>
+      'Read-only references; original facts stay authoritative';
+
+  @override
+  String get relationshipSpaceObjectFile => 'File';
+
+  @override
+  String get relationshipSpaceObjectLink => 'Link';
+
+  @override
+  String get relationshipSpaceObjectReference => 'Reference';
+
+  @override
   String conversationRealtimeCount(int count) {
     return 'Realtime $count';
   }
