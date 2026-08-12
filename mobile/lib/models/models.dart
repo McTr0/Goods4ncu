@@ -1492,7 +1492,8 @@ class SocialPersonaAsset {
 
   bool get isReady =>
       status == 'active' &&
-      (moderationStatus == 'approved' || moderationStatus == 'not_required');
+      (moderationStatus == 'approved' || moderationStatus == 'not_required') &&
+      (storageVerifiedAt != null || (url?.trim().isNotEmpty ?? false));
 
   factory SocialPersonaAsset.fromJson(Map<String, dynamic> json) {
     return SocialPersonaAsset(

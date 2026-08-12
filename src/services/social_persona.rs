@@ -808,6 +808,18 @@ fn normalize_asset_mime_type(value: &str) -> Result<String, ApiError> {
     }
 }
 
+/// Validate the small, non-ambiguous magic headers used by the supported
+/// persona image formats. MIME metadata alone is not authoritative because a
+/// direct object upload can lie about Content-Type.
+pub fn image_header_matches(mime_type: &str, prefix: &[u8]) -> bool {
+    match mime_type.trim().to_ascii_lowercase().as_str() {
+        "image/png" => prefix.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]),
+        "image/jpeg" => prefix.starts_with(&[0xFF, 0xD8, 0xFF]),
+        "image/webp" => prefix.len() >= 12 && &prefix[0..4] == b"RIFF" && &prefix[8..12] == b"WEBP",
+        _ => false,
+    }
+}
+
 fn validate_asset_size(size_bytes: i64) -> Result<(), ApiError> {
     if (1..=10 * 1024 * 1024).contains(&size_bytes) {
         Ok(())
@@ -926,5 +938,23 @@ mod tests {
             "casual_chat".to_string(),
         ];
         assert!(normalize_input(too_many).is_err());
+    }
+
+    #[test]
+    fn image_headers_must_match_declared_mime() {
+        assert!(image_header_matches(
+            "image/png",
+            &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]
+        ));
+        assert!(image_header_matches(
+            "image/jpeg",
+            &[0xFF, 0xD8, 0xFF, 0xE0]
+        ));
+        assert!(image_header_matches("image/webp", b"RIFF0000WEBPVP8 "));
+        assert!(!image_header_matches("image/png", b"not an image"));
+        assert!(!image_header_matches(
+            "image/jpeg",
+            &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]
+        ));
     }
 }

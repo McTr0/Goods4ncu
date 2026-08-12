@@ -16,8 +16,9 @@ use crate::api::error::ApiError;
 use crate::api::session::{OptionalSession, VerifiedTenant};
 use crate::api::{user::resolve_public_request_campus, AppState};
 use crate::services::social_persona::{
-    CompleteSocialPersonaAssetInput, CreateSocialPersonaAssetInput, PublicSocialPersonaView,
-    SocialPersonaAssetView, SocialPersonaInput, SocialPersonaService, SocialPersonaView,
+    image_header_matches, CompleteSocialPersonaAssetInput, CreateSocialPersonaAssetInput,
+    PublicSocialPersonaView, SocialPersonaAssetView, SocialPersonaInput, SocialPersonaService,
+    SocialPersonaView,
 };
 
 #[derive(Debug, Deserialize)]
@@ -193,6 +194,12 @@ pub async fn complete_asset(
         code: "persona_asset_mime_missing",
         message: "平台没有返回图片类型".to_string(),
     })?;
+    if !image_header_matches(&uploaded_mime_type, &metadata.prefix_bytes) {
+        return Err(ApiError::CodedConflict {
+            code: "persona_asset_header_mismatch",
+            message: "图片文件头与类型不一致".to_string(),
+        });
+    }
     let completed = service
         .complete_asset(
             &tenant.session.user_id,

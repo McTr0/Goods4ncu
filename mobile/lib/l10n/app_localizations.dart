@@ -5693,6 +5693,132 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Choices are restricted to the current style version.'**
   String get socialPersonaSelectHint;
+
+  /// No description provided for @socialPersonaAssetsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Role assets'**
+  String get socialPersonaAssetsTitle;
+
+  /// No description provided for @socialPersonaAssetsDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Images are presentation only. They become public only after server verification and review; a failed load still falls back to the static role.'**
+  String get socialPersonaAssetsDescription;
+
+  /// No description provided for @socialPersonaAssetsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No role assets uploaded yet.'**
+  String get socialPersonaAssetsEmpty;
+
+  /// No description provided for @socialPersonaAssetAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Add image'**
+  String get socialPersonaAssetAdd;
+
+  /// No description provided for @socialPersonaAssetIllustration.
+  ///
+  /// In en, this message translates to:
+  /// **'Role illustration'**
+  String get socialPersonaAssetIllustration;
+
+  /// No description provided for @socialPersonaAssetPhotoStylized.
+  ///
+  /// In en, this message translates to:
+  /// **'Stylized photo'**
+  String get socialPersonaAssetPhotoStylized;
+
+  /// No description provided for @socialPersonaAssetPendingUpload.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload still needs completion'**
+  String get socialPersonaAssetPendingUpload;
+
+  /// No description provided for @socialPersonaAssetPendingReview.
+  ///
+  /// In en, this message translates to:
+  /// **'Under review; not public'**
+  String get socialPersonaAssetPendingReview;
+
+  /// No description provided for @socialPersonaAssetReady.
+  ///
+  /// In en, this message translates to:
+  /// **'Approved and ready'**
+  String get socialPersonaAssetReady;
+
+  /// No description provided for @socialPersonaAssetRejected.
+  ///
+  /// In en, this message translates to:
+  /// **'Review rejected'**
+  String get socialPersonaAssetRejected;
+
+  /// No description provided for @socialPersonaAssetRevoked.
+  ///
+  /// In en, this message translates to:
+  /// **'Revoked'**
+  String get socialPersonaAssetRevoked;
+
+  /// No description provided for @socialPersonaAssetDeleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Cleaned up'**
+  String get socialPersonaAssetDeleted;
+
+  /// No description provided for @socialPersonaAssetUse.
+  ///
+  /// In en, this message translates to:
+  /// **'Use'**
+  String get socialPersonaAssetUse;
+
+  /// No description provided for @socialPersonaAssetRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry verification'**
+  String get socialPersonaAssetRetry;
+
+  /// No description provided for @socialPersonaAssetRevoke.
+  ///
+  /// In en, this message translates to:
+  /// **'Revoke this asset'**
+  String get socialPersonaAssetRevoke;
+
+  /// No description provided for @socialPersonaAssetSizeInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'The image is empty or larger than 10 MB.'**
+  String get socialPersonaAssetSizeInvalid;
+
+  /// No description provided for @socialPersonaAssetUploadTargetMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'The server did not return a safe upload target.'**
+  String get socialPersonaAssetUploadTargetMissing;
+
+  /// No description provided for @socialPersonaAssetUploadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Role asset upload failed'**
+  String get socialPersonaAssetUploadFailed;
+
+  /// No description provided for @socialPersonaAssetSelected.
+  ///
+  /// In en, this message translates to:
+  /// **'Asset selected; publish the role presentation again.'**
+  String get socialPersonaAssetSelected;
+
+  /// No description provided for @socialPersonaAssetRevokeConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Revoke this role asset?'**
+  String get socialPersonaAssetRevokeConfirmTitle;
+
+  /// No description provided for @socialPersonaAssetRevokeConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'It will stop being public immediately and enter remote cleanup. Conversation history is unchanged.'**
+  String get socialPersonaAssetRevokeConfirmBody;
 }
 
 class _AppLocalizationsDelegate

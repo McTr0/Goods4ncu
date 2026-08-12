@@ -439,7 +439,7 @@ impl AppState {
     }
 
     /// Probe a server-generated object key without trusting a client upload
-    /// claim. The range request transfers at most the first byte when the
+    /// claim. The range request transfers at most the first 512 bytes when the
     /// platform honours Range, while Content-Range/Length supplies the object
     /// size used by the shared-object lifecycle.
     pub async fn probe_platform_object(
@@ -453,9 +453,9 @@ impl AppState {
             .timeout(std::time::Duration::from_secs(10))
             .build()
             .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
-        let response = client
+        let mut response = client
             .get(url)
-            .header(reqwest::header::RANGE, "bytes=0-0")
+            .header(reqwest::header::RANGE, "bytes=0-511")
             .send()
             .await
             .map_err(|error| {
@@ -494,10 +494,26 @@ impl AppState {
             .get(reqwest::header::ETAG)
             .and_then(|value| value.to_str().ok())
             .map(str::to_string);
+        let mut prefix_bytes = Vec::with_capacity(512);
+        while prefix_bytes.len() < 512 {
+            let Some(chunk) = response.chunk().await.map_err(|error| {
+                tracing::warn!(%error, "platform storage prefix probe failed");
+                ApiError::ServiceUnavailable("平台文件服务")
+            })?
+            else {
+                break;
+            };
+            let remaining = 512 - prefix_bytes.len();
+            prefix_bytes.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+            if chunk.len() >= remaining {
+                break;
+            }
+        }
         Ok(PlatformObjectMetadata {
             size_bytes,
             mime_type,
             etag,
+            prefix_bytes,
         })
     }
 }
@@ -507,6 +523,9 @@ pub struct PlatformObjectMetadata {
     pub size_bytes: i64,
     pub mime_type: Option<String>,
     pub etag: Option<String>,
+    /// Bounded prefix read used by image lifecycles to validate file headers.
+    /// It is never persisted or returned to clients.
+    pub prefix_bytes: Vec<u8>,
 }
 
 fn parse_content_range_total(value: &str) -> Option<i64> {

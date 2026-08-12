@@ -11,6 +11,8 @@ class _FakeApiService extends ApiService {
     this.profile, {
     this.memberships = const [],
     String? activeCampusId,
+    this.persona,
+    this.personaAssets = const [],
   }) : activeCampusId =
            activeCampusId ??
            (memberships.isEmpty ? null : memberships.first.campusId);
@@ -18,6 +20,8 @@ class _FakeApiService extends ApiService {
   final Map<String, dynamic> profile;
   List<CampusMembership> memberships;
   String? activeCampusId;
+  SocialPersona? persona;
+  List<SocialPersonaAsset> personaAssets;
   String? switchedCampusId;
   int verificationRequests = 0;
   String? confirmedCode;
@@ -26,7 +30,11 @@ class _FakeApiService extends ApiService {
   Future<Map<String, dynamic>> getUserProfile() async => profile;
 
   @override
-  Future<SocialPersona?> getSocialPersona() async => null;
+  Future<SocialPersona?> getSocialPersona() async => persona;
+
+  @override
+  Future<List<SocialPersonaAsset>> getSocialPersonaAssets() async =>
+      personaAssets;
 
   @override
   Future<List<CampusMembership>> getCampusMemberships() async => memberships;
@@ -238,6 +246,68 @@ void main() {
       expect(api.switchedCampusId, 'campus-2');
       expect(find.text('第二校园'), findsOneWidget);
       expect(find.text(l.campusSwitchSuccess), findsOneWidget);
+    });
+
+    testWidgets('shows reviewed persona assets in the owner profile', (
+      tester,
+    ) async {
+      final persona = SocialPersona(
+        id: 'persona-1',
+        userId: 'student-1',
+        campusId: 'campus-1',
+        representationMode: 'role_character',
+        styleVersion: 'v1',
+        appearance: const SocialPersonaAppearance(
+          palette: 'teal',
+          silhouette: 'soft',
+          accessory: 'leaf',
+          outfit: 'campus',
+        ),
+        selfDescriptions: const ['slow_to_warm'],
+        contactPosture: 'leave_message',
+        status: 'draft',
+      );
+      final api = _FakeApiService(
+        {
+          'username': 'student',
+          'role': 'user',
+          'created_at': '2026-03-01T08:00:00Z',
+        },
+        memberships: const [
+          CampusMembership(
+            id: 'membership-1',
+            campusId: 'campus-1',
+            campusSlug: 'ncu',
+            campusNameZh: '南昌大学',
+            campusNameEn: 'Nanchang University',
+            status: 'verified',
+            role: 'member',
+          ),
+        ],
+        persona: persona,
+        personaAssets: [
+          SocialPersonaAsset(
+            id: 'asset-1',
+            personaId: 'persona-1',
+            assetType: 'illustration',
+            declaredMimeType: 'image/png',
+            declaredSizeBytes: 1024,
+            uploadedSizeBytes: 1024,
+            uploadedMimeType: 'image/png',
+            storageVerifiedAt: DateTime.utc(2026, 8, 12),
+            moderationStatus: 'approved',
+            status: 'active',
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(_buildTestApp(ProfilePage(apiService: api)));
+      await tester.pumpAndSettle();
+      final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
+
+      expect(find.text(l.socialPersonaAssetsTitle), findsOneWidget);
+      expect(find.text(l.socialPersonaAssetReady), findsOneWidget);
+      expect(find.text(l.socialPersonaAssetUse), findsOneWidget);
     });
   });
 }

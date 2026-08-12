@@ -2962,4 +2962,69 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get socialPersonaSelectHint => '这些选项会被严格限制在当前风格版本内。';
+
+  @override
+  String get socialPersonaAssetsTitle => '角色素材';
+
+  @override
+  String get socialPersonaAssetsDescription =>
+      '图片只作为角色呈现；服务器验证并审核通过后才会公开，加载失败仍会回退静态角色。';
+
+  @override
+  String get socialPersonaAssetsEmpty => '还没有上传角色素材。';
+
+  @override
+  String get socialPersonaAssetAdd => '添加图片';
+
+  @override
+  String get socialPersonaAssetIllustration => '角色插画';
+
+  @override
+  String get socialPersonaAssetPhotoStylized => '风格化照片';
+
+  @override
+  String get socialPersonaAssetPendingUpload => '等待完成上传';
+
+  @override
+  String get socialPersonaAssetPendingReview => '审核中，暂不公开';
+
+  @override
+  String get socialPersonaAssetReady => '已通过审核，可使用';
+
+  @override
+  String get socialPersonaAssetRejected => '未通过审核';
+
+  @override
+  String get socialPersonaAssetRevoked => '已撤销';
+
+  @override
+  String get socialPersonaAssetDeleted => '已清理';
+
+  @override
+  String get socialPersonaAssetUse => '使用';
+
+  @override
+  String get socialPersonaAssetRetry => '重试确认';
+
+  @override
+  String get socialPersonaAssetRevoke => '撤销此素材';
+
+  @override
+  String get socialPersonaAssetSizeInvalid => '图片为空或超过 10 MB。';
+
+  @override
+  String get socialPersonaAssetUploadTargetMissing => '服务器没有返回安全的上传目标。';
+
+  @override
+  String get socialPersonaAssetUploadFailed => '角色素材上传失败';
+
+  @override
+  String get socialPersonaAssetSelected => '已选择素材；请重新发布角色化呈现。';
+
+  @override
+  String get socialPersonaAssetRevokeConfirmTitle => '撤销这份角色素材？';
+
+  @override
+  String get socialPersonaAssetRevokeConfirmBody =>
+      '撤销后它会立即停止公开展示，并进入远端清理。历史沟通不会被修改。';
 }

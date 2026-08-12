@@ -3098,4 +3098,72 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get socialPersonaSelectHint =>
       'Choices are restricted to the current style version.';
+
+  @override
+  String get socialPersonaAssetsTitle => 'Role assets';
+
+  @override
+  String get socialPersonaAssetsDescription =>
+      'Images are presentation only. They become public only after server verification and review; a failed load still falls back to the static role.';
+
+  @override
+  String get socialPersonaAssetsEmpty => 'No role assets uploaded yet.';
+
+  @override
+  String get socialPersonaAssetAdd => 'Add image';
+
+  @override
+  String get socialPersonaAssetIllustration => 'Role illustration';
+
+  @override
+  String get socialPersonaAssetPhotoStylized => 'Stylized photo';
+
+  @override
+  String get socialPersonaAssetPendingUpload => 'Upload still needs completion';
+
+  @override
+  String get socialPersonaAssetPendingReview => 'Under review; not public';
+
+  @override
+  String get socialPersonaAssetReady => 'Approved and ready';
+
+  @override
+  String get socialPersonaAssetRejected => 'Review rejected';
+
+  @override
+  String get socialPersonaAssetRevoked => 'Revoked';
+
+  @override
+  String get socialPersonaAssetDeleted => 'Cleaned up';
+
+  @override
+  String get socialPersonaAssetUse => 'Use';
+
+  @override
+  String get socialPersonaAssetRetry => 'Retry verification';
+
+  @override
+  String get socialPersonaAssetRevoke => 'Revoke this asset';
+
+  @override
+  String get socialPersonaAssetSizeInvalid =>
+      'The image is empty or larger than 10 MB.';
+
+  @override
+  String get socialPersonaAssetUploadTargetMissing =>
+      'The server did not return a safe upload target.';
+
+  @override
+  String get socialPersonaAssetUploadFailed => 'Role asset upload failed';
+
+  @override
+  String get socialPersonaAssetSelected =>
+      'Asset selected; publish the role presentation again.';
+
+  @override
+  String get socialPersonaAssetRevokeConfirmTitle => 'Revoke this role asset?';
+
+  @override
+  String get socialPersonaAssetRevokeConfirmBody =>
+      'It will stop being public immediately and enter remote cleanup. Conversation history is unchanged.';
 }
