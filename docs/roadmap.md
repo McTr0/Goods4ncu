@@ -30,7 +30,7 @@
 当前能力还不是生产就绪。主要差距：
 
 - CampusMembership、核心资源校园作用域、后台审核队列、跨校园理由审计和统一 session extractor 已落地。当前所有租户表（包括 persona asset）已启用 FORCE RLS（`0042` 及后续领域迁移，`app.campus_id` 事务级 GUC 触发，未设置时放行以保持应用层为主边界），隔离与写拒绝有集成测试；应用侧全请求 GUC 注入（fail-closed）与多副本租户验证仍属 Phase 4。
-- Agent 的更新/下架/成交意向/议价已接入 crash-safe ActionPlan（模型只能提出，L3 需独立 token 的二次确认）；发布采用立即执行 + 条件式撤销。HTTP、Agent 和撤销路径已统一经过 `ListingCommandService`；四类关键动作在提案时保存 `inventory.content_revision`，确认时按锁内版本比较，HTTP 更新/删除也支持期望版本，完整行动审计仍待补。
+- Agent 的更新/下架/成交意向/议价已接入 crash-safe ActionPlan（模型只能提出，L3 需独立 token 的二次确认）；发布采用立即执行 + 条件式撤销。HTTP、Agent 和撤销路径已统一经过 `ListingCommandService`；四类关键动作在提案时保存 `inventory.content_revision`，确认时按锁内版本比较，HTTP 更新/删除也支持期望版本，typed terminal outcome 和行动级 receipt 已落地，完整 AgentRun 审计仍待补。
 - 聊天隐私迁移已完成首阶段：留言/连接二分、服务端已发送、设备本地 `LOCALLY_SEEN`、主动 acknowledgement，以及陌生人/忙碌/联系人静音与重复请求抑制均由当前协议执行。
 - WebSocket 跨副本投递已具备（Redis fan-out，双实例端到端验证）；call signaling 多副本化与压测仍待做，typing 已从协议移除。outbox 基础与通知推送已持久化，其余事件消费者仍在进程内。
 - 媒体隔离、审核公开门槛、缩略图和 Base64 退出不完整；案件事实层已具备，对象存储隔离已用真实 MinIO 完成生产模式演练，媒体审核队列已通过 `0069` 增加可回收 lease，并补齐低基数队列/延迟指标；生产 bucket/CDN、图片审核 provider 和人工运营仍需部署侧验收。
@@ -223,8 +223,8 @@
 ### 安全与质量
 
 - [部分完成] 工具层滥用测试集已落地（`tests/agent_injection_regression.rs`）：跨校园购买/议价、参数污染（空/超长标题、越界成色、非正/天价价格、越界出价）、自买自卖、未认证用户提案全部被拒并有零副作用断言；confirmation token 隔离、跨用户/校园确认拒绝、资源版本快照冲突和原子恢复已有回归覆盖。Agent listing 已与 HTTP 共享同步文本审核、分类/空白/金额规范化；针对真实 LLM 的间接注入与虚假承诺评估仍需线上评测集。
-- AgentRun 记录路由、检索、工具、provider、版本、延迟和结果类别，敏感正文脱敏。
-- [部分完成] Agent ActionPlan 提案已支持认证请求的 `Idempotency-Key`：同一用户/校园和动作参数哈希的重试复用同一计划，改参数安全拒绝；统一 AgentRun/审计信封、设备绑定和版本化风险文案仍待完成。
+- [部分完成] ActionPlan 计划终态已保存受约束的 `result_code`；`agent_action_audits` 在同一事务中记录提案、幂等重放/冲突、确认、执行、失败、取消和过期，带租户、trace、风险、耗时和固定元数据，不保存正文、token、args 或完整错误。统一 AgentRun（路由、检索、provider、版本、token/TTFT）信封、设备绑定和版本化风险文案仍待完成。
+- AgentRun 完整记录路由、检索、工具、provider、版本、延迟和结果类别，敏感正文脱敏；行动 receipt 不能替代该完整运行记录。
 - 无 LLM 时搜索、表单、聊天和成交记录仍可用。
 - Agent 变更采用 feature flag 和 canary，越权执行有立即 kill switch。
 
@@ -297,7 +297,7 @@
 | Secret Chat | Phase 1 | [已实现] 新建默认 403（`SECRET_CHAT_NEW_SESSIONS_ENABLED` 仅迁移窗口可开），移动端入口已移除，历史会话可读有回归覆盖 |
 | 进程内事件 | Phase 4 | [部分完成] outbox 通知与专用 `embedding_jobs` listing 投影已迁移并有回归覆盖；审核投影等其余消费者仍待迁移 |
 | 单实例 WebSocket | Phase 4 | [部分完成] Redis fan-out 已实现并通过双实例端到端测试；断线补偿依赖既有 HTTP 拉取，压测仍待做 |
-| Agent 直接写工具 | Phase 3 | [部分完成] 发布已进入可撤销直接执行，四个计划动作使用 crash-safe ActionPlan；listing command 与资源版本快照已统一，提案幂等已落地，版本化文案与完整行动审计仍待补 |
+| Agent 直接写工具 | Phase 3 | [部分完成] 发布已进入可撤销直接执行，四个计划动作使用 crash-safe ActionPlan；listing command 与资源版本快照已统一，提案幂等、typed terminal outcome 和行动级审计已落地，设备/重新认证绑定、版本化文案、完整 AgentRun envelope 与对账仍待补 |
 
 ## 路线图维护规则
 

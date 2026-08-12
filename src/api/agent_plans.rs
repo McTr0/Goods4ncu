@@ -72,29 +72,34 @@ pub async fn confirm_plan(
     match outcome {
         ConfirmOutcome::Executed(result) => Ok(no_store_json(serde_json::json!({
             "status": "executed",
+            "outcome_code": "executed",
             "result": result,
         }))),
         ConfirmOutcome::NeedsSecondConfirmation { confirmation_token } => {
             Ok(no_store_json(serde_json::json!({
                 "status": "needs_second_confirmation",
+                "outcome_code": "needs_second_confirmation",
                 "confirmation_token": confirmation_token,
             })))
         }
         // Idempotent re-confirm: same terminal answer, no second execution.
         ConfirmOutcome::AlreadyExecuted(result) => Ok(no_store_json(serde_json::json!({
             "status": "executed",
+            "outcome_code": "already_executed",
             "result": result,
         }))),
-        ConfirmOutcome::Failed(message) => {
-            Err(ApiError::Conflict(format!("操作执行失败：{}", message)))
-        }
-        ConfirmOutcome::Expired => Err(ApiError::Conflict(
-            "该操作已过期，请重新向小帮发起".to_string(),
-        )),
-        ConfirmOutcome::NotConfirmable(status) => Err(ApiError::Conflict(format!(
-            "该操作当前状态为 {}，无法确认",
-            status
-        ))),
+        ConfirmOutcome::Failed(message) => Err(ApiError::CodedConflict {
+            code: "agent_plan_execution_failed",
+            message: format!("操作执行失败：{}", message),
+        }),
+        ConfirmOutcome::Expired => Err(ApiError::CodedConflict {
+            code: "agent_plan_expired",
+            message: "该操作已过期，请重新向小帮发起".to_string(),
+        }),
+        ConfirmOutcome::NotConfirmable(status) => Err(ApiError::CodedConflict {
+            code: "agent_plan_not_confirmable",
+            message: format!("该操作当前状态为 {}，无法确认", status),
+        }),
         ConfirmOutcome::NotFound => Err(ApiError::NotFound),
     }
 }

@@ -239,6 +239,107 @@ async fn proposal_idempotency_reuses_same_plan_and_rejects_changed_args() {
 }
 
 #[tokio::test]
+async fn action_plan_audit_records_safe_transitions_and_typed_terminal_outcome() {
+    with_test_pool(|pool| async move {
+        let buyer_id = format!("plan-audit-buyer-{}", Uuid::new_v4().simple());
+        let seller_id = format!("plan-audit-seller-{}", Uuid::new_v4().simple());
+        seed_verified_user(&pool, &buyer_id).await;
+        seed_verified_user(&pool, &seller_id).await;
+        let listing_id = seed_listing(&pool, &seller_id).await;
+        let ctx = tool_ctx(pool.clone(), &buyer_id);
+        let service = AgentPlanService::new(pool.clone());
+
+        goods4ncu::agents::tools::PurchaseItemIntentTool { ctx: ctx.clone() }
+            .call(purchase_args(&listing_id))
+            .await
+            .expect("propose purchase");
+        let plan = service
+            .list_pending(&buyer_id, ncu_campus_id())
+            .await
+            .expect("list plan")
+            .pop()
+            .expect("plan");
+        let first_token = plan.confirmation_token.clone();
+        let second_token = expect_second_token(
+            service
+                .confirm(&ctx, &buyer_id, ncu_campus_id(), plan.id, &first_token)
+                .await
+                .expect("first confirmation"),
+        );
+        service
+            .confirm(&ctx, &buyer_id, ncu_campus_id(), plan.id, &second_token)
+            .await
+            .expect("second confirmation");
+
+        let result_code: String =
+            sqlx::query_scalar("SELECT result_code FROM agent_action_plans WHERE id = $1")
+                .bind(plan.id)
+                .fetch_one(&pool)
+                .await
+                .expect("typed result code");
+        assert_eq!(result_code, "executed");
+
+        let events: Vec<(String, String)> = sqlx::query_as(
+            "SELECT event_type, outcome_code
+             FROM agent_action_audits
+             WHERE plan_id = $1
+             ORDER BY created_at ASC, id ASC",
+        )
+        .bind(plan.id)
+        .fetch_all(&pool)
+        .await
+        .expect("audit events");
+        assert_eq!(
+            events,
+            vec![
+                ("proposal_created".to_string(), "pending".to_string()),
+                (
+                    "first_confirmation".to_string(),
+                    "needs_second_confirmation".to_string(),
+                ),
+                ("execution_started".to_string(), "executing".to_string()),
+                ("execution_succeeded".to_string(), "executed".to_string()),
+            ]
+        );
+
+        let audit_payload: String = sqlx::query_scalar(
+            "SELECT string_agg(metadata::text, ' ') FROM agent_action_audits WHERE plan_id = $1",
+        )
+        .bind(plan.id)
+        .fetch_one(&pool)
+        .await
+        .expect("audit metadata");
+        assert!(!audit_payload.contains("confirmation_token"));
+        assert!(!audit_payload.contains(&listing_id));
+
+        let cancel_listing = seed_listing(&pool, &seller_id).await;
+        goods4ncu::agents::tools::PurchaseItemIntentTool { ctx }
+            .call(purchase_args(&cancel_listing))
+            .await
+            .expect("propose cancellable plan");
+        let cancellable = service
+            .list_pending(&buyer_id, ncu_campus_id())
+            .await
+            .expect("list cancellable plan")
+            .into_iter()
+            .find(|candidate| candidate.id != plan.id)
+            .expect("cancellable plan");
+        assert!(service
+            .cancel(&buyer_id, ncu_campus_id(), cancellable.id)
+            .await
+            .expect("cancel plan"));
+        let cancelled_code: String =
+            sqlx::query_scalar("SELECT result_code FROM agent_action_plans WHERE id = $1")
+                .bind(cancellable.id)
+                .fetch_one(&pool)
+                .await
+                .expect("cancelled result code");
+        assert_eq!(cancelled_code, "cancelled");
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn stale_l3_plan_fails_before_creating_a_deal_intent() {
     with_test_pool(|pool| async move {
         let buyer_id = format!("plan-stale-buyer-{}", Uuid::new_v4().simple());

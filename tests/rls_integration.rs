@@ -377,6 +377,7 @@ async fn rls_policies_exist_on_all_tenant_tables() {
             "feed_feedback",
             "feed_preferences",
             "agent_action_plans",
+            "agent_action_audits",
             "admin_audit_logs",
             "campus_memberships",
             "refresh_tokens",

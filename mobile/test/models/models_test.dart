@@ -1411,6 +1411,7 @@ void main() {
           'status': 'confirmed_once',
           'confirmation_token': 'second-token',
           'expires_at': '2026-08-01T12:00:00Z',
+          'result_code': null,
         });
 
         expect(plan.isHighRisk, isTrue);
@@ -1435,11 +1436,13 @@ void main() {
     test('parses the rotated token returned by the primary confirmation', () {
       final outcome = AgentPlanConfirmResult.fromJson({
         'status': 'needs_second_confirmation',
+        'outcome_code': 'needs_second_confirmation',
         'confirmation_token': 'rotated-second-token',
       });
 
       expect(outcome.needsSecondConfirmation, isTrue);
       expect(outcome.confirmationToken, 'rotated-second-token');
+      expect(outcome.outcomeCode, 'needs_second_confirmation');
       expect(outcome.executed, isFalse);
     });
   });

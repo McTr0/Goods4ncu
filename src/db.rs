@@ -81,6 +81,9 @@ pub async fn init_db(database_url: &str) -> Result<PgPool> {
     // Keep the literal path here so sqlx embeds the current on-disk migration set at compile time, including new files.
     // Migrations are embedded in the binary; deployment must rebuild whenever
     // files under migrations/ change rather than reusing an older executable.
+    // Keep this comment adjacent to the macro so adding a migration also
+    // invalidates binaries in environments whose build cache watches files
+    // conservatively.
     sqlx::migrate!("./migrations").run(&db_pool).await?;
 
     Ok(db_pool)

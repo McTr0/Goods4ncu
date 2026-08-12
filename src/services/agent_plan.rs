@@ -10,6 +10,7 @@
 
 use sha2::{Digest, Sha256};
 use sqlx::{Acquire, PgPool, Postgres, Row, Transaction};
+use std::time::Instant;
 use uuid::Uuid;
 
 use crate::agents::tools::{execute_planned_action_in_tx, ToolContext};
@@ -30,6 +31,7 @@ pub struct AgentPlanView {
     pub confirmation_token: String,
     pub expires_at: chrono::DateTime<chrono::Utc>,
     pub result: Option<String>,
+    pub result_code: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -75,6 +77,8 @@ impl AgentPlanService {
 
     /// Persist a pending plan and return its id.
     pub async fn create_plan(&self, input: CreatePlanInput<'_>) -> anyhow::Result<Uuid> {
+        let started = Instant::now();
+        let trace_id = crate::api::request_context::current_or_new_request_id();
         let proposal_request_hash = input
             .proposal_idempotency_key
             .map(|_| Self::proposal_request_hash(input.action, input.risk_level, input.args));
@@ -110,6 +114,22 @@ impl AgentPlanService {
         .await?;
 
         if let Some(id) = inserted {
+            record_audit(
+                &mut tx,
+                AuditRecord {
+                    trace_id: &trace_id,
+                    campus_id: input.campus_id,
+                    user_id: input.user_id,
+                    plan_id: Some(id),
+                    action: Some(input.action),
+                    risk_level: Some(input.risk_level),
+                    event_type: "proposal_created",
+                    outcome_code: "pending",
+                    duration_ms: elapsed_ms(started),
+                    metadata: serde_json::json!({ "replayed": false }),
+                },
+            )
+            .await?;
             tx.commit().await?;
             return Ok(id);
         }
@@ -138,9 +158,43 @@ impl AgentPlanService {
         };
         let existing_hash: String = row.get("proposal_request_hash");
         if Some(existing_hash.as_str()) != proposal_request_hash.as_deref() {
+            let id: Uuid = row.get("id");
+            record_audit(
+                &mut tx,
+                AuditRecord {
+                    trace_id: &trace_id,
+                    campus_id: input.campus_id,
+                    user_id: input.user_id,
+                    plan_id: Some(id),
+                    action: Some(input.action),
+                    risk_level: Some(input.risk_level),
+                    event_type: "proposal_conflict",
+                    outcome_code: "idempotency_conflict",
+                    duration_ms: elapsed_ms(started),
+                    metadata: serde_json::json!({ "request_rejected": true }),
+                },
+            )
+            .await?;
+            tx.commit().await?;
             anyhow::bail!("相同 Idempotency-Key 已用于不同的待确认操作，请为新操作生成新的 key");
         }
         let id: Uuid = row.get("id");
+        record_audit(
+            &mut tx,
+            AuditRecord {
+                trace_id: &trace_id,
+                campus_id: input.campus_id,
+                user_id: input.user_id,
+                plan_id: Some(id),
+                action: Some(input.action),
+                risk_level: Some(input.risk_level),
+                event_type: "proposal_replayed",
+                outcome_code: "reused",
+                duration_ms: elapsed_ms(started),
+                metadata: serde_json::json!({ "replayed": true }),
+            },
+        )
+        .await?;
         tx.commit().await?;
         Ok(id)
     }
@@ -182,7 +236,7 @@ impl AgentPlanService {
                             THEN second_confirmation_token
                         ELSE confirmation_token
                     END AS confirmation_token,
-                    expires_at, result, created_at
+                    expires_at, result, result_code, created_at
              FROM agent_action_plans
              WHERE user_id = $1 AND campus_id = $2
                AND status IN ('pending', 'confirmed_once') AND expires_at > NOW()
@@ -204,18 +258,61 @@ impl AgentPlanService {
         campus_id: Uuid,
         plan_id: Uuid,
     ) -> anyhow::Result<bool> {
-        let updated = sqlx::query(
+        let started = Instant::now();
+        let trace_id = crate::api::request_context::current_or_new_request_id();
+        let mut tx = self.db.begin().await?;
+        let row = sqlx::query(
+            "SELECT action, risk_level, status
+             FROM agent_action_plans
+             WHERE id = $1 AND user_id = $2 AND campus_id = $3
+             FOR UPDATE",
+        )
+        .bind(plan_id)
+        .bind(user_id)
+        .bind(campus_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(row) = row else {
+            tx.commit().await?;
+            return Ok(false);
+        };
+        let status: String = row.get("status");
+        if !matches!(status.as_str(), "pending" | "confirmed_once") {
+            tx.commit().await?;
+            return Ok(false);
+        }
+
+        sqlx::query(
             "UPDATE agent_action_plans
-             SET status = 'cancelled', updated_at = NOW()
+             SET status = 'cancelled', result_code = 'cancelled', updated_at = NOW()
              WHERE id = $1 AND user_id = $2 AND campus_id = $3
                AND status IN ('pending', 'confirmed_once')",
         )
         .bind(plan_id)
         .bind(user_id)
         .bind(campus_id)
-        .execute(&self.db)
+        .execute(&mut *tx)
         .await?;
-        Ok(updated.rows_affected() > 0)
+        let action: String = row.get("action");
+        let risk_level: String = row.get("risk_level");
+        record_audit(
+            &mut tx,
+            AuditRecord {
+                trace_id: &trace_id,
+                campus_id,
+                user_id,
+                plan_id: Some(plan_id),
+                action: Some(&action),
+                risk_level: Some(&risk_level),
+                event_type: "cancelled",
+                outcome_code: "cancelled",
+                duration_ms: elapsed_ms(started),
+                metadata: serde_json::json!({}),
+            },
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(true)
     }
 
     /// Confirm and execute a plan.
@@ -232,6 +329,8 @@ impl AgentPlanService {
         plan_id: Uuid,
         token: &str,
     ) -> anyhow::Result<ConfirmOutcome> {
+        let started = Instant::now();
+        let trace_id = crate::api::request_context::current_or_new_request_id();
         let mut tx = self.db.begin().await?;
 
         // Serialise every confirmation of this plan. A duplicate primary L3
@@ -251,9 +350,26 @@ impl AgentPlanService {
         .fetch_optional(&mut *tx)
         .await?;
         let Some(row) = row else {
+            record_audit(
+                &mut tx,
+                AuditRecord {
+                    trace_id: &trace_id,
+                    campus_id,
+                    user_id,
+                    plan_id: None,
+                    action: None,
+                    risk_level: None,
+                    event_type: "confirmation_rejected",
+                    outcome_code: "not_found",
+                    duration_ms: elapsed_ms(started),
+                    metadata: serde_json::json!({}),
+                },
+            )
+            .await?;
             return commit_outcome(tx, ConfirmOutcome::NotFound).await;
         };
 
+        let action: String = row.get("action");
         let status: String = row.get("status");
         let risk_level: String = row.get("risk_level");
         let stored_token: String = row.get("confirmation_token");
@@ -272,12 +388,44 @@ impl AgentPlanService {
             primary_matches || second_matches
         };
         if !token_is_valid {
+            record_audit(
+                &mut tx,
+                AuditRecord {
+                    trace_id: &trace_id,
+                    campus_id,
+                    user_id,
+                    plan_id: Some(plan_id),
+                    action: Some(&action),
+                    risk_level: Some(&risk_level),
+                    event_type: "confirmation_rejected",
+                    outcome_code: "invalid_token",
+                    duration_ms: elapsed_ms(started),
+                    metadata: serde_json::json!({ "status": status }),
+                },
+            )
+            .await?;
             return commit_outcome(tx, ConfirmOutcome::NotFound).await;
         }
 
         match status.as_str() {
             "executed" => {
                 let result: Option<String> = row.get("result");
+                record_audit(
+                    &mut tx,
+                    AuditRecord {
+                        trace_id: &trace_id,
+                        campus_id,
+                        user_id,
+                        plan_id: Some(plan_id),
+                        action: Some(&action),
+                        risk_level: Some(&risk_level),
+                        event_type: "already_executed",
+                        outcome_code: "already_executed",
+                        duration_ms: elapsed_ms(started),
+                        metadata: serde_json::json!({}),
+                    },
+                )
+                .await?;
                 return commit_outcome(
                     tx,
                     ConfirmOutcome::AlreadyExecuted(result.unwrap_or_default()),
@@ -285,8 +433,42 @@ impl AgentPlanService {
                 .await;
             }
             "pending" | "confirmed_once" => {}
-            "expired" => return commit_outcome(tx, ConfirmOutcome::Expired).await,
+            "expired" => {
+                record_audit(
+                    &mut tx,
+                    AuditRecord {
+                        trace_id: &trace_id,
+                        campus_id,
+                        user_id,
+                        plan_id: Some(plan_id),
+                        action: Some(&action),
+                        risk_level: Some(&risk_level),
+                        event_type: "expired",
+                        outcome_code: "expired",
+                        duration_ms: elapsed_ms(started),
+                        metadata: serde_json::json!({ "already_marked": true }),
+                    },
+                )
+                .await?;
+                return commit_outcome(tx, ConfirmOutcome::Expired).await;
+            }
             other => {
+                record_audit(
+                    &mut tx,
+                    AuditRecord {
+                        trace_id: &trace_id,
+                        campus_id,
+                        user_id,
+                        plan_id: Some(plan_id),
+                        action: Some(&action),
+                        risk_level: Some(&risk_level),
+                        event_type: "confirmation_rejected",
+                        outcome_code: "not_confirmable",
+                        duration_ms: elapsed_ms(started),
+                        metadata: serde_json::json!({ "status": other }),
+                    },
+                )
+                .await?;
                 return commit_outcome(tx, ConfirmOutcome::NotConfirmable(other.to_string())).await;
             }
         }
@@ -294,7 +476,7 @@ impl AgentPlanService {
         let is_expired: bool = row.get("is_expired");
         if is_expired {
             sqlx::query(
-                "UPDATE agent_action_plans SET status = 'expired', updated_at = NOW()
+                "UPDATE agent_action_plans SET status = 'expired', result_code = 'expired', updated_at = NOW()
                  WHERE id = $1 AND user_id = $2 AND campus_id = $3
                    AND status IN ('pending', 'confirmed_once')",
             )
@@ -302,6 +484,22 @@ impl AgentPlanService {
             .bind(user_id)
             .bind(campus_id)
             .execute(&mut *tx)
+            .await?;
+            record_audit(
+                &mut tx,
+                AuditRecord {
+                    trace_id: &trace_id,
+                    campus_id,
+                    user_id,
+                    plan_id: Some(plan_id),
+                    action: Some(&action),
+                    risk_level: Some(&risk_level),
+                    event_type: "expired",
+                    outcome_code: "expired",
+                    duration_ms: elapsed_ms(started),
+                    metadata: serde_json::json!({ "lazy_transition": true }),
+                },
+            )
             .await?;
             return commit_outcome(tx, ConfirmOutcome::Expired).await;
         }
@@ -322,6 +520,22 @@ impl AgentPlanService {
             .bind(campus_id)
             .execute(&mut *tx)
             .await?;
+            record_audit(
+                &mut tx,
+                AuditRecord {
+                    trace_id: &trace_id,
+                    campus_id,
+                    user_id,
+                    plan_id: Some(plan_id),
+                    action: Some(&action),
+                    risk_level: Some(&risk_level),
+                    event_type: "first_confirmation",
+                    outcome_code: "needs_second_confirmation",
+                    duration_ms: elapsed_ms(started),
+                    metadata: serde_json::json!({ "step": 1 }),
+                },
+            )
+            .await?;
             return commit_outcome(
                 tx,
                 ConfirmOutcome::NeedsSecondConfirmation {
@@ -335,6 +549,22 @@ impl AgentPlanService {
             let second_token = second_token.ok_or_else(|| {
                 anyhow::anyhow!("L3 action plan {} is missing its second token", plan_id)
             })?;
+            record_audit(
+                &mut tx,
+                AuditRecord {
+                    trace_id: &trace_id,
+                    campus_id,
+                    user_id,
+                    plan_id: Some(plan_id),
+                    action: Some(&action),
+                    risk_level: Some(&risk_level),
+                    event_type: "second_confirmation_requested",
+                    outcome_code: "needs_second_confirmation",
+                    duration_ms: elapsed_ms(started),
+                    metadata: serde_json::json!({ "step": 2, "replayed": true }),
+                },
+            )
+            .await?;
             return commit_outcome(
                 tx,
                 ConfirmOutcome::NeedsSecondConfirmation {
@@ -345,9 +575,41 @@ impl AgentPlanService {
         }
 
         if risk_level == "L3" && status == "confirmed_once" && !second_matches {
+            record_audit(
+                &mut tx,
+                AuditRecord {
+                    trace_id: &trace_id,
+                    campus_id,
+                    user_id,
+                    plan_id: Some(plan_id),
+                    action: Some(&action),
+                    risk_level: Some(&risk_level),
+                    event_type: "confirmation_rejected",
+                    outcome_code: "not_found",
+                    duration_ms: elapsed_ms(started),
+                    metadata: serde_json::json!({ "status": status }),
+                },
+            )
+            .await?;
             return commit_outcome(tx, ConfirmOutcome::NotFound).await;
         }
         if risk_level != "L3" && status != "pending" {
+            record_audit(
+                &mut tx,
+                AuditRecord {
+                    trace_id: &trace_id,
+                    campus_id,
+                    user_id,
+                    plan_id: Some(plan_id),
+                    action: Some(&action),
+                    risk_level: Some(&risk_level),
+                    event_type: "confirmation_rejected",
+                    outcome_code: "not_confirmable",
+                    duration_ms: elapsed_ms(started),
+                    metadata: serde_json::json!({ "status": status }),
+                },
+            )
+            .await?;
             return commit_outcome(tx, ConfirmOutcome::NotConfirmable(status)).await;
         }
 
@@ -367,8 +629,23 @@ impl AgentPlanService {
         .execute(&mut *tx)
         .await?;
 
-        let action: String = row.get("action");
         let args: serde_json::Value = row.get("args");
+        record_audit(
+            &mut tx,
+            AuditRecord {
+                trace_id: &trace_id,
+                campus_id,
+                user_id,
+                plan_id: Some(plan_id),
+                action: Some(&action),
+                risk_level: Some(&risk_level),
+                event_type: "execution_started",
+                outcome_code: "executing",
+                duration_ms: elapsed_ms(started),
+                metadata: serde_json::json!({}),
+            },
+        )
+        .await?;
         let mut action_savepoint = (&mut tx).begin().await?;
         let execution = execute_planned_action_in_tx(
             ctx,
@@ -385,7 +662,7 @@ impl AgentPlanService {
                 action_savepoint.commit().await?;
                 sqlx::query(
                     "UPDATE agent_action_plans
-                     SET status = 'executed', executed_at = NOW(), result = $2, updated_at = NOW()
+                     SET status = 'executed', result_code = 'executed', executed_at = NOW(), result = $2, updated_at = NOW()
                      WHERE id = $1 AND user_id = $3 AND campus_id = $4
                        AND status = 'executing'",
                 )
@@ -395,6 +672,22 @@ impl AgentPlanService {
                 .bind(campus_id)
                 .execute(&mut *tx)
                 .await?;
+                record_audit(
+                    &mut tx,
+                    AuditRecord {
+                        trace_id: &trace_id,
+                        campus_id,
+                        user_id,
+                        plan_id: Some(plan_id),
+                        action: Some(&action),
+                        risk_level: Some(&risk_level),
+                        event_type: "execution_succeeded",
+                        outcome_code: "executed",
+                        duration_ms: elapsed_ms(started),
+                        metadata: serde_json::json!({}),
+                    },
+                )
+                .await?;
                 commit_outcome(tx, ConfirmOutcome::Executed(result)).await
             }
             Err(error) => {
@@ -402,7 +695,7 @@ impl AgentPlanService {
                 let message = error.to_string();
                 sqlx::query(
                     "UPDATE agent_action_plans
-                     SET status = 'failed', result = $2, updated_at = NOW()
+                     SET status = 'failed', result_code = 'execution_failed', result = $2, updated_at = NOW()
                      WHERE id = $1 AND user_id = $3 AND campus_id = $4
                        AND status = 'executing'",
                 )
@@ -412,10 +705,68 @@ impl AgentPlanService {
                 .bind(campus_id)
                 .execute(&mut *tx)
                 .await?;
+                record_audit(
+                    &mut tx,
+                    AuditRecord {
+                        trace_id: &trace_id,
+                        campus_id,
+                        user_id,
+                        plan_id: Some(plan_id),
+                        action: Some(&action),
+                        risk_level: Some(&risk_level),
+                        event_type: "execution_failed",
+                        outcome_code: "execution_failed",
+                        duration_ms: elapsed_ms(started),
+                        metadata: serde_json::json!({}),
+                    },
+                )
+                .await?;
                 commit_outcome(tx, ConfirmOutcome::Failed(message)).await
             }
         }
     }
+}
+
+struct AuditRecord<'a> {
+    trace_id: &'a str,
+    campus_id: Uuid,
+    user_id: &'a str,
+    plan_id: Option<Uuid>,
+    action: Option<&'a str>,
+    risk_level: Option<&'a str>,
+    event_type: &'a str,
+    outcome_code: &'a str,
+    duration_ms: Option<i32>,
+    metadata: serde_json::Value,
+}
+
+async fn record_audit(
+    tx: &mut Transaction<'_, Postgres>,
+    record: AuditRecord<'_>,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO agent_action_audits (
+            trace_id, campus_id, user_id, plan_id, action, risk_level,
+            event_type, outcome_code, duration_ms, metadata
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+    )
+    .bind(record.trace_id)
+    .bind(record.campus_id)
+    .bind(record.user_id)
+    .bind(record.plan_id)
+    .bind(record.action)
+    .bind(record.risk_level)
+    .bind(record.event_type)
+    .bind(record.outcome_code)
+    .bind(record.duration_ms)
+    .bind(record.metadata)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+fn elapsed_ms(started: Instant) -> Option<i32> {
+    Some(started.elapsed().as_millis().min(i32::MAX as u128) as i32)
 }
 
 async fn commit_outcome(
@@ -452,6 +803,7 @@ fn row_to_view(row: sqlx::postgres::PgRow) -> AgentPlanView {
         confirmation_token: row.get("confirmation_token"),
         expires_at: row.get("expires_at"),
         result: row.get("result"),
+        result_code: row.get("result_code"),
         created_at: row.get("created_at"),
     }
 }

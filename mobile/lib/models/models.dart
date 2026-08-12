@@ -1965,6 +1965,7 @@ class AgentPlan {
   final String status;
   final String confirmationToken;
   final DateTime? expiresAt;
+  final String? resultCode;
 
   AgentPlan({
     required this.id,
@@ -1974,6 +1975,7 @@ class AgentPlan {
     this.status = 'pending',
     required this.confirmationToken,
     this.expiresAt,
+    this.resultCode,
   });
 
   factory AgentPlan.fromJson(Map<String, dynamic> json) => AgentPlan(
@@ -1984,6 +1986,7 @@ class AgentPlan {
     status: json['status']?.toString() ?? 'pending',
     confirmationToken: json['confirmation_token']?.toString() ?? '',
     expiresAt: DateTime.tryParse(json['expires_at']?.toString() ?? ''),
+    resultCode: json['result_code']?.toString(),
   );
 
   bool get isHighRisk => riskLevel == 'L3';
@@ -1995,11 +1998,13 @@ class AgentPlanConfirmResult {
   final String status;
   final String result;
   final String? confirmationToken;
+  final String? outcomeCode;
 
   AgentPlanConfirmResult({
     required this.status,
     required this.result,
     this.confirmationToken,
+    this.outcomeCode,
   });
 
   factory AgentPlanConfirmResult.fromJson(Map<String, dynamic> json) =>
@@ -2007,6 +2012,7 @@ class AgentPlanConfirmResult {
         status: json['status']?.toString() ?? '',
         result: json['result']?.toString() ?? '',
         confirmationToken: json['confirmation_token']?.toString(),
+        outcomeCode: json['outcome_code']?.toString(),
       );
 
   bool get needsSecondConfirmation => status == 'needs_second_confirmation';

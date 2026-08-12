@@ -835,8 +835,8 @@ Flutter 在 wanted 详情按当前用户身份展示“收到的推荐”或“�
 
 [已实现] 小帮的商品发布是可恢复的低风险动作：通过校验后立即发布，并在小帮页提供撤销窗口。修改、下架使用 L2 ActionPlan；成交意向和还价使用 L3 ActionPlan。confirmation token 只通过以下认证接口返回，不出现在聊天文本中；带 token 的响应使用 `Cache-Control: no-store`。
 
-- `GET /api/agent/plans` — 只列出当前用户在当前活动校园内、未过期的 `pending` 或 `confirmed_once` 计划，返回 `status`、当前步骤的 `confirmation_token`、`risk_level`、`summary` 和 `expires_at`。
-- `POST /api/agent/plans/{id}/confirm` — body `{ "confirmation_token": "..." }`。L2 计划一次确认后执行。L3 第一次必须提交 primary token，响应为 `{ "status": "needs_second_confirmation", "confirmation_token": "<独立的第二步 token>" }`；只有返回的第二步 token 可以执行。primary 请求的传输重试只会重放同一挑战，不会被计为第二次确认。终态重试返回同一执行结果。过期/已取消返回 `409`；错误 token、其他用户、其他校园或不存在统一 `404`（不泄露归属）。执行校验失败返回 `409` 并把计划记为 `failed`。
+- `GET /api/agent/plans` — 只列出当前用户在当前活动校园内、未过期的 `pending` 或 `confirmed_once` 计划，返回 `status`、当前步骤的 `confirmation_token`、`risk_level`、`summary`、`expires_at` 和（如已有）稳定的 `result_code`。
+- `POST /api/agent/plans/{id}/confirm` — body `{ "confirmation_token": "..." }`。L2 计划一次确认后执行。L3 第一次必须提交 primary token，响应为 `{ "status": "needs_second_confirmation", "outcome_code": "needs_second_confirmation", "confirmation_token": "<独立的第二步 token>" }`；只有返回的第二步 token 可以执行。primary 请求的传输重试只会重放同一挑战，不会被计为第二次确认。终态重试返回同一执行结果并带 `outcome_code: already_executed`。过期、执行失败或不可确认分别使用稳定错误 code `agent_plan_expired`、`agent_plan_execution_failed`、`agent_plan_not_confirmable`；错误 token、其他用户、其他校园或不存在统一 `404`（不泄露归属）。
 - `POST /api/agent/plans/{id}/cancel` — 取消当前校园内的 `pending` 或 `confirmed_once` 计划。
 
 确认从锁定计划行、重新校验校园资格/所有权/商品状态/金额，到业务事实、适用时的通知/outbox 和计划终态都位于同一个数据库事务。业务执行使用 savepoint：校验失败不会留下部分事实；进程在 commit 前中断时整笔事务回滚，原 token 可安全重试。升级前遗留的已提交 `executing` 行被迁移为 `interrupted`，必须人工核对，系统绝不自动重放。
@@ -1170,7 +1170,7 @@ POST /api/v1/agent/plans/{id}/cancel
 
 这是目标 `/api/v1` 形态，不等同于上方当前未版本化接口。目标创建协议还应返回 `idempotency_key`、`confirmation_mode`、版本化预览和风险文案；L3 继续使用相互独立的两步 token。
 
-当前 confirm 已重新验证 tenant、membership、owner、状态和金额，并把业务事实与计划终态原子提交。listing 更新、下架、成交意向和议价计划已携带 `inventory.content_revision` 快照并在锁内拒绝过期写入；当前聊天入口已支持按用户/校园和动作参数哈希绑定的通用提案 `Idempotency-Key`，相同请求重试复用原计划，改参数拒绝。稳定错误 code 和完整审计信封仍是 `/api/v1` 收敛项。
+当前 confirm 已重新验证 tenant、membership、owner、状态和金额，并把业务事实、typed terminal outcome 和计划终态原子提交。listing 更新、下架、成交意向和议价计划已携带 `inventory.content_revision` 快照并在锁内拒绝过期写入；当前聊天入口已支持按用户/校园和动作参数哈希绑定的通用提案 `Idempotency-Key`，相同请求重试复用原计划，改参数拒绝。`agent_action_audits` 记录同事务内的行动级 receipt，但不保存正文、token、args 或完整错误；完整 AgentRun 审计信封、设备/重新认证绑定和 `/api/v1` 前缀仍是目标态。
 
 ### Moderation 与申诉
 

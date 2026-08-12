@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 适用读者 | AI/后端工程师、产品经理、安全工程师、测试工程师和 Agent 工具维护者 |
-| 当前状态 | 已有意图路由、耐久 RAG 投影、多个 LLM provider 和市场工具；ActionPlan、提案幂等、ListingCommandService 与 listing 资源版本快照已落地，统一 AgentRun/审计仍是目标态 |
+| 当前状态 | 已有意图路由、耐久 RAG 投影、多个 LLM provider 和市场工具；ActionPlan、提案幂等、ListingCommandService、listing 资源版本快照、typed terminal outcome 和隐私安全行动审计已落地，统一 AgentRun 仍是目标态 |
 | 事实来源 | `src/agents/`、`src/llm/`、聊天 API、工具测试、LLM metrics 和 Flutter 小帮入口 |
 | 最后核对范围 | 搜索、发布、更新、删除、成交意向、议价、回复建议和流式回复 |
 
@@ -27,7 +27,7 @@ Agent 的价值是把用户意图翻译为可理解、可检查、可撤销的�
 
 [已实现] 可恢复的发布会立即执行并提供撤销窗口；更新/删除生成 L2 ActionPlan，成交意向/议价生成使用独立两步 token 的 L3 ActionPlan。确认锁、业务事实、适用时的通知/outbox 和计划终态原子提交，commit 前中断可安全重试。
 
-[已实现] Agent listing 创建/更新与 HTTP 路径已收敛到同一 `ListingCommandService`，共享文本审核、分类/空白规范化、金额类型和事务入口。更新/下架/成交意向/议价计划在提案时保存数据库 `content_revision`，确认时在同一锁内比较，过期计划安全失败；HTTP 更新支持 `expected_content_revision`/`If-Match`。Agent 提案可携带认证请求的 `Idempotency-Key`，服务端按用户/校园和动作参数 SHA-256 绑定重试；相同 key 的相同请求复用原计划，参数变化安全拒绝。版本化风险文案和统一 AgentRun/审计仍待补齐。
+[已实现] Agent listing 创建/更新与 HTTP 路径已收敛到同一 `ListingCommandService`，共享文本审核、分类/空白规范化、金额类型和事务入口。更新/下架/成交意向/议价计划在提案时保存数据库 `content_revision`，确认时在同一锁内比较，过期计划安全失败；HTTP 更新支持 `expected_content_revision`/`If-Match`。Agent 提案可携带认证请求的 `Idempotency-Key`，服务端按用户/校园和动作参数 SHA-256 绑定重试；相同 key 的相同请求复用原计划，参数变化安全拒绝。计划终态现在同时保存受限的 `result_code`；`agent_action_audits` 在同一事务中记录提案、重放、确认、执行、失败、取消和过期事件，只保留 trace、租户、动作/风险、结果类别、耗时和固定元数据，不保存正文、token 或完整错误。设备/重新认证绑定、版本化风险文案和统一 AgentRun envelope 仍待补齐。
 
 ## 权限等级
 
@@ -123,8 +123,9 @@ legacy executing -> interrupted
 - 执行前重新校验 campus membership、资源 owner、状态和金额；上下文变化安全失败且不留下部分事实。
 - token 不进入模型文本或缓存响应；`args` 只保存执行所需字段，不复制无关聊天历史。
 - 旧协议中无法判断副作用的 durable `executing` 迁移为 `interrupted`，必须人工核对，永不自动重放。
+- `agent_action_audits` 是行动级 receipt，不等同于完整 AgentRun：它在同一外层事务中记录可验证的状态转换，元数据有数据库大小上限，且不携带聊天正文、确认 token 或完整 provider 错误。
 
-[部分完成] listing 更新、下架、成交意向和议价已在提案时保存 `inventory.content_revision`，确认时按锁内版本比较；HTTP 更新/删除也支持 body 版本或 `If-Match`，旧客户端省略版本时保留兼容行为。提案 `Idempotency-Key` 已在同一用户/校园范围内落库并绑定动作、风险等级和参数哈希；相同 key 重试复用同一计划，改参数返回安全错误。仍需补设备/重新认证绑定、版本化风险文案、typed outcome 和统一审计事件。当前与目标 `/api/v1` 的区别见 [API 参考](api-reference.md)。
+[部分完成] listing 更新、下架、成交意向和议价已在提案时保存 `inventory.content_revision`，确认时按锁内版本比较；HTTP 更新/删除也支持 body 版本或 `If-Match`，旧客户端省略版本时保留兼容行为。提案 `Idempotency-Key` 已在同一用户/校园范围内落库并绑定动作、风险等级和参数哈希；相同 key 重试复用同一计划，改参数返回安全错误。typed terminal outcome 与行动级审计已落地；仍需补设备/重新认证绑定、版本化风险文案、完整 AgentRun envelope 和对账界面。当前与目标 `/api/v1` 的区别见 [API 参考](api-reference.md)。
 
 ## 工具设计
 
@@ -154,7 +155,7 @@ audit category
 5. 工具错误分为用户可修复、状态冲突、权限拒绝、依赖故障和内部错误。
 6. 工具描述不能承诺 service 实际不支持的行为。
 
-当前成交/议价的核心约束已复用事务内执行函数；listing 创建、更新和下架现已通过统一 `ListingCommandService` 进入规范化、文本审核和事务入口。关键 listing 写动作已捕获并校验数据库维护的资源版本，避免 Agent 依据旧内容覆盖新事实；提案幂等已落地，完整审计和统一对账仍是后续工作。
+当前成交/议价的核心约束已复用事务内执行函数；listing 创建、更新和下架现已通过统一 `ListingCommandService` 进入规范化、文本审核和事务入口。关键 listing 写动作已捕获并校验数据库维护的资源版本，避免 Agent 依据旧内容覆盖新事实；提案幂等和行动级审计已落地，完整 AgentRun 对账仍是后续工作。
 
 ## 记忆与上下文
 
@@ -234,13 +235,13 @@ Provider 层统一 chat、streaming、tool calling 和 embedding 能力，但不
 
 ## 可观测性
 
-每次 AgentRun 使用统一 `trace_id`，记录：
+完整 AgentRun 仍需把聊天/路由/provider 事实统一到同一 envelope；当前已落地的 ActionPlan receipt 使用 HTTP `trace_id`（无 HTTP 上下文时生成 UUID），记录：
 
-- 路由结果、provider、model、prompt 模板版本和工具 schema 版本。
-- 检索数量、过滤数量、最终引用的资源 ID。
-- 工具名、风险等级、耗时、结果类别和是否要求确认。
-- token 用量、首 token 延迟、总延迟、取消和错误类别。
-- 不记录密钥、完整 token、密码、完整收款码或无关私聊正文。
+- 提案、幂等重放/冲突、首次/第二步确认、执行开始/成功/失败、取消、过期和终态重放事件。
+- 租户、用户、plan、动作、风险等级、稳定 `outcome_code`、耗时和固定 allow-list 元数据。
+- 不记录密钥、完整 token、密码、完整收款码、消息正文、动作参数或完整 provider 错误。
+
+目标 AgentRun envelope 仍需补充路由结果、provider/model、prompt/tool schema 版本、检索计数、token 用量、TTFT、取消和统一错误类别；这些字段不能通过把敏感正文塞进当前行动审计表来“补齐”。
 
 Metrics 关注成功路径与安全护栏：草稿采纳率、确认取消率、工具冲突率、provider 错误率、越权拦截数和每次有效闭环成本。
 
