@@ -14,6 +14,52 @@ class UploadService extends BaseService {
   final UserService _userService;
   final Uuid _uuid = const Uuid();
 
+  /// Upload bytes to a server-generated shared-object key. The key is never
+  /// chosen by the client; callers must use `ChatSharedObject.uploadKey` and
+  /// then call the API completion endpoint so the server probes the object.
+  Future<String> uploadBytesToObjectKey(
+    List<int> bytes, {
+    required String objectKey,
+    required String contentType,
+  }) async {
+    final normalizedKey = objectKey.trim().replaceFirst(RegExp(r'^/+'), '');
+    if (normalizedKey.isEmpty || normalizedKey.contains('..')) {
+      throw NetworkException('文件上传目标无效');
+    }
+    final stsToken = await _userService.getUploadToken();
+    final endpointHost = stsToken.endpoint
+        .replaceFirst(RegExp(r'^https?://'), '')
+        .replaceAll(RegExp(r'/$'), '');
+    final ossUrl = Uri.https('${stsToken.bucket}.$endpointHost', normalizedKey);
+    final ossDate = _buildOssDateHeader();
+    final authorization = _buildOssAuthorization(
+      method: 'PUT',
+      contentType: contentType,
+      date: ossDate,
+      bucket: stsToken.bucket,
+      objectKey: normalizedKey,
+      accessKeyId: stsToken.accessKeyId,
+      accessKeySecret: stsToken.accessKeySecret,
+      securityToken: stsToken.securityToken,
+    );
+    final response = await http
+        .put(
+          ossUrl,
+          headers: {
+            'Date': ossDate,
+            'Authorization': authorization,
+            'x-oss-security-token': stsToken.securityToken,
+            'Content-Type': contentType,
+          },
+          body: bytes,
+        )
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw NetworkException('文件上传失败: ${response.statusCode}');
+    }
+    return ossUrl.toString();
+  }
+
   Future<String> uploadAudioBytes(List<int> audioBytes) async {
     final stsToken = await _userService.getUploadToken();
     final objectKey =

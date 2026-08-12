@@ -200,6 +200,10 @@ pub struct ChatSharedObjectView {
     pub mime_type: Option<String>,
     pub size_bytes: Option<i64>,
     pub status: String,
+    pub moderation_status: String,
+    pub storage_verified_at: Option<String>,
+    pub uploaded_size_bytes: Option<i64>,
+    pub uploaded_mime_type: Option<String>,
     pub upload_key: Option<String>,
     pub canonical_url: Option<String>,
     pub created_at: String,
@@ -320,6 +324,16 @@ pub struct CreateSharedObjectInput {
     pub mime_type: Option<String>,
     pub size_bytes: Option<i64>,
     pub canonical_url: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompleteSharedObjectInput {
+    pub object_id: Uuid,
+    pub user_id: String,
+    pub uploaded_size_bytes: i64,
+    pub uploaded_mime_type: Option<String>,
+    pub storage_etag: Option<String>,
+    pub moderation_required: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1438,14 +1452,24 @@ impl ChatConversationService {
             SharedObjectKind::File => Some(format!("chat/{}/{}", input.campus_id, id)),
             SharedObjectKind::Link => None,
         };
+        let initial_status = match input.kind {
+            SharedObjectKind::File => "pending_upload",
+            SharedObjectKind::Link => "active",
+        };
+        let initial_moderation_status = match input.kind {
+            SharedObjectKind::File => "not_required",
+            SharedObjectKind::Link => "approved",
+        };
         let row = sqlx::query(
             "INSERT INTO chat_shared_objects (
                  id, campus_id, conversation_id, created_by, kind, title,
-                 storage_key, canonical_url, mime_type, size_bytes
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 storage_key, canonical_url, mime_type, size_bytes, status,
+                 moderation_status
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
              RETURNING id, campus_id, conversation_id, created_by, kind, title,
                        storage_key, canonical_url, mime_type, size_bytes, status,
-                       created_at, updated_at",
+                       moderation_status, storage_verified_at, uploaded_size_bytes,
+                       uploaded_mime_type, created_at, updated_at",
         )
         .bind(id)
         .bind(input.campus_id)
@@ -1457,6 +1481,111 @@ impl ChatConversationService {
         .bind(canonical_url)
         .bind(mime_type)
         .bind(size_bytes)
+        .bind(initial_status)
+        .bind(initial_moderation_status)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        tx.commit().await.map_err(commit_error)?;
+        row_to_shared_object(row)
+    }
+
+    /// Commit a server-verified upload.  The HTTP layer performs the platform
+    /// object probe first; this method only accepts the resulting metadata and
+    /// atomically moves the object out of `pending_upload`.
+    pub async fn complete_shared_object(
+        &self,
+        input: CompleteSharedObjectInput,
+    ) -> Result<ChatSharedObjectView, ApiError> {
+        if input.uploaded_size_bytes < 0 || input.uploaded_size_bytes > 2_147_483_648 {
+            return Err(ApiError::BadRequest("文件大小无效".to_string()));
+        }
+        let uploaded_mime_type =
+            normalize_shared_object_mime_type(input.uploaded_mime_type.as_deref())?;
+        let mut tx = self.begin().await?;
+        let row = sqlx::query(
+            "SELECT object.id, object.campus_id, object.conversation_id,
+                    object.created_by, object.kind, object.title,
+                    object.storage_key, object.canonical_url, object.mime_type,
+                    object.size_bytes, object.status, object.moderation_status,
+                    object.storage_verified_at, object.uploaded_size_bytes,
+                    object.uploaded_mime_type, object.created_at, object.updated_at
+             FROM chat_shared_objects object
+             JOIN chat_conversation_members member
+               ON member.conversation_id = object.conversation_id
+              AND member.user_id = $2
+              AND member.archived_at IS NULL
+             WHERE object.id = $1 AND object.status <> 'deleted'
+             FOR UPDATE OF object",
+        )
+        .bind(input.object_id)
+        .bind(&input.user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?
+        .ok_or(ApiError::NotFound)?;
+        let created_by: String = row.get("created_by");
+        if created_by != input.user_id {
+            return Err(ApiError::Forbidden);
+        }
+        let kind: String = row.get("kind");
+        if kind != SharedObjectKind::File.as_str() {
+            return Err(ApiError::BadRequest(
+                "只有文件对象需要上传完成确认".to_string(),
+            ));
+        }
+        let status: String = row.get("status");
+        if status == "revoked" {
+            return Err(ApiError::Conflict("shared_object_revoked".to_string()));
+        }
+        let storage_verified_at: Option<DateTime<Utc>> = row.get("storage_verified_at");
+        if status != "pending_upload"
+            && !(status == "pending_review" && storage_verified_at.is_none())
+        {
+            return row_to_shared_object(row);
+        }
+        let expected_size: Option<i64> = row.get("size_bytes");
+        if expected_size.is_some_and(|expected| expected != input.uploaded_size_bytes) {
+            return Err(ApiError::CodedConflict {
+                code: "shared_object_size_mismatch",
+                message: "平台文件大小与创建时声明不一致".to_string(),
+            });
+        }
+        let expected_mime: Option<String> = row.get("mime_type");
+        if expected_mime.is_some() && expected_mime != uploaded_mime_type {
+            return Err(ApiError::CodedConflict {
+                code: "shared_object_mime_mismatch",
+                message: "平台文件类型与创建时声明不一致".to_string(),
+            });
+        }
+        let next_status = if input.moderation_required {
+            "pending_review"
+        } else {
+            "active"
+        };
+        let next_moderation_status = if input.moderation_required {
+            "pending"
+        } else {
+            "approved"
+        };
+        let row = sqlx::query(
+            "UPDATE chat_shared_objects
+             SET status = $2, moderation_status = $3,
+                 storage_verified_at = NOW(), uploaded_size_bytes = $4,
+                 uploaded_mime_type = $5, storage_etag = $6,
+                 last_error = NULL, updated_at = NOW()
+             WHERE id = $1
+             RETURNING id, campus_id, conversation_id, created_by, kind, title,
+                       storage_key, canonical_url, mime_type, size_bytes, status,
+                       moderation_status, storage_verified_at, uploaded_size_bytes,
+                       uploaded_mime_type, created_at, updated_at",
+        )
+        .bind(input.object_id)
+        .bind(next_status)
+        .bind(next_moderation_status)
+        .bind(input.uploaded_size_bytes)
+        .bind(uploaded_mime_type)
+        .bind(input.storage_etag)
         .fetch_one(&mut *tx)
         .await
         .map_err(db_error)?;
@@ -1476,8 +1605,9 @@ impl ChatConversationService {
             "SELECT object.id, object.campus_id, object.conversation_id,
                     object.created_by, object.kind, object.title,
                     object.storage_key, object.canonical_url, object.mime_type,
-                    object.size_bytes, object.status, object.created_at,
-                    object.updated_at
+                    object.size_bytes, object.status, object.moderation_status,
+                    object.storage_verified_at, object.uploaded_size_bytes,
+                    object.uploaded_mime_type, object.created_at, object.updated_at
              FROM chat_shared_objects object
              JOIN chat_conversation_members member
                ON member.conversation_id = object.conversation_id
@@ -1507,8 +1637,9 @@ impl ChatConversationService {
             "SELECT object.id, object.campus_id, object.conversation_id,
                     object.created_by, object.kind, object.title,
                     object.storage_key, object.canonical_url, object.mime_type,
-                    object.size_bytes, object.status, object.created_at,
-                    object.updated_at
+                    object.size_bytes, object.status, object.moderation_status,
+                    object.storage_verified_at, object.uploaded_size_bytes,
+                    object.uploaded_mime_type, object.created_at, object.updated_at
              FROM chat_shared_objects object
              JOIN chat_conversation_members member
                ON member.conversation_id = object.conversation_id
@@ -1527,7 +1658,7 @@ impl ChatConversationService {
         if created_by != user_id {
             return Err(ApiError::Forbidden);
         }
-        if row.get::<String, _>("status") == "active" {
+        if row.get::<String, _>("status") != "revoked" {
             sqlx::query(
                 "UPDATE chat_shared_objects
                  SET status = 'revoked', revoked_at = NOW(), updated_at = NOW()
@@ -1726,6 +1857,7 @@ impl ChatConversationService {
                  AND object.kind = message.quote_kind
                  AND object.conversation_id = message.direct_conversation_id
                  AND object.status = 'active'
+                 AND object.moderation_status IN ('approved', 'not_required')
                 WHERE message.quote_kind IS NOT NULL
                   AND message.quote_ref_id IS NOT NULL
                   AND (
@@ -3109,6 +3241,7 @@ async fn enrich_message_for_user(
                       AND object.kind = $2
                       AND object.conversation_id = $3::uuid
                       AND object.status = 'active'
+                      AND object.moderation_status IN ('approved', 'not_required')
                 )",
             )
             .bind(object_id)
@@ -3216,7 +3349,10 @@ fn normalize_shared_object_title(value: &str) -> Result<String, ApiError> {
 }
 
 fn normalize_shared_object_mime_type(value: Option<&str>) -> Result<Option<String>, ApiError> {
-    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(value) = value
+        .map(|value| value.split(';').next().unwrap_or(value).trim())
+        .filter(|value| !value.is_empty())
+    else {
         return Ok(None);
     };
     if value.len() > 127
@@ -3393,7 +3529,8 @@ async fn resolve_structured_quote(
                  WHERE object.id = $1
                    AND object.conversation_id = $2
                    AND object.kind = $4
-                   AND object.status = 'active'",
+                   AND object.status = 'active'
+                   AND object.moderation_status IN ('approved', 'not_required')",
             )
             .bind(object_id)
             .bind(conversation.id)
@@ -3402,7 +3539,10 @@ async fn resolve_structured_quote(
             .fetch_optional(&mut **tx)
             .await
             .map_err(db_error)?
-            .ok_or(ApiError::NotFound)?;
+            .ok_or_else(|| ApiError::CodedConflict {
+                code: "shared_object_not_ready",
+                message: "文件尚未完成上传审核，或共享对象已失效".to_string(),
+            })?;
             json!({
                 "id": row.get::<Uuid, _>("id").to_string(),
                 "title": row.get::<String, _>("title"),
@@ -3563,6 +3703,12 @@ fn row_to_shared_object(row: sqlx::postgres::PgRow) -> Result<ChatSharedObjectVi
         mime_type: row.get("mime_type"),
         size_bytes: row.get("size_bytes"),
         status: row.get("status"),
+        moderation_status: row.get("moderation_status"),
+        storage_verified_at: row
+            .get::<Option<DateTime<Utc>>, _>("storage_verified_at")
+            .map(|value| value.to_rfc3339()),
+        uploaded_size_bytes: row.get("uploaded_size_bytes"),
+        uploaded_mime_type: row.get("uploaded_mime_type"),
         upload_key: row.get("storage_key"),
         canonical_url: row.get("canonical_url"),
         created_at: created_at.to_rfc3339(),

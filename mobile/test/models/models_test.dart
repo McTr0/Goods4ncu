@@ -170,6 +170,10 @@ void main() {
         'mime_type': 'application/pdf',
         'size_bytes': 4096,
         'status': 'active',
+        'moderation_status': 'approved',
+        'storage_verified_at': '2026-08-12T10:00:01Z',
+        'uploaded_size_bytes': 4096,
+        'uploaded_mime_type': 'application/pdf',
         'upload_key': 'chat/campus-1/object-1',
         'download_path': '/api/chat/shared-objects/object-1/media',
         'created_at': '2026-08-12T10:00:00Z',
@@ -180,6 +184,33 @@ void main() {
       expect(object.uploadKey, 'chat/campus-1/object-1');
       expect(object.downloadPath, contains('/media'));
       expect(object.canonicalUrl, isNull);
+      expect(object.moderationStatus, 'approved');
+      expect(object.storageVerifiedAt, DateTime.parse('2026-08-12T10:00:01Z'));
+      expect(object.uploadedSizeBytes, 4096);
+      expect(object.uploadedMimeType, 'application/pdf');
+    });
+
+    test('keeps an unverified upload inactive', () {
+      final object = ChatSharedObject.fromJson({
+        'id': 'object-pending',
+        'campus_id': 'campus-1',
+        'conversation_id': 'conversation-1',
+        'created_by': 'user-a',
+        'kind': 'file',
+        'title': '待上传.pdf',
+        'mime_type': 'application/pdf',
+        'size_bytes': 4096,
+        'status': 'pending_upload',
+        'moderation_status': 'not_required',
+        'upload_key': 'chat/campus-1/object-pending',
+        'created_at': '2026-08-12T10:00:00Z',
+        'updated_at': '2026-08-12T10:00:00Z',
+      });
+
+      expect(object.isActive, isFalse);
+      expect(object.moderationStatus, 'not_required');
+      expect(object.storageVerifiedAt, isNull);
+      expect(object.uploadedSizeBytes, isNull);
     });
 
     test('keeps revoked links visible as history but inactive', () {

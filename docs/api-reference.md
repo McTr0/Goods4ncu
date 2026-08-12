@@ -502,7 +502,7 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 ### POST `/api/chat/conversations/{id}/shared-objects`
 
-需要登录、活动校园和会话成员权限。创建一个可被双方引用的权威文件或链接对象。`kind` 只能是 `file` 或 `link`：文件由服务端生成 `upload_key`（形如 `chat/{campus_id}/{object_id}`），上传必须使用平台存储；链接只接受规范化的 `http/https` URL，片段会被丢弃，平台不会抓取页面或生成预览。响应包含 `download_path`（仅文件），客户端仍须显式请求它才能获得媒体 URL。
+需要登录、活动校园和会话成员权限。创建一个可被双方引用的权威文件或链接对象。`kind` 只能是 `file` 或 `link`：文件由服务端生成 `upload_key`（形如 `chat/{campus_id}/{object_id}`），创建后状态为 `pending_upload`，上传必须使用平台存储；链接状态直接为 `active`，只接受规范化的 `http/https` URL，片段会被丢弃，平台不会抓取页面或生成预览。响应包含 `download_path`（仅文件），客户端仍须显式请求它才能获得媒体 URL。
 
 ```json
 {
@@ -514,13 +514,17 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 文件可以提供 `mime_type` 与 `size_bytes`，服务端限制标题、类型和 2 GiB 大小上限。对象创建、引用和消息发送分开；客户端先创建对象，再用消息 `quote: { "kind": "file|link", "ref_id": "object-id" }` 引用。服务端忽略客户端传入的 URL、标题或状态快照。
 
+### POST `/api/chat/shared-objects/{id}/complete`
+
+仅文件创建者可调用，正文可为空对象。服务端使用自己生成的 storage key 向平台存储发起 Range probe，读取平台返回的大小、类型和 ETag，并与创建声明比较；平台必须返回文件类型，客户端不能用“上传成功”字段绕过这一步。通过后，非图片文件进入 `active`；启用图片审核且类型为图片时进入 `pending_review`，由现有 moderation worker 完成 `approved/rejected` 回调。重复调用在已验证后直接返回权威对象，不重新依赖外部 URL。只有 `active` 文件能被引用或打开，`pending_upload/pending_review/rejected` 都会返回 `shared_object_not_ready`。
+
 ### GET `/api/chat/shared-objects/{id}`
 
-需要登录且必须是源会话成员，并通过当前活动校园边界。返回对象的 `kind/title/status`、来源会话和规范化链接；`revoked` 只作为历史解释保留，不能继续引用。对象不是在线、已读或送达事实。
+需要登录且必须是源会话成员，并通过当前活动校园边界。返回对象的 `kind/title/status/moderation_status`、来源会话和规范化链接；文件状态依次可能为 `pending_upload`、`pending_review`、`active`、`rejected`、`revoked` 或 `deleted`。`revoked` 只作为历史解释保留，不能继续引用。对象不是在线、已读或送达事实。
 
 ### GET `/api/chat/shared-objects/{id}/media`
 
-仅适用于活动文件对象。需要登录且必须是源会话成员；服务端再次检查校园、对象状态和平台存储 key，私有 bucket 返回短时签名 URL，公共 bucket 返回平台 bucket URL。外部 URL、已撤销对象和任意自造 key 都不会被代理或签名。客户端不得在消息正文中自动加载它。
+仅适用于 `active` 文件对象。需要登录且必须是源会话成员；服务端再次检查校园、对象状态和平台存储 key，私有 bucket 返回短时签名 URL，公共 bucket 返回平台 bucket URL。外部 URL、未完成上传/审核、已撤销对象和任意自造 key 都不会被代理或签名。客户端不得在消息正文中自动加载它。
 
 ### DELETE `/api/chat/shared-objects/{id}`
 

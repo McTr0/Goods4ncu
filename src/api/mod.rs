@@ -437,6 +437,84 @@ impl AppState {
         };
         Some(format!("{}://{}/{}", endpoint.scheme(), authority, key))
     }
+
+    /// Probe a server-generated object key without trusting a client upload
+    /// claim. The range request transfers at most the first byte when the
+    /// platform honours Range, while Content-Range/Length supplies the object
+    /// size used by the shared-object lifecycle.
+    pub async fn probe_platform_object(
+        &self,
+        object_key: &str,
+    ) -> Result<PlatformObjectMetadata, ApiError> {
+        let url = self
+            .public_platform_media_url(object_key)
+            .ok_or_else(|| ApiError::NotImplemented("平台文件服务未配置".to_string()))?;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
+        let response = client
+            .get(url)
+            .header(reqwest::header::RANGE, "bytes=0-0")
+            .send()
+            .await
+            .map_err(|error| {
+                tracing::warn!(%error, "platform storage probe failed");
+                ApiError::ServiceUnavailable("平台文件服务")
+            })?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(ApiError::CodedConflict {
+                code: "shared_object_upload_missing",
+                message: "平台文件尚未上传完成".to_string(),
+            });
+        }
+        if !response.status().is_success() {
+            return Err(ApiError::ServiceUnavailable("平台文件服务"));
+        }
+        let headers = response.headers();
+        let size_bytes = headers
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(parse_content_range_total)
+            .or_else(|| {
+                headers
+                    .get(reqwest::header::CONTENT_LENGTH)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.parse::<i64>().ok())
+            })
+            .ok_or_else(|| ApiError::CodedConflict {
+                code: "shared_object_storage_metadata_missing",
+                message: "平台没有返回文件大小".to_string(),
+            })?;
+        let mime_type = headers
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let etag = headers
+            .get(reqwest::header::ETAG)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        Ok(PlatformObjectMetadata {
+            size_bytes,
+            mime_type,
+            etag,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlatformObjectMetadata {
+    pub size_bytes: i64,
+    pub mime_type: Option<String>,
+    pub etag: Option<String>,
+}
+
+fn parse_content_range_total(value: &str) -> Option<i64> {
+    let (_, total) = value.trim().split_once('/')?;
+    if total == "*" {
+        return None;
+    }
+    total.parse().ok()
 }
 
 fn is_platform_media_reference(state: &AppState, stored: &str) -> bool {
@@ -883,6 +961,10 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             get(user_chat::get_shared_object).delete(user_chat::revoke_shared_object),
         )
         .route(
+            "/api/chat/shared-objects/{id}/complete",
+            post(user_chat::complete_shared_object),
+        )
+        .route(
             "/api/chat/shared-objects/{id}/media",
             get(user_chat::get_shared_object_media),
         )
@@ -1246,5 +1328,12 @@ mod tests {
             endpoint,
             "goods"
         ));
+    }
+
+    #[test]
+    fn content_range_parser_prefers_total_object_size() {
+        assert_eq!(parse_content_range_total("bytes 0-0/4096"), Some(4096));
+        assert_eq!(parse_content_range_total("bytes 0-0/*"), None);
+        assert_eq!(parse_content_range_total("garbage"), None);
     }
 }

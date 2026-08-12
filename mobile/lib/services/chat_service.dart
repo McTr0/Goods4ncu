@@ -274,6 +274,21 @@ class ChatService extends BaseService {
     );
   }
 
+  /// Confirm a platform upload. The backend probes the server-generated key;
+  /// this call never turns a client-side upload claim into an active object.
+  Future<ChatSharedObject> completeSharedObject(String objectId) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/chat/shared-objects/$objectId/complete'),
+      headers,
+      jsonEncode(const <String, dynamic>{}),
+    );
+    return handleResponse(
+      response,
+      (data) => ChatSharedObject.fromJson(data as Map<String, dynamic>),
+    );
+  }
+
   Future<ChatSharedObjectMedia> getSharedObjectMedia(String objectId) async {
     final headers = await authHeaders();
     final response = await get(

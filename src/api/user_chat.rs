@@ -21,7 +21,8 @@ pub use message::{
 };
 pub use reply::reply_suggestions;
 pub use shared_object::{
-    create_shared_object, get_shared_object, get_shared_object_media, revoke_shared_object,
+    complete_shared_object, create_shared_object, get_shared_object, get_shared_object_media,
+    revoke_shared_object,
 };
 pub use telegram::{
     add_space_member, answer_call, create_call, create_secret_session, create_space, end_call,

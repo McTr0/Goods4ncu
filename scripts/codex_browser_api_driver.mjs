@@ -385,10 +385,10 @@ async function runR2Chat(baseUrl) {
   );
   assert(
     sharedFile.kind === 'file' &&
-      sharedFile.status === 'active' &&
+      sharedFile.status === 'pending_upload' &&
       sharedFile.upload_key?.startsWith('chat/') &&
       sharedFile.download_path,
-    'file shared object should be server-owned and active',
+    'file shared object should remain pending until the server probes storage',
     sharedFile,
   );
 
@@ -426,8 +426,13 @@ async function runR2Chat(baseUrl) {
       image_url: null,
       audio_url: null,
     },
+    [409],
   );
-  assert(fileQuote.quote?.kind === 'file', 'active file object should be quotable', fileQuote);
+  assert(
+    fileQuote._status === 409,
+    'pending file object must not be quotable before upload verification',
+    fileQuote,
+  );
 
   const linkQuote = await request(
     baseUrl,

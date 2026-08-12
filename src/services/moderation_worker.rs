@@ -155,6 +155,10 @@ async fn finalize_job(
     reject_reason: Option<&str>,
 ) -> anyhow::Result<()> {
     let mut tx = db.begin().await?;
+    // Keep the lock order aligned with shared-object job submission: resource
+    // first, moderation job second. This prevents a completion retry holding
+    // the object row from deadlocking a worker finalizing the same job.
+    update_resource_status(&mut tx, resource_type, resource_id, status).await?;
     sqlx::query(
         "UPDATE moderation_jobs
          SET status = $1, reject_reason = $2, processed_at = CURRENT_TIMESTAMP
@@ -165,7 +169,6 @@ async fn finalize_job(
     .bind(job_id)
     .execute(&mut *tx)
     .await?;
-    update_resource_status(&mut tx, resource_type, resource_id, status).await?;
     if status == "rejected" {
         create_case_for_rejected_job(&mut tx, job_id)
             .await

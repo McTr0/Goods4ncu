@@ -1332,6 +1332,10 @@ class ChatSharedObject {
     required this.mimeType,
     required this.sizeBytes,
     required this.status,
+    required this.moderationStatus,
+    required this.storageVerifiedAt,
+    required this.uploadedSizeBytes,
+    required this.uploadedMimeType,
     required this.uploadKey,
     required this.canonicalUrl,
     required this.createdAt,
@@ -1348,6 +1352,10 @@ class ChatSharedObject {
   final String? mimeType;
   final int? sizeBytes;
   final String status;
+  final String moderationStatus;
+  final DateTime? storageVerifiedAt;
+  final int? uploadedSizeBytes;
+  final String? uploadedMimeType;
   final String? uploadKey;
   final String? canonicalUrl;
   final DateTime createdAt;
@@ -1367,6 +1375,12 @@ class ChatSharedObject {
       mimeType: json['mime_type']?.toString(),
       sizeBytes: (json['size_bytes'] as num?)?.toInt(),
       status: json['status']?.toString() ?? 'active',
+      moderationStatus: json['moderation_status']?.toString() ?? 'not_required',
+      storageVerifiedAt: DateTime.tryParse(
+        json['storage_verified_at']?.toString() ?? '',
+      ),
+      uploadedSizeBytes: (json['uploaded_size_bytes'] as num?)?.toInt(),
+      uploadedMimeType: json['uploaded_mime_type']?.toString(),
       uploadKey: json['upload_key']?.toString(),
       canonicalUrl: json['canonical_url']?.toString(),
       createdAt:

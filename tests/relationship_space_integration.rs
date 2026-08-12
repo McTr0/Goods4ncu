@@ -2,8 +2,8 @@
 //! while explicit Pin actions stay idempotent, reversible, and campus-scoped.
 
 use goods4ncu::services::chat_conversation::{
-    ChatConversationService, CreateSharedObjectInput, SendConversationMessageInput,
-    SharedObjectKind, StructuredQuoteInput, StructuredQuoteKind,
+    ChatConversationService, CompleteSharedObjectInput, CreateSharedObjectInput,
+    SendConversationMessageInput, SharedObjectKind, StructuredQuoteInput, StructuredQuoteKind,
 };
 use goods4ncu::test_infra::with_test_pool;
 use sqlx::Row;
@@ -251,10 +251,33 @@ async fn shared_file_and_link_objects_are_authoritative_and_revokeable() {
             .await
             .expect("create file object");
         assert_eq!(file.kind, "file");
+        assert_eq!(file.status, "pending_upload");
         assert!(file
             .upload_key
             .as_deref()
             .is_some_and(|key| key.starts_with(&format!("chat/{campus_id}/"))));
+
+        let pending_quote = service
+            .send_message(SendConversationMessageInput {
+                client_message_id: Uuid::new_v4(),
+                conversation_id,
+                sender_id: bob.clone(),
+                content: "先试着引用未完成文件".to_string(),
+                reply_to_message_id: None,
+                quote: Some(StructuredQuoteInput {
+                    kind: StructuredQuoteKind::File,
+                    ref_id: file.id.clone(),
+                }),
+                image_data: None,
+                audio_data: None,
+                image_url: None,
+                audio_url: None,
+            })
+            .await;
+        assert!(
+            pending_quote.is_err(),
+            "pending upload must not be quotable"
+        );
 
         let link = service
             .create_shared_object(CreateSharedObjectInput {
@@ -273,6 +296,35 @@ async fn shared_file_and_link_objects_are_authoritative_and_revokeable() {
             link.canonical_url.as_deref(),
             Some("https://example.com/course")
         );
+
+        let file = service
+            .complete_shared_object(CompleteSharedObjectInput {
+                object_id: Uuid::parse_str(&file.id).expect("file id"),
+                user_id: alice.clone(),
+                uploaded_size_bytes: 4096,
+                uploaded_mime_type: Some("application/pdf".to_string()),
+                storage_etag: Some("etag-test".to_string()),
+                moderation_required: false,
+            })
+            .await
+            .expect("complete server-verified file upload");
+        assert_eq!(file.status, "active");
+        assert_eq!(file.uploaded_size_bytes, Some(4096));
+        assert!(file.storage_verified_at.is_some());
+
+        let retried = service
+            .complete_shared_object(CompleteSharedObjectInput {
+                object_id: Uuid::parse_str(&file.id).expect("file id"),
+                user_id: alice.clone(),
+                uploaded_size_bytes: 1,
+                uploaded_mime_type: Some("application/octet-stream".to_string()),
+                storage_etag: Some("stale-retry-etag".to_string()),
+                moderation_required: true,
+            })
+            .await
+            .expect("completion retry is idempotent");
+        assert_eq!(retried.status, "active");
+        assert_eq!(retried.uploaded_size_bytes, Some(4096));
 
         let quoted = service
             .send_message(SendConversationMessageInput {

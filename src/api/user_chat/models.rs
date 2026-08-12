@@ -83,6 +83,9 @@ pub struct CreateSharedObjectBody {
     pub canonical_url: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CompleteSharedObjectBody {}
+
 #[derive(Debug, Serialize)]
 pub struct SharedObjectResponse {
     #[serde(flatten)]

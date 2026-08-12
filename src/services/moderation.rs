@@ -576,6 +576,28 @@ pub(crate) async fn set_media_moderation_status(
                 tracing::warn!(resource_id, "invalid chat_image resource id");
             }
         }
+        "chat_shared_object" => {
+            if let Ok(object_id) = resource_id.parse::<uuid::Uuid>() {
+                sqlx::query(
+                    "UPDATE chat_shared_objects
+                     SET moderation_status = $1,
+                         status = CASE
+                             WHEN status IN ('revoked', 'deleted') THEN status
+                             WHEN $1 = 'approved' THEN 'active'
+                             WHEN $1 = 'rejected' THEN 'rejected'
+                             ELSE status
+                         END,
+                         updated_at = NOW()
+                     WHERE id = $2",
+                )
+                .bind(status)
+                .bind(object_id)
+                .execute(&mut **tx)
+                .await?;
+            } else {
+                tracing::warn!(resource_id, "invalid chat_shared_object resource id");
+            }
+        }
         "avatar" => {
             sqlx::query("UPDATE users SET avatar_moderation_status = $1 WHERE id = $2")
                 .bind(status)
