@@ -189,12 +189,12 @@
 
 该方向是目标态产品迁移，不改变当前 API 参考中的已实现事实。按以下顺序推进：
 
-当前进度：[部分完成] R0 的 Flutter 共同空间静态投影已接入联系人线程和独立私聊；只读取现有 Thread/Conversation 事实，`active` 只显示为“已连接”，没有新增后端状态。R1 已落地 `SocialPersona` v1 的受控 token、草稿/发布/归档、同校园公开读取、审计和普通头像回退；图片资产、照片风格化和人工审核队列仍待实现。R2 已落地同校园无序用户对 `relationship_key`、`space-events` cursor、显式幂等 Pin、最近连接恢复点，以及从既有 quote 派生的共享对象入口；2026-08-12 已在全新隔离数据库和真实 Flutter Web 上验收联系人空间的留言与连接入口，Flutter 已把商品/成交/文件/链接等共享引用显示为不加载资源的只读 rail。双账号接受/结束连接、完整主动 acknowledgement 旅程和文件/链接的后端权威对象仍待补齐。
+当前进度：[部分完成] R0 的 Flutter 共同空间静态投影已接入联系人线程和独立私聊；只读取现有 Thread/Conversation 事实，`active` 只显示为“已连接”，没有新增后端状态。R1 已落地 `SocialPersona` v1 的受控 token、草稿/发布/归档、同校园公开读取、审计和普通头像回退；图片资产、照片风格化和人工审核队列仍待实现。R2 已落地同校园无序用户对 `relationship_key`、`space-events` cursor、显式幂等 Pin、最近连接恢复点，以及从既有 quote 派生的共享对象入口。2026-08-12 已在全新隔离数据库上通过双账号 `realtime -> accept -> acknowledge -> close`、主动确认 `received -> completed -> withdraw` 和独立 `mail` 的真实 API 旅程；同日真实 Flutter Web 已验收留言/连接入口，且页面没有在线、正在输入或已读提示。Flutter 已把商品/成交/文件/链接等共享引用显示为不加载资源的只读 rail。剩余边界是文件/链接的后端权威对象、平台存储/代理和完整媒体生命周期，不把当前 quote 快照冒充为这些能力。
 
 1. **R0：体验原型与词义测试。** 用真实移动端尺寸验证“对方左上 / 自己右下”、留言/连接切换、角色缩放和 Memory Rail；确认用户不会把角色姿态理解成在线、已读或 Agent 参与。此阶段不改后端。
 2. **R1：静态角色身份层。** [部分完成] `0063_social_personas` 与 `/api/user/persona`、`/api/users/{id}/persona` 已支持统一风格 token、草稿、显式发布/归档、同校园边界和审计；Flutter 个人资料和公开主页已提供创建/预览/编辑入口。下一步补充 24/48/160 资产、深浅色与 reduced-motion fallback、媒体审核和照片风格化，不能把生成图当作身份认证。
-3. **R2：Relationship Space 投影（消息只读，Pin 显式写入）。** [部分完成] 复用 `Thread / Conversation / Message / Quote`，为同校园无序用户对提供稳定 relationship key 和 cursor；已实现“时间 + Pin”、最近连接恢复点，以及文件、链接、商品 quote 的共享对象入口。Pin 通过 `0064_relationship_space_pins` 保存为用户主动、可撤销的共享事实，仍不建立第二套消息事实。下一步补真实数据库/浏览器旅程和更完整的文件/链接展示。
-4. **R3：连接空间化。** 留言状态拉开角色并强调历史；请求/接受连接只由明确状态机驱动，连接期间弱化角色与 Rail。实现发送方“普通留言 / 希望今天处理 / 请求连接”的克制时间尺度，以及接收方主动的可留言、可连接、忙和稍后规则；接收方规则始终优先，不引入 online、typing、last seen 或 read。
+3. **R2：Relationship Space 投影（消息只读，Pin 显式写入）。** [部分完成] 复用 `Thread / Conversation / Message / Quote`，为同校园无序用户对提供稳定 relationship key 和 cursor；已实现“时间 + Pin”、最近连接恢复点，以及文件、链接、商品 quote 的只读共享对象入口。Pin 通过 `0064_relationship_space_pins` 保存为用户主动、可撤销的共享事实，仍不建立第二套消息事实。双账号 API 旅程、隐私字段递归断言、Flutter Web 入口和 Flutter 共享对象 rail 已验收。下一步只推进更完整的文件/链接展示：先建立平台存储/代理的权威引用，再接入审核、删除、权限失效和旧客户端兼容测试；外部 URL 不得由消息正文直接加载。
+4. **R3：连接空间化。** [部分完成] 留言状态已拉开角色并强调历史；请求/接受/结束连接由明确状态机驱动，连接期间弱化角色与 Rail。发送方的留言/连接入口、接收方主动确认和可留言/可连接/忙/稍后规则已接入现有协议；下一步补真实移动端双账号接受、结束、替换/撤销 acknowledgement 的可视旅程与回归截图。接收方规则始终优先，不引入 online、typing、last seen 或 read。
 5. **R4：可选语义增强。** 主题聚类、自然语言回忆与共识提议必须携带 `source_event_ids`；模型不可用时自动退回确定性时间、Pin、文件和搜索。共享约定只有用户明确采纳后才生效。
 
 群组的长期 Group + 临时 Discussion、语音/视频带宽升级、人物/地点轨迹和通用权威 `SpaceEvent` 写模型都后置。通用事件模型只有在投影回放、幂等、双写原子、删除/权限失效和旧客户端兼容全部通过后才可启用。
