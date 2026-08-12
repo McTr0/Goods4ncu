@@ -94,6 +94,8 @@ class _UserChatPageState extends State<UserChatPage> {
 
   Agreement? _agreement;
   RelationshipSpace? _relationshipSpace;
+  SocialPersona? _otherPersona;
+  SocialPersona? _selfPersona;
   bool _awaitingHandoff = false;
   late final AgreementService _agreementService;
   late final ReputationService _reputationService;
@@ -167,6 +169,7 @@ class _UserChatPageState extends State<UserChatPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadArrangement();
       _loadRelationshipSpace();
+      _loadPersonas();
     });
   }
 
@@ -713,10 +716,13 @@ class _UserChatPageState extends State<UserChatPage> {
       setState(() {
         _agreement = null;
         _relationshipSpace = null;
+        _otherPersona = null;
+        _selfPersona = null;
         _awaitingHandoff = false;
       });
       _loadArrangement();
       _loadRelationshipSpace();
+      _loadPersonas();
     }
   }
 
@@ -749,6 +755,49 @@ class _UserChatPageState extends State<UserChatPage> {
     } catch (_) {
       // The message path remains usable when the projection is unavailable;
       // this is an additive rail, never a second chat dependency.
+    }
+  }
+
+  Future<void> _loadPersonas() async {
+    final conversationId = widget.conversationId;
+    final otherUserId = widget.otherUserId;
+    final personas = await Future.wait<SocialPersona?>([
+      _loadPublicPersona(otherUserId),
+      _loadOwnPersona(),
+    ]);
+    if (!mounted ||
+        widget.conversationId != conversationId ||
+        widget.otherUserId != otherUserId) {
+      return;
+    }
+    setState(() {
+      _otherPersona = personas[0];
+      _selfPersona = personas[1];
+    });
+  }
+
+  Future<SocialPersona?> _loadPublicPersona(String userId) async {
+    try {
+      final persona = await _userService.getPublicSocialPersona(userId);
+      // Public endpoints should already filter this server-side, but keep the
+      // client fail-closed so a rolling upgrade or malformed response cannot
+      // expose a draft/archived role in a relationship space.
+      return persona?.isPublished == true ? persona : null;
+    } catch (_) {
+      // The role layer is optional. A public persona outage must not hide the
+      // relationship timeline or make a message path fail.
+      return null;
+    }
+  }
+
+  Future<SocialPersona?> _loadOwnPersona() async {
+    try {
+      final persona = await _userService.getSocialPersona();
+      // A private draft is useful on the profile editor, never as a public
+      // anchor beside a message. Archive means ordinary avatar fallback.
+      return persona?.isPublished == true ? persona : null;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -787,6 +836,8 @@ class _UserChatPageState extends State<UserChatPage> {
         if (!widget.embedded)
           RelationshipSpacePreview(
             otherName: _displayName,
+            otherPersona: _otherPersona,
+            selfPersona: _selfPersona,
             latestEvent: _messages.isEmpty ? null : _messages.last.content,
             isConnected: _conversation?.state == ConversationState.active,
             pinCount: _relationshipSpace?.pins.length ?? 0,

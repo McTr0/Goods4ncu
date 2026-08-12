@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'social_persona_card.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
@@ -16,6 +17,8 @@ class RelationshipSpacePreview extends StatelessWidget {
     super.key,
     required this.otherName,
     this.otherAvatarUrl,
+    this.otherPersona,
+    this.selfPersona,
     this.latestEvent,
     this.isConnected = false,
     this.pinCount = 0,
@@ -27,6 +30,8 @@ class RelationshipSpacePreview extends StatelessWidget {
 
   final String otherName;
   final String? otherAvatarUrl;
+  final SocialPersona? otherPersona;
+  final SocialPersona? selfPersona;
   final String? latestEvent;
   final bool isConnected;
   final int pinCount;
@@ -87,6 +92,7 @@ class RelationshipSpacePreview extends StatelessWidget {
                   child: _PersonaAnchor(
                     name: otherName,
                     imageUrl: otherAvatarUrl,
+                    persona: otherPersona,
                     alignment: CrossAxisAlignment.start,
                     compact: compact,
                   ),
@@ -108,6 +114,7 @@ class RelationshipSpacePreview extends StatelessWidget {
                 Expanded(
                   child: _PersonaAnchor(
                     name: l.relationshipSpaceMe,
+                    persona: selfPersona,
                     alignment: CrossAxisAlignment.end,
                     compact: compact,
                   ),
@@ -393,12 +400,14 @@ class _PersonaAnchor extends StatelessWidget {
   const _PersonaAnchor({
     required this.name,
     this.imageUrl,
+    this.persona,
     required this.alignment,
     this.compact = false,
   });
 
   final String name;
   final String? imageUrl;
+  final SocialPersona? persona;
   final CrossAxisAlignment alignment;
   final bool compact;
 
@@ -408,29 +417,43 @@ class _PersonaAnchor extends StatelessWidget {
     final trimmedName = name.trim();
     final fallback = trimmedName.isEmpty ? '?' : trimmedName.characters.first;
     final hasImage = imageUrl != null && imageUrl!.trim().isNotEmpty;
+    final roleAvatar = persona == null
+        ? null
+        : SocialPersonaAvatar(
+            persona: persona!,
+            size: compact ? 24 : 160,
+            semanticLabel: trimmedName.isEmpty ? null : trimmedName,
+          );
     return Column(
       crossAxisAlignment: alignment,
       children: [
-        Container(
-          width: compact ? 36 : 48,
-          height: compact ? 36 : 48,
-          decoration: BoxDecoration(
-            color: AppTheme.mint,
-            borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-            border: Border.all(color: AppTheme.primary.withValues(alpha: .18)),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: hasImage
-              ? Image.network(
-                  imageUrl!,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => _FallbackFace(
-                    label: fallback,
-                    foreground: AppTheme.primary,
-                  ),
-                )
-              : _FallbackFace(label: fallback, foreground: AppTheme.primary),
-        ),
+        roleAvatar ??
+            Container(
+              width: compact ? 36 : 48,
+              height: compact ? 36 : 48,
+              decoration: BoxDecoration(
+                color: AppTheme.mint,
+                borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+                border: Border.all(
+                  color: AppTheme.primary.withValues(alpha: .18),
+                ),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: hasImage
+                  ? Image.network(
+                      imageUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) =>
+                          _FallbackFace(
+                            label: fallback,
+                            foreground: AppTheme.primary,
+                          ),
+                    )
+                  : _FallbackFace(
+                      label: fallback,
+                      foreground: AppTheme.primary,
+                    ),
+            ),
         SizedBox(height: compact ? AppTheme.sp2 : AppTheme.sp4),
         Text(
           trimmedName.isEmpty ? '?' : trimmedName,

@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use std::collections::HashSet;
@@ -41,7 +41,7 @@ pub struct SocialPersonaView {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicSocialPersonaView {
     pub representation_mode: String,
     pub style_version: String,

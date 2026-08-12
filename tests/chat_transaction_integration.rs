@@ -136,6 +136,23 @@ async fn threads_group_multiple_conversations_by_peer_without_merging_history() 
     with_test_pool(|pool| async move {
         insert_user(&pool, "user-a", "alice").await;
         insert_user(&pool, "user-b", "bob").await;
+        sqlx::query(
+            "INSERT INTO social_personas (
+                 user_id, campus_id, representation_mode, style_version,
+                 appearance_config, self_descriptions, contact_posture,
+                 status, published_at
+             ) VALUES (
+                 'user-a',
+                 'c0000000-0000-0000-0000-000000000001',
+                 'role_character', 'v1',
+                 '{\"palette\":\"plum\",\"silhouette\":\"round\",\"accessory\":\"leaf\",\"outfit\":\"campus\"}',
+                 '[\"slow_to_warm\"]', 'leave_message',
+                 'published', NOW()
+             )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         let service = ChatConversationService::new(pool.clone());
 
         let realtime_id = create_active_realtime(&service, "user-a", "user-b").await;
@@ -194,6 +211,17 @@ async fn threads_group_multiple_conversations_by_peer_without_merging_history() 
             .unwrap()
             .pop()
             .unwrap();
+        let persona = campus_thread.persona.expect("published peer persona");
+        assert_eq!(persona.representation_mode, "role_character");
+        assert_eq!(persona.contact_posture, "leave_message");
+        assert!(service
+            .list_threads("user-b", None, 20)
+            .await
+            .unwrap()
+            .first()
+            .unwrap()
+            .persona
+            .is_none());
         assert_eq!(
             campus_thread.relationship_key,
             "relationship:v1:c0000000-0000-0000-0000-000000000001:user-a:user-b"

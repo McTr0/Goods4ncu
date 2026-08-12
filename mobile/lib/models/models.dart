@@ -1082,6 +1082,7 @@ class ChatThread {
     this.pendingCount = 0,
     this.hasActiveRealtime = false,
     this.latestListingTitle,
+    this.peerPersona,
   });
 
   final String peerUserId;
@@ -1100,6 +1101,7 @@ class ChatThread {
   final int pendingCount;
   final bool hasActiveRealtime;
   final String? latestListingTitle;
+  final SocialPersona? peerPersona;
 
   ChatThread copyWith({int? unreadCount}) => ChatThread(
     peerUserId: peerUserId,
@@ -1114,6 +1116,7 @@ class ChatThread {
     pendingCount: pendingCount,
     hasActiveRealtime: hasActiveRealtime,
     latestListingTitle: latestListingTitle,
+    peerPersona: peerPersona,
   );
 
   factory ChatThread.fromJson(Map<String, dynamic> json) {
@@ -1134,6 +1137,11 @@ class ChatThread {
       pendingCount: (json['pending_count'] as num?)?.toInt() ?? 0,
       hasActiveRealtime: json['has_active_realtime'] == true,
       latestListingTitle: json['latest_listing_title']?.toString(),
+      peerPersona: json['persona'] is Map
+          ? SocialPersona.fromJson(
+              (json['persona'] as Map).cast<String, dynamic>(),
+            )
+          : null,
     );
   }
 }
@@ -1496,7 +1504,13 @@ class SocialPersona {
               .map((value) => value.toString())
               .toList(growable: false),
       contactPosture: json['contact_posture']?.toString() ?? 'leave_message',
-      status: json['status']?.toString() ?? 'draft',
+      // Public persona responses intentionally omit private lifecycle fields,
+      // but a published_at timestamp is still an explicit server fact. Infer
+      // only the public published state; missing timestamps remain private
+      // draft-safe defaults.
+      status:
+          json['status']?.toString() ??
+          (json['published_at'] == null ? 'draft' : 'published'),
       publishedAt: json['published_at']?.toString(),
       createdAt: json['created_at']?.toString(),
       updatedAt: json['updated_at']?.toString(),

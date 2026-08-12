@@ -146,10 +146,10 @@ GOOD4NCU_API_BASE=http://127.0.0.1:3000 \
 | 主动确认 | `seller1` 对消息选择“收到 / 我会看 / 已处理” | `buyer1` 观察消息 | 只有显式动作产生对应 acknowledgement 和 `message_acknowledgement_changed`，可替换或撤销；打开消息不自动确认。 |
 | 跨校园确认隔离 | 同一账号的设备分别停在两个校园 | A 校园接收 acknowledgement | 只有 A 校园 socket 收到事件；B 校园只能通过自己的 HTTP 会话看到自己的会话，不能收到 A 的消息或确认。 |
 | 连接不是在线 | `buyer1` 发起连接，`seller1` 接受并结束 | 双方观察状态 | `syn_sent/syn_ack` 在线程摘要和会话卡片中都只显示等待/确认，只有 `active` 才显示 `请求连接 -> 已连接 -> 已结束`；不额外显示 online、last seen 或 typing。 |
-| 共同空间投影（R0） | 打开联系人线程，再打开一段留言或连接 | 双方观察页面 | 显示双方角色锚点、时间轨迹和明确的“可以留言/已连接”；页面打开、滚动和角色缩放不产生对方可见事件。390×844 与桌面分栏都不得遮挡正文。 |
+| 共同空间投影（R0） | 打开联系人线程，再打开一段留言或连接 | 双方观察页面 | 显示双方角色锚点、时间轨迹和明确的“可以留言/已连接”；活动校园 Thread 只投影已发布 persona，列表/线程头/完整空间分别使用 24/48/160 静态 token；草稿/归档回退普通头像。页面打开、滚动和角色缩放不产生对方可见事件。390×844 与桌面分栏都不得遮挡正文。 |
 | 共同空间事件轨迹（R2） | API driver 按 `relationship_key` 首页读取，再用 `next_cursor` 翻页 | 对方尝试跨校园或访问未参与的 peer | 只返回当前用户可见的会话事件与消息来源；cursor 不改变 `LOCALLY_SEEN`，跨校园/越权返回 404，不产生 read/typing/online 事实。 |
 | 共同空间 Pin 与共享对象（R2） | `r2-chat` 驱动与 Rust 回归共同覆盖双方 Pin、创建 file/link 权威对象、消息引用、撤销后读取 `space-events`；2026-08-12 生产 OSS rehearsal 已调用 `/complete` 并验证 signed DELETE 清理 | 重复 Pin、撤销不存在的 Pin、伪造外部文件 URL、未完成上传就引用、隐藏源消息、跨校园读取、非创建者撤销、远端删除失败重试 | Pin 幂等且可撤销；`actor_id` 保留主动者；file 创建后为 `pending_upload`，只有服务端 Range probe 成功、尺寸/类型匹配后才进入 `active` 或 `pending_review`；file/link 只能引用活动 `chat_shared_objects`，链接片段被规范化且不抓取；撤销后原消息保留但 quote、媒体入口和共享对象投影失效，双方收到 `shared_object_revoked`；后台 worker 对 revoked/deleted file 执行可重试、幂等的远端 DELETE 并保留错误审计；Flutter rail 只读且不自动加载资源，不产生 read/typing/online 事实。 |
-| 角色化社交分身（R1） | 已认证用户在个人资料创建并保存角色草稿，再显式发布、编辑和归档；Flutter widget 覆盖 24/48/160 token、深色主题和 `disableAnimations` | 另一用户打开同校园公开主页；未认证/跨校园用户尝试读取 | 草稿只对本人可见；发布后只返回受控 token、用户标签和主动接近方式；归档后恢复普通头像；跨校园或非 verified membership 不公开；任一页面打开、Push 或输入不改变 persona 状态；角色 token 在三种尺寸保持静态且不表达在线、输入中或已读。 |
+| 角色化社交分身（R1） | 已认证用户在个人资料创建并保存角色草稿，再显式发布、编辑和归档；Flutter widget 覆盖 24/48/160 token、深色主题和 `disableAnimations`；线程集成回归验证活动校园 Thread 附带发布角色 | 另一用户打开同校园公开主页；未认证/跨校园用户尝试读取；legacy 无校园 Thread 读取 | 草稿只对本人可见；发布后只返回受控 token、用户标签和主动接近方式；归档后恢复普通头像；跨校园或非 verified membership 不公开；legacy 无校园 Thread 不附带 persona；任一页面打开、Push 或输入不改变 persona 状态；角色 token 在三种尺寸保持静态且不表达在线、输入中或已读。 |
 | 回复引用 | `buyer1` 长按回复 | `seller1` 发一条消息 | 引用气泡展示原发送者和摘要。 |
 | 表情反应 | `buyer1` 添加反应 | 无 | 反应出现在气泡下方，自己的反应高亮。 |
 | 仅对自己删除 | `buyer1` 删除消息 | `seller1` 读取同一会话 | buyer 看不到，seller 仍看得到。 |

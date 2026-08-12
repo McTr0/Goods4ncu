@@ -25,6 +25,30 @@ void main() {
 
       expect(thread.relationshipKey, isNull);
     });
+
+    test('parses only the published peer role token when supplied by a campus thread', () {
+      final thread = ChatThread.fromJson({
+        'peer_user_id': 'user-b',
+        'peer_username': 'Bob',
+        'latest_activity_at': '2026-08-12T10:00:00Z',
+        'persona': {
+          'representation_mode': 'role_character',
+          'style_version': 'v1',
+          'appearance_config': {
+            'palette': 'plum',
+            'silhouette': 'round',
+            'accessory': 'leaf',
+            'outfit': 'campus',
+          },
+          'self_descriptions': ['slow_to_warm'],
+          'contact_posture': 'leave_message',
+          'published_at': '2026-08-12T10:00:00Z',
+        },
+      });
+
+      expect(thread.peerPersona?.isPublished, isTrue);
+      expect(thread.peerPersona?.appearance.palette, 'plum');
+    });
   });
 
   group('RelationshipSpace', () {
@@ -156,6 +180,19 @@ void main() {
         });
       },
     );
+
+    test('recognizes a public response from its published timestamp', () {
+      final persona = SocialPersona.fromJson({
+        'representation_mode': 'role_character',
+        'style_version': 'v1',
+        'appearance_config': <String, dynamic>{},
+        'self_descriptions': <dynamic>[],
+        'contact_posture': 'leave_message',
+        'published_at': '2026-08-12T10:00:00Z',
+      });
+
+      expect(persona.isPublished, isTrue);
+    });
   });
 
   group('ChatSharedObject', () {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/components/relationship_space_preview.dart';
+import 'package:goods4ncu_mobile/components/social_persona_card.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/theme/app_theme.dart';
@@ -62,6 +63,41 @@ void main() {
     expect(find.text('2 个 Pin'), findsOneWidget);
     expect(find.text('1 个共享对象'), findsOneWidget);
     expect(find.text('时间轨迹'), findsWidgets);
+  });
+
+  testWidgets('uses static role tokens for both sides of a full space', (
+    tester,
+  ) async {
+    const persona = SocialPersona(
+      representationMode: 'role_character',
+      styleVersion: 'v1',
+      appearance: SocialPersonaAppearance(
+        palette: 'teal',
+        silhouette: 'soft',
+        accessory: 'leaf',
+        outfit: 'campus',
+      ),
+      selfDescriptions: [],
+      contactPosture: 'leave_message',
+      status: 'published',
+    );
+    await tester.pumpWidget(
+      _host(
+        const RelationshipSpacePreview(
+          otherName: 'Alice',
+          otherPersona: persona,
+          selfPersona: persona,
+        ),
+      ),
+    );
+
+    final avatars = find.byType(SocialPersonaAvatar);
+    expect(avatars, findsNWidgets(2));
+    expect(tester.getSize(avatars.at(0)), const Size(160, 160));
+    expect(tester.getSize(avatars.at(1)), const Size(160, 160));
+    expect(find.text('在线'), findsNothing);
+    expect(find.text('已读'), findsNothing);
+    expect(find.text('正在输入'), findsNothing);
   });
 
   testWidgets(

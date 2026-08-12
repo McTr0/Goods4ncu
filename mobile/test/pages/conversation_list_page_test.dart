@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:goods4ncu_mobile/components/social_persona_card.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/pages/conversation_list_page.dart';
@@ -176,6 +177,20 @@ void main() {
           pendingCount: 1,
           hasActiveRealtime: true,
           latestListingTitle: '二手显示器',
+          peerPersona: SocialPersona(
+            representationMode: 'role_character',
+            styleVersion: 'v1',
+            appearance: const SocialPersonaAppearance(
+              palette: 'plum',
+              silhouette: 'round',
+              accessory: 'leaf',
+              outfit: 'campus',
+            ),
+            selfDescriptions: const ['slow_to_warm'],
+            contactPosture: 'leave_message',
+            status: 'published',
+            publishedAt: '2026-08-12T10:00:00Z',
+          ),
         ),
       ],
     );
@@ -188,6 +203,11 @@ void main() {
     expect(find.text('留言 2'), findsOneWidget);
     expect(find.text('共 4 段'), findsOneWidget);
     expect(find.text('待回应 1'), findsOneWidget);
+    expect(find.byType(SocialPersonaAvatar), findsOneWidget);
+    expect(
+      tester.getSize(find.byType(SocialPersonaAvatar)),
+      const Size(24, 24),
+    );
   });
 
   testWidgets('conversation inbox uses dark scaffold background', (

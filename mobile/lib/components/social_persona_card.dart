@@ -30,7 +30,9 @@ class SocialPersonaPreviewCard extends StatelessWidget {
     final content = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SocialPersonaAvatar(persona: persona, size: compact ? 48 : 76),
+        // Compact cards are used in profile-adjacent summaries (48); the
+        // full role card gets the 160 token that is also used in a space.
+        SocialPersonaAvatar(persona: persona, size: compact ? 48 : 160),
         SizedBox(width: compact ? AppTheme.sp12 : AppTheme.sp16),
         Expanded(
           child: Column(

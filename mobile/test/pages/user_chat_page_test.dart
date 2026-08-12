@@ -28,6 +28,12 @@ class _FakePageChatService extends ChatService {
 class _FakePageUserService extends UserService {
   @override
   Future<Map<String, dynamic>> getUserProfile() async => {'user_id': 'user-me'};
+
+  @override
+  Future<SocialPersona?> getPublicSocialPersona(String userId) async => null;
+
+  @override
+  Future<SocialPersona?> getSocialPersona() async => null;
 }
 
 class _BrokenAgreementService extends AgreementService {

@@ -484,11 +484,11 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 ### GET `/api/chat/threads`
 
-需要登录。按 `other_user_id` 聚合收件箱，让同一聊天对象只返回一个 Thread。支持 `mode=all|realtime|mail`。返回对方标识、最近活动/预览、conversation/mail/realtime/pending 数量、active realtime 状态，以及只读的 `relationship_key`。当请求带有服务端推导的活动校园时，key 是该校园内无序用户对的稳定标识；无校园的 legacy 读取使用独立命名空间。新客户端根据设备本地的 `LOCALLY_SEEN` 标记显示“新留言”，不读取服务器未读数。
+需要登录。按 `other_user_id` 聚合收件箱，让同一聊天对象只返回一个 Thread。支持 `mode=all|realtime|mail`。返回对方标识、最近活动/预览、conversation/mail/realtime/pending 数量、active realtime 状态，以及只读的 `relationship_key`。带活动校园的 Thread 另外可返回 `persona`：它只包含对方在该校园明确发布的受控角色 token 与接近方式；草稿、归档、非活动校园或未验证成员统一为 `null`。无校园的 legacy 读取不返回 persona。当请求带有服务端推导的活动校园时，key 是该校园内无序用户对的稳定标识；无校园的 legacy 读取使用独立命名空间。新客户端根据设备本地的 `LOCALLY_SEEN` 标记显示“新留言”，不读取服务器未读数。
 
 ### GET `/api/chat/threads/{peer_user_id}`
 
-需要登录。返回当前用户与指定对方之间的 Conversation 卡组，按最近活动排序，并在 `thread.relationship_key` 中返回同校园无序用户对的只读稳定标识。只包含当前用户参与的会话，不泄露第三方历史。Thread 是查询聚合，不改变底层 Conversation ID 和状态机，也不产生在线、输入中或已读事实。
+需要登录。返回当前用户与指定对方之间的 Conversation 卡组，按最近活动排序，并在 `thread.relationship_key` 中返回同校园无序用户对的只读稳定标识；活动校园下的 `thread.persona` 遵循上面的已发布角色边界。只包含当前用户参与的会话，不泄露第三方历史。Thread 是查询聚合，不改变底层 Conversation ID 和状态机，也不产生在线、输入中或已读事实。
 
 ### GET `/api/chat/threads/{peer_user_id}/space-events`
 

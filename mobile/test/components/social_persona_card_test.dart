@@ -71,6 +71,26 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('preview card selects 48 compact and 160 full role tokens', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _host(SocialPersonaPreviewCard(persona: _persona(), compact: true)),
+    );
+    expect(
+      tester.getSize(find.byType(SocialPersonaAvatar)),
+      const Size(48, 48),
+    );
+
+    await tester.pumpWidget(
+      _host(SocialPersonaPreviewCard(persona: _persona())),
+    );
+    expect(
+      tester.getSize(find.byType(SocialPersonaAvatar)),
+      const Size(160, 160),
+    );
+  });
+
   testWidgets(
     'role token stays static and legible in dark reduced-motion mode',
     (tester) async {

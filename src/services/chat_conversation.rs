@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::api::error::ApiError;
 use crate::services::moderation_case::create_case_for_report;
+use crate::services::social_persona::PublicSocialPersonaView;
 use crate::utils::cents_to_yuan;
 
 pub const INVITE_TTL_MINUTES: i64 = 10;
@@ -142,6 +143,9 @@ pub struct ChatThreadView {
     pub pending_count: i64,
     pub has_active_realtime: bool,
     pub latest_listing_title: Option<String>,
+    /// Published role presentation for the peer in the resolved campus.
+    /// Drafts and archived roles are never included in a thread projection.
+    pub persona: Option<PublicSocialPersonaView>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1097,7 +1101,31 @@ impl ChatConversationService {
                        AND visible.state = 'active'
                    ) AS has_active_realtime,
                    MAX(visible.listing_title) FILTER (WHERE visible.recency_rank = 1)
-                       AS latest_listing_title
+                       AS latest_listing_title,
+                   (
+                       SELECT json_build_object(
+                           'representation_mode', persona.representation_mode,
+                           'style_version', persona.style_version,
+                           'appearance_config', persona.appearance_config,
+                           'self_descriptions', persona.self_descriptions,
+                           'contact_posture', persona.contact_posture,
+                           'published_at', persona.published_at
+                       )
+                       FROM social_personas persona
+                       JOIN users persona_user
+                         ON persona_user.id = persona.user_id
+                        AND persona_user.status = 'active'
+                       JOIN campus_memberships persona_membership
+                         ON persona_membership.user_id = persona.user_id
+                        AND persona_membership.campus_id = persona.campus_id
+                        AND persona_membership.status = 'verified'
+                       JOIN campuses persona_campus
+                         ON persona_campus.id = persona.campus_id
+                        AND persona_campus.status = 'active'
+                       WHERE persona.user_id = visible.peer_user_id
+                         AND persona.campus_id = $4
+                         AND persona.status = 'published'
+                   ) AS persona
             FROM visible
             LEFT JOIN users peer ON peer.id = visible.peer_user_id
             GROUP BY visible.peer_user_id, peer.username
@@ -1137,6 +1165,11 @@ impl ChatConversationService {
                     pending_count: row.get("pending_count"),
                     has_active_realtime: row.get("has_active_realtime"),
                     latest_listing_title: row.get("latest_listing_title"),
+                    persona: row
+                        .try_get::<Option<Value>, _>("persona")
+                        .ok()
+                        .flatten()
+                        .and_then(|value| serde_json::from_value(value).ok()),
                 }
             })
             .collect())

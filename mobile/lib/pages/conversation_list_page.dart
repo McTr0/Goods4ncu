@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../components/contact_conversation_sheet.dart';
 import '../components/relationship_space_preview.dart';
+import '../components/social_persona_card.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
@@ -714,7 +715,13 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
         children: [
           Row(
             children: [
-              _Avatar(name: _displayName),
+              thread?.peerPersona == null
+                  ? _Avatar(name: _displayName)
+                  : SocialPersonaAvatar(
+                      persona: thread!.peerPersona!,
+                      size: 48,
+                      semanticLabel: _displayName,
+                    ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -756,6 +763,7 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
             const SizedBox(height: AppTheme.sp12),
             RelationshipSpacePreview(
               otherName: _displayName,
+              otherPersona: thread.peerPersona,
               latestEvent: thread.latestPreview,
               isConnected: thread.hasActiveRealtime,
               compact: true,
@@ -2328,7 +2336,13 @@ class _PeerThreadCard extends StatelessWidget {
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         onTap: onTap,
-        leading: _Avatar(name: thread.peerUsername),
+        leading: thread.peerPersona == null
+            ? _Avatar(name: thread.peerUsername)
+            : SocialPersonaAvatar(
+                persona: thread.peerPersona!,
+                size: 24,
+                semanticLabel: thread.peerUsername,
+              ),
         title: Row(
           children: [
             Expanded(
