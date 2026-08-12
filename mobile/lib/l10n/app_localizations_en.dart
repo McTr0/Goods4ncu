@@ -2978,4 +2978,165 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get adminListingNoActions =>
       'No administrative action is available for this listing.';
+
+  @override
+  String get socialPersonaTitle => 'Role presentation';
+
+  @override
+  String get socialPersonaDescription =>
+      'Show how you want to be approached with choices you made; it never represents online, read, or inferred attention state.';
+
+  @override
+  String get socialPersonaCreate => 'Create role presentation';
+
+  @override
+  String get socialPersonaEdit => 'Edit role presentation';
+
+  @override
+  String get socialPersonaDraft => 'Draft · visible only to you';
+
+  @override
+  String get socialPersonaPublished => 'Published · visible on this campus';
+
+  @override
+  String get socialPersonaArchived => 'Archived · ordinary avatar is shown';
+
+  @override
+  String get socialPersonaRepresentationMode => 'Representation';
+
+  @override
+  String get socialPersonaTraitMapped => 'Trait mapped';
+
+  @override
+  String get socialPersonaRoleCharacter => 'Role character';
+
+  @override
+  String get socialPersonaPalette => 'Palette';
+
+  @override
+  String get socialPersonaPaletteTeal => 'Teal';
+
+  @override
+  String get socialPersonaPalettePlum => 'Plum';
+
+  @override
+  String get socialPersonaPaletteSun => 'Sun';
+
+  @override
+  String get socialPersonaPaletteSlate => 'Slate';
+
+  @override
+  String get socialPersonaSilhouette => 'Silhouette';
+
+  @override
+  String get socialPersonaSilhouetteSoft => 'Soft';
+
+  @override
+  String get socialPersonaSilhouetteRound => 'Round';
+
+  @override
+  String get socialPersonaSilhouetteSharp => 'Sharp';
+
+  @override
+  String get socialPersonaAccessory => 'Accessory';
+
+  @override
+  String get socialPersonaAccessoryNone => 'None';
+
+  @override
+  String get socialPersonaAccessoryGlasses => 'Glasses';
+
+  @override
+  String get socialPersonaAccessoryHeadphones => 'Headphones';
+
+  @override
+  String get socialPersonaAccessoryLeaf => 'Leaf';
+
+  @override
+  String get socialPersonaOutfit => 'Outfit';
+
+  @override
+  String get socialPersonaOutfitCampus => 'Campus';
+
+  @override
+  String get socialPersonaOutfitWorkwear => 'Simple';
+
+  @override
+  String get socialPersonaOutfitCasual => 'Casual';
+
+  @override
+  String get socialPersonaOutfitLab => 'Lab';
+
+  @override
+  String get socialPersonaContactPosture => 'How others can approach you';
+
+  @override
+  String get socialPersonaLeaveMessage =>
+      'Leave a message; replies may not be immediate';
+
+  @override
+  String get socialPersonaConnectionAllowed =>
+      'Connection requests are welcome';
+
+  @override
+  String get socialPersonaBusy => 'Busy lately; messages are still welcome';
+
+  @override
+  String get socialPersonaLater => 'Will look later';
+
+  @override
+  String get socialPersonaLabels => 'Self-description (up to three)';
+
+  @override
+  String get socialPersonaLabelSlowToWarm => 'Slow to warm';
+
+  @override
+  String get socialPersonaLabelBusinessOnly => 'Business only';
+
+  @override
+  String get socialPersonaLabelMeetupFriendly => 'Meetup friendly';
+
+  @override
+  String get socialPersonaLabelCasualChat => 'Casual chat';
+
+  @override
+  String get socialPersonaLabelReplyLater => 'Replies later';
+
+  @override
+  String get socialPersonaLabelTechEnthusiast => 'Tech enthusiast';
+
+  @override
+  String get socialPersonaSaveDraft => 'Save draft';
+
+  @override
+  String get socialPersonaPublish => 'Publish presentation';
+
+  @override
+  String get socialPersonaArchive => 'Archive and restore ordinary avatar';
+
+  @override
+  String get socialPersonaRestore => 'Edit and publish again';
+
+  @override
+  String get socialPersonaPublishConfirmTitle => 'Publish role presentation?';
+
+  @override
+  String get socialPersonaPublishConfirmBody =>
+      'People on this campus will be able to see it. It never means online, read, typing, or any other attention state.';
+
+  @override
+  String get socialPersonaSaved => 'Role presentation draft saved';
+
+  @override
+  String get socialPersonaPublishedToast => 'Role presentation published';
+
+  @override
+  String get socialPersonaArchivedToast => 'Archived; ordinary avatar is shown';
+
+  @override
+  String get socialPersonaPreviewRole => 'Role preview';
+
+  @override
+  String get socialPersonaSelectHint =>
+      'Choices are restricted to the current style version.';
 }

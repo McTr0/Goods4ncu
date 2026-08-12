@@ -179,18 +179,22 @@ Conversation 终止后不可复活。重新联系会创建新 Conversation，但
 
 ### SocialPersona、RelationshipSpace 与 SpaceEvent
 
-[目标态] `SocialPersona` 是用户在某个校园中的角色化呈现，不是账号、membership 或 Agent 身份。建议字段分组为：
+[部分实现] `SocialPersona` 是用户在某个校园中的角色化呈现，不是账号、membership 或 Agent 身份。当前迁移 `0063_social_personas` 已落地每用户每校园一条记录：
 
 ```text
-user_id / campus_id
-representation_mode: photo_stylized | trait_mapped | role_character
-style_version / appearance_config / approved_asset_id
-self_descriptions[]          # 用户主动选择
-contact_posture              # 用户主动公开的粗粒度接近方式
-published_at / updated_at
+id / user_id / campus_id
+representation_mode: trait_mapped | role_character
+style_version: v1
+appearance_config             # palette / silhouette / accessory / outfit 白名单
+self_descriptions[]           # 最多三个用户主动选择的标签
+contact_posture               # leave_message | connection_allowed | busy | later
+status: draft | published | archived
+published_at / created_at / updated_at
 ```
 
 `contact_posture` 可以表达可留言、可请求连接、忙或稍后，但不能保存或派生 online、last seen、typing 或 read。角色素材复用媒体隔离与审核；`representation_mode` 只是展示披露，不证明外貌真实性。用户未发布分身时继续使用普通头像和文字资料，核心联系能力不能被 AI 生成服务绑架。
+
+当前 API 通过 `VerifiedTenant` 只允许活动校园的 verified member 创建、编辑、发布和归档；草稿只对本人返回，公开接口只返回同一校园中已发布的配置。每次创建、编辑、发布和归档都写入 `social_persona_audits`。`archived` 会恢复普通头像展示。图片候选、照片风格化、资产审核和 `approved_asset_id` 仍是后续迁移，不应在当前客户端自行假设。
 
 `Relationship` 表示同一校园内两个人之间的长期入口；`RelationshipSpace` 是它的交互投影。当前没有必要立刻新增权威关系表：`campus_id + 无序用户对` 的 Thread 聚合可以作为迁移桥梁，屏蔽、membership 和可见性依旧由现有事实控制。当前 API 已在活动校园作用域返回只读 `relationship_key`（`relationship:v1:{campus}:{lo}:{hi}`）；它只用于投影缓存和未来 cursor 的关联，不授予权限，也不代表在线或注意力状态。
 

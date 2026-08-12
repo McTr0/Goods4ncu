@@ -1211,6 +1211,96 @@ class RelationshipSpace {
   }
 }
 
+/// User-controlled role presentation. This is intentionally a presentation
+/// layer: it contains only selected tokens and explicit labels, never inferred
+/// presence, typing, read, or personality state.
+class SocialPersonaAppearance {
+  const SocialPersonaAppearance({
+    required this.palette,
+    required this.silhouette,
+    required this.accessory,
+    required this.outfit,
+  });
+
+  final String palette;
+  final String silhouette;
+  final String accessory;
+  final String outfit;
+
+  factory SocialPersonaAppearance.fromJson(Map<String, dynamic>? json) {
+    return SocialPersonaAppearance(
+      palette: json?['palette']?.toString() ?? 'teal',
+      silhouette: json?['silhouette']?.toString() ?? 'soft',
+      accessory: json?['accessory']?.toString() ?? 'none',
+      outfit: json?['outfit']?.toString() ?? 'campus',
+    );
+  }
+
+  Map<String, String> toJson() => {
+    'palette': palette,
+    'silhouette': silhouette,
+    'accessory': accessory,
+    'outfit': outfit,
+  };
+}
+
+class SocialPersona {
+  const SocialPersona({
+    this.id,
+    this.userId,
+    this.campusId,
+    required this.representationMode,
+    required this.styleVersion,
+    required this.appearance,
+    required this.selfDescriptions,
+    required this.contactPosture,
+    required this.status,
+    this.publishedAt,
+    this.createdAt,
+    this.updatedAt,
+  });
+
+  final String? id;
+  final String? userId;
+  final String? campusId;
+  final String representationMode;
+  final String styleVersion;
+  final SocialPersonaAppearance appearance;
+  final List<String> selfDescriptions;
+  final String contactPosture;
+  final String status;
+  final String? publishedAt;
+  final String? createdAt;
+  final String? updatedAt;
+
+  bool get isPublished => status == 'published';
+  bool get isDraft => status == 'draft';
+  bool get isArchived => status == 'archived';
+
+  factory SocialPersona.fromJson(Map<String, dynamic> json) {
+    return SocialPersona(
+      id: json['id']?.toString(),
+      userId: json['user_id']?.toString(),
+      campusId: json['campus_id']?.toString(),
+      representationMode:
+          json['representation_mode']?.toString() ?? 'trait_mapped',
+      styleVersion: json['style_version']?.toString() ?? 'v1',
+      appearance: SocialPersonaAppearance.fromJson(
+        (json['appearance_config'] as Map?)?.cast<String, dynamic>(),
+      ),
+      selfDescriptions:
+          (json['self_descriptions'] as List<dynamic>? ?? const [])
+              .map((value) => value.toString())
+              .toList(growable: false),
+      contactPosture: json['contact_posture']?.toString() ?? 'leave_message',
+      status: json['status']?.toString() ?? 'draft',
+      publishedAt: json['published_at']?.toString(),
+      createdAt: json['created_at']?.toString(),
+      updatedAt: json['updated_at']?.toString(),
+    );
+  }
+}
+
 class ReplySuggestion {
   const ReplySuggestion({required this.tone, required this.text});
   final String tone;

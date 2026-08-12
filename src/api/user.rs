@@ -17,7 +17,7 @@ use crate::services::campus::{
     CampusMembershipView, CampusMembershipsResponse, CampusService, VerificationRequestResponse,
 };
 
-async fn resolve_public_request_campus(
+pub(crate) async fn resolve_public_request_campus(
     state: &AppState,
     session: Option<&AuthSessionContext>,
 ) -> Result<Uuid, ApiError> {

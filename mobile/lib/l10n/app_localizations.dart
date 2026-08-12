@@ -5447,6 +5447,318 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No administrative action is available for this listing.'**
   String get adminListingNoActions;
+
+  /// No description provided for @socialPersonaTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Role presentation'**
+  String get socialPersonaTitle;
+
+  /// No description provided for @socialPersonaDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Show how you want to be approached with choices you made; it never represents online, read, or inferred attention state.'**
+  String get socialPersonaDescription;
+
+  /// No description provided for @socialPersonaCreate.
+  ///
+  /// In en, this message translates to:
+  /// **'Create role presentation'**
+  String get socialPersonaCreate;
+
+  /// No description provided for @socialPersonaEdit.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit role presentation'**
+  String get socialPersonaEdit;
+
+  /// No description provided for @socialPersonaDraft.
+  ///
+  /// In en, this message translates to:
+  /// **'Draft · visible only to you'**
+  String get socialPersonaDraft;
+
+  /// No description provided for @socialPersonaPublished.
+  ///
+  /// In en, this message translates to:
+  /// **'Published · visible on this campus'**
+  String get socialPersonaPublished;
+
+  /// No description provided for @socialPersonaArchived.
+  ///
+  /// In en, this message translates to:
+  /// **'Archived · ordinary avatar is shown'**
+  String get socialPersonaArchived;
+
+  /// No description provided for @socialPersonaRepresentationMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Representation'**
+  String get socialPersonaRepresentationMode;
+
+  /// No description provided for @socialPersonaTraitMapped.
+  ///
+  /// In en, this message translates to:
+  /// **'Trait mapped'**
+  String get socialPersonaTraitMapped;
+
+  /// No description provided for @socialPersonaRoleCharacter.
+  ///
+  /// In en, this message translates to:
+  /// **'Role character'**
+  String get socialPersonaRoleCharacter;
+
+  /// No description provided for @socialPersonaPalette.
+  ///
+  /// In en, this message translates to:
+  /// **'Palette'**
+  String get socialPersonaPalette;
+
+  /// No description provided for @socialPersonaPaletteTeal.
+  ///
+  /// In en, this message translates to:
+  /// **'Teal'**
+  String get socialPersonaPaletteTeal;
+
+  /// No description provided for @socialPersonaPalettePlum.
+  ///
+  /// In en, this message translates to:
+  /// **'Plum'**
+  String get socialPersonaPalettePlum;
+
+  /// No description provided for @socialPersonaPaletteSun.
+  ///
+  /// In en, this message translates to:
+  /// **'Sun'**
+  String get socialPersonaPaletteSun;
+
+  /// No description provided for @socialPersonaPaletteSlate.
+  ///
+  /// In en, this message translates to:
+  /// **'Slate'**
+  String get socialPersonaPaletteSlate;
+
+  /// No description provided for @socialPersonaSilhouette.
+  ///
+  /// In en, this message translates to:
+  /// **'Silhouette'**
+  String get socialPersonaSilhouette;
+
+  /// No description provided for @socialPersonaSilhouetteSoft.
+  ///
+  /// In en, this message translates to:
+  /// **'Soft'**
+  String get socialPersonaSilhouetteSoft;
+
+  /// No description provided for @socialPersonaSilhouetteRound.
+  ///
+  /// In en, this message translates to:
+  /// **'Round'**
+  String get socialPersonaSilhouetteRound;
+
+  /// No description provided for @socialPersonaSilhouetteSharp.
+  ///
+  /// In en, this message translates to:
+  /// **'Sharp'**
+  String get socialPersonaSilhouetteSharp;
+
+  /// No description provided for @socialPersonaAccessory.
+  ///
+  /// In en, this message translates to:
+  /// **'Accessory'**
+  String get socialPersonaAccessory;
+
+  /// No description provided for @socialPersonaAccessoryNone.
+  ///
+  /// In en, this message translates to:
+  /// **'None'**
+  String get socialPersonaAccessoryNone;
+
+  /// No description provided for @socialPersonaAccessoryGlasses.
+  ///
+  /// In en, this message translates to:
+  /// **'Glasses'**
+  String get socialPersonaAccessoryGlasses;
+
+  /// No description provided for @socialPersonaAccessoryHeadphones.
+  ///
+  /// In en, this message translates to:
+  /// **'Headphones'**
+  String get socialPersonaAccessoryHeadphones;
+
+  /// No description provided for @socialPersonaAccessoryLeaf.
+  ///
+  /// In en, this message translates to:
+  /// **'Leaf'**
+  String get socialPersonaAccessoryLeaf;
+
+  /// No description provided for @socialPersonaOutfit.
+  ///
+  /// In en, this message translates to:
+  /// **'Outfit'**
+  String get socialPersonaOutfit;
+
+  /// No description provided for @socialPersonaOutfitCampus.
+  ///
+  /// In en, this message translates to:
+  /// **'Campus'**
+  String get socialPersonaOutfitCampus;
+
+  /// No description provided for @socialPersonaOutfitWorkwear.
+  ///
+  /// In en, this message translates to:
+  /// **'Simple'**
+  String get socialPersonaOutfitWorkwear;
+
+  /// No description provided for @socialPersonaOutfitCasual.
+  ///
+  /// In en, this message translates to:
+  /// **'Casual'**
+  String get socialPersonaOutfitCasual;
+
+  /// No description provided for @socialPersonaOutfitLab.
+  ///
+  /// In en, this message translates to:
+  /// **'Lab'**
+  String get socialPersonaOutfitLab;
+
+  /// No description provided for @socialPersonaContactPosture.
+  ///
+  /// In en, this message translates to:
+  /// **'How others can approach you'**
+  String get socialPersonaContactPosture;
+
+  /// No description provided for @socialPersonaLeaveMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave a message; replies may not be immediate'**
+  String get socialPersonaLeaveMessage;
+
+  /// No description provided for @socialPersonaConnectionAllowed.
+  ///
+  /// In en, this message translates to:
+  /// **'Connection requests are welcome'**
+  String get socialPersonaConnectionAllowed;
+
+  /// No description provided for @socialPersonaBusy.
+  ///
+  /// In en, this message translates to:
+  /// **'Busy lately; messages are still welcome'**
+  String get socialPersonaBusy;
+
+  /// No description provided for @socialPersonaLater.
+  ///
+  /// In en, this message translates to:
+  /// **'Will look later'**
+  String get socialPersonaLater;
+
+  /// No description provided for @socialPersonaLabels.
+  ///
+  /// In en, this message translates to:
+  /// **'Self-description (up to three)'**
+  String get socialPersonaLabels;
+
+  /// No description provided for @socialPersonaLabelSlowToWarm.
+  ///
+  /// In en, this message translates to:
+  /// **'Slow to warm'**
+  String get socialPersonaLabelSlowToWarm;
+
+  /// No description provided for @socialPersonaLabelBusinessOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Business only'**
+  String get socialPersonaLabelBusinessOnly;
+
+  /// No description provided for @socialPersonaLabelMeetupFriendly.
+  ///
+  /// In en, this message translates to:
+  /// **'Meetup friendly'**
+  String get socialPersonaLabelMeetupFriendly;
+
+  /// No description provided for @socialPersonaLabelCasualChat.
+  ///
+  /// In en, this message translates to:
+  /// **'Casual chat'**
+  String get socialPersonaLabelCasualChat;
+
+  /// No description provided for @socialPersonaLabelReplyLater.
+  ///
+  /// In en, this message translates to:
+  /// **'Replies later'**
+  String get socialPersonaLabelReplyLater;
+
+  /// No description provided for @socialPersonaLabelTechEnthusiast.
+  ///
+  /// In en, this message translates to:
+  /// **'Tech enthusiast'**
+  String get socialPersonaLabelTechEnthusiast;
+
+  /// No description provided for @socialPersonaSaveDraft.
+  ///
+  /// In en, this message translates to:
+  /// **'Save draft'**
+  String get socialPersonaSaveDraft;
+
+  /// No description provided for @socialPersonaPublish.
+  ///
+  /// In en, this message translates to:
+  /// **'Publish presentation'**
+  String get socialPersonaPublish;
+
+  /// No description provided for @socialPersonaArchive.
+  ///
+  /// In en, this message translates to:
+  /// **'Archive and restore ordinary avatar'**
+  String get socialPersonaArchive;
+
+  /// No description provided for @socialPersonaRestore.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit and publish again'**
+  String get socialPersonaRestore;
+
+  /// No description provided for @socialPersonaPublishConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Publish role presentation?'**
+  String get socialPersonaPublishConfirmTitle;
+
+  /// No description provided for @socialPersonaPublishConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'People on this campus will be able to see it. It never means online, read, typing, or any other attention state.'**
+  String get socialPersonaPublishConfirmBody;
+
+  /// No description provided for @socialPersonaSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Role presentation draft saved'**
+  String get socialPersonaSaved;
+
+  /// No description provided for @socialPersonaPublishedToast.
+  ///
+  /// In en, this message translates to:
+  /// **'Role presentation published'**
+  String get socialPersonaPublishedToast;
+
+  /// No description provided for @socialPersonaArchivedToast.
+  ///
+  /// In en, this message translates to:
+  /// **'Archived; ordinary avatar is shown'**
+  String get socialPersonaArchivedToast;
+
+  /// No description provided for @socialPersonaPreviewRole.
+  ///
+  /// In en, this message translates to:
+  /// **'Role preview'**
+  String get socialPersonaPreviewRole;
+
+  /// No description provided for @socialPersonaSelectHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Choices are restricted to the current style version.'**
+  String get socialPersonaSelectHint;
 }
 
 class _AppLocalizationsDelegate

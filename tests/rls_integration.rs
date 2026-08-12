@@ -380,6 +380,8 @@ async fn rls_policies_exist_on_all_tenant_tables() {
             "admin_audit_logs",
             "campus_memberships",
             "refresh_tokens",
+            "social_personas",
+            "social_persona_audits",
         ];
         for table in expected {
             let (enabled, forced): (bool, bool) = sqlx::query_as(

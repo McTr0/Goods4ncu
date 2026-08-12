@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
+import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/pages/profile_page.dart';
 import 'package:goods4ncu_mobile/services/api_service.dart';
 import 'package:goods4ncu_mobile/services/user_service.dart';
@@ -23,6 +24,9 @@ class _FakeApiService extends ApiService {
 
   @override
   Future<Map<String, dynamic>> getUserProfile() async => profile;
+
+  @override
+  Future<SocialPersona?> getSocialPersona() async => null;
 
   @override
   Future<List<CampusMembership>> getCampusMemberships() async => memberships;

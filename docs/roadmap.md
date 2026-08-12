@@ -29,7 +29,7 @@
 
 当前能力还不是生产就绪。主要差距：
 
-- CampusMembership、核心资源校园作用域、后台审核队列、跨校园理由审计和统一 session extractor 已落地。当前 19 张租户表已启用 FORCE RLS（`0042` 及后续领域迁移，`app.campus_id` 事务级 GUC 触发，未设置时放行以保持应用层为主边界），隔离与写拒绝有集成测试；应用侧全请求 GUC 注入（fail-closed）与多副本租户验证仍属 Phase 4。
+- CampusMembership、核心资源校园作用域、后台审核队列、跨校园理由审计和统一 session extractor 已落地。当前 21 张租户表已启用 FORCE RLS（`0042` 及后续领域迁移，`app.campus_id` 事务级 GUC 触发，未设置时放行以保持应用层为主边界），隔离与写拒绝有集成测试；应用侧全请求 GUC 注入（fail-closed）与多副本租户验证仍属 Phase 4。
 - Agent 的更新/下架/成交意向/议价已接入 crash-safe ActionPlan（模型只能提出，L3 需独立 token 的二次确认）；发布采用立即执行 + 条件式撤销。HTTP、Agent 和撤销路径已统一经过 `ListingCommandService`；资源版本快照仍待补。
 - 聊天隐私迁移已完成首阶段：留言/连接二分、服务端已发送、设备本地 `LOCALLY_SEEN`、主动 acknowledgement，以及陌生人/忙碌/联系人静音与重复请求抑制均由当前协议执行。
 - WebSocket 跨副本投递已具备（Redis fan-out，双实例端到端验证）；call signaling 多副本化与压测仍待做，typing 已从协议移除。outbox 基础与通知推送已持久化，其余事件消费者仍在进程内。
@@ -189,10 +189,10 @@
 
 该方向是目标态产品迁移，不改变当前 API 参考中的已实现事实。按以下顺序推进：
 
-当前进度：[部分完成] R0 的 Flutter 共同空间静态投影已接入联系人线程和独立私聊；只读取现有 Thread/Conversation 事实，`active` 只显示为“已连接”，没有新增后端状态。R2 已先补上只读的同校园无序用户对 `relationship_key` 与由现有会话事件/消息派生的 `space-events` cursor；Pin、共享对象和真实浏览器的联系人空间旅程仍待验收。
+当前进度：[部分完成] R0 的 Flutter 共同空间静态投影已接入联系人线程和独立私聊；只读取现有 Thread/Conversation 事实，`active` 只显示为“已连接”，没有新增后端状态。R1 已落地 `SocialPersona` v1 的受控 token、草稿/发布/归档、同校园公开读取、审计和普通头像回退；图片资产、照片风格化和人工审核队列仍待实现。R2 已先补上只读的同校园无序用户对 `relationship_key` 与由现有会话事件/消息派生的 `space-events` cursor；Pin、共享对象和真实浏览器的联系人空间旅程仍待验收。
 
 1. **R0：体验原型与词义测试。** 用真实移动端尺寸验证“对方左上 / 自己右下”、留言/连接切换、角色缩放和 Memory Rail；确认用户不会把角色姿态理解成在线、已读或 Agent 参与。此阶段不改后端。
-2. **R1：静态角色身份层。** 定义统一风格 token、模板部件、24/48/160 三档资产、深浅色与 reduced-motion fallback；实现角色创建、编辑、预览、审核、发布和恢复普通头像。校园认证、角色模式、自述标签与公开接近方式分字段展示。
+2. **R1：静态角色身份层。** [部分完成] `0063_social_personas` 与 `/api/user/persona`、`/api/users/{id}/persona` 已支持统一风格 token、草稿、显式发布/归档、同校园边界和审计；Flutter 个人资料和公开主页已提供创建/预览/编辑入口。下一步补充 24/48/160 资产、深浅色与 reduced-motion fallback、媒体审核和照片风格化，不能把生成图当作身份认证。
 3. **R2：只读 Relationship Space 投影。** 复用 `Thread / Conversation / Message / Quote`，为同校园无序用户对提供稳定 relationship key 和 cursor；先实现“时间 + Pin”、最近连接恢复点，以及文件、链接、商品 quote 的共享对象入口。不得先建第二套消息事实。
 4. **R3：连接空间化。** 留言状态拉开角色并强调历史；请求/接受连接只由明确状态机驱动，连接期间弱化角色与 Rail。实现发送方“普通留言 / 希望今天处理 / 请求连接”的克制时间尺度，以及接收方主动的可留言、可连接、忙和稍后规则；接收方规则始终优先，不引入 online、typing、last seen 或 read。
 5. **R4：可选语义增强。** 主题聚类、自然语言回忆与共识提议必须携带 `source_event_ids`；模型不可用时自动退回确定性时间、Pin、文件和搜索。共享约定只有用户明确采纳后才生效。

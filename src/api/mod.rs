@@ -37,6 +37,7 @@ pub mod recommendations;
 pub mod reputation;
 pub mod request_context;
 pub mod session;
+pub mod social_persona;
 pub mod stats;
 pub mod undo;
 pub mod upload;
@@ -745,6 +746,18 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             get(user::get_profile).patch(user::update_profile),
         )
         .route(
+            "/api/user/persona",
+            get(social_persona::get_persona).put(social_persona::upsert_persona),
+        )
+        .route(
+            "/api/user/persona/publish",
+            post(social_persona::publish_persona),
+        )
+        .route(
+            "/api/user/persona/archive",
+            post(social_persona::archive_persona),
+        )
+        .route(
             "/api/user/campus-memberships",
             get(user::get_campus_memberships),
         )
@@ -762,6 +775,10 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .route(
             "/api/users/{id}/listings",
             get(user::get_public_user_listings),
+        )
+        .route(
+            "/api/users/{id}/persona",
+            get(social_persona::get_public_persona),
         )
         .route("/api/users/{id}/report", post(content_reports::report_user))
         .route("/api/users/{id}", get(user::get_user_profile))

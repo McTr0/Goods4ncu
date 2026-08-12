@@ -56,6 +56,56 @@ void main() {
     });
   });
 
+  group('SocialPersona', () {
+    test(
+      'parses the published token presentation without attention fields',
+      () {
+        final persona = SocialPersona.fromJson({
+          'id': 'persona-1',
+          'user_id': 'user-a',
+          'campus_id': 'campus-a',
+          'representation_mode': 'role_character',
+          'style_version': 'v1',
+          'appearance_config': {
+            'palette': 'plum',
+            'silhouette': 'round',
+            'accessory': 'leaf',
+            'outfit': 'campus',
+          },
+          'self_descriptions': ['slow_to_warm', 'meetup_friendly'],
+          'contact_posture': 'leave_message',
+          'status': 'published',
+          'published_at': '2026-08-12T10:00:00Z',
+        });
+
+        expect(persona.isPublished, isTrue);
+        expect(persona.appearance.palette, 'plum');
+        expect(persona.selfDescriptions, ['slow_to_warm', 'meetup_friendly']);
+        expect(persona.contactPosture, 'leave_message');
+      },
+    );
+
+    test(
+      'fills safe defaults when a public response omits optional fields',
+      () {
+        final persona = SocialPersona.fromJson({
+          'representation_mode': 'trait_mapped',
+          'appearance_config': <String, dynamic>{},
+          'self_descriptions': <dynamic>[],
+          'contact_posture': 'later',
+        });
+
+        expect(persona.status, 'draft');
+        expect(persona.appearance.toJson(), {
+          'palette': 'teal',
+          'silhouette': 'soft',
+          'accessory': 'none',
+          'outfit': 'campus',
+        });
+      },
+    );
+  });
+
   group('ConversationMessage', () {
     test('fromJson parses all fields correctly', () {
       final json = {

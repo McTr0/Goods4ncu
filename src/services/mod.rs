@@ -31,6 +31,7 @@ pub mod price_discovery;
 pub mod product;
 pub mod reputation;
 pub mod settlement;
+pub mod social_persona;
 pub mod storage;
 pub mod token_denylist;
 pub mod totp;

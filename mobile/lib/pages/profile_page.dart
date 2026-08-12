@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
+import '../components/social_persona_card.dart';
+import '../models/models.dart';
 import '../services/api_service.dart';
 import '../services/admin_role_cache.dart';
 import '../services/ws_service.dart';
@@ -22,6 +24,7 @@ class ProfilePage extends StatefulWidget {
 class _ProfilePageState extends State<ProfilePage> {
   late final ApiService _apiService;
   Map<String, dynamic>? _profile;
+  SocialPersona? _persona;
   List<CampusMembership> _campusMemberships = const [];
   String? _activeCampusId;
   bool _loading = true;
@@ -38,6 +41,7 @@ class _ProfilePageState extends State<ProfilePage> {
     setState(() {
       _loading = true;
       _error = null;
+      _persona = null;
     });
     try {
       final results = await Future.wait<dynamic>([
@@ -53,6 +57,12 @@ class _ProfilePageState extends State<ProfilePage> {
           _loading = false;
         });
       }
+      // The role layer is optional: a transient persona failure must not hide
+      // the ordinary profile, campus membership, or contact controls.
+      try {
+        final persona = await _apiService.getSocialPersona();
+        if (mounted) setState(() => _persona = persona);
+      } catch (_) {}
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -62,6 +72,82 @@ class _ProfilePageState extends State<ProfilePage> {
               'Failed to load profile';
         });
       }
+    }
+  }
+
+  Future<void> _editPersona() async {
+    final draft = await showSocialPersonaEditor(context, _persona);
+    if (draft == null || !mounted) return;
+    final l = AppLocalizations.of(context)!;
+    try {
+      final persona = await _apiService.upsertSocialPersona(
+        representationMode: draft.representationMode,
+        appearanceConfig: draft.appearanceConfig,
+        selfDescriptions: draft.selfDescriptions,
+        contactPosture: draft.contactPosture,
+      );
+      if (!mounted) return;
+      setState(() => _persona = persona);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.socialPersonaSaved)));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('${l.error}: $error')));
+    }
+  }
+
+  Future<void> _publishPersona() async {
+    final l = AppLocalizations.of(context)!;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l.socialPersonaPublishConfirmTitle),
+        content: Text(l.socialPersonaPublishConfirmBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(l.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(l.socialPersonaPublish),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final persona = await _apiService.publishSocialPersona();
+      if (!mounted) return;
+      setState(() => _persona = persona);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.socialPersonaPublishedToast)));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('${l.error}: $error')));
+    }
+  }
+
+  Future<void> _archivePersona() async {
+    final l = AppLocalizations.of(context)!;
+    try {
+      final persona = await _apiService.archiveSocialPersona();
+      if (!mounted) return;
+      setState(() => _persona = persona);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.socialPersonaArchivedToast)));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('${l.error}: $error')));
     }
   }
 
@@ -345,6 +431,19 @@ class _ProfilePageState extends State<ProfilePage> {
                     : null,
               ),
             ],
+            if (campusMembership?.isVerified == true) ...[
+              const SizedBox(height: AppTheme.sp20),
+              _SocialPersonaSection(
+                persona: _persona,
+                onEdit: _editPersona,
+                onPublish: _persona == null || _persona!.isPublished
+                    ? null
+                    : _publishPersona,
+                onArchive: _persona?.isPublished == true
+                    ? _archivePersona
+                    : null,
+              ),
+            ],
             const SizedBox(height: AppTheme.sp32),
 
             _MenuCard(
@@ -402,6 +501,101 @@ class _ProfilePageState extends State<ProfilePage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _SocialPersonaSection extends StatelessWidget {
+  const _SocialPersonaSection({
+    required this.persona,
+    required this.onEdit,
+    this.onPublish,
+    this.onArchive,
+  });
+
+  final SocialPersona? persona;
+  final VoidCallback onEdit;
+  final VoidCallback? onPublish;
+  final VoidCallback? onArchive;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    final current = persona;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                l.socialPersonaTitle,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+            IconButton(
+              onPressed: onEdit,
+              tooltip: current == null
+                  ? l.socialPersonaCreate
+                  : l.socialPersonaEdit,
+              icon: Icon(
+                current == null
+                    ? Icons.add_circle_outline
+                    : Icons.edit_outlined,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppTheme.sp4),
+        Text(
+          l.socialPersonaDescription,
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: AppTheme.textSecondary),
+        ),
+        const SizedBox(height: AppTheme.sp12),
+        if (current == null)
+          OutlinedButton.icon(
+            onPressed: onEdit,
+            icon: const Icon(Icons.auto_awesome_outlined),
+            label: Text(l.socialPersonaCreate),
+          )
+        else ...[
+          SocialPersonaPreviewCard(persona: current),
+          const SizedBox(height: AppTheme.sp8),
+          Text(switch (current.status) {
+            'published' => l.socialPersonaPublished,
+            'archived' => l.socialPersonaArchived,
+            _ => l.socialPersonaDraft,
+          }, style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: AppTheme.sp8),
+          Wrap(
+            spacing: AppTheme.sp8,
+            runSpacing: AppTheme.sp8,
+            children: [
+              if (onPublish != null)
+                FilledButton.icon(
+                  onPressed: onPublish,
+                  icon: const Icon(Icons.public_outlined),
+                  label: Text(l.socialPersonaPublish),
+                ),
+              OutlinedButton.icon(
+                onPressed: onEdit,
+                icon: const Icon(Icons.edit_outlined),
+                label: Text(l.socialPersonaEdit),
+              ),
+              if (onArchive != null)
+                TextButton.icon(
+                  onPressed: onArchive,
+                  icon: const Icon(Icons.archive_outlined),
+                  label: Text(l.socialPersonaArchive),
+                ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 }

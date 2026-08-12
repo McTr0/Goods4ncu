@@ -43,6 +43,9 @@ class _StubUserService extends UserService {
     int limit = 20,
     int offset = 0,
   }) async => {'items': <dynamic>[]};
+
+  @override
+  Future<SocialPersona?> getPublicSocialPersona(String userId) async => null;
 }
 
 class _RecordingContentReportService extends ContentReportService {

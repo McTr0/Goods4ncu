@@ -218,9 +218,46 @@ Content-Type: application/json
 
 `show_wechat/show_alipay` 默认 `false`。URL 为空时不得开启公开展示。收款码只表示用户自愿公开的线下收款信息，不代表平台验证收款人或担保付款。
 
+### GET `/api/user/persona`
+
+[已实现] 需要活动校园的 verified membership。返回 `{ "persona": null | {...} }`；本人可以看到当前校园的 `draft`、`published` 或 `archived` 记录。角色呈现是用户主导的展示层，不是身份认证、Agent 权限或在线/已读/正在输入状态。
+
+### PUT `/api/user/persona`
+
+[已实现] 保存当前校园的私有草稿。body 只接受当前 `style_version=v1` 的受控 token：
+
+```json
+{
+  "representation_mode": "trait_mapped",
+  "style_version": "v1",
+  "appearance_config": {
+    "palette": "teal",
+    "silhouette": "soft",
+    "accessory": "leaf",
+    "outfit": "campus"
+  },
+  "self_descriptions": ["slow_to_warm", "meetup_friendly"],
+  "contact_posture": "leave_message"
+}
+```
+
+`representation_mode` 当前为 `trait_mapped|role_character`；`self_descriptions` 最多三个且必须来自固定标签；外观字段不能扩展或写入自由文本。保存会把已发布记录退回 `draft`，旧发布不会继续公开，并写入 `social_persona_audits`。
+
+### POST `/api/user/persona/publish`
+
+[已实现] 需要同一 verified campus 下已有 persona。显式发布当前草稿，返回 `status=published`；同校园公开主页才会展示它。发布不会产生任何 online、read、typing 或 Agent 参与事实。
+
+### POST `/api/user/persona/archive`
+
+[已实现] 需要同一 verified campus 下已有 persona。将记录设为 `archived` 并清除 `published_at`，公开主页回退普通头像。归档动作可审计，后续仍可通过 PUT 编辑并再次发布。
+
 ### GET `/api/users/{id}`
 
 公开用户主页。返回允许公开的用户名、头像、加入时间、active listing 总数和用户主动公开的 `payment_qr` URL。当前计数不拆分出/收。不会返回完整邮箱、学号、发现设置、公开开关或私有收款码。
+
+### GET `/api/users/{id}/persona`
+
+[已实现] 游客或登录用户均可读取，但校园由当前登录 session 的活动校园解析，游客使用默认公开校园。响应为 `{ "persona": null | {...} }`；只有目标用户在该校园有 verified membership 且明确 `published` 时才返回角色配置。草稿、归档、非活动校园和未认证成员统一返回 `persona: null`，不泄漏存在性。响应只包含 `representation_mode`、`style_version`、受控 `appearance_config`、用户标签、主动 `contact_posture` 和 `published_at`，不包含账号、认证或注意力状态。
 
 ### POST `/api/users/{id}/report`
 

@@ -6,6 +6,7 @@ import '../components/contact_conversation_sheet.dart';
 import '../components/content_report_dialog.dart';
 import '../components/payment_qr_image.dart';
 import '../components/price_tag.dart';
+import '../components/social_persona_card.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
@@ -45,6 +46,7 @@ class _UserHomePageState extends State<UserHomePage> {
   late final ContentReportService _contentReportService;
   Map<String, dynamic>? _profile;
   List<Listing> _listings = const [];
+  SocialPersona? _persona;
   bool _loading = true;
   Reputation? _reputation;
   late final ReputationService _reputationService =
@@ -116,6 +118,14 @@ class _UserHomePageState extends State<UserHomePage> {
       try {
         final reputation = await _reputationService.of(widget.userId);
         if (mounted) setState(() => _reputation = reputation);
+      } catch (_) {}
+      // A published role presentation is an optional layer. Its absence or a
+      // transient lookup failure must never hide the ordinary public profile.
+      try {
+        final persona = await _userService.getPublicSocialPersona(
+          widget.userId,
+        );
+        if (mounted) setState(() => _persona = persona);
       } catch (_) {}
     } catch (error) {
       if (!mounted) return;
@@ -265,6 +275,13 @@ class _UserHomePageState extends State<UserHomePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _ProfileHeader(profile: _profile!, onContact: _contactUser),
+              if (_persona != null) ...[
+                const SizedBox(height: AppTheme.sp12),
+                SocialPersonaPreviewCard(
+                  persona: _persona!,
+                  title: l.socialPersonaTitle,
+                ),
+              ],
               // Right where someone decides whether to deal with this person.
               // A record kept and never shown is bookkeeping, not trust.
               if (_reputation != null)
