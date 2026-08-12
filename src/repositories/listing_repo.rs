@@ -19,6 +19,16 @@ pub enum UpdateOwnedResult {
     Inactive,
 }
 
+fn version_conflict(expected: i64, actual: i64) -> ApiError {
+    ApiError::CodedConflict {
+        code: "listing_version_conflict",
+        message: format!(
+            "发布内容已变化（期望版本 {}, 当前版本 {}），请刷新后重试",
+            expected, actual
+        ),
+    }
+}
+
 /// Escape special characters for PostgreSQL LIKE patterns.
 ///
 /// The following characters are escaped:
@@ -349,7 +359,7 @@ impl PostgresListingRepository {
         input: &UpdateListingInput,
     ) -> Result<bool, ApiError> {
         Ok(matches!(
-            self.update_owned_active_with_state_in_tx(tx, id, owner_id, campus_id, input)
+            self.update_owned_active_with_state_in_tx(tx, id, owner_id, campus_id, input, None)
                 .await?,
             UpdateOwnedResult::Updated
         ))
@@ -362,9 +372,10 @@ impl PostgresListingRepository {
         owner_id: &str,
         campus_id: Uuid,
         input: &UpdateListingInput,
+        expected_content_revision: Option<i64>,
     ) -> Result<UpdateOwnedResult, ApiError> {
-        let status = sqlx::query_scalar::<_, String>(
-            "SELECT status FROM inventory
+        let row = sqlx::query_as::<_, (String, i64)>(
+            "SELECT status, content_revision FROM inventory
              WHERE id = $1 AND owner_id = $2 AND campus_id = $3
              FOR UPDATE",
         )
@@ -374,9 +385,19 @@ impl PostgresListingRepository {
         .fetch_optional(&mut **tx)
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        let Some(status) = status else {
+        let Some((status, actual_revision)) = row else {
             return Ok(UpdateOwnedResult::NotFound);
         };
+        if let Some(expected) = expected_content_revision {
+            if expected <= 0 {
+                return Err(ApiError::BadRequest(
+                    "expected_content_revision 必须为正整数".to_string(),
+                ));
+            }
+            if expected != actual_revision {
+                return Err(version_conflict(expected, actual_revision));
+            }
+        }
         let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
             .bind(id)
             .fetch_one(&mut **tx)
@@ -516,8 +537,20 @@ impl PostgresListingRepository {
         owner_id: &str,
         campus_id: Uuid,
     ) -> Result<DeleteOwnedResult, ApiError> {
-        let status = sqlx::query_scalar::<_, String>(
-            "SELECT status FROM inventory
+        self.delete_owned_with_revision_in_tx(tx, id, owner_id, campus_id, None)
+            .await
+    }
+
+    pub async fn delete_owned_with_revision_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        id: &str,
+        owner_id: &str,
+        campus_id: Uuid,
+        expected_content_revision: Option<i64>,
+    ) -> Result<DeleteOwnedResult, ApiError> {
+        let row = sqlx::query_as::<_, (String, i64)>(
+            "SELECT status, content_revision FROM inventory
              WHERE id = $1 AND owner_id = $2 AND campus_id = $3
              FOR UPDATE",
         )
@@ -528,6 +561,17 @@ impl PostgresListingRepository {
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
         .ok_or(ApiError::NotFound)?;
+        let (status, actual_revision) = row;
+        if let Some(expected) = expected_content_revision {
+            if expected <= 0 {
+                return Err(ApiError::BadRequest(
+                    "expected_content_revision 必须为正整数".to_string(),
+                ));
+            }
+            if expected != actual_revision {
+                return Err(version_conflict(expected, actual_revision));
+            }
+        }
 
         if status == "sold" {
             return Err(ApiError::BadRequest("无法删除已售出的商品".to_string()));
@@ -571,7 +615,7 @@ impl ListingRepository for PostgresListingRepository {
         offset: i64,
     ) -> Result<(Vec<Listing>, i64), ApiError> {
         let mut query = format!(
-            "SELECT id, campus_id, title, category, brand, direction, condition_score, suggested_price_cny, \
+            "SELECT id, campus_id, content_revision, title, category, brand, direction, condition_score, suggested_price_cny, \
              defects, description, CASE WHEN images_moderation_status = 'approved' THEN image_url ELSE NULL END AS image_url, owner_id, status, created_at \
              FROM inventory WHERE status = 'active' AND campus_id = '{}'
                AND NOT listing_has_active_restriction(id)",
@@ -687,7 +731,7 @@ impl ListingRepository for PostgresListingRepository {
 
     async fn find_by_id(&self, id: &str) -> Result<Option<Listing>, ApiError> {
         let row = sqlx::query_as::<_, Listing>(
-            "SELECT id, campus_id, title, category, brand, direction, condition_score, suggested_price_cny, \
+            "SELECT id, campus_id, content_revision, title, category, brand, direction, condition_score, suggested_price_cny, \
              defects, description, CASE WHEN images_moderation_status = 'approved' THEN image_url ELSE NULL END AS image_url, owner_id, status, created_at \
              FROM inventory WHERE id = $1",
         )
@@ -703,7 +747,7 @@ impl ListingRepository for PostgresListingRepository {
         id: &str,
     ) -> Result<Option<(Listing, Option<String>)>, ApiError> {
         let row = sqlx::query(
-            "SELECT i.id, i.campus_id, i.title, i.category, i.brand, i.direction, i.condition_score, i.suggested_price_cny, \
+            "SELECT i.id, i.campus_id, i.content_revision, i.title, i.category, i.brand, i.direction, i.condition_score, i.suggested_price_cny, \
              i.defects, i.description, \
              CASE WHEN i.images_moderation_status = 'approved' THEN i.image_url ELSE NULL END AS image_url, \
              i.owner_id, i.status, i.created_at, \
@@ -722,6 +766,7 @@ impl ListingRepository for PostgresListingRepository {
                 let listing = Listing {
                     id: r.get("id"),
                     campus_id: r.get("campus_id"),
+                    content_revision: r.get("content_revision"),
                     title: r.get("title"),
                     category: r.get("category"),
                     brand: r.get("brand"),
@@ -1183,6 +1228,134 @@ mod tests {
                 .await
                 .expect_err("key reuse must fail");
             assert!(matches!(error, ApiError::Conflict(_)));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn stale_listing_revision_cannot_overwrite_or_delete_newer_content() {
+        with_test_pool(|pool| async move {
+            sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')")
+                .bind("revision-owner")
+                .bind("revision-owner")
+                .execute(&pool)
+                .await
+                .expect("insert owner");
+
+            let campus_id = Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap();
+            let repo = PostgresListingRepository::new(pool.clone());
+            let listing_id = repo
+                .create(CreateListingInput {
+                    campus_id,
+                    title: "Versioned desk".to_string(),
+                    category: "other".to_string(),
+                    brand: Some("Campus".to_string()),
+                    direction: "offer".to_string(),
+                    condition_score: 8,
+                    suggested_price_cny: 100.0,
+                    defects: vec![],
+                    description: "first".to_string(),
+                    image_url: None,
+                    owner_id: "revision-owner".to_string(),
+                })
+                .await
+                .expect("create listing");
+            let revision: i64 =
+                sqlx::query_scalar("SELECT content_revision FROM inventory WHERE id = $1")
+                    .bind(&listing_id)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("initial revision");
+
+            let input = UpdateListingInput {
+                title: Some("Updated desk".to_string()),
+                category: None,
+                brand: None,
+                condition_score: None,
+                suggested_price_cny: None,
+                defects: None,
+                description: None,
+                status: None,
+            };
+            let mut tx = pool.begin().await.expect("update transaction");
+            assert_eq!(
+                repo.update_owned_active_with_state_in_tx(
+                    &mut tx,
+                    &listing_id,
+                    "revision-owner",
+                    campus_id,
+                    &input,
+                    Some(revision),
+                )
+                .await
+                .expect("versioned update"),
+                UpdateOwnedResult::Updated
+            );
+            tx.commit().await.expect("commit update");
+
+            let current_revision: i64 =
+                sqlx::query_scalar("SELECT content_revision FROM inventory WHERE id = $1")
+                    .bind(&listing_id)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("current revision");
+            assert!(current_revision > revision);
+
+            let mut stale_update_tx = pool.begin().await.expect("stale update transaction");
+            let stale_update = repo
+                .update_owned_active_with_state_in_tx(
+                    &mut stale_update_tx,
+                    &listing_id,
+                    "revision-owner",
+                    campus_id,
+                    &input,
+                    Some(revision),
+                )
+                .await
+                .expect_err("stale update must fail");
+            assert!(matches!(
+                stale_update,
+                ApiError::CodedConflict {
+                    code: "listing_version_conflict",
+                    ..
+                }
+            ));
+            stale_update_tx
+                .rollback()
+                .await
+                .expect("rollback stale update");
+
+            let mut stale_delete_tx = pool.begin().await.expect("stale delete transaction");
+            let stale_delete = repo
+                .delete_owned_with_revision_in_tx(
+                    &mut stale_delete_tx,
+                    &listing_id,
+                    "revision-owner",
+                    campus_id,
+                    Some(revision),
+                )
+                .await
+                .expect_err("stale delete must fail");
+            assert!(matches!(
+                stale_delete,
+                ApiError::CodedConflict {
+                    code: "listing_version_conflict",
+                    ..
+                }
+            ));
+            stale_delete_tx
+                .rollback()
+                .await
+                .expect("rollback stale delete");
+
+            let (title, status): (String, String) =
+                sqlx::query_as("SELECT title, status FROM inventory WHERE id = $1")
+                    .bind(&listing_id)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("listing remains live");
+            assert_eq!(title, "Updated desk");
+            assert_eq!(status, "active");
         })
         .await;
     }

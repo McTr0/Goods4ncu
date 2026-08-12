@@ -116,19 +116,56 @@ pub(crate) async fn execute_planned_action_in_tx(
             .await
             .map(|created| created.message),
         "update_listing" => {
-            execute_update_listing_in_tx(ctx, tx, user_id, campus_id, parse(args)?).await
+            let (args, expected_revision) = parse_planned_args(args)?;
+            execute_update_listing_in_tx(ctx, tx, user_id, campus_id, args, expected_revision).await
         }
         "delete_listing" => {
-            execute_delete_listing_in_tx(ctx, tx, user_id, campus_id, parse(args)?).await
+            let (args, expected_revision) = parse_planned_args(args)?;
+            execute_delete_listing_in_tx(ctx, tx, user_id, campus_id, args, expected_revision).await
         }
-        "purchase_item" => execute_purchase_item_in_tx(ctx, tx, user_id, campus_id, parse(args)?)
-            .await
-            .map(|(message, _)| message),
+        "purchase_item" => {
+            let (args, expected_revision) = parse_planned_args(args)?;
+            execute_purchase_item_in_tx(ctx, tx, user_id, campus_id, args, expected_revision)
+                .await
+                .map(|(message, _)| message)
+        }
         "negotiate_item" => {
-            execute_negotiate_item_in_tx(ctx, tx, user_id, campus_id, parse(args)?).await
+            let (args, expected_revision) = parse_planned_args(args)?;
+            execute_negotiate_item_in_tx(ctx, tx, user_id, campus_id, args, expected_revision).await
         }
         other => Err(ToolError(format!("未知的计划动作: {}", other))),
     }
+}
+
+/// Plan rows created before the version snapshot rollout remain executable.
+/// New plans carry this internal field in their JSON args, but it is removed
+/// before deserializing the model-facing tool arguments so the capability is
+/// never part of the model's public schema.
+fn parse_planned_args<T: serde::de::DeserializeOwned>(
+    mut args: serde_json::Value,
+) -> Result<(T, Option<i64>), ToolError> {
+    let expected_revision = args
+        .as_object_mut()
+        .and_then(|object| object.remove("expected_content_revision"))
+        .map(|value| {
+            value
+                .as_i64()
+                .ok_or_else(|| ToolError("计划参数已失效，资源版本不是整数".to_string()))
+        })
+        .transpose()?
+        .map(|revision| {
+            if revision > 0 {
+                Ok(revision)
+            } else {
+                Err(ToolError(
+                    "计划参数已失效，资源版本必须为正整数".to_string(),
+                ))
+            }
+        })
+        .transpose()?;
+    let parsed = serde_json::from_value(args)
+        .map_err(|error| ToolError(format!("计划参数已失效，无法安全执行: {}", error)))?;
+    Ok((parsed, expected_revision))
 }
 
 async fn require_verified_campus(
@@ -163,8 +200,9 @@ async fn propose_action_plan<A: serde::Serialize>(
     // Fail fast so unverified users get immediate feedback instead of a plan
     // that can never execute.
     let campus_id = require_verified_campus(ctx, &user_id).await?;
-    let args_json =
+    let mut args_json =
         serde_json::to_value(args).map_err(|e| ToolError(format!("序列化参数失败: {}", e)))?;
+    attach_listing_revision_snapshot(ctx, &user_id, campus_id, action, &mut args_json).await?;
 
     let plan = crate::services::agent_plan::AgentPlanService::new(ctx.db_pool.clone())
         .create_plan(
@@ -177,6 +215,69 @@ async fn propose_action_plan<A: serde::Serialize>(
         "已创建待确认操作：{}。该操作需要你在应用中确认后才会执行（10 分钟内有效，计划编号 {}）。请在“待确认操作”里查看并确认或取消。",
         summary, plan
     ))
+}
+
+/// Capture the database-owned listing version at proposal time. The model
+/// cannot supply or alter this value: any same-named input is discarded before
+/// the authoritative read. Confirmation then compares this snapshot while
+/// holding the listing row lock, so a plan cannot silently act on a newer
+/// price, description, lifecycle state or restriction revision.
+async fn attach_listing_revision_snapshot(
+    ctx: &ToolContext,
+    user_id: &str,
+    campus_id: uuid::Uuid,
+    action: &str,
+    args: &mut serde_json::Value,
+) -> Result<(), ToolError> {
+    if !matches!(
+        action,
+        "update_listing" | "delete_listing" | "purchase_item" | "negotiate_item"
+    ) {
+        return Ok(());
+    }
+    let Some(object) = args.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(listing_id) = object
+        .get("listing_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+    else {
+        object.remove("expected_content_revision");
+        return Ok(());
+    };
+    object.remove("expected_content_revision");
+
+    let revision = if matches!(action, "update_listing" | "delete_listing") {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT content_revision FROM inventory
+             WHERE id = $1 AND campus_id = $2 AND owner_id = $3",
+        )
+        .bind(&listing_id)
+        .bind(campus_id)
+        .bind(user_id)
+        .fetch_optional(&ctx.db_pool)
+        .await
+    } else {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT content_revision FROM inventory
+             WHERE id = $1 AND campus_id = $2",
+        )
+        .bind(&listing_id)
+        .bind(campus_id)
+        .fetch_optional(&ctx.db_pool)
+        .await
+    }
+    .map_err(|error| ToolError(format!("读取发布版本失败: {}", error)))?;
+
+    if let Some(revision) = revision {
+        object.insert(
+            "expected_content_revision".to_string(),
+            serde_json::json!(revision),
+        );
+    }
+    Ok(())
 }
 
 /// Money on the model-facing boundary, in yuan.
@@ -731,7 +832,8 @@ pub async fn execute_update_listing(
     if !lock_verified_membership_in_tx(&mut tx, &owner_id, campus_id).await? {
         return Err(ToolError("请先完成校园身份验证后再进行此操作".to_string()));
     }
-    let result = execute_update_listing_in_tx(ctx, &mut tx, &owner_id, campus_id, args).await?;
+    let result =
+        execute_update_listing_in_tx(ctx, &mut tx, &owner_id, campus_id, args, None).await?;
     tx.commit()
         .await
         .map_err(|error| ToolError(format!("Commit error: {}", error)))?;
@@ -744,6 +846,7 @@ async fn execute_update_listing_in_tx(
     owner_id: &str,
     campus_id: uuid::Uuid,
     args: UpdateListingArgs,
+    expected_content_revision: Option<i64>,
 ) -> Result<String, ToolError> {
     if args.new_price.is_none() && args.new_title.is_none() && args.new_description.is_none() {
         return Ok("No fields to update were provided.".to_string());
@@ -751,7 +854,7 @@ async fn execute_update_listing_in_tx(
 
     let listing_id = args.listing_id.clone();
     let result = ListingCommandService::new(ctx.db_pool.clone(), ctx.moderation.clone())
-        .update_in_tx(
+        .update_with_state_and_revision_in_tx(
             tx,
             &listing_id,
             owner_id,
@@ -765,17 +868,20 @@ async fn execute_update_listing_in_tx(
                 defects: None,
                 description: args.new_description,
             },
+            expected_content_revision,
         )
         .await
         .map_err(|error| ToolError(format!("更新校验失败: {}", error)))?;
 
-    if result {
-        Ok(format!("Successfully updated listing {}", listing_id))
-    } else {
-        Ok(format!(
+    match result {
+        crate::repositories::UpdateOwnedResult::Updated => {
+            Ok(format!("Successfully updated listing {}", listing_id))
+        }
+        crate::repositories::UpdateOwnedResult::NotFound
+        | crate::repositories::UpdateOwnedResult::Inactive => Ok(format!(
             "No active listing found with ID: {} (or you don't own it)",
             listing_id
-        ))
+        )),
     }
 }
 
@@ -838,7 +944,8 @@ pub async fn execute_delete_listing(
     if !lock_verified_membership_in_tx(&mut tx, &owner_id, campus_id).await? {
         return Err(ToolError("请先完成校园身份验证后再进行此操作".to_string()));
     }
-    let result = execute_delete_listing_in_tx(ctx, &mut tx, &owner_id, campus_id, args).await?;
+    let result =
+        execute_delete_listing_in_tx(ctx, &mut tx, &owner_id, campus_id, args, None).await?;
     tx.commit()
         .await
         .map_err(|error| ToolError(format!("Commit error: {}", error)))?;
@@ -851,11 +958,18 @@ async fn execute_delete_listing_in_tx(
     owner_id: &str,
     campus_id: uuid::Uuid,
     args: DeleteListingArgs,
+    expected_content_revision: Option<i64>,
 ) -> Result<String, ToolError> {
     // Owners may remove their own restricted content. Restriction blocks
     // editing or commerce, not the safety-improving act of taking it down.
     let deleted = match ListingCommandService::new(ctx.db_pool.clone(), ctx.moderation.clone())
-        .delete_in_tx(tx, &args.listing_id, owner_id, campus_id)
+        .delete_with_revision_in_tx(
+            tx,
+            &args.listing_id,
+            owner_id,
+            campus_id,
+            expected_content_revision,
+        )
         .await
     {
         Ok(result) => result,
@@ -947,7 +1061,7 @@ pub async fn execute_purchase_item(
         return Err(ToolError("请先完成校园身份验证后再进行此操作".to_string()));
     }
     let (message, recorded_intent) =
-        execute_purchase_item_in_tx(ctx, &mut tx, &buyer_id, campus_id, args).await?;
+        execute_purchase_item_in_tx(ctx, &mut tx, &buyer_id, campus_id, args, None).await?;
     tx.commit()
         .await
         .map_err(|error| ToolError(format!("Commit error: {}", error)))?;
@@ -986,12 +1100,13 @@ async fn execute_purchase_item_in_tx(
     buyer_id: &str,
     campus_id: uuid::Uuid,
     args: PurchaseItemIntentArgs,
+    expected_content_revision: Option<i64>,
 ) -> Result<(String, bool), ToolError> {
     // Lock the listing before reading owner, state and the price used for the
     // tolerance check. OrderService locks it again in this same transaction;
     // that is harmless and keeps its standalone invariant intact.
     let listing = sqlx::query_as::<_, ListingCheckRow>(
-        "SELECT id, campus_id, owner_id, suggested_price_cny, status
+        "SELECT id, campus_id, owner_id, suggested_price_cny, status, content_revision
          FROM inventory WHERE id = $1 FOR UPDATE",
     )
     .bind(&args.listing_id)
@@ -1004,6 +1119,17 @@ async fn execute_purchase_item_in_tx(
             false,
         ));
     };
+    if let Some(expected) = expected_content_revision {
+        if expected <= 0 {
+            return Err(ToolError("资源版本必须为正整数".to_string()));
+        }
+        if expected != listing.content_revision {
+            return Err(ToolError(format!(
+                "商品内容已变化（期望版本 {}，当前版本 {}），请刷新后重新发起成交意向",
+                expected, listing.content_revision
+            )));
+        }
+    }
 
     let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
         .bind(&args.listing_id)
@@ -1193,7 +1319,8 @@ pub async fn execute_negotiate_item(
     if !lock_verified_membership_in_tx(&mut tx, &buyer_id, campus_id).await? {
         return Err(ToolError("请先完成校园身份验证后再进行此操作".to_string()));
     }
-    let message = execute_negotiate_item_in_tx(ctx, &mut tx, &buyer_id, campus_id, args).await?;
+    let message =
+        execute_negotiate_item_in_tx(ctx, &mut tx, &buyer_id, campus_id, args, None).await?;
     tx.commit()
         .await
         .map_err(|error| ToolError(format!("Commit error: {}", error)))?;
@@ -1206,11 +1333,12 @@ async fn execute_negotiate_item_in_tx(
     buyer_id: &str,
     campus_id: uuid::Uuid,
     args: NegotiateItemArgs,
+    expected_content_revision: Option<i64>,
 ) -> Result<String, ToolError> {
     // Inventory is the first business-fact lock. This serializes eligibility,
     // duplicate detection and HITL insertion against takedown and retries.
     let listing = sqlx::query_as::<_, ListingCheckRow>(
-        "SELECT id, campus_id, owner_id, suggested_price_cny, status
+        "SELECT id, campus_id, owner_id, suggested_price_cny, status, content_revision
          FROM inventory WHERE id = $1 AND campus_id = $2 FOR UPDATE",
     )
     .bind(&args.listing_id)
@@ -1221,6 +1349,17 @@ async fn execute_negotiate_item_in_tx(
     let Some(listing) = listing else {
         return Err(ToolError("当前校园未找到可议价的商品".to_string()));
     };
+    if let Some(expected) = expected_content_revision {
+        if expected <= 0 {
+            return Err(ToolError("资源版本必须为正整数".to_string()));
+        }
+        if expected != listing.content_revision {
+            return Err(ToolError(format!(
+                "商品内容已变化（期望版本 {}，当前版本 {}），请刷新后重新发起还价",
+                expected, listing.content_revision
+            )));
+        }
+    }
 
     if buyer_id == listing.owner_id {
         return Err(ToolError("不能对自己的商品发起还价".to_string()));
@@ -1320,6 +1459,7 @@ struct ListingCheckRow {
     owner_id: String,
     suggested_price_cny: i64,
     status: String,
+    content_revision: i64,
 }
 
 // ---------------------------------------------------------------------------

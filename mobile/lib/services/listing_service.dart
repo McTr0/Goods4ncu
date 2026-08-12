@@ -195,12 +195,20 @@ class ListingService extends BaseService {
 
   /// Update existing listing.
   /// PUT /api/listings/{id}
-  Future<void> updateListing(String id, Map<String, dynamic> updates) async {
+  Future<void> updateListing(
+    String id,
+    Map<String, dynamic> updates, {
+    int? expectedContentRevision,
+  }) async {
     final headers = await authHeaders();
+    final payload = Map<String, dynamic>.from(updates);
+    if (expectedContentRevision != null && expectedContentRevision > 0) {
+      payload['expected_content_revision'] = expectedContentRevision;
+    }
     final response = await put(
       Uri.parse('$baseUrl/api/listings/$id'),
       headers,
-      jsonEncode(updates),
+      jsonEncode(payload),
     );
     handleResponse(response, (_) {});
   }
@@ -231,8 +239,11 @@ class ListingService extends BaseService {
 
   /// Delete listing.
   /// DELETE /api/listings/{id}
-  Future<void> deleteListing(String id) async {
+  Future<void> deleteListing(String id, {int? expectedContentRevision}) async {
     final headers = await authHeaders();
+    if (expectedContentRevision != null && expectedContentRevision > 0) {
+      headers['If-Match'] = '"$expectedContentRevision"';
+    }
     final response = await delete(
       Uri.parse('$baseUrl/api/listings/$id'),
       headers,

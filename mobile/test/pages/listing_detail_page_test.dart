@@ -137,7 +137,7 @@ class _ListingApiService extends ApiService {
   }
 
   @override
-  Future<void> deleteListing(String id) async {
+  Future<void> deleteListing(String id, {int? expectedContentRevision}) async {
     deleteCalls += 1;
   }
 

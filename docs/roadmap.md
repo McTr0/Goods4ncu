@@ -30,11 +30,11 @@
 当前能力还不是生产就绪。主要差距：
 
 - CampusMembership、核心资源校园作用域、后台审核队列、跨校园理由审计和统一 session extractor 已落地。当前所有租户表（包括 persona asset）已启用 FORCE RLS（`0042` 及后续领域迁移，`app.campus_id` 事务级 GUC 触发，未设置时放行以保持应用层为主边界），隔离与写拒绝有集成测试；应用侧全请求 GUC 注入（fail-closed）与多副本租户验证仍属 Phase 4。
-- Agent 的更新/下架/成交意向/议价已接入 crash-safe ActionPlan（模型只能提出，L3 需独立 token 的二次确认）；发布采用立即执行 + 条件式撤销。HTTP、Agent 和撤销路径已统一经过 `ListingCommandService`；资源版本快照仍待补。
+- Agent 的更新/下架/成交意向/议价已接入 crash-safe ActionPlan（模型只能提出，L3 需独立 token 的二次确认）；发布采用立即执行 + 条件式撤销。HTTP、Agent 和撤销路径已统一经过 `ListingCommandService`；四类关键动作在提案时保存 `inventory.content_revision`，确认时按锁内版本比较，HTTP 更新/删除也支持期望版本，完整行动审计仍待补。
 - 聊天隐私迁移已完成首阶段：留言/连接二分、服务端已发送、设备本地 `LOCALLY_SEEN`、主动 acknowledgement，以及陌生人/忙碌/联系人静音与重复请求抑制均由当前协议执行。
 - WebSocket 跨副本投递已具备（Redis fan-out，双实例端到端验证）；call signaling 多副本化与压测仍待做，typing 已从协议移除。outbox 基础与通知推送已持久化，其余事件消费者仍在进程内。
 - 媒体隔离、审核公开门槛、缩略图和 Base64 退出不完整；案件事实层已具备，对象存储隔离已用真实 MinIO 完成生产模式演练，媒体审核队列已通过 `0069` 增加可回收 lease，并补齐低基数队列/延迟指标；生产 bucket/CDN、图片审核 provider 和人工运营仍需部署侧验收。
-- API 缺少统一版本和 cursor；[已实现] 未版本化接口已有兼容旧客户端的稳定错误字段、服务端 request ID，以及 listing 发布、wanted response 和成交确认幂等，其他写接口仍需收敛。
+- API 缺少统一版本和 cursor；[已实现] 未版本化接口已有兼容旧客户端的稳定错误字段、服务端 request ID，以及 listing 发布、wanted response 和成交确认幂等；listing 读写已提供 `content_revision`/`If-Match` 冲突保护，其他写接口仍需收敛。
 - 首页商品 feed、相似商品、listing wanted matches 与意图撮合均已有统一解释和显式反馈控制；离线质量评估、公平性指标与跨表达软排序仍不足。
 - Secret Chat 与服务器可治理通信目标冲突。
 - 备份恢复、密钥管理、SLO、告警和事故演练未闭环。
@@ -169,7 +169,7 @@
 - [已实现] 发布采用“立即执行 + 撤销窗口”；update/delete listing 生成 L2 pending 计划，purchase/negotiate 生成 L3 pending 计划。输入快照、风险级、10 分钟过期和 token 由 `0038_agent_action_plans.sql` + `AgentPlanService` 承载；token 只经认证且禁止缓存的 `/api/agent/plans` 返回，绝不进入模型可见文本。
 - [已实现] `0058_agent_plan_atomic_confirmation.sql` 把计划行锁、业务执行、适用时的通知/outbox 和计划终态放进同一外层事务，动作内部使用 savepoint。commit 前崩溃整笔回滚；成功结果和业务事实同时可见；并发/重复 confirm 只产生一个业务事实。旧协议遗留的 `executing` 迁移为不可重放的 `interrupted`，等待人工核对。
 - [已实现] L3 两步使用不同 token：primary 只把计划置为 `confirmed_once` 并返回独立 second token；primary 的网络重试只重放同一挑战，只有 second token 能执行。当前校园绑定贯穿 list/cancel/confirm，移动端对新挑战和重新加载后的 armed 计划都在任何执行请求前展示高风险对话框。
-- [目标态] 补通用资源版本快照、提案幂等键、版本化风险文案、typed execution outcome 与完整审计/对账界面。
+- [部分完成] listing 更新、下架、成交意向和议价已在 ActionPlan 提案时保存 `inventory.content_revision`，确认时按锁内版本比较；HTTP 更新/删除也支持 body 版本或 `If-Match`。仍需补通用提案幂等键、版本化风险文案、typed execution outcome 与完整审计/对账界面。
 
 ### 工具收敛
 
@@ -187,14 +187,23 @@
 
 ### 关系空间与角色分身（聊天隐私稳定后）
 
-该方向是目标态产品迁移，不改变当前 API 参考中的已实现事实。按以下顺序推进：
+该方向是对“留言 / 连接 + 主动确认”计划的产品化延伸，不把产品退回“聊天列表 + 无限消息流”。它不改变当前 API 参考中的已实现事实，先以现有 `Thread / Conversation / Message` 为事实源，再逐步增加关系级投影。开发顺序固定为：先完成 listing 写路径硬化，再稳定聊天隐私协议，最后按 R0–R4 推进关系空间和角色层。
+
+#### 本次计划修订的设计决定
+
+1. **留言与连接仍是两种基本语义。** 留言只承诺服务端已发送，连接是一次双方明确同意、可以结束的实时交流；主动 acknowledgement 继续是用户行为，不由打开页面、Push、输入或角色动画代替。
+2. **关系空间是长期入口，不是新的消息服务器。** 同一对用户只有一个关系入口，消息、连接起止、共享对象、Pin 和确认在空间内可回到；现有 Conversation 继续保存每次留言/连接边界，通用 `SpaceEvent` 写模型后置。
+3. **角色是呈现层，不是代理人格。** 用户的 `SocialPersona` 由用户定义、确认和发布；它表达身份、边界和接近方式，不证明真人外貌，不自动模仿语气，也不替用户聊天。角色未发布或撤销时回退普通头像。
+4. **平台 Agent 的视觉人格必须独立。** 小帮可以使用候选工作名“小樟”的统一视觉 skin 表达搜索、草拟、等待确认、执行和失败等可验证工具状态，但不能作为桌宠主动召回用户；进入真实连接后应退出视觉中心，只有用户明确请求时才出现，并始终标识为 Agent。
+5. **接收者控制注意力入口。** 发送者可以选择普通留言或希望今天处理等时间尺度，但不能越过接收方的联系人、陌生人、忙碌和静音规则；不做“紧急/超级紧急”红色等级，也不以在线、最后上线、正在输入或未读数施压。
+6. **群聊另起模型。** 长期 Group 只承载群留言，临时 `Discussion` 才承载一段有参与者和结束边界的讨论；一对一关系空间通过验证前，群组临时讨论、语音/视频升级和全量动态角色均不进入本阶段承诺。
 
 当前进度：[部分完成] R0 的 Flutter 共同空间静态投影已接入联系人线程和独立私聊；只读取现有 Thread/Conversation 事实，`active` 只显示为“已连接”，没有新增后端状态；连接建立后角色 token 退到背景，只保留双方名称与连接状态。R1 已落地 `SocialPersona` v1 的受控 token、草稿/发布/归档、同校园公开读取、审计和普通头像回退；Flutter 已提供静态 24/48/160 token、深色主题对比度和 reduced-motion-safe fallback，活动校园 Thread 列表/详情与 Relationship Space 会投影已发布角色，草稿/归档 fail-closed。`0070_social_persona_assets` 与 `0071_social_persona_asset_upload_expiry` 现在提供服务器生成 key、真实对象探测、大小/MIME 校验、审核 worker 门槛、显式选择/撤销、短期公开 URL、过期孤儿上传撤销和耐久远端清理；`0072_moderation_job_storage_key` 让私有审核 worker 从稳定对象 key 按次重新签发 provider URL，不把会过期的 presigned URL 当作队列事实；`photo_stylized` 仅记录素材来源，不冒充身份，也不把生成 provider 绑定到核心联系能力。真实图片审核 provider、生产 bucket/CDN 和实体设备仍需部署侧验收。R2 已落地同校园无序用户对 `relationship_key`、`space-events` cursor、显式幂等 Pin、最近连接恢复点，以及从既有 quote 派生的共享对象入口；`0065_chat_shared_objects`、`0066_shared_object_upload_lifecycle` 与 `0067_chat_shared_object_storage_cleanup` 现在为 file/link 提供同校园、同会话、可撤销的平台权威引用、上传审核边界和耐久远端清理。`0072` 后的完整生产拓扑演练已通过：双副本空库启动、Redis fan-out、SLO、MinIO 私有 bucket、presigned PUT/GET、signed DELETE、撤销审计、worker 清理、RLS、滚动重启、PITR 和有序排空均有断言。生产 bucket/CDN、图片审核 provider 和实体设备仍需部署侧验收。私有代理失效已有 API 回归：活动文件可获取短期签名 URL，撤销后同一媒体入口返回 404；旧客户端兼容窗口已结束，`0068_remove_chat_attention_compat_shadow` 清除了回滚影子列。2026-08-12 已在全新隔离数据库上通过双账号 `realtime -> accept -> acknowledge -> close`、主动确认 `received -> completed -> withdraw` 和独立 `mail` 的真实 API 旅程；同日真实 Flutter Web 已验收留言/连接入口，且页面没有在线、正在输入或已读提示。Flutter 已把商品/成交/文件/链接等共享引用显示为不加载资源的只读 rail，并增加共享对象 API 模型。`MessageBubble` 已在 `390×844` widget 视口回归中确认 acknowledgement 菜单可达；实体 390×844 设备验收仍未完成，不把视口测试或未验证的对象存在性冒充为上传成功。
 
 1. **R0：体验原型与词义测试。** 用真实移动端尺寸验证“对方左上 / 自己右下”、留言/连接切换、角色缩放和 Memory Rail；确认用户不会把角色姿态理解成在线、已读或 Agent 参与。此阶段不改后端。
 2. **R1：静态角色身份层。** [部分完成] `0063_social_personas`、`0070_social_persona_assets`、`0071_social_persona_asset_upload_expiry` 与 `0072_moderation_job_storage_key`、`/api/user/persona`、`/api/user/persona/assets` 已支持统一风格 token、受审核图片候选、服务器 key、owner-scoped presigned PUT、对象完成探测、审核队列按次 fresh presigned URL、显式选择/发布/归档/撤销、过期孤儿上传撤销、同校园边界和审计；Flutter 个人资料页现已主动请求 upload target，在私有部署直传单对象 presigned URL，开发/公开 bucket 回退到 verified-membership STS，随后完成探测、查看审核状态、选择和撤销；公开主页可解析审核后的短期 asset URL，加载失败回退静态 token。照片风格化 provider、真实媒体审核账号和生产 CDN 仍需部署侧验收，不能把生成图当作身份认证；`0069` 已先解决审核 worker 崩溃后的可恢复性，`0070`/`0071`/`0072` 复用同一 lease/队列。
 3. **R2：Relationship Space 投影（消息只读，Pin/对象显式写入）。** [部分完成] 复用 `Thread / Conversation / Message / Quote`，为同校园无序用户对提供稳定 relationship key 和 cursor；已实现“时间 + Pin”、最近连接恢复点，以及商品 quote 和 file/link 权威对象的只读共享对象入口。Pin 通过 `0064_relationship_space_pins` 保存为用户主动、可撤销的共享事实，`0065_chat_shared_objects`/`0066_shared_object_upload_lifecycle`/`0067_shared_object_storage_cleanup` 保存平台 key/规范化链接、来源会话、创建者、上传/审核和 `pending_upload -> pending_review/active -> revoked/deleted` 生命周期；撤销后的文件由耐久 worker 以 signed DELETE 清理并保留重试审计，不建立第二套消息事实。回归已覆盖对象创建、服务端完成上传状态转换、同会话引用、未完成文件引用拒绝、非创建者撤销拒绝、撤销后消息 quote/space 投影失效、链接片段规范化和 API 媒体入口在撤销后返回 404；真实生产演练已通过 MinIO `/complete`、签名删除和远端不存在断言；Flutter API 模型、上传到服务端 key 的方法与共享 rail 已覆盖只读显示，外部 URL 仍不得由消息正文直接加载。下一步是生产 bucket/CDN、图片审核 provider 和实体设备验收。
-4. **R3：连接空间化。** [部分完成] 留言状态已拉开角色并强调历史；请求/接受/结束连接由明确状态机驱动，连接期间弱化角色与 Rail。发送方的留言/连接入口、接收方主动确认和可留言/可连接/忙/稍后规则已接入现有协议；2026-08-12 已在干净种子账号上完成真实 Flutter Web 双账号“发起 → 接通 → 确认 → 结束”旅程，另验证了接收消息的无障碍“打开消息操作 → 我会看 → 撤销主动确认”菜单，页面保留历史且没有在线/输入中/已读事实。`MessageBubble` 的 `390×844` widget 回归已覆盖三种 acknowledgement 动作的窄屏可达性；下一步仍需实体设备上的 acknowledgement 替换、撤销与跨设备实时同步截图。Flutter widget、API driver 和后端回归已覆盖语义与权限。接收方规则始终优先，不引入 online、typing、last seen 或 read。
+4. **R3：连接空间化。** [部分完成] 留言状态已拉开角色并强调历史；请求/接受/结束连接由明确状态机驱动，连接期间弱化角色与 Rail。发送方可以选择普通留言、希望今天处理或请求连接，接收方的联系人/陌生人/忙碌/静音规则始终优先；不引入“紧急”红色等级。2026-08-12 已在干净种子账号上完成真实 Flutter Web 双账号“发起 → 接通 → 确认 → 结束”旅程，另验证了接收消息的无障碍“打开消息操作 → 我会看 → 撤销主动确认”菜单，页面保留历史且没有在线/输入中/已读事实。`MessageBubble` 的 `390×844` widget 回归已覆盖三种 acknowledgement 动作的窄屏可达性；下一步仍需实体设备上的 acknowledgement 替换、撤销与跨设备实时同步截图。Flutter widget、API driver 和后端回归已覆盖语义与权限。接收方规则始终优先，不引入 online、typing、last seen 或 read。
 5. **R4：可选语义增强。** 主题聚类、自然语言回忆与共识提议必须携带 `source_event_ids`；模型不可用时自动退回确定性时间、Pin、文件和搜索。共享约定只有用户明确采纳后才生效。
 
 群组的长期 Group + 临时 Discussion、语音/视频带宽升级、人物/地点轨迹和通用权威 `SpaceEvent` 写模型都后置。通用事件模型只有在投影回放、幂等、双写原子、删除/权限失效和旧客户端兼容全部通过后才可启用。
@@ -208,11 +217,12 @@
 - 打开页面、Push、输入、滚动和角色缩放不会产生对方可见事件；只有明确留言、连接、Pin、acknowledgement 或共享对象动作写入事实。
 - 时间 + Pin 轨迹在 LLM 完全关闭时可重建；源事件隐藏、删除、审核或权限变化后投影同步失效。
 - 角色生成原图和候选遵守媒体隔离、审核、删除与 Provider 数据边界；完全角色化有明确披露，分身不可冒充平台 Agent。
+- 用户能区分自己的角色化呈现、平台 Agent（候选工作名“小樟”）和真实对方；Agent 不因空闲、Push 或停留主动出现，连接期间不把角色动画当作在线/已读/正在输入。
 - 用“找回上次事项成功率、边界理解率、首次有效联系完成率和骚扰举报率”验收，不用停留时长、角色点击量或消息量证明成功。
 
 ### 安全与质量
 
-- [部分完成] 工具层滥用测试集已落地（`tests/agent_injection_regression.rs`）：跨校园购买/议价、参数污染（空/超长标题、越界成色、非正/天价价格、越界出价）、自买自卖、未认证用户提案全部被拒并有零副作用断言；confirmation token 隔离、跨用户/校园确认拒绝和原子恢复在计划测试中覆盖。Agent listing 已与 HTTP 共享同步文本审核、分类/空白/金额规范化；针对真实 LLM 的间接注入与虚假承诺评估仍需线上评测集。
+- [部分完成] 工具层滥用测试集已落地（`tests/agent_injection_regression.rs`）：跨校园购买/议价、参数污染（空/超长标题、越界成色、非正/天价价格、越界出价）、自买自卖、未认证用户提案全部被拒并有零副作用断言；confirmation token 隔离、跨用户/校园确认拒绝、资源版本快照冲突和原子恢复已有回归覆盖。Agent listing 已与 HTTP 共享同步文本审核、分类/空白/金额规范化；针对真实 LLM 的间接注入与虚假承诺评估仍需线上评测集。
 - AgentRun 记录路由、检索、工具、provider、版本、延迟和结果类别，敏感正文脱敏。
 - 无 LLM 时搜索、表单、聊天和成交记录仍可用。
 - Agent 变更采用 feature flag 和 canary，越权执行有立即 kill switch。
@@ -286,7 +296,7 @@
 | Secret Chat | Phase 1 | [已实现] 新建默认 403（`SECRET_CHAT_NEW_SESSIONS_ENABLED` 仅迁移窗口可开），移动端入口已移除，历史会话可读有回归覆盖 |
 | 进程内事件 | Phase 4 | [部分完成] outbox 通知与专用 `embedding_jobs` listing 投影已迁移并有回归覆盖；审核投影等其余消费者仍待迁移 |
 | 单实例 WebSocket | Phase 4 | [部分完成] Redis fan-out 已实现并通过双实例端到端测试；断线补偿依赖既有 HTTP 拉取，压测仍待做 |
-| Agent 直接写工具 | Phase 3 | [部分完成] 发布已进入可撤销直接执行，四个计划动作使用 crash-safe ActionPlan；listing command 已统一，资源版本快照和完整行动审计仍待补 |
+| Agent 直接写工具 | Phase 3 | [部分完成] 发布已进入可撤销直接执行，四个计划动作使用 crash-safe ActionPlan；listing command 与资源版本快照已统一，提案幂等、版本化文案与完整行动审计仍待补 |
 
 ## 路线图维护规则
 

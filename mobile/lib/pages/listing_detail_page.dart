@@ -1332,7 +1332,10 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     if (confirmed != true || !mounted) return;
     setState(() => _isOperating = true);
     try {
-      await _apiService.deleteListing(listing.id);
+      await _apiService.deleteListing(
+        listing.id,
+        expectedContentRevision: listing.contentRevision,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,

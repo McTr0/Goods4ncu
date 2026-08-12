@@ -303,14 +303,26 @@ class ApiService extends BaseService {
     idempotencyKey: idempotencyKey,
   );
 
-  Future<void> updateListing(String id, Map<String, dynamic> updates) =>
-      _listingService.updateListing(id, updates);
+  Future<void> updateListing(
+    String id,
+    Map<String, dynamic> updates, {
+    int? expectedContentRevision,
+  }) =>
+      _listingService.updateListing(
+        id,
+        updates,
+        expectedContentRevision: expectedContentRevision,
+      );
 
   Future<void> fulfillWanted(String id) => _listingService.fulfillWanted(id);
 
   Future<void> relistListing(String id) => _listingService.relistListing(id);
 
-  Future<void> deleteListing(String id) => _listingService.deleteListing(id);
+  Future<void> deleteListing(String id, {int? expectedContentRevision}) =>
+      _listingService.deleteListing(
+        id,
+        expectedContentRevision: expectedContentRevision,
+      );
 
   Future<ListingsResponse> getWantedMatches(String wantedId) =>
       _listingService.getWantedMatches(wantedId);

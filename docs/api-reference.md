@@ -360,6 +360,7 @@ Content-Type: application/json
   "items": [
     {
       "id": "listing-id",
+      "content_revision": 7,
       "title": "二手教材",
       "category": "books",
       "brand": "高等教育出版社",
@@ -378,7 +379,7 @@ Content-Type: application/json
 
 ### GET `/api/listings/{id}`
 
-公开查看商品详情。未登录用户可以看基本信息；登录用户会额外拿到 `owner_id`，用于发起直聊。返回 `defects`、`description`、`owner_username`、`status`、`created_at` 等字段。
+公开查看商品详情。未登录用户可以看基本信息；登录用户会额外拿到 `owner_id`，用于发起直聊。返回 `content_revision`（数据库维护的乐观并发版本）、`defects`、`description`、`owner_username`、`status`、`created_at` 等字段。列表、我的发布和 wanted match 条目也带同一版本字段。
 
 ### POST `/api/listings/{id}/report`
 
@@ -422,9 +423,11 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 需要登录且必须是 owner。支持局部更新：`title`、`category`、`brand`、`condition_score`、`suggested_price_cny`、`defects`、`description`。状态更新不走这个通用接口。
 
+客户端应把读取到的 `content_revision` 放入 body 的 `expected_content_revision`，或发送 `If-Match: "<content_revision>"`。两者同时存在时必须一致；版本不匹配返回 `409`、`code=listing_version_conflict`，不会覆盖较新的编辑。字段和 header 在兼容窗口内可省略，省略时保留旧客户端行为。状态和版本检查、更新在同一事务内完成。
+
 ### DELETE `/api/listings/{id}`
 
-需要活动校园的 verified membership 且必须是 owner。事务先按校园和 owner 锁定 listing，再把非 sold 条目标记为 `deleted`；重复删除保持幂等。删除 active wanted 会立即关闭当前响应轮次，已有 Response 继续作为只读历史保留。
+需要活动校园的 verified membership 且必须是 owner。建议发送 `If-Match: "<content_revision>"`；版本不匹配返回 `409`、`code=listing_version_conflict`，不会删除较新的内容。事务先按校园、owner 和版本锁定 listing，再把非 sold 条目标记为 `deleted`；重复删除保持幂等。删除 active wanted 会立即关闭当前响应轮次，已有 Response 继续作为只读历史保留。
 
 ### POST `/api/listings/{id}/relist`
 
@@ -1164,7 +1167,7 @@ POST /api/v1/agent/plans/{id}/cancel
 
 这是目标 `/api/v1` 形态，不等同于上方当前未版本化接口。目标创建协议还应返回 `idempotency_key`、`confirmation_mode`、版本化预览和风险文案；L3 继续使用相互独立的两步 token。
 
-当前 confirm 已重新验证 tenant、membership、owner、状态和金额，并把业务事实与计划终态原子提交。通用资源版本快照、提案幂等键、稳定错误 code 和完整审计信封仍是 `/api/v1` 收敛项。
+当前 confirm 已重新验证 tenant、membership、owner、状态和金额，并把业务事实与计划终态原子提交。listing 更新、下架、成交意向和议价计划已携带 `inventory.content_revision` 快照并在锁内拒绝过期写入；通用提案幂等键、稳定错误 code 和完整审计信封仍是 `/api/v1` 收敛项。
 
 ### Moderation 与申诉
 

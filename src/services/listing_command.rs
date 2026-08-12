@@ -202,6 +202,7 @@ impl ListingCommandService {
         })
     }
 
+    #[allow(dead_code)]
     pub async fn update_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -217,6 +218,7 @@ impl ListingCommandService {
         ))
     }
 
+    #[allow(dead_code)]
     pub async fn update_with_state_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -225,12 +227,33 @@ impl ListingCommandService {
         campus_id: Uuid,
         draft: UpdateListingDraft,
     ) -> Result<UpdateOwnedResult, ApiError> {
-        let input = self.normalize_update(draft)?;
-        PostgresListingRepository::new(self.pool.clone())
-            .update_owned_active_with_state_in_tx(tx, id, owner_id, campus_id, &input)
+        self.update_with_state_and_revision_in_tx(tx, id, owner_id, campus_id, draft, None)
             .await
     }
 
+    pub async fn update_with_state_and_revision_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        id: &str,
+        owner_id: &str,
+        campus_id: Uuid,
+        draft: UpdateListingDraft,
+        expected_content_revision: Option<i64>,
+    ) -> Result<UpdateOwnedResult, ApiError> {
+        let input = self.normalize_update(draft)?;
+        PostgresListingRepository::new(self.pool.clone())
+            .update_owned_active_with_state_in_tx(
+                tx,
+                id,
+                owner_id,
+                campus_id,
+                &input,
+                expected_content_revision,
+            )
+            .await
+    }
+
+    #[allow(dead_code)]
     pub async fn delete_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -238,8 +261,26 @@ impl ListingCommandService {
         owner_id: &str,
         campus_id: Uuid,
     ) -> Result<DeleteOwnedResult, ApiError> {
+        self.delete_with_revision_in_tx(tx, id, owner_id, campus_id, None)
+            .await
+    }
+
+    pub async fn delete_with_revision_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        id: &str,
+        owner_id: &str,
+        campus_id: Uuid,
+        expected_content_revision: Option<i64>,
+    ) -> Result<DeleteOwnedResult, ApiError> {
         PostgresListingRepository::new(self.pool.clone())
-            .delete_owned_in_tx(tx, id, owner_id, campus_id)
+            .delete_owned_with_revision_in_tx(
+                tx,
+                id,
+                owner_id,
+                campus_id,
+                expected_content_revision,
+            )
             .await
     }
 

@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
-    http::HeaderMap,
+    http::{header::IF_MATCH, HeaderMap},
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -53,6 +53,8 @@ pub struct ListingQuery {
 #[derive(Serialize)]
 pub struct ListingSummary {
     pub id: String,
+    /// Database-owned optimistic-concurrency version for subsequent writes.
+    pub content_revision: i64,
     pub title: String,
     pub category: String,
     pub brand: String,
@@ -103,6 +105,8 @@ pub struct WantedMatchesResponse {
 #[derive(Serialize)]
 pub struct ListingDetail {
     pub id: String,
+    /// Database-owned optimistic-concurrency version for subsequent writes.
+    pub content_revision: i64,
     pub title: String,
     pub category: String,
     pub brand: String,
@@ -170,6 +174,9 @@ pub struct WantedResponseResult {
 
 #[derive(Deserialize)]
 pub struct UpdateListingRequest {
+    /// Optional optimistic-concurrency guard. Legacy clients may omit it;
+    /// clients that read a detail/list row should echo its revision here.
+    pub expected_content_revision: Option<i64>,
     pub title: Option<String>,
     pub category: Option<String>,
     pub brand: Option<String>,
@@ -177,6 +184,33 @@ pub struct UpdateListingRequest {
     pub suggested_price_cny: Option<f64>,
     pub defects: Option<Vec<String>>,
     pub description: Option<String>,
+}
+
+/// Parse an HTTP `If-Match` revision emitted by listing reads. The API keeps
+/// this header optional for legacy clients; a concrete value is always treated
+/// as a strict optimistic-concurrency guard.
+fn expected_revision_from_if_match(headers: &HeaderMap) -> Result<Option<i64>, ApiError> {
+    let Some(value) = headers.get(IF_MATCH) else {
+        return Ok(None);
+    };
+    let raw = value
+        .to_str()
+        .map_err(|_| ApiError::BadRequest("If-Match 头无效".to_string()))?
+        .trim();
+    if raw == "*" {
+        return Ok(None);
+    }
+    let unquoted = raw.strip_prefix('"').unwrap_or(raw);
+    let unquoted = unquoted.strip_suffix('"').unwrap_or(unquoted);
+    let revision = unquoted
+        .parse::<i64>()
+        .map_err(|_| ApiError::BadRequest("If-Match 必须是正整数版本号".to_string()))?;
+    if revision <= 0 {
+        return Err(ApiError::BadRequest(
+            "If-Match 必须是正整数版本号".to_string(),
+        ));
+    }
+    Ok(Some(revision))
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +260,7 @@ fn listing_summary_from_listing(listing: crate::repositories::Listing) -> Listin
     let defect_hint = defects.first().cloned();
     ListingSummary {
         id: listing.id,
+        content_revision: listing.content_revision,
         title: listing.title,
         category: listing.category,
         brand: listing.brand.unwrap_or_default(),
@@ -445,6 +480,7 @@ pub async fn get_listing(
 
     Ok(Json(ListingDetail {
         id: listing.id,
+        content_revision: listing.content_revision,
         title: listing.title,
         category: listing.category,
         brand: listing.brand.unwrap_or_default(),
@@ -999,11 +1035,29 @@ pub async fn fulfill_wanted(
 /// PUT /api/listings/:id - update a listing (owner only)
 pub async fn update_listing(
     State(state): State<AppState>,
+    headers: HeaderMap,
     tenant: VerifiedTenant,
     Path(id): Path<String>,
     Json(payload): Json<UpdateListingRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user_id = tenant.session.user_id.clone();
+    let header_revision = expected_revision_from_if_match(&headers)?;
+    if let Some(revision) = payload.expected_content_revision {
+        if revision <= 0 {
+            return Err(ApiError::BadRequest(
+                "expected_content_revision 必须为正整数".to_string(),
+            ));
+        }
+    }
+    if payload.expected_content_revision.is_some()
+        && header_revision.is_some()
+        && payload.expected_content_revision != header_revision
+    {
+        return Err(ApiError::BadRequest(
+            "请求体与 If-Match 的版本号不一致".to_string(),
+        ));
+    }
+    let expected_content_revision = payload.expected_content_revision.or(header_revision);
     let command =
         ListingCommandService::new(state.infra.db.clone(), state.infra.moderation.clone());
     let mut tx = state
@@ -1013,7 +1067,7 @@ pub async fn update_listing(
         .await
         .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
     let update_result = command
-        .update_with_state_in_tx(
+        .update_with_state_and_revision_in_tx(
             &mut tx,
             &id,
             &user_id,
@@ -1027,6 +1081,7 @@ pub async fn update_listing(
                 defects: payload.defects,
                 description: payload.description,
             },
+            expected_content_revision,
         )
         .await?;
     match update_result {
@@ -1054,10 +1109,12 @@ pub async fn update_listing(
 /// DELETE /api/listings/:id - delete a listing (owner only)
 pub async fn delete_listing(
     State(state): State<AppState>,
+    headers: HeaderMap,
     tenant: VerifiedTenant,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user_id = tenant.session.user_id.clone();
+    let expected_content_revision = expected_revision_from_if_match(&headers)?;
     let command =
         ListingCommandService::new(state.infra.db.clone(), state.infra.moderation.clone());
     let mut tx = state
@@ -1067,7 +1124,13 @@ pub async fn delete_listing(
         .await
         .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
     command
-        .delete_in_tx(&mut tx, &id, &user_id, tenant.campus_id)
+        .delete_with_revision_in_tx(
+            &mut tx,
+            &id,
+            &user_id,
+            tenant.campus_id,
+            expected_content_revision,
+        )
         .await?;
     tx.commit()
         .await
@@ -1401,6 +1464,7 @@ mod tests {
     fn test_listing_summary_serialization() {
         let summary = ListingSummary {
             id: "listing-456".to_string(),
+            content_revision: 1,
             title: "MacBook Pro".to_string(),
             category: "electronics".to_string(),
             brand: "Apple".to_string(),
@@ -1425,6 +1489,7 @@ mod tests {
     fn test_listing_summary_without_defect_hint() {
         let summary = ListingSummary {
             id: "listing-789".to_string(),
+            content_revision: 1,
             title: "Book".to_string(),
             category: "books".to_string(),
             brand: "Publisher".to_string(),
@@ -1459,6 +1524,7 @@ mod tests {
             items: vec![WantedMatchItem {
                 listing: ListingSummary {
                     id: "offer-1".to_string(),
+                    content_revision: 1,
                     title: "Matching offer".to_string(),
                     category: "electronics".to_string(),
                     brand: "Campus Brand".to_string(),
@@ -1532,6 +1598,7 @@ mod tests {
     fn test_listing_detail_serialization() {
         let detail = ListingDetail {
             id: "listing-detail-1".to_string(),
+            content_revision: 1,
             title: "iPhone 15".to_string(),
             category: "electronics".to_string(),
             brand: "Apple".to_string(),

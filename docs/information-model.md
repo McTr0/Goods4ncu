@@ -261,9 +261,9 @@ ActionPlan: pending -> confirmed_once (L3) -> executing (transaction-local) -> e
             legacy executing -> interrupted
 ```
 
-ActionPlan 保存待执行输入快照、风险级、短期 confirmation capability 和执行结果，不是已执行事实。L2 一次确认；L3 primary token 只能进入 `confirmed_once`，服务端随后才公开独立的第二步 token。primary 重试只重放挑战，不能执行。计划归属创建时的 campus，list/cancel/confirm 都按当前认证用户和活动校园过滤。
+ActionPlan 保存待执行输入快照、风险级、短期 confirmation capability 和执行结果，不是已执行事实。L2 一次确认；L3 primary token 只能进入 `confirmed_once`，服务端随后才公开独立的第二步 token。primary 重试只重放挑战，不能执行。更新、下架、成交意向和议价计划还在 args 中保存提案时的 `inventory.content_revision`；确认时在锁定 listing 后比较，版本变化返回失败且不产生业务事实。计划归属创建时的 campus，list/cancel/confirm 都按当前认证用户和活动校园过滤。
 
-新协议中的 `executing` 只存在于未提交事务内：计划行锁、业务写入、通知/outbox 和 `executed` 结果一起 commit；动作失败先回滚 savepoint，再在同一外层事务记录 `failed`。因此 commit 前崩溃不会留下业务事实或持久 `executing`。迁移发现的旧协议 `executing` 无法安全判断副作用是否已提交，只能标记 `interrupted` 并人工核对，绝不自动重放。通用资源版本快照、提案幂等和统一审计事件仍待补齐。
+新协议中的 `executing` 只存在于未提交事务内：计划行锁、业务写入、通知/outbox 和 `executed` 结果一起 commit；动作失败先回滚 savepoint，再在同一外层事务记录 `failed`。因此 commit 前崩溃不会留下业务事实或持久 `executing`。迁移发现的旧协议 `executing` 无法安全判断副作用是否已提交，只能标记 `interrupted` 并人工核对，绝不自动重放。listing 关键写动作已在提案时保存 `inventory.content_revision` 并在锁内比较；通用提案幂等和统一审计事件仍待补齐。
 
 ### AuditEvent 与 DomainEvent
 
@@ -293,7 +293,7 @@ ActionPlan 保存待执行输入快照、风险级、短期 confirmation capabil
 
 ### Listing embedding 投影版本
 
-[已实现] `inventory.content_revision` 是 listing 可检索内容与可见性的单调版本。数据库 trigger 在 INSERT，以及 title/category/brand/condition/defects/description/direction、status 或 campus 变化时维护版本；`listing_restriction_effects` 的生效、释放、删除和改挂也会使对应 listing 失效并推进版本。
+[已实现] `inventory.content_revision` 是 listing 可检索内容与可见性的单调版本。数据库 trigger 在 INSERT，以及 title/category/brand/condition/defects/description/direction、status 或 campus 变化时维护版本；`listing_restriction_effects` 的生效、释放、删除和改挂也会使对应 listing 失效并推进版本。列表和详情向客户端返回该版本；HTTP 更新可用 `expected_content_revision`/`If-Match`，版本不一致返回 `listing_version_conflict`；Agent 关键 ActionPlan 在确认时执行同一锁内比较。
 
 `embedding_jobs` 每个 `listing_id` 一行，保存 `campus_id`、最新 `desired_revision`、pending/processing/completed/dead-letter 状态、attempt/backoff、lease 和错误。新的 revision 通过 UPSERT 合并；processing 中的行保持当前 lease，但提升 desired revision。Worker 必须重新读取权威 inventory 与 restriction 状态，决定 upsert embedding 还是删除投影，不能把 job payload 当业务事实。
 

@@ -111,7 +111,7 @@ impl WantedMatchService {
                   AND NULLIF(LOWER(BTRIM(target.brand)), '') IS NOT NULL
                 GROUP BY LOWER(BTRIM(target.brand))
             )
-            SELECT i.id, i.campus_id, i.title, i.category, i.brand, i.direction,
+            SELECT i.id, i.campus_id, i.content_revision, i.title, i.category, i.brand, i.direction,
                    i.condition_score, i.suggested_price_cny, i.defects, i.description,
                    CASE WHEN i.images_moderation_status = 'approved'
                         THEN i.image_url ELSE NULL END AS image_url,

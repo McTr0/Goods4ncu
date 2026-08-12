@@ -84,7 +84,7 @@ Embedding provider 调用发生在 listing 提交之后。provider 超时、限�
 
 `wanted`：价格是预算上限，成色是最低可接受成色，owner 是需求方。没有品牌偏好时当前客户端可提交“不限”，生产目标应改为显式可选字段而不是把展示词当真实品牌。
 
-Agent 发布当前是低风险即时动作，并在小帮页提供撤销窗口；它仍必须经过与表单相同的审核和校验。Agent、HTTP 和撤销路径已统一经过 `ListingCommandService`；资源版本快照仍属于后续生产化工作。
+Agent 发布当前是低风险即时动作，并在小帮页提供撤销窗口；它仍必须经过与表单相同的审核和校验。Agent、HTTP 和撤销路径已统一经过 `ListingCommandService`。更新、下架、成交意向和议价的 ActionPlan 在提案时保存 `inventory.content_revision`，确认时在锁定资源后比较；HTTP 更新支持 body 的 `expected_content_revision` 或 `If-Match`，冲突不会覆盖新事实。旧客户端省略版本时保留兼容行为。
 
 ### 状态
 
@@ -311,7 +311,7 @@ realtime 的 `active` 只表示这一段会话已经接通，不是全局在线�
   -> 原校园内重新校验并把业务事实、适用时的通知/outbox、计划终态原子提交
 ```
 
-ActionPlan 过期、membership 失效、权限或商品状态变化时安全失败。模型不能用聊天中的“已经同意”绕过 confirmation token；primary 请求重试也不能变成第二次确认。通用资源版本快照和统一 Agent 审计仍是目标态。
+ActionPlan 过期、membership 失效、权限、商品状态或 `content_revision` 变化时安全失败。模型不能用聊天中的“已经同意”绕过 confirmation token；primary 请求重试也不能变成第二次确认。统一 Agent 审计仍是目标态。
 
 Provider 失败时保留用户输入，提供关键词搜索、普通表单和手工聊天；不能让整个市场不可用。
 

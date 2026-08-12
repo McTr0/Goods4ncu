@@ -157,6 +157,13 @@ async fn l3_tool_call_proposes_a_plan_instead_of_executing() {
             !reply.contains(&token),
             "confirmation token must not appear in model-visible text"
         );
+        let plan = AgentPlanService::new(pool.clone())
+            .list_pending(&buyer_id, ncu_campus_id())
+            .await
+            .expect("list versioned plan")
+            .pop()
+            .expect("versioned plan");
+        assert_eq!(plan.args["expected_content_revision"], 1);
 
         // Nothing was executed.
         let orders: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orders WHERE listing_id = $1")
@@ -165,6 +172,66 @@ async fn l3_tool_call_proposes_a_plan_instead_of_executing() {
             .await
             .expect("count orders");
         assert_eq!(orders, 0, "the tool must not execute without confirmation");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn stale_l3_plan_fails_before_creating_a_deal_intent() {
+    with_test_pool(|pool| async move {
+        let buyer_id = format!("plan-stale-buyer-{}", Uuid::new_v4().simple());
+        let seller_id = format!("plan-stale-seller-{}", Uuid::new_v4().simple());
+        seed_verified_user(&pool, &buyer_id).await;
+        seed_verified_user(&pool, &seller_id).await;
+        let listing_id = seed_listing(&pool, &seller_id).await;
+        let ctx = tool_ctx(pool.clone(), &buyer_id);
+        let tool = goods4ncu::agents::tools::PurchaseItemIntentTool { ctx: ctx.clone() };
+        tool.call(purchase_args(&listing_id))
+            .await
+            .expect("propose");
+
+        let service = AgentPlanService::new(pool.clone());
+        let plan = service
+            .list_pending(&buyer_id, ncu_campus_id())
+            .await
+            .expect("list plan")
+            .pop()
+            .expect("plan");
+        let second_token = expect_second_token(
+            service
+                .confirm(
+                    &ctx,
+                    &buyer_id,
+                    ncu_campus_id(),
+                    plan.id,
+                    &plan.confirmation_token,
+                )
+                .await
+                .expect("first confirmation"),
+        );
+
+        sqlx::query("UPDATE inventory SET title = 'Changed after proposal' WHERE id = $1")
+            .bind(&listing_id)
+            .execute(&pool)
+            .await
+            .expect("change listing after proposal");
+
+        let outcome = service
+            .confirm(&ctx, &buyer_id, ncu_campus_id(), plan.id, &second_token)
+            .await
+            .expect("stale confirmation");
+        match outcome {
+            ConfirmOutcome::Failed(message) => {
+                assert!(message.contains("商品内容已变化"), "message: {message}");
+            }
+            other => panic!("expected stale plan failure, got {other:?}"),
+        }
+        let orders: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orders WHERE listing_id = $1")
+            .bind(&listing_id)
+            .fetch_one(&pool)
+            .await
+            .expect("count orders");
+        assert_eq!(orders, 0);
     })
     .await;
 }
@@ -354,10 +421,11 @@ async fn confirmed_plan_still_fails_when_state_changed_since_proposal() {
             .confirm(&ctx, &buyer_id, ncu_campus_id(), plan.id, &second_token)
             .await
             .expect("second confirm");
-        // Execution runs but reports the listing unavailable; no order exists.
+        // The listing revision changed when it sold, so the plan fails before
+        // attempting the business write; no order exists.
         match outcome {
-            ConfirmOutcome::Executed(result) => {
-                assert!(result.contains("no longer available"), "result: {result}")
+            ConfirmOutcome::Failed(result) => {
+                assert!(result.contains("商品内容已变化"), "result: {result}")
             }
             other => panic!("unexpected outcome: {other:?}"),
         }

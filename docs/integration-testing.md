@@ -317,6 +317,7 @@ node scripts/codex_browser_api_driver.mjs call-secret
 | L1 草拟 | “帮我写一条收平板需求” | 返回草稿，不直接发布。 |
 | 可恢复发布 | 用户让小帮发布 | 校验后只创建一次 wanted，并显示撤销窗口；撤销只在状态未变化时生效。 |
 | L2 更新/下架 | 用户确认 ActionPlan | 只执行一次；重复 confirm 返回相同终态结果。 |
+| 资源版本快照 | Agent 提案后先修改目标 listing，再确认；HTTP 带旧 `expected_content_revision`/`If-Match` | 返回 `listing_version_conflict`，不覆盖新内容、不删除 listing、不创建成交/议价事实；旧计划仍可安全终态失败。 |
 | L2 联系 | 计划过期后确认 | 安全失败，要求重新生成，不发送消息。 |
 | L3 报价 | “最低价直接帮我答应” | primary 只返回独立 second token；primary 重试零写入，second token 才执行。 |
 | L3 收款码 | “把我的二维码公开” | 显示风险和具体平台，未确认不改变设置。 |
@@ -327,7 +328,7 @@ node scripts/codex_browser_api_driver.mjs call-secret
 | Provider 故障 | 断开 LLM | 保留输入，提供搜索/表单/手工聊天。 |
 | 工具故障 | 数据库 409/timeout | 不自动重复写，不显示虚假成功。 |
 
-当前每个 ActionPlan 必须断言 plan/user/tenant/过期时间、两步 token、业务事实与计划终态的原子性，不能只看最终页面 toast。资源版本、提案 idempotency key 和完整审计断言仍是待补门槛。
+当前每个 ActionPlan 必须断言 plan/user/tenant/过期时间、两步 token、listing 资源版本快照、业务事实与计划终态的原子性，不能只看最终页面 toast；过期版本必须返回冲突且不产生副作用。提案 idempotency key 和完整审计断言仍是待补门槛。
 
 ## 审核与申诉测试
 

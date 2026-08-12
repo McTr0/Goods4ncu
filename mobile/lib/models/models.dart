@@ -13,6 +13,9 @@ class Listing {
   static const String adminActionRestore = 'restore';
 
   final String id;
+  /// Database-owned optimistic-concurrency version. Older servers may omit
+  /// it during rollout, in which case writes keep their legacy behavior.
+  final int? contentRevision;
   final String title;
   final String category;
   final String brand;
@@ -47,6 +50,7 @@ class Listing {
 
   Listing({
     required this.id,
+    this.contentRevision,
     required this.title,
     required this.category,
     required this.brand,
@@ -111,6 +115,7 @@ class Listing {
         : null;
     return Listing(
       id: json['id'] ?? '',
+      contentRevision: (json['content_revision'] as num?)?.toInt(),
       title: json['title'] ?? '',
       category: json['category'] ?? '',
       brand: json['brand'] ?? '',

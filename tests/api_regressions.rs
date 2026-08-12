@@ -186,6 +186,130 @@ async fn listing_update_rejects_cross_campus_and_non_active_targets() {
     }).await;
 }
 
+#[tokio::test]
+async fn listing_http_writes_honor_content_revision_guards() {
+    with_test_pool(|pool| async move {
+        let owner = Uuid::new_v4().to_string();
+        insert_user(
+            &pool,
+            &owner,
+            &format!("revision-http-owner-{}", Uuid::new_v4()),
+            "hash",
+            "user",
+            "active",
+        )
+        .await;
+        let campus: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("campus");
+        let listing_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO inventory (
+                 id, campus_id, title, category, brand, condition_score,
+                 suggested_price_cny, defects, owner_id, status
+             ) VALUES ($1, $2, 'Revision item', 'other', 'Test', 8,
+                       10000, '[]', $3, 'active')",
+        )
+        .bind(&listing_id)
+        .bind(campus)
+        .bind(&owner)
+        .execute(&pool)
+        .await
+        .expect("listing");
+        let (token, _, _) = generate_access_token_for_campus(
+            &owner,
+            "user",
+            Some(campus),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("token");
+        let app = create_router(build_state(pool.clone()), &[]);
+
+        let detail_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(format!("/api/listings/{listing_id}"))
+                    .header("Authorization", bearer(&token))
+                    .body(Body::empty())
+                    .expect("detail request"),
+            )
+            .await
+            .expect("detail response");
+        assert_eq!(detail_response.status(), StatusCode::OK);
+        let initial_revision = response_json(detail_response).await["content_revision"]
+            .as_i64()
+            .expect("content revision");
+
+        let (updated_status, _) = authenticated_json(
+            &app,
+            Method::PUT,
+            &format!("/api/listings/{listing_id}"),
+            &token,
+            Some(json!({
+                "expected_content_revision": initial_revision,
+                "title": "Revision item updated"
+            })),
+        )
+        .await;
+        assert_eq!(updated_status, StatusCode::OK);
+
+        let current_revision: i64 =
+            sqlx::query_scalar("SELECT content_revision FROM inventory WHERE id = $1")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("current revision");
+        assert!(current_revision > initial_revision);
+
+        let (stale_status, stale_body) = authenticated_json(
+            &app,
+            Method::PUT,
+            &format!("/api/listings/{listing_id}"),
+            &token,
+            Some(json!({
+                "expected_content_revision": initial_revision,
+                "title": "must not overwrite"
+            })),
+        )
+        .await;
+        assert_eq!(stale_status, StatusCode::CONFLICT);
+        assert_eq!(stale_body["code"], "listing_version_conflict");
+
+        let delete_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri(format!("/api/listings/{listing_id}"))
+                    .header("Authorization", bearer(&token))
+                    .header("If-Match", format!("\"{initial_revision}\""))
+                    .body(Body::empty())
+                    .expect("delete request"),
+            )
+            .await
+            .expect("delete response");
+        assert_eq!(delete_response.status(), StatusCode::CONFLICT);
+        let delete_body = response_json(delete_response).await;
+        assert_eq!(delete_body["code"], "listing_version_conflict");
+
+        let (title, status): (String, String) =
+            sqlx::query_as("SELECT title, status FROM inventory WHERE id = $1")
+                .bind(&listing_id)
+                .fetch_one(&pool)
+                .await
+                .expect("listing remains current");
+        assert_eq!(
+            (title.as_str(), status.as_str()),
+            ("Revision item updated", "active")
+        );
+    })
+    .await;
+}
+
 fn hash_refresh_token(token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(token.as_bytes());

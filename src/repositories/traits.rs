@@ -18,6 +18,9 @@ pub use crate::api::error::ApiError;
 pub struct Listing {
     pub id: String,
     pub campus_id: uuid::Uuid,
+    /// Database-owned optimistic-concurrency version. It advances whenever
+    /// the listing's visible facts or effective visibility change.
+    pub content_revision: i64,
     pub title: String,
     pub category: String,
     pub brand: Option<String>,
