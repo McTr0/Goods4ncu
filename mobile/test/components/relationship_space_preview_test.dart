@@ -100,6 +100,40 @@ void main() {
     expect(find.text('正在输入'), findsNothing);
   });
 
+  testWidgets('connected space withdraws role tokens from the conversation', (
+    tester,
+  ) async {
+    const persona = SocialPersona(
+      representationMode: 'role_character',
+      styleVersion: 'v1',
+      appearance: SocialPersonaAppearance(
+        palette: 'teal',
+        silhouette: 'soft',
+        accessory: 'leaf',
+        outfit: 'campus',
+      ),
+      selfDescriptions: [],
+      contactPosture: 'leave_message',
+      status: 'published',
+    );
+    await tester.pumpWidget(
+      _host(
+        const RelationshipSpacePreview(
+          otherName: 'Alice',
+          otherPersona: persona,
+          selfPersona: persona,
+          isConnected: true,
+        ),
+      ),
+    );
+
+    // Once the users explicitly connect, the role presentation leaves the
+    // stage. The relationship state remains visible without implying that a
+    // platform character is participating in the conversation.
+    expect(find.byType(SocialPersonaAvatar), findsNothing);
+    expect(find.text('已连接'), findsOneWidget);
+  });
+
   testWidgets(
     'shows shared object references without loading their resources',
     (tester) async {

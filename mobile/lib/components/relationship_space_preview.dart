@@ -10,8 +10,10 @@ import '../theme/app_theme.dart';
 /// This widget deliberately has no animation or presence subscription. The
 /// only live fact it accepts is whether the current conversation is explicitly
 /// connected; everything else is a user-facing projection of existing thread
-/// history. It is therefore safe to use while the Relationship Space backend
-/// is still being introduced behind the existing Thread/Conversation model.
+/// history. When connected, role tokens withdraw so the platform does not
+/// visually insert itself into the conversation. It is therefore safe to use
+/// while the Relationship Space backend is still being introduced behind the
+/// existing Thread/Conversation model.
 class RelationshipSpacePreview extends StatelessWidget {
   const RelationshipSpacePreview({
     super.key,
@@ -93,6 +95,7 @@ class RelationshipSpacePreview extends StatelessWidget {
                     name: otherName,
                     imageUrl: otherAvatarUrl,
                     persona: otherPersona,
+                    showPersona: !isConnected,
                     alignment: CrossAxisAlignment.start,
                     compact: compact,
                   ),
@@ -115,6 +118,7 @@ class RelationshipSpacePreview extends StatelessWidget {
                   child: _PersonaAnchor(
                     name: l.relationshipSpaceMe,
                     persona: selfPersona,
+                    showPersona: !isConnected,
                     alignment: CrossAxisAlignment.end,
                     compact: compact,
                   ),
@@ -401,6 +405,7 @@ class _PersonaAnchor extends StatelessWidget {
     required this.name,
     this.imageUrl,
     this.persona,
+    this.showPersona = true,
     required this.alignment,
     this.compact = false,
   });
@@ -408,6 +413,7 @@ class _PersonaAnchor extends StatelessWidget {
   final String name;
   final String? imageUrl;
   final SocialPersona? persona;
+  final bool showPersona;
   final CrossAxisAlignment alignment;
   final bool compact;
 
@@ -417,7 +423,7 @@ class _PersonaAnchor extends StatelessWidget {
     final trimmedName = name.trim();
     final fallback = trimmedName.isEmpty ? '?' : trimmedName.characters.first;
     final hasImage = imageUrl != null && imageUrl!.trim().isNotEmpty;
-    final roleAvatar = persona == null
+    final roleAvatar = !showPersona || persona == null
         ? null
         : SocialPersonaAvatar(
             persona: persona!,
