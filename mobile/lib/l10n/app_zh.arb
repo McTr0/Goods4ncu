@@ -766,30 +766,6 @@
   "sellerConfirmedDeal": "卖家确认成交",
   "itemAutoDelisted": "商品已自动下架",
   "listingStatus": "商品状态",
-  "chatReadReceiptSettingsTitle": "聊天已读策略",
-  "chatReadReceiptDefaultTitle": "默认已读方式",
-  "chatReadReceiptAutoTitle": "自动已读",
-  "chatReadReceiptManualTitle": "手动已读",
-  "chatReadReceiptAutoSubtitle": "打开实时聊天后自动标记收到的消息。",
-  "chatReadReceiptManualSubtitle": "只有点击“标记已读”后，对方才会看到已读。",
-  "chatReadReceiptAutoCurrent": "自动：打开实时聊天后自动标记已读。",
-  "chatReadReceiptManualCurrent": "手动：打开聊天不会自动让对方看到已读。",
-  "chatReadReceiptUpdated": "聊天已读策略已更新",
-  "markConversationRead": "标记已读",
-  "markConversationReadSuccess": "已标记为已读",
-  "manualReadUnreadOne": "有未读消息，当前为手动已读",
-  "manualReadUnreadMany": "{count} 条未读消息，当前为手动已读",
-  "@manualReadUnreadMany": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "readPreferenceUpdated": "已读策略已更新",
-  "readPreferenceInherit": "已读策略：继承默认",
-  "readPreferenceAuto": "已读策略：自动",
-  "readPreferenceManual": "已读策略：手动",
   "selectedSuffix": " ✓",
   "quoteListing": "商品",
   "quoteOrder": "成交记录",
@@ -1056,22 +1032,6 @@
       }
     }
   },
-  "markReadFailed": "标记已读失败：{error}",
-  "@markReadFailed": {
-    "placeholders": {
-      "error": {
-        "type": "String"
-      }
-    }
-  },
-  "readPreferenceUpdateFailed": "已读策略更新失败：{error}",
-  "@readPreferenceUpdateFailed": {
-    "placeholders": {
-      "error": {
-        "type": "String"
-      }
-    }
-  },
   "quoteUnavailable": "当前会话没有可引用的商品、订单或议价信息",
   "quotePickerTitle": "引用相关信息",
   "quotePickerSubtitle": "引用会由服务器生成事实快照，价格、标题和状态不会被前端伪造。",
@@ -1236,20 +1196,11 @@
   "sendFailedShort": "发送失败",
   "messageSentStatus": "已发送",
   "messageActionsHint": "打开消息操作",
-  "messageReadStatus": "已读",
   "messageDeliveredStatus": "已发送",
   "acknowledgementReceived": "收到",
   "acknowledgementWillReview": "我会看",
   "acknowledgementCompleted": "已处理",
   "acknowledgementWithdraw": "撤销主动确认",
-  "typingIndicator": "{username} 正在输入...",
-  "@typingIndicator": {
-    "placeholders": {
-      "username": {
-        "type": "String"
-      }
-    }
-  },
   "loadFailedWithError": "加载失败：{error}",
   "@loadFailedWithError": {
     "placeholders": {

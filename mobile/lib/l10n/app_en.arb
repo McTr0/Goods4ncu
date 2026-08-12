@@ -793,30 +793,6 @@
   "sellerConfirmedDeal": "Seller confirmed deal",
   "itemAutoDelisted": "Item auto-delisted",
   "listingStatus": "Listing status",
-  "chatReadReceiptSettingsTitle": "Chat read receipts",
-  "chatReadReceiptDefaultTitle": "Default read behavior",
-  "chatReadReceiptAutoTitle": "Auto read",
-  "chatReadReceiptManualTitle": "Manual read",
-  "chatReadReceiptAutoSubtitle": "Mark received messages as read when you open an active realtime chat.",
-  "chatReadReceiptManualSubtitle": "They only see read after you tap \"Mark read\".",
-  "chatReadReceiptAutoCurrent": "Auto: opening an active realtime chat marks messages as read.",
-  "chatReadReceiptManualCurrent": "Manual: opening chat does not automatically show read receipts.",
-  "chatReadReceiptUpdated": "Chat read receipt setting updated",
-  "markConversationRead": "Mark read",
-  "markConversationReadSuccess": "Marked as read",
-  "manualReadUnreadOne": "Unread messages are waiting; manual read is on",
-  "manualReadUnreadMany": "{count} unread messages; manual read is on",
-  "@manualReadUnreadMany": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "readPreferenceUpdated": "Read preference updated",
-  "readPreferenceInherit": "Read receipts: inherit default",
-  "readPreferenceAuto": "Read receipts: auto",
-  "readPreferenceManual": "Read receipts: manual",
   "selectedSuffix": " ✓",
   "quoteListing": "Listing",
   "quoteOrder": "Deal record",
@@ -1083,22 +1059,6 @@
       }
     }
   },
-  "markReadFailed": "Mark read failed: {error}",
-  "@markReadFailed": {
-    "placeholders": {
-      "error": {
-        "type": "String"
-      }
-    }
-  },
-  "readPreferenceUpdateFailed": "Read preference update failed: {error}",
-  "@readPreferenceUpdateFailed": {
-    "placeholders": {
-      "error": {
-        "type": "String"
-      }
-    }
-  },
   "quoteUnavailable": "This conversation has no listing, order, or negotiation context to quote.",
   "quotePickerTitle": "Quote related info",
   "quotePickerSubtitle": "The server creates the fact snapshot, so price, title, and status cannot be forged by the client.",
@@ -1263,20 +1223,11 @@
   "sendFailedShort": "Send failed",
   "messageSentStatus": "Sent",
   "messageActionsHint": "Open message actions",
-  "messageReadStatus": "Read",
   "messageDeliveredStatus": "Sent",
   "acknowledgementReceived": "Received",
   "acknowledgementWillReview": "I'll review",
   "acknowledgementCompleted": "Completed",
   "acknowledgementWithdraw": "Withdraw acknowledgement",
-  "typingIndicator": "{username} is typing...",
-  "@typingIndicator": {
-    "placeholders": {
-      "username": {
-        "type": "String"
-      }
-    }
-  },
   "loadFailedWithError": "Load failed: {error}",
   "@loadFailedWithError": {
     "placeholders": {

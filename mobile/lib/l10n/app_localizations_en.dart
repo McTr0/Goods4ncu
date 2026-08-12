@@ -1874,64 +1874,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get listingStatus => 'Listing status';
 
   @override
-  String get chatReadReceiptSettingsTitle => 'Chat read receipts';
-
-  @override
-  String get chatReadReceiptDefaultTitle => 'Default read behavior';
-
-  @override
-  String get chatReadReceiptAutoTitle => 'Auto read';
-
-  @override
-  String get chatReadReceiptManualTitle => 'Manual read';
-
-  @override
-  String get chatReadReceiptAutoSubtitle =>
-      'Mark received messages as read when you open an active realtime chat.';
-
-  @override
-  String get chatReadReceiptManualSubtitle =>
-      'They only see read after you tap \"Mark read\".';
-
-  @override
-  String get chatReadReceiptAutoCurrent =>
-      'Auto: opening an active realtime chat marks messages as read.';
-
-  @override
-  String get chatReadReceiptManualCurrent =>
-      'Manual: opening chat does not automatically show read receipts.';
-
-  @override
-  String get chatReadReceiptUpdated => 'Chat read receipt setting updated';
-
-  @override
-  String get markConversationRead => 'Mark read';
-
-  @override
-  String get markConversationReadSuccess => 'Marked as read';
-
-  @override
-  String get manualReadUnreadOne =>
-      'Unread messages are waiting; manual read is on';
-
-  @override
-  String manualReadUnreadMany(int count) {
-    return '$count unread messages; manual read is on';
-  }
-
-  @override
-  String get readPreferenceUpdated => 'Read preference updated';
-
-  @override
-  String get readPreferenceInherit => 'Read receipts: inherit default';
-
-  @override
-  String get readPreferenceAuto => 'Read receipts: auto';
-
-  @override
-  String get readPreferenceManual => 'Read receipts: manual';
-
-  @override
   String get selectedSuffix => ' ✓';
 
   @override
@@ -2331,16 +2273,6 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String markReadFailed(String error) {
-    return 'Mark read failed: $error';
-  }
-
-  @override
-  String readPreferenceUpdateFailed(String error) {
-    return 'Read preference update failed: $error';
-  }
-
-  @override
   String get quoteUnavailable =>
       'This conversation has no listing, order, or negotiation context to quote.';
 
@@ -2612,9 +2544,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get messageActionsHint => 'Open message actions';
 
   @override
-  String get messageReadStatus => 'Read';
-
-  @override
   String get messageDeliveredStatus => 'Sent';
 
   @override
@@ -2628,11 +2557,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get acknowledgementWithdraw => 'Withdraw acknowledgement';
-
-  @override
-  String typingIndicator(String username) {
-    return '$username is typing...';
-  }
 
   @override
   String loadFailedWithError(String error) {

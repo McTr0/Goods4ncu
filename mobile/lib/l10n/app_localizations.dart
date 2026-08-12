@@ -3534,108 +3534,6 @@ abstract class AppLocalizations {
   /// **'Listing status'**
   String get listingStatus;
 
-  /// No description provided for @chatReadReceiptSettingsTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Chat read receipts'**
-  String get chatReadReceiptSettingsTitle;
-
-  /// No description provided for @chatReadReceiptDefaultTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Default read behavior'**
-  String get chatReadReceiptDefaultTitle;
-
-  /// No description provided for @chatReadReceiptAutoTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Auto read'**
-  String get chatReadReceiptAutoTitle;
-
-  /// No description provided for @chatReadReceiptManualTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Manual read'**
-  String get chatReadReceiptManualTitle;
-
-  /// No description provided for @chatReadReceiptAutoSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Mark received messages as read when you open an active realtime chat.'**
-  String get chatReadReceiptAutoSubtitle;
-
-  /// No description provided for @chatReadReceiptManualSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'They only see read after you tap \"Mark read\".'**
-  String get chatReadReceiptManualSubtitle;
-
-  /// No description provided for @chatReadReceiptAutoCurrent.
-  ///
-  /// In en, this message translates to:
-  /// **'Auto: opening an active realtime chat marks messages as read.'**
-  String get chatReadReceiptAutoCurrent;
-
-  /// No description provided for @chatReadReceiptManualCurrent.
-  ///
-  /// In en, this message translates to:
-  /// **'Manual: opening chat does not automatically show read receipts.'**
-  String get chatReadReceiptManualCurrent;
-
-  /// No description provided for @chatReadReceiptUpdated.
-  ///
-  /// In en, this message translates to:
-  /// **'Chat read receipt setting updated'**
-  String get chatReadReceiptUpdated;
-
-  /// No description provided for @markConversationRead.
-  ///
-  /// In en, this message translates to:
-  /// **'Mark read'**
-  String get markConversationRead;
-
-  /// No description provided for @markConversationReadSuccess.
-  ///
-  /// In en, this message translates to:
-  /// **'Marked as read'**
-  String get markConversationReadSuccess;
-
-  /// No description provided for @manualReadUnreadOne.
-  ///
-  /// In en, this message translates to:
-  /// **'Unread messages are waiting; manual read is on'**
-  String get manualReadUnreadOne;
-
-  /// No description provided for @manualReadUnreadMany.
-  ///
-  /// In en, this message translates to:
-  /// **'{count} unread messages; manual read is on'**
-  String manualReadUnreadMany(int count);
-
-  /// No description provided for @readPreferenceUpdated.
-  ///
-  /// In en, this message translates to:
-  /// **'Read preference updated'**
-  String get readPreferenceUpdated;
-
-  /// No description provided for @readPreferenceInherit.
-  ///
-  /// In en, this message translates to:
-  /// **'Read receipts: inherit default'**
-  String get readPreferenceInherit;
-
-  /// No description provided for @readPreferenceAuto.
-  ///
-  /// In en, this message translates to:
-  /// **'Read receipts: auto'**
-  String get readPreferenceAuto;
-
-  /// No description provided for @readPreferenceManual.
-  ///
-  /// In en, this message translates to:
-  /// **'Read receipts: manual'**
-  String get readPreferenceManual;
-
   /// No description provided for @selectedSuffix.
   ///
   /// In en, this message translates to:
@@ -4320,18 +4218,6 @@ abstract class AppLocalizations {
   /// **'Report failed: {error}'**
   String reportFailed(String error);
 
-  /// No description provided for @markReadFailed.
-  ///
-  /// In en, this message translates to:
-  /// **'Mark read failed: {error}'**
-  String markReadFailed(String error);
-
-  /// No description provided for @readPreferenceUpdateFailed.
-  ///
-  /// In en, this message translates to:
-  /// **'Read preference update failed: {error}'**
-  String readPreferenceUpdateFailed(String error);
-
   /// No description provided for @quoteUnavailable.
   ///
   /// In en, this message translates to:
@@ -4794,12 +4680,6 @@ abstract class AppLocalizations {
   /// **'Open message actions'**
   String get messageActionsHint;
 
-  /// No description provided for @messageReadStatus.
-  ///
-  /// In en, this message translates to:
-  /// **'Read'**
-  String get messageReadStatus;
-
   /// No description provided for @messageDeliveredStatus.
   ///
   /// In en, this message translates to:
@@ -4829,12 +4709,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Withdraw acknowledgement'**
   String get acknowledgementWithdraw;
-
-  /// No description provided for @typingIndicator.
-  ///
-  /// In en, this message translates to:
-  /// **'{username} is typing...'**
-  String typingIndicator(String username);
 
   /// No description provided for @loadFailedWithError.
   ///

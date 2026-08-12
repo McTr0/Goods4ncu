@@ -1789,59 +1789,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get listingStatus => '商品状态';
 
   @override
-  String get chatReadReceiptSettingsTitle => '聊天已读策略';
-
-  @override
-  String get chatReadReceiptDefaultTitle => '默认已读方式';
-
-  @override
-  String get chatReadReceiptAutoTitle => '自动已读';
-
-  @override
-  String get chatReadReceiptManualTitle => '手动已读';
-
-  @override
-  String get chatReadReceiptAutoSubtitle => '打开实时聊天后自动标记收到的消息。';
-
-  @override
-  String get chatReadReceiptManualSubtitle => '只有点击“标记已读”后，对方才会看到已读。';
-
-  @override
-  String get chatReadReceiptAutoCurrent => '自动：打开实时聊天后自动标记已读。';
-
-  @override
-  String get chatReadReceiptManualCurrent => '手动：打开聊天不会自动让对方看到已读。';
-
-  @override
-  String get chatReadReceiptUpdated => '聊天已读策略已更新';
-
-  @override
-  String get markConversationRead => '标记已读';
-
-  @override
-  String get markConversationReadSuccess => '已标记为已读';
-
-  @override
-  String get manualReadUnreadOne => '有未读消息，当前为手动已读';
-
-  @override
-  String manualReadUnreadMany(int count) {
-    return '$count 条未读消息，当前为手动已读';
-  }
-
-  @override
-  String get readPreferenceUpdated => '已读策略已更新';
-
-  @override
-  String get readPreferenceInherit => '已读策略：继承默认';
-
-  @override
-  String get readPreferenceAuto => '已读策略：自动';
-
-  @override
-  String get readPreferenceManual => '已读策略：手动';
-
-  @override
   String get selectedSuffix => ' ✓';
 
   @override
@@ -2227,16 +2174,6 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String markReadFailed(String error) {
-    return '标记已读失败：$error';
-  }
-
-  @override
-  String readPreferenceUpdateFailed(String error) {
-    return '已读策略更新失败：$error';
-  }
-
-  @override
   String get quoteUnavailable => '当前会话没有可引用的商品、订单或议价信息';
 
   @override
@@ -2492,9 +2429,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get messageActionsHint => '打开消息操作';
 
   @override
-  String get messageReadStatus => '已读';
-
-  @override
   String get messageDeliveredStatus => '已发送';
 
   @override
@@ -2508,11 +2442,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get acknowledgementWithdraw => '撤销主动确认';
-
-  @override
-  String typingIndicator(String username) {
-    return '$username 正在输入...';
-  }
 
   @override
   String loadFailedWithError(String error) {
