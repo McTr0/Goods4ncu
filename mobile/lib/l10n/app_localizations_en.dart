@@ -2609,6 +2609,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get messageSentStatus => 'Sent';
 
   @override
+  String get messageActionsHint => 'Open message actions';
+
+  @override
   String get messageReadStatus => 'Read';
 
   @override

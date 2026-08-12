@@ -2489,6 +2489,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get messageSentStatus => '已发送';
 
   @override
+  String get messageActionsHint => '打开消息操作';
+
+  @override
   String get messageReadStatus => '已读';
 
   @override

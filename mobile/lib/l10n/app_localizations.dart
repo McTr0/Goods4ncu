@@ -4788,6 +4788,12 @@ abstract class AppLocalizations {
   /// **'Sent'**
   String get messageSentStatus;
 
+  /// No description provided for @messageActionsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Open message actions'**
+  String get messageActionsHint;
+
   /// No description provided for @messageReadStatus.
   ///
   /// In en, this message translates to:

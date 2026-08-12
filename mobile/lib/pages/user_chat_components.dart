@@ -205,225 +205,245 @@ class MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
-    return Align(
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: GestureDetector(
-        onLongPress: () => _showMessageActions(context),
-        child: Container(
-          constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.75,
-          ),
-          margin: const EdgeInsets.symmetric(vertical: 4),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: isMe ? AppTheme.primary : Colors.grey[200],
-            borderRadius: BorderRadius.circular(16).copyWith(
-              bottomRight: isMe
-                  ? const Radius.circular(0)
-                  : const Radius.circular(16),
-              bottomLeft: !isMe
-                  ? const Radius.circular(0)
-                  : const Radius.circular(16),
+    final actionsAvailable =
+        onReply != null ||
+        onReact != null ||
+        onAcknowledge != null ||
+        onWithdrawAcknowledgement != null ||
+        onEdit != null ||
+        onTogglePin != null ||
+        onHide != null ||
+        onReport != null;
+    return Semantics(
+      container: true,
+      button: actionsAvailable,
+      label: actionsAvailable ? l.messageActionsHint : null,
+      onTap: actionsAvailable ? () => _showMessageActions(context) : null,
+      child: Align(
+        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+        child: GestureDetector(
+          onLongPress: () => _showMessageActions(context),
+          child: Container(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.75,
             ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if ((message.imageUrl != null && message.imageUrl!.isNotEmpty) ||
-                  (message.imageBase64 != null &&
-                      message.imageBase64!.isNotEmpty))
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child:
-                        message.imageUrl != null && message.imageUrl!.isNotEmpty
-                        ? Image.network(
-                            message.imageUrl!,
-                            width: 200,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              if (message.imageBase64 != null &&
-                                  message.imageBase64!.isNotEmpty) {
-                                return Image.memory(
-                                  base64Decode(message.imageBase64!),
-                                  width: 200,
-                                  fit: BoxFit.cover,
-                                );
-                              }
-                              return const SizedBox.shrink();
-                            },
-                          )
-                        : Image.memory(
-                            base64Decode(message.imageBase64!),
-                            width: 200,
-                            fit: BoxFit.cover,
-                          ),
-                  ),
-                ),
-              if ((message.audioUrl != null && message.audioUrl!.isNotEmpty) ||
-                  (message.audioBase64 != null &&
-                      message.audioBase64!.isNotEmpty))
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: AudioMessagePlayer(
-                    audioUrl: message.audioUrl,
-                    audioBase64: message.audioBase64,
-                    isMe: isMe,
-                  ),
-                ),
-              if (message.replyPreview != null)
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: (isMe ? Colors.white : AppTheme.primary).withValues(
-                      alpha: 0.14,
+            margin: const EdgeInsets.symmetric(vertical: 4),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isMe ? AppTheme.primary : Colors.grey[200],
+              borderRadius: BorderRadius.circular(16).copyWith(
+                bottomRight: isMe
+                    ? const Radius.circular(0)
+                    : const Radius.circular(16),
+                bottomLeft: !isMe
+                    ? const Radius.circular(0)
+                    : const Radius.circular(16),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if ((message.imageUrl != null &&
+                        message.imageUrl!.isNotEmpty) ||
+                    (message.imageBase64 != null &&
+                        message.imageBase64!.isNotEmpty))
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child:
+                          message.imageUrl != null &&
+                              message.imageUrl!.isNotEmpty
+                          ? Image.network(
+                              message.imageUrl!,
+                              width: 200,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                if (message.imageBase64 != null &&
+                                    message.imageBase64!.isNotEmpty) {
+                                  return Image.memory(
+                                    base64Decode(message.imageBase64!),
+                                    width: 200,
+                                    fit: BoxFit.cover,
+                                  );
+                                }
+                                return const SizedBox.shrink();
+                              },
+                            )
+                          : Image.memory(
+                              base64Decode(message.imageBase64!),
+                              width: 200,
+                              fit: BoxFit.cover,
+                            ),
                     ),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border(
-                      left: BorderSide(
+                  ),
+                if ((message.audioUrl != null &&
+                        message.audioUrl!.isNotEmpty) ||
+                    (message.audioBase64 != null &&
+                        message.audioBase64!.isNotEmpty))
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: AudioMessagePlayer(
+                      audioUrl: message.audioUrl,
+                      audioBase64: message.audioBase64,
+                      isMe: isMe,
+                    ),
+                  ),
+                if (message.replyPreview != null)
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: (isMe ? Colors.white : AppTheme.primary)
+                          .withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border(
+                        left: BorderSide(
+                          color: isMe ? Colors.white70 : AppTheme.primary,
+                          width: 3,
+                        ),
+                      ),
+                    ),
+                    child: Text(
+                      message.replyPreview!.content.isEmpty
+                          ? l.replyPreviewGeneric
+                          : message.replyPreview!.content,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: isMe ? Colors.white70 : Colors.black54,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                if (message.quote != null)
+                  _StructuredQuoteCard(quote: message.quote!, isMe: isMe),
+                if (isPinned)
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Icon(
+                        Icons.push_pin,
+                        size: 14,
                         color: isMe ? Colors.white70 : AppTheme.primary,
-                        width: 3,
+                        semanticLabel: l.relationshipSpaceUnpin,
                       ),
                     ),
                   ),
-                  child: Text(
-                    message.replyPreview!.content.isEmpty
-                        ? l.replyPreviewGeneric
-                        : message.replyPreview!.content,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: isMe ? Colors.white70 : Colors.black54,
-                      fontSize: 12,
-                    ),
+                Text(
+                  message.content,
+                  style: TextStyle(
+                    color: isMe ? Colors.white : Colors.black87,
+                    fontSize: 16,
                   ),
                 ),
-              if (message.quote != null)
-                _StructuredQuoteCard(quote: message.quote!, isMe: isMe),
-              if (isPinned)
-                Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Icon(
-                      Icons.push_pin,
-                      size: 14,
-                      color: isMe ? Colors.white70 : AppTheme.primary,
-                      semanticLabel: l.relationshipSpaceUnpin,
-                    ),
-                  ),
-                ),
-              Text(
-                message.content,
-                style: TextStyle(
-                  color: isMe ? Colors.white : Colors.black87,
-                  fontSize: 16,
-                ),
-              ),
-              if (message.editedAt != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Text(
-                    l.editedSuffix,
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: isMe ? Colors.white60 : Colors.black38,
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
-                ),
-              if (message.reactions.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Wrap(
-                    spacing: 4,
-                    runSpacing: 4,
-                    children: message.reactions.map((reaction) {
-                      return Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 7,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: reaction.reactedByMe
-                              ? Colors.white.withValues(alpha: 0.28)
-                              : Colors.black.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          '${reaction.emoji} ${reaction.count}',
-                          style: TextStyle(
-                            color: isMe ? Colors.white : Colors.black87,
-                            fontSize: 12,
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              if (message.acknowledgements.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Wrap(
-                    spacing: 4,
-                    runSpacing: 4,
-                    children: message.acknowledgements.map((acknowledgement) {
-                      return Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 7,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: (isMe ? Colors.white : Colors.black)
-                              .withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          _acknowledgementLabel(context, acknowledgement.kind),
-                          style: TextStyle(
-                            color: isMe ? Colors.white : Colors.black87,
-                            fontSize: 12,
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              const SizedBox(height: 4),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _formatTime(message.sentAt),
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: isMe ? Colors.white70 : Colors.black45,
-                    ),
-                  ),
-                  if (isMe && onEdit != null) ...[
-                    const SizedBox(width: 4),
-                    GestureDetector(
-                      onTap: onEdit,
-                      child: Text(
-                        l.editAction,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.white60,
-                          decoration: TextDecoration.underline,
-                        ),
+                if (message.editedAt != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      l.editedSuffix,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: isMe ? Colors.white60 : Colors.black38,
+                        fontStyle: FontStyle.italic,
                       ),
                     ),
+                  ),
+                if (message.reactions.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      children: message.reactions.map((reaction) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: reaction.reactedByMe
+                                ? Colors.white.withValues(alpha: 0.28)
+                                : Colors.black.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            '${reaction.emoji} ${reaction.count}',
+                            style: TextStyle(
+                              color: isMe ? Colors.white : Colors.black87,
+                              fontSize: 12,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                if (message.acknowledgements.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      children: message.acknowledgements.map((acknowledgement) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: (isMe ? Colors.white : Colors.black)
+                                .withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            _acknowledgementLabel(
+                              context,
+                              acknowledgement.kind,
+                            ),
+                            style: TextStyle(
+                              color: isMe ? Colors.white : Colors.black87,
+                              fontSize: 12,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _formatTime(message.sentAt),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: isMe ? Colors.white70 : Colors.black45,
+                      ),
+                    ),
+                    if (isMe && onEdit != null) ...[
+                      const SizedBox(width: 4),
+                      GestureDetector(
+                        onTap: onEdit,
+                        child: Text(
+                          l.editAction,
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.white60,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (isMe) ...[
+                      const SizedBox(width: 4),
+                      _buildStatus(context),
+                    ],
                   ],
-                  if (isMe) ...[
-                    const SizedBox(width: 4),
-                    _buildStatus(context),
-                  ],
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
       ),

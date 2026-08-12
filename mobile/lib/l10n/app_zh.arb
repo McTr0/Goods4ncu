@@ -1235,6 +1235,7 @@
   "reportAction": "举报",
   "sendFailedShort": "发送失败",
   "messageSentStatus": "已发送",
+  "messageActionsHint": "打开消息操作",
   "messageReadStatus": "已读",
   "messageDeliveredStatus": "已发送",
   "acknowledgementReceived": "收到",

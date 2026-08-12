@@ -1262,6 +1262,7 @@
   "reportAction": "Report",
   "sendFailedShort": "Send failed",
   "messageSentStatus": "Sent",
+  "messageActionsHint": "Open message actions",
   "messageReadStatus": "Read",
   "messageDeliveredStatus": "Sent",
   "acknowledgementReceived": "Received",

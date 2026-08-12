@@ -324,6 +324,38 @@ void main() {
       },
     );
 
+    testWidgets('exposes message actions through accessibility semantics', (
+      tester,
+    ) async {
+      final message = ConversationMessage(
+        id: '1',
+        conversationId: 'conv-1',
+        senderId: 'user-other',
+        content: '无障碍确认入口',
+        sentAt: DateTime.now(),
+        status: 'sent',
+      );
+
+      await tester.pumpWidget(
+        buildTestableWidget(
+          MessageBubble(
+            message: message,
+            isMe: false,
+            isConnected: false,
+            onAcknowledge: (_) {},
+          ),
+        ),
+      );
+
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Semantics && widget.properties.label == '打开消息操作',
+        ),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('displays timestamp', (tester) async {
       final message = ConversationMessage(
         id: '1',
