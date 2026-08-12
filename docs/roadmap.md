@@ -169,7 +169,7 @@
 - [已实现] 发布采用“立即执行 + 撤销窗口”；update/delete listing 生成 L2 pending 计划，purchase/negotiate 生成 L3 pending 计划。输入快照、风险级、10 分钟过期和 token 由 `0038_agent_action_plans.sql` + `AgentPlanService` 承载；token 只经认证且禁止缓存的 `/api/agent/plans` 返回，绝不进入模型可见文本。
 - [已实现] `0058_agent_plan_atomic_confirmation.sql` 把计划行锁、业务执行、适用时的通知/outbox 和计划终态放进同一外层事务，动作内部使用 savepoint。commit 前崩溃整笔回滚；成功结果和业务事实同时可见；并发/重复 confirm 只产生一个业务事实。旧协议遗留的 `executing` 迁移为不可重放的 `interrupted`，等待人工核对。
 - [已实现] L3 两步使用不同 token：primary 只把计划置为 `confirmed_once` 并返回独立 second token；primary 的网络重试只重放同一挑战，只有 second token 能执行。当前校园绑定贯穿 list/cancel/confirm，移动端对新挑战和重新加载后的 armed 计划都在任何执行请求前展示高风险对话框。
-- [部分完成] listing 更新、下架、成交意向和议价已在 ActionPlan 提案时保存 `inventory.content_revision`，确认时按锁内版本比较；HTTP 更新/删除也支持 body 版本或 `If-Match`。仍需补通用提案幂等键、版本化风险文案、typed execution outcome 与完整审计/对账界面。
+- [部分完成] listing 更新、下架、成交意向和议价已在 ActionPlan 提案时保存 `inventory.content_revision`，确认时按锁内版本比较；HTTP 更新/删除也支持 body 版本或 `If-Match`；提案 `Idempotency-Key` 已绑定用户/校园与动作参数哈希，重试复用原计划、改参数安全拒绝。仍需补版本化风险文案、typed execution outcome 与完整审计/对账界面。
 
 ### 工具收敛
 
@@ -224,6 +224,7 @@
 
 - [部分完成] 工具层滥用测试集已落地（`tests/agent_injection_regression.rs`）：跨校园购买/议价、参数污染（空/超长标题、越界成色、非正/天价价格、越界出价）、自买自卖、未认证用户提案全部被拒并有零副作用断言；confirmation token 隔离、跨用户/校园确认拒绝、资源版本快照冲突和原子恢复已有回归覆盖。Agent listing 已与 HTTP 共享同步文本审核、分类/空白/金额规范化；针对真实 LLM 的间接注入与虚假承诺评估仍需线上评测集。
 - AgentRun 记录路由、检索、工具、provider、版本、延迟和结果类别，敏感正文脱敏。
+- [部分完成] Agent ActionPlan 提案已支持认证请求的 `Idempotency-Key`：同一用户/校园和动作参数哈希的重试复用同一计划，改参数安全拒绝；统一 AgentRun/审计信封、设备绑定和版本化风险文案仍待完成。
 - 无 LLM 时搜索、表单、聊天和成交记录仍可用。
 - Agent 变更采用 feature flag 和 canary，越权执行有立即 kill switch。
 
@@ -296,7 +297,7 @@
 | Secret Chat | Phase 1 | [已实现] 新建默认 403（`SECRET_CHAT_NEW_SESSIONS_ENABLED` 仅迁移窗口可开），移动端入口已移除，历史会话可读有回归覆盖 |
 | 进程内事件 | Phase 4 | [部分完成] outbox 通知与专用 `embedding_jobs` listing 投影已迁移并有回归覆盖；审核投影等其余消费者仍待迁移 |
 | 单实例 WebSocket | Phase 4 | [部分完成] Redis fan-out 已实现并通过双实例端到端测试；断线补偿依赖既有 HTTP 拉取，压测仍待做 |
-| Agent 直接写工具 | Phase 3 | [部分完成] 发布已进入可撤销直接执行，四个计划动作使用 crash-safe ActionPlan；listing command 与资源版本快照已统一，提案幂等、版本化文案与完整行动审计仍待补 |
+| Agent 直接写工具 | Phase 3 | [部分完成] 发布已进入可撤销直接执行，四个计划动作使用 crash-safe ActionPlan；listing command 与资源版本快照已统一，提案幂等已落地，版本化文案与完整行动审计仍待补 |
 
 ## 路线图维护规则
 

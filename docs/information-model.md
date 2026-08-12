@@ -263,7 +263,7 @@ ActionPlan: pending -> confirmed_once (L3) -> executing (transaction-local) -> e
 
 ActionPlan 保存待执行输入快照、风险级、短期 confirmation capability 和执行结果，不是已执行事实。L2 一次确认；L3 primary token 只能进入 `confirmed_once`，服务端随后才公开独立的第二步 token。primary 重试只重放挑战，不能执行。更新、下架、成交意向和议价计划还在 args 中保存提案时的 `inventory.content_revision`；确认时在锁定 listing 后比较，版本变化返回失败且不产生业务事实。计划归属创建时的 campus，list/cancel/confirm 都按当前认证用户和活动校园过滤。
 
-新协议中的 `executing` 只存在于未提交事务内：计划行锁、业务写入、通知/outbox 和 `executed` 结果一起 commit；动作失败先回滚 savepoint，再在同一外层事务记录 `failed`。因此 commit 前崩溃不会留下业务事实或持久 `executing`。迁移发现的旧协议 `executing` 无法安全判断副作用是否已提交，只能标记 `interrupted` 并人工核对，绝不自动重放。listing 关键写动作已在提案时保存 `inventory.content_revision` 并在锁内比较；通用提案幂等和统一审计事件仍待补齐。
+新协议中的 `executing` 只存在于未提交事务内：计划行锁、业务写入、通知/outbox 和 `executed` 结果一起 commit；动作失败先回滚 savepoint，再在同一外层事务记录 `failed`。因此 commit 前崩溃不会留下业务事实或持久 `executing`。迁移发现的旧协议 `executing` 无法安全判断副作用是否已提交，只能标记 `interrupted` 并人工核对，绝不自动重放。listing 关键写动作已在提案时保存 `inventory.content_revision` 并在锁内比较；提案 `Idempotency-Key` 已按用户/校园和动作参数哈希去重，统一审计事件仍待补齐。
 
 ### AuditEvent 与 DomainEvent
 

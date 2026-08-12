@@ -26,6 +26,7 @@ fn tool_ctx_in_campus(pool: sqlx::PgPool, user_id: &str, campus_id: Uuid) -> Too
         db_pool: pool.clone(),
         current_user_id: Some(user_id.to_string()),
         current_campus_id: Some(campus_id),
+        proposal_idempotency_key: None,
         moderation: goods4ncu::services::moderation::ModerationService::new_for_test(false),
         notification: NotificationService::new(pool),
     }
@@ -172,6 +173,67 @@ async fn l3_tool_call_proposes_a_plan_instead_of_executing() {
             .await
             .expect("count orders");
         assert_eq!(orders, 0, "the tool must not execute without confirmation");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn proposal_idempotency_reuses_same_plan_and_rejects_changed_args() {
+    with_test_pool(|pool| async move {
+        let buyer_id = format!("plan-idempotent-buyer-{}", Uuid::new_v4().simple());
+        let seller_id = format!("plan-idempotent-seller-{}", Uuid::new_v4().simple());
+        seed_verified_user(&pool, &buyer_id).await;
+        seed_verified_user(&pool, &seller_id).await;
+        let listing_id = seed_listing(&pool, &seller_id).await;
+
+        let mut ctx = tool_ctx(pool.clone(), &buyer_id);
+        ctx.proposal_idempotency_key = Some(format!("retry-{}", Uuid::new_v4().simple()));
+        let tool = goods4ncu::agents::tools::PurchaseItemIntentTool { ctx };
+
+        let first = tool
+            .call(purchase_args(&listing_id))
+            .await
+            .expect("first proposal");
+        sqlx::query(
+            "UPDATE inventory
+             SET title = 'Changed after proposal', content_revision = content_revision + 1
+             WHERE id = $1",
+        )
+        .bind(&listing_id)
+        .execute(&pool)
+        .await
+        .expect("change listing revision");
+        let second = tool
+            .call(purchase_args(&listing_id))
+            .await
+            .expect("same request retry");
+
+        let plans: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM agent_action_plans WHERE user_id = $1")
+                .bind(&buyer_id)
+                .fetch_one(&pool)
+                .await
+                .expect("count idempotent plans");
+        assert_eq!(plans, 1, "a retry must not create a second plan");
+        let plan_id: Uuid =
+            sqlx::query_scalar("SELECT id FROM agent_action_plans WHERE user_id = $1")
+                .bind(&buyer_id)
+                .fetch_one(&pool)
+                .await
+                .expect("read original plan");
+        assert!(first.contains(&plan_id.to_string()));
+        assert!(second.contains(&plan_id.to_string()));
+
+        let mut changed = purchase_args(&listing_id);
+        changed.offered_price += 100;
+        let error = tool
+            .call(changed)
+            .await
+            .expect_err("same key with changed arguments must fail");
+        assert!(
+            error.to_string().contains("不同的待确认操作"),
+            "unexpected idempotency error: {error}"
+        );
     })
     .await;
 }

@@ -276,6 +276,8 @@ pub(crate) async fn handle_chat(
 
     let normalized_image_url = normalize_platform_media_url(&state, image_url, "image_url")?;
     let normalized_audio_url = normalize_platform_media_url(&state, audio_url, "audio_url")?;
+    let proposal_idempotency_key =
+        crate::api::request_context::idempotency_key_from_headers(&headers)?;
 
     // Direct TCP peer address as rate-limit key — cannot be spoofed.
     // X-Forwarded-For is read for logging only, never as a rate-limit token.
@@ -386,6 +388,7 @@ pub(crate) async fn handle_chat(
             state.infra.event_tx.clone(),
             Some(current_user_id.clone()),
             session.campus_id,
+            proposal_idempotency_key.clone(),
             state.infra.moderation.clone(),
         )
         .await
@@ -479,6 +482,8 @@ async fn handle_chat_stream_request(
 
     let normalized_image_url = normalize_platform_media_url(&state, image_url, "image_url")?;
     let normalized_audio_url = normalize_platform_media_url(&state, audio_url, "audio_url")?;
+    let proposal_idempotency_key =
+        crate::api::request_context::idempotency_key_from_headers(&headers)?;
 
     let token = extract_bearer_token(&headers)?;
 
@@ -589,6 +594,7 @@ async fn handle_chat_stream_request(
             state.infra.event_tx.clone(),
             Some(current_user_id.clone()),
             session.campus_id,
+            proposal_idempotency_key,
             state.infra.moderation.clone(),
         )
         .await

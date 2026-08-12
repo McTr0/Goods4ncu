@@ -851,7 +851,7 @@ Flutter 在 wanted 详情按当前用户身份展示“收到的推荐”或“�
 
 ### POST `/api/chat`
 
-单轮 JSON AI 请求。会持久化用户消息，经过意图路由后调用工具或 LLM。
+单轮 JSON AI 请求。会持久化用户消息，经过意图路由后调用工具或 LLM。若请求可能触发 Agent 的待确认写操作，可携带 `Idempotency-Key` 请求头；同一认证用户、活动校园和相同动作参数的重试会复用原 ActionPlan，不会创建第二个待确认操作。相同 key 改变动作、风险等级或参数会安全拒绝。该 key 不会进入模型上下文。
 
 ### GET `/api/chat/stream`
 
@@ -859,7 +859,7 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 
 ### POST `/api/chat/stream`
 
-推荐的 SSE 路径，使用 JSON body，适合认证上下文和移动端流式显示。小帮请求必须携带 `conversation_id: "__agent__"`。服务端先读取该用户此前的最近历史，再保存当前用户消息；流式响应正常结束后保存完整 AI 回复。中断或 provider 失败时不保存不完整的 AI 回复，但已经提交的用户消息仍会保留。
+推荐的 SSE 路径，使用 JSON body，适合认证上下文和移动端流式显示。小帮请求必须携带 `conversation_id: "__agent__"`。服务端先读取该用户此前的最近历史，再保存当前用户消息；流式响应正常结束后保存完整 AI 回复。中断或 provider 失败时不保存不完整的 AI 回复，但已经提交的用户消息仍会保留。重试可能产生写计划时应复用同一个 `Idempotency-Key`；服务端按用户/校园和动作参数哈希复用计划，不能用同 key 改写另一项操作。
 
 ## WebSocket
 
@@ -1110,7 +1110,7 @@ listing 的生命周期和可用性是两个正交维度：`inventory.status` �
 
 `code` 是客户端稳定判断依据，`message` 可本地化，`details` 只包含安全的字段级信息。不得返回 SQL、provider 原始错误、屏蔽关系或审核规则。
 
-发布、wanted response 和成交确认已实现 `Idempotency-Key`。聊天创建/消息发送使用请求体中的客户端 UUID 幂等；Agent confirm 以 plan + 当前步骤 token 重放稳定挑战或终态结果。其他关键写接口、Agent proposal 的客户端幂等键及统一 `/api/v1` 幂等错误契约仍属于目标态。同一作用域、key 和请求内容的重试返回首次结果；相同 key 配不同 body 必须冲突。已返回 `replayed` 的接口用该字段区分首次执行和结果重放。
+发布、wanted response、成交确认和 Agent proposal 已实现 `Idempotency-Key`。聊天创建/消息发送仍使用请求体中的客户端 UUID 幂等；Agent confirm 以 plan + 当前步骤 token 重放稳定挑战或终态结果。统一 `/api/v1` 幂等错误契约仍属于目标态。同一作用域、key 和请求内容的重试返回首次结果；相同 key 配不同 body 必须冲突。已返回 `replayed` 的接口用该字段区分首次执行和结果重放。
 
 列表统一使用：
 
@@ -1170,7 +1170,7 @@ POST /api/v1/agent/plans/{id}/cancel
 
 这是目标 `/api/v1` 形态，不等同于上方当前未版本化接口。目标创建协议还应返回 `idempotency_key`、`confirmation_mode`、版本化预览和风险文案；L3 继续使用相互独立的两步 token。
 
-当前 confirm 已重新验证 tenant、membership、owner、状态和金额，并把业务事实与计划终态原子提交。listing 更新、下架、成交意向和议价计划已携带 `inventory.content_revision` 快照并在锁内拒绝过期写入；通用提案幂等键、稳定错误 code 和完整审计信封仍是 `/api/v1` 收敛项。
+当前 confirm 已重新验证 tenant、membership、owner、状态和金额，并把业务事实与计划终态原子提交。listing 更新、下架、成交意向和议价计划已携带 `inventory.content_revision` 快照并在锁内拒绝过期写入；当前聊天入口已支持按用户/校园和动作参数哈希绑定的通用提案 `Idempotency-Key`，相同请求重试复用原计划，改参数拒绝。稳定错误 code 和完整审计信封仍是 `/api/v1` 收敛项。
 
 ### Moderation 与申诉
 

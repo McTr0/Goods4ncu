@@ -176,6 +176,7 @@ pub trait LlmProvider: Send + Sync {
         event_tx: mpsc::Sender<BusinessEvent>,
         current_user_id: Option<String>,
         current_campus_id: Option<uuid::Uuid>,
+        proposal_idempotency_key: Option<String>,
         moderation: crate::services::moderation::ModerationService,
     ) -> anyhow::Result<Box<dyn MarketplaceAgent>>;
 

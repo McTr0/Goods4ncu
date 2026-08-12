@@ -219,5 +219,33 @@ void main() {
 
       await service.disconnect();
     });
+
+    test('preserves the proposal idempotency key across auth retry', () async {
+      final client = _QueuedClient([_response(401), _response(200)]);
+      var accessToken = 'expired-token';
+
+      final service = SseService(
+        baseUrl: 'https://api.test',
+        getAccessToken: () async => accessToken,
+        refreshAccessToken: () async {
+          accessToken = 'fresh-token';
+          return true;
+        },
+        clientFactory: () => client,
+      );
+
+      await service.connect(message: 'draft', idempotencyKey: 'agent-retry-1');
+
+      expect(client.requests.length, 2);
+      expect(
+        (client.requests[0] as http.Request).headers['Idempotency-Key'],
+        'agent-retry-1',
+      );
+      expect(
+        (client.requests[1] as http.Request).headers['Idempotency-Key'],
+        'agent-retry-1',
+      );
+      await service.disconnect();
+    });
   });
 }

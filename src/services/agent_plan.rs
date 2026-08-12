@@ -8,6 +8,7 @@
 //! campus membership, listing state, price bounds), so a confirmed plan whose
 //! world has changed fails safely instead of executing against stale state.
 
+use sha2::{Digest, Sha256};
 use sqlx::{Acquire, PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
@@ -57,45 +58,115 @@ pub struct AgentPlanService {
     db: PgPool,
 }
 
+pub struct CreatePlanInput<'a> {
+    pub campus_id: Uuid,
+    pub user_id: &'a str,
+    pub action: &'a str,
+    pub risk_level: &'a str,
+    pub args: &'a serde_json::Value,
+    pub summary: &'a str,
+    pub proposal_idempotency_key: Option<&'a str>,
+}
+
 impl AgentPlanService {
     pub fn new(db: PgPool) -> Self {
         Self { db }
     }
 
     /// Persist a pending plan and return its id.
-    pub async fn create_plan(
-        &self,
-        campus_id: Uuid,
-        user_id: &str,
-        action: &str,
-        risk_level: &str,
-        args: &serde_json::Value,
-        summary: &str,
-    ) -> anyhow::Result<Uuid> {
+    pub async fn create_plan(&self, input: CreatePlanInput<'_>) -> anyhow::Result<Uuid> {
+        let proposal_request_hash = input
+            .proposal_idempotency_key
+            .map(|_| Self::proposal_request_hash(input.action, input.risk_level, input.args));
+        let mut tx = self.db.begin().await?;
         let token = new_confirmation_token();
-        let second_token = (risk_level == "L3").then(new_confirmation_token);
-        let id: Uuid = sqlx::query_scalar(
+        let second_token = (input.risk_level == "L3").then(new_confirmation_token);
+        let inserted: Option<Uuid> = sqlx::query_scalar(
             "INSERT INTO agent_action_plans (
                 campus_id, user_id, action, risk_level, args, summary,
-                confirmation_token, second_confirmation_token, expires_at
+                confirmation_token, second_confirmation_token, expires_at,
+                proposal_idempotency_key, proposal_request_hash
              ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8,
-                NOW() + make_interval(mins => $9::int)
+                NOW() + make_interval(mins => $9::int), $10, $11
              )
+             ON CONFLICT (campus_id, user_id, proposal_idempotency_key)
+                WHERE proposal_idempotency_key IS NOT NULL
+             DO NOTHING
              RETURNING id",
         )
-        .bind(campus_id)
-        .bind(user_id)
-        .bind(action)
-        .bind(risk_level)
-        .bind(args)
-        .bind(summary)
+        .bind(input.campus_id)
+        .bind(input.user_id)
+        .bind(input.action)
+        .bind(input.risk_level)
+        .bind(input.args)
+        .bind(input.summary)
         .bind(&token)
         .bind(second_token.as_deref())
         .bind(PLAN_TTL_MINUTES as i32)
-        .fetch_one(&self.db)
+        .bind(input.proposal_idempotency_key)
+        .bind(proposal_request_hash.as_deref())
+        .fetch_optional(&mut *tx)
         .await?;
+
+        if let Some(id) = inserted {
+            tx.commit().await?;
+            return Ok(id);
+        }
+
+        // A concurrent retry may have won the unique insert. Lock the existing
+        // row before comparing its hash, then return the original plan id only
+        // when the request is byte-for-byte equivalent at the canonical hash
+        // boundary.
+        let Some(key) = input.proposal_idempotency_key else {
+            anyhow::bail!("agent plan insert was skipped without an idempotency key");
+        };
+        let Some(row) = sqlx::query(
+            "SELECT id, proposal_request_hash
+             FROM agent_action_plans
+             WHERE campus_id = $1 AND user_id = $2
+               AND proposal_idempotency_key = $3
+             FOR UPDATE",
+        )
+        .bind(input.campus_id)
+        .bind(input.user_id)
+        .bind(key)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            anyhow::bail!("idempotent agent plan disappeared during retry");
+        };
+        let existing_hash: String = row.get("proposal_request_hash");
+        if Some(existing_hash.as_str()) != proposal_request_hash.as_deref() {
+            anyhow::bail!("相同 Idempotency-Key 已用于不同的待确认操作，请为新操作生成新的 key");
+        }
+        let id: Uuid = row.get("id");
+        tx.commit().await?;
         Ok(id)
+    }
+
+    /// Hash the only proposal inputs that affect execution.  The human-facing
+    /// summary is intentionally excluded because wording may vary across LLM
+    /// retries while the requested action remains identical.
+    pub fn proposal_request_hash(
+        action: &str,
+        risk_level: &str,
+        args: &serde_json::Value,
+    ) -> String {
+        let mut request_args = args.clone();
+        // This field is a server-owned concurrency snapshot, not part of the
+        // caller's request. A retry after the resource changes must still
+        // replay the original plan rather than turning idempotency into a
+        // second, freshly snapshotted proposal.
+        if let Some(object) = request_args.as_object_mut() {
+            object.remove("expected_content_revision");
+        }
+        let canonical = serde_json::json!({
+            "action": action,
+            "risk_level": risk_level,
+            "args": request_args,
+        });
+        hex::encode(Sha256::digest(canonical.to_string().as_bytes()))
     }
 
     /// Pending (unexpired) plans for a user in the active campus, most recent first.

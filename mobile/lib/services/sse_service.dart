@@ -94,6 +94,7 @@ class SseService {
     String? listingId,
     String? imageUrl,
     String? audioUrl,
+    String? idempotencyKey,
   }) async {
     await disconnect();
     final connectionId = _activeConnectionId;
@@ -122,7 +123,13 @@ class SseService {
     if (imageUrl != null) body['image_url'] = imageUrl;
     if (audioUrl != null) body['audio_url'] = audioUrl;
 
-    var streamedResponse = await _sendSseRequest(client, uri, token, body);
+    var streamedResponse = await _sendSseRequest(
+      client,
+      uri,
+      token,
+      body,
+      idempotencyKey: idempotencyKey,
+    );
 
     if (connectionId != _activeConnectionId) {
       client.close();
@@ -142,6 +149,7 @@ class SseService {
             uri,
             refreshedToken,
             body,
+            idempotencyKey: idempotencyKey,
           );
         }
       }
@@ -208,13 +216,17 @@ class SseService {
     http.Client client,
     Uri uri,
     String token,
-    Map<String, dynamic> body,
-  ) {
+    Map<String, dynamic> body, {
+    String? idempotencyKey,
+  }) {
     final request = http.Request('POST', uri);
     request.headers['Accept'] = 'text/event-stream';
     request.headers['Cache-Control'] = 'no-cache';
     request.headers['Content-Type'] = 'application/json';
     request.headers['Authorization'] = 'Bearer $token';
+    if (idempotencyKey != null && idempotencyKey.isNotEmpty) {
+      request.headers['Idempotency-Key'] = idempotencyKey;
+    }
     request.body = jsonEncode(body);
     return client.send(request);
   }

@@ -249,7 +249,7 @@ Agent 权限等级和确认协议见 [Agent 系统设计](agent-system.md)。
 | 联系人线程与 realtime/mail | [已实现] | 底层会话独立，收件箱按联系人聚合 |
 | 群组、频道、通话 | [实验中] | 已有 API 和 UI，生产权限与弱网能力仍不足 |
 | 线下成交记录 | [已实现] | 不托管资金，不追踪支付和物流 |
-| Agent 搜索和工具 | [部分完成] | 发布已是即时可撤销；更新/下架使用 L2 ActionPlan，成交意向/议价使用独立 token 的 L3 双重确认；listing command 与关键动作的 `content_revision` 快照已统一，提案幂等和完整审计仍待补 |
+| Agent 搜索和工具 | [部分完成] | 发布已是即时可撤销；更新/下架使用 L2 ActionPlan，成交意向/议价使用独立 token 的 L3 双重确认；listing command 与关键动作的 `content_revision` 快照已统一，提案按用户/校园和动作参数哈希幂等，完整审计仍待补 |
 | 多校园 membership | [部分完成] | membership、活动校园 session、核心资源作用域与 RLS 已落地；资格续期和多副本生产验证仍待完成 |
 | 解释型 Feed 与用户反馈 | [部分完成] | 首页商品、相似商品、listing wanted matches 与 intent feed/matches 已有解释、精确隐藏、泛化降权、个性化开关和清除；真实质量/公平评估仍待完成 |
 | Secret Chat E2EE | [实验中][待弃用] | 不进入生产承诺，迁移方向见信任安全设计 |

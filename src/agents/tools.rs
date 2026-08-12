@@ -23,6 +23,9 @@ pub struct ToolContext {
     pub db_pool: PgPool,
     pub current_user_id: Option<String>,
     pub current_campus_id: Option<uuid::Uuid>,
+    /// Optional retry key from the authenticated chat request. It is only
+    /// used to deduplicate a proposal; it never enters model-visible text.
+    pub proposal_idempotency_key: Option<String>,
     /// Configured content policy shared with the HTTP listing command path.
     pub moderation: ModerationService,
     /// Notification service for sending in-app alerts (e.g., negotiation requests).
@@ -205,9 +208,15 @@ async fn propose_action_plan<A: serde::Serialize>(
     attach_listing_revision_snapshot(ctx, &user_id, campus_id, action, &mut args_json).await?;
 
     let plan = crate::services::agent_plan::AgentPlanService::new(ctx.db_pool.clone())
-        .create_plan(
-            campus_id, &user_id, action, risk_level, &args_json, &summary,
-        )
+        .create_plan(crate::services::agent_plan::CreatePlanInput {
+            campus_id,
+            user_id: &user_id,
+            action,
+            risk_level,
+            args: &args_json,
+            summary: &summary,
+            proposal_idempotency_key: ctx.proposal_idempotency_key.as_deref(),
+        })
         .await
         .map_err(|e| ToolError(format!("创建待确认操作失败: {}", e)))?;
 
@@ -1557,6 +1566,7 @@ mod tests {
             db_pool: pool.clone(),
             current_user_id,
             current_campus_id: None,
+            proposal_idempotency_key: None,
             moderation: ModerationService::new_for_test(false),
             notification: crate::services::notification::NotificationService::new(pool),
         }
@@ -1760,6 +1770,7 @@ mod tests {
             db_pool: pool.clone(),
             current_user_id: None,
             current_campus_id: None,
+            proposal_idempotency_key: None,
             moderation: ModerationService::new_for_test(false),
             notification: crate::services::notification::NotificationService::new(pool),
         }
@@ -2018,6 +2029,7 @@ mod tests {
                 db_pool: pool.clone(),
                 current_user_id: Some(owner_id.clone()),
                 current_campus_id: None,
+                proposal_idempotency_key: None,
                 moderation: ModerationService::new_for_test(false),
                 notification: crate::services::notification::NotificationService::new(
                     pool.clone(),

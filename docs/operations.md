@@ -263,7 +263,7 @@ ORDER BY updated_at;
 - confirmation token 不写日志、不进模型上下文，token-bearing API 响应必须保持 `Cache-Control: no-store`。
 - 事务内只允许数据库副作用。新增外部调用必须先写 transactional outbox，由幂等 worker 在 commit 后投递，不能把网络请求塞进确认事务。
 
-当前没有自动化 `interrupted` 对账/结案界面；typed execution outcome、统一审计和提案幂等仍是后续运行性门槛。listing 关键动作的资源版本快照与冲突保护已经落地。
+当前没有自动化 `interrupted` 对账/结案界面；typed execution outcome 和统一审计仍是后续运行性门槛。listing 关键动作的资源版本快照与冲突保护、Agent 提案按用户/校园和动作参数哈希的幂等已经落地。
 
 常用只读检查：
 

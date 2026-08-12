@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 适用读者 | AI/后端工程师、产品经理、安全工程师、测试工程师和 Agent 工具维护者 |
-| 当前状态 | 已有意图路由、耐久 RAG 投影、多个 LLM provider 和市场工具；ActionPlan、ListingCommandService 与 listing 资源版本快照已落地，统一 AgentRun/审计仍是目标态 |
+| 当前状态 | 已有意图路由、耐久 RAG 投影、多个 LLM provider 和市场工具；ActionPlan、提案幂等、ListingCommandService 与 listing 资源版本快照已落地，统一 AgentRun/审计仍是目标态 |
 | 事实来源 | `src/agents/`、`src/llm/`、聊天 API、工具测试、LLM metrics 和 Flutter 小帮入口 |
 | 最后核对范围 | 搜索、发布、更新、删除、成交意向、议价、回复建议和流式回复 |
 
@@ -27,7 +27,7 @@ Agent 的价值是把用户意图翻译为可理解、可检查、可撤销的�
 
 [已实现] 可恢复的发布会立即执行并提供撤销窗口；更新/删除生成 L2 ActionPlan，成交意向/议价生成使用独立两步 token 的 L3 ActionPlan。确认锁、业务事实、适用时的通知/outbox 和计划终态原子提交，commit 前中断可安全重试。
 
-[已实现] Agent listing 创建/更新与 HTTP 路径已收敛到同一 `ListingCommandService`，共享文本审核、分类/空白规范化、金额类型和事务入口。更新/下架/成交意向/议价计划在提案时保存数据库 `content_revision`，确认时在同一锁内比较，过期计划安全失败；HTTP 更新支持 `expected_content_revision`/`If-Match`。提案幂等、版本化风险文案和统一 AgentRun/审计仍待补齐。
+[已实现] Agent listing 创建/更新与 HTTP 路径已收敛到同一 `ListingCommandService`，共享文本审核、分类/空白规范化、金额类型和事务入口。更新/下架/成交意向/议价计划在提案时保存数据库 `content_revision`，确认时在同一锁内比较，过期计划安全失败；HTTP 更新支持 `expected_content_revision`/`If-Match`。Agent 提案可携带认证请求的 `Idempotency-Key`，服务端按用户/校园和动作参数 SHA-256 绑定重试；相同 key 的相同请求复用原计划，参数变化安全拒绝。版本化风险文案和统一 AgentRun/审计仍待补齐。
 
 ## 权限等级
 
@@ -124,7 +124,7 @@ legacy executing -> interrupted
 - token 不进入模型文本或缓存响应；`args` 只保存执行所需字段，不复制无关聊天历史。
 - 旧协议中无法判断副作用的 durable `executing` 迁移为 `interrupted`，必须人工核对，永不自动重放。
 
-[部分完成] listing 更新、下架、成交意向和议价已在提案时保存 `inventory.content_revision`，确认时按锁内版本比较；HTTP 更新/删除也支持 body 版本或 `If-Match`，旧客户端省略版本时保留兼容行为。仍需补 proposal idempotency key、设备/重新认证绑定、版本化风险文案、typed outcome 和统一审计事件。当前与目标 `/api/v1` 的区别见 [API 参考](api-reference.md)。
+[部分完成] listing 更新、下架、成交意向和议价已在提案时保存 `inventory.content_revision`，确认时按锁内版本比较；HTTP 更新/删除也支持 body 版本或 `If-Match`，旧客户端省略版本时保留兼容行为。提案 `Idempotency-Key` 已在同一用户/校园范围内落库并绑定动作、风险等级和参数哈希；相同 key 重试复用同一计划，改参数返回安全错误。仍需补设备/重新认证绑定、版本化风险文案、typed outcome 和统一审计事件。当前与目标 `/api/v1` 的区别见 [API 参考](api-reference.md)。
 
 ## 工具设计
 
@@ -154,7 +154,7 @@ audit category
 5. 工具错误分为用户可修复、状态冲突、权限拒绝、依赖故障和内部错误。
 6. 工具描述不能承诺 service 实际不支持的行为。
 
-当前成交/议价的核心约束已复用事务内执行函数；listing 创建、更新和下架现已通过统一 `ListingCommandService` 进入规范化、文本审核和事务入口。关键 listing 写动作已捕获并校验数据库维护的资源版本，避免 Agent 依据旧内容覆盖新事实；提案幂等、完整审计和统一对账仍是后续工作。
+当前成交/议价的核心约束已复用事务内执行函数；listing 创建、更新和下架现已通过统一 `ListingCommandService` 进入规范化、文本审核和事务入口。关键 listing 写动作已捕获并校验数据库维护的资源版本，避免 Agent 依据旧内容覆盖新事实；提案幂等已落地，完整审计和统一对账仍是后续工作。
 
 ## 记忆与上下文
 

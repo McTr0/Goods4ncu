@@ -8,6 +8,7 @@ import '../l10n/app_localizations.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
 import 'dart:io';
 import '../services/api_service.dart';
 import '../services/chat_service.dart';
@@ -463,6 +464,7 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> {
+  static const _uuid = Uuid();
   final TextEditingController _controller = TextEditingController();
   final List<ChatMessage> _messages = [];
   late final ApiService _apiService;
@@ -891,6 +893,7 @@ class _ChatPageState extends State<ChatPage> {
       );
 
       // Connect SSE stream with timeout.
+      final proposalIdempotencyKey = _uuid.v4();
       bool connected;
       try {
         await _sseService
@@ -899,6 +902,7 @@ class _ChatPageState extends State<ChatPage> {
               conversationId: '__agent__',
               imageUrl: uploadedMedia.imageUrl,
               audioUrl: uploadedMedia.audioUrl,
+              idempotencyKey: proposalIdempotencyKey,
             )
             .timeout(const Duration(seconds: 30));
         connected = true;

@@ -238,4 +238,17 @@ mod tests {
         assert_eq!(json["error"], json["message"]);
         assert!(json["message"].as_str().unwrap().contains("missing field"));
     }
+
+    #[test]
+    fn idempotency_key_parser_accepts_opaque_ascii_and_rejects_spaces() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Idempotency-Key", HeaderValue::from_static("retry-123"));
+        assert_eq!(
+            idempotency_key_from_headers(&headers).unwrap().as_deref(),
+            Some("retry-123")
+        );
+
+        headers.insert("Idempotency-Key", HeaderValue::from_static("has space"));
+        assert!(idempotency_key_from_headers(&headers).is_err());
+    }
 }
