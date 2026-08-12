@@ -252,7 +252,7 @@ listing 已使用 case-owned、可组合的 `listing_restriction_effects`：effe
 
 ### AgentRun 与 AgentActionPlan
 
-[部分完成] `agent_runs` 与 `agent_run_events` 是活动校园内一条 Agent 请求的安全运行信封，不是 prompt、聊天正文或 provider transcript 的副本。普通 JSON/SSE 聊天会记录稳定 `trace_id`、路由和置信度、provider/model、prompt/tool schema 版本、状态/typed outcome、耗时，以及检索数量、过滤数量、最近一批受限资源 ID 和工具调用类别；`GET /api/agent/runs` 只向本人返回这些受限字段。直接规则回复和 provider 失败也有明确 outcome。检索关键词、消息正文、工具参数、confirmation token、密钥和完整错误不入库。当前仍缺 token 用量、TTFT、客户端断开后的取消结案、ActionPlan 显式外键关联、设备/重新认证绑定和 `/api/v1` 对账接口。
+[部分完成] `agent_runs` 与 `agent_run_events` 是活动校园内一条 Agent 请求的安全运行信封，不是 prompt、聊天正文或 provider transcript 的副本。普通 JSON/SSE 聊天会记录稳定 `trace_id`、路由和置信度、provider/model、prompt/tool schema 版本、状态/typed outcome、SSE 首 token 延迟、耗时，以及检索数量、过滤数量、最近一批受限资源 ID 和工具调用类别；`GET /api/agent/runs` 只向本人返回这些受限字段。直接规则回复和 provider 失败也有明确 outcome。检索关键词、消息正文、工具参数、confirmation token、密钥和完整错误不入库。客户端断开后的有界取消结案已落地；聊天提案 receipt 通过可空 `agent_action_audits.agent_run_id` 显式关联。当前仍缺 token 用量、provider 侧 TTFT、持久化取消对账、设备/重新认证绑定和 `/api/v1` 对账接口。
 
 ActionPlan 的行动级 receipt 已集中到租户隔离的 `agent_action_audits`，并为计划终态增加受约束的 `result_code`。需要事前确认的修改、删除、成交意向和议价形成 `AgentActionPlan`；低风险发布立即执行并进入撤销窗口：
 

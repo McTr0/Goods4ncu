@@ -744,15 +744,31 @@ async fn record_audit(
     tx: &mut Transaction<'_, Postgres>,
     record: AuditRecord<'_>,
 ) -> anyhow::Result<()> {
-    sqlx::query(
-        "INSERT INTO agent_action_audits (
-            trace_id, campus_id, user_id, plan_id, action, risk_level,
-            event_type, outcome_code, duration_ms, metadata
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+    // Proposal calls made from chat share the request trace with AgentRun, so
+    // attach the receipt explicitly when that envelope exists.  Confirmation
+    // and cancel requests are allowed to remain unlinked because they are
+    // user actions that may not have a chat run at all.
+    let agent_run_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id
+         FROM agent_runs
+         WHERE trace_id = $1 AND campus_id = $2 AND user_id = $3",
     )
     .bind(record.trace_id)
     .bind(record.campus_id)
     .bind(record.user_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO agent_action_audits (
+            trace_id, campus_id, user_id, agent_run_id, plan_id, action,
+            risk_level, event_type, outcome_code, duration_ms, metadata
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+    )
+    .bind(record.trace_id)
+    .bind(record.campus_id)
+    .bind(record.user_id)
+    .bind(agent_run_id)
     .bind(record.plan_id)
     .bind(record.action)
     .bind(record.risk_level)

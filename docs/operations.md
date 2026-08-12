@@ -263,12 +263,12 @@ ORDER BY updated_at;
 - confirmation token 不写日志、不进模型上下文，token-bearing API 响应必须保持 `Cache-Control: no-store`。
 - 事务内只允许数据库副作用。新增外部调用必须先写 transactional outbox，由幂等 worker 在 commit 后投递，不能把网络请求塞进确认事务。
 
-当前没有自动化 `interrupted` 对账/结案界面；首版 `agent_runs`/`agent_run_events` 已把活动校园聊天的路由、provider/model、版本、检索聚合、工具类别、耗时和 typed outcome 放入安全 envelope，并由 `GET /api/agent/runs` 提供只读视图。SSE 客户端在生成器尚未自然结束时可能暂时保持 `started`，不能当作成功或失败。ActionPlan 的 typed terminal outcome 已落地；`agent_action_audits` 记录行动级 receipt（提案、重放/冲突、确认、执行、失败、取消、过期），与计划终态同事务提交，并明确不保存正文、token、args 或完整错误。listing 关键动作的资源版本快照与冲突保护、Agent 提案按用户/校园和动作参数哈希的幂等已经落地。token/TTFT、取消结案、ActionPlan 显式关联、设备/重新认证绑定和版本化风险文案仍需补齐。
+当前没有自动化 `interrupted` 对账/结案界面；首版 `agent_runs`/`agent_run_events` 已把活动校园聊天的路由、provider/model、版本、检索聚合、工具类别、SSE TTFT、耗时和 typed outcome 放入安全 envelope，并由 `GET /api/agent/runs` 提供只读视图。SSE 客户端丢弃生成器后，进程内 reconciliation task 会在有界 grace period 后把仍为 `started` 的运行标记为 `cancelled`；正常结束会提前终止该任务。ActionPlan 的 typed terminal outcome 已落地；`agent_action_audits` 记录行动级 receipt（提案、重放/冲突、确认、执行、失败、取消、过期），与计划终态同事务提交，并明确不保存正文、token、args 或完整错误；聊天提案在同一 trace 下可通过 `agent_run_id` 显式关联。listing 关键动作的资源版本快照与冲突保护、Agent 提案按用户/校园和动作参数哈希的幂等已经落地。token 用量、provider 侧 TTFT、持久化取消对账任务、设备/重新认证绑定和版本化风险文案仍需补齐。
 
 只读排查可按 trace 或计划串起行动链路；事件元数据只用于安全运营，不应被当成消息阅读、在线或注意力信号：
 
 ```sql
-SELECT trace_id, plan_id, action, risk_level, event_type,
+SELECT trace_id, agent_run_id, plan_id, action, risk_level, event_type,
        outcome_code, duration_ms, created_at
 FROM agent_action_audits
 WHERE campus_id = '<active-campus-uuid>'
@@ -408,7 +408,7 @@ RETURNING listing_id, campus_id, desired_revision;
 
 [已实现] `0030_normalize_money_bigint.sql` 修复历史升级库可能遗留的 `INT4` 金额列，将商品价格、成交价和议价金额统一为 `BIGINT`。若空库测试正常但现有环境列表接口出现金额 decode 错误，先检查 migration 是否已经执行到 0030，不要在应用层把金额退回 32 位。
 
-[已实现] `0034_moderation_cases.sql` 新增 `moderation_cases`、`moderation_case_events`、`moderation_appeals`，并把媒体拒绝任务和聊天举报回填为案件；`0053_content_reports.sql` 为商品和用户举报增加同校园 intake，并在同一事务中关联统一案件。`0037_outbox_events.sql` 已新增 `outbox_events`（见 Transactional Outbox 一节），`0038_agent_action_plans.sql` 已实现需确认的 Agent 写动作计划，`0075_agent_action_audit.sql`/`0076_agent_action_audit_campus_cleanup.sql` 已实现租户隔离的行动 receipt，`0077_agent_runs.sql`/`0078_agent_runs_campus_cleanup.sql` 已实现首版安全运行 envelope；token/TTFT、取消结案、ActionPlan 显式关联和统一对账仍是目标态。
+[已实现] `0034_moderation_cases.sql` 新增 `moderation_cases`、`moderation_case_events`、`moderation_appeals`，并把媒体拒绝任务和聊天举报回填为案件；`0053_content_reports.sql` 为商品和用户举报增加同校园 intake，并在同一事务中关联统一案件。`0037_outbox_events.sql` 已新增 `outbox_events`（见 Transactional Outbox 一节），`0038_agent_action_plans.sql` 已实现需确认的 Agent 写动作计划，`0075_agent_action_audit.sql`/`0076_agent_action_audit_campus_cleanup.sql` 已实现租户隔离的行动 receipt，`0077_agent_runs.sql`/`0078_agent_runs_campus_cleanup.sql`/`0079_agent_action_audit_run_link.sql` 已实现首版安全运行 envelope、SSE TTFT、bounded cancellation reconciliation 和聊天提案的可空显式 receipt 关联；token 用量、provider 侧 TTFT、持久化取消对账和统一版本化 API 仍是目标态。
 
 ## 内容审核策略
 

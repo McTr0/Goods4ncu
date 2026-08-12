@@ -65,6 +65,15 @@ async fn agent_run_is_idempotent_typed_and_body_free() {
         assert_eq!(run_id, replayed_id);
 
         assert!(service
+            .record_ttft(&trace_id, ncu_campus_id(), &user_id, 17)
+            .await
+            .expect("record first-token latency"));
+        assert!(!service
+            .record_ttft(&trace_id, ncu_campus_id(), &user_id, 23)
+            .await
+            .expect("first-token latency is write-once"));
+
+        assert!(service
             .record_retrieval(
                 &trace_id,
                 ncu_campus_id(),
@@ -154,6 +163,7 @@ async fn agent_run_is_idempotent_typed_and_body_free() {
             serde_json::json!(["listing-a", "listing-b"])
         );
         assert_eq!(run.duration_ms, Some(25));
+        assert_eq!(run.ttft_ms, Some(17));
 
         let event_count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM agent_run_events WHERE run_id = $1")
@@ -173,6 +183,70 @@ async fn agent_run_is_idempotent_typed_and_body_free() {
         assert!(!metadata.contains("agent-user"));
         assert!(!metadata.contains("listing-a"));
         assert!(!metadata.contains("prompt"));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn abandoned_agent_run_can_be_reconciled_as_cancelled() {
+    with_test_pool(|pool| async move {
+        let user_id = format!("agent-run-cancel-{}", Uuid::new_v4().simple());
+        seed_verified_user(&pool, &user_id).await;
+        let service = AgentRunService::new(pool.clone());
+        let trace_id = format!("agent-run-cancel-trace-{}", Uuid::new_v4().simple());
+
+        service
+            .start(
+                &trace_id,
+                ncu_campus_id(),
+                &user_id,
+                "agent-user-1",
+                "chat",
+                0.5,
+                Some("gemini"),
+                Some("gemini-test-model"),
+            )
+            .await
+            .expect("start cancellable run");
+
+        assert!(service
+            .cancel_started(
+                &trace_id,
+                ncu_campus_id(),
+                &user_id,
+                Some("client_disconnect_or_timeout"),
+                Some(120_000),
+            )
+            .await
+            .expect("reconcile cancelled run"));
+        assert!(!service
+            .cancel_started(
+                &trace_id,
+                ncu_campus_id(),
+                &user_id,
+                Some("client_disconnect_or_timeout"),
+                Some(120_001),
+            )
+            .await
+            .expect("duplicate cancellation is ignored"));
+
+        let run = service
+            .list_recent(&user_id, ncu_campus_id(), 20)
+            .await
+            .expect("list cancelled run")
+            .pop()
+            .expect("cancelled run exists");
+        assert_eq!(run.status, "cancelled");
+        assert_eq!(run.outcome_code.as_deref(), Some("cancelled"));
+        assert_eq!(run.duration_ms, Some(120_000));
+
+        let error_code: Option<String> =
+            sqlx::query_scalar("SELECT error_code FROM agent_runs WHERE trace_id = $1")
+                .bind(&trace_id)
+                .fetch_one(&pool)
+                .await
+                .expect("read cancellation error code");
+        assert_eq!(error_code.as_deref(), Some("client_disconnect_or_timeout"));
     })
     .await;
 }

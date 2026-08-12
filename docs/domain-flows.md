@@ -311,7 +311,7 @@ realtime 的 `active` 只表示这一段会话已经接通，不是全局在线�
   -> 原校园内重新校验并把业务事实、适用时的通知/outbox、计划终态原子提交
 ```
 
-ActionPlan 过期、membership 失效、权限、商品状态或 `content_revision` 变化时安全失败。模型不能用聊天中的“已经同意”绕过 confirmation token；primary 请求重试也不能变成第二次确认。行动级 `agent_action_audits` 已在同一事务中记录提案、确认、执行和终态事件；聊天首版 `agent_runs`/`agent_run_events` 另外记录不含正文的路由、provider/model、检索聚合、工具类别、耗时和 typed outcome。token/TTFT、客户端断开结案、ActionPlan 显式关联、设备/重新认证绑定和完整 `/api/v1` 对账仍是后续工作。
+ActionPlan 过期、membership 失效、权限、商品状态或 `content_revision` 变化时安全失败。模型不能用聊天中的“已经同意”绕过 confirmation token；primary 请求重试也不能变成第二次确认。行动级 `agent_action_audits` 已在同一事务中记录提案、确认、执行和终态事件；聊天提案在共享 trace 下通过可空 `agent_run_id` 与首版 `agent_runs`/`agent_run_events` 串联，后者记录不含正文的路由、provider/model、检索聚合、工具类别、SSE TTFT、耗时和 typed outcome；客户端断开后的有界取消结案已落地。token 用量/provider 侧 TTFT、设备/重新认证绑定、版本化风险文案和完整 `/api/v1` 对账仍是后续工作。
 
 Provider 失败时保留用户输入，提供关键词搜索、普通表单和手工聊天；不能让整个市场不可用。
 

@@ -13,6 +13,7 @@ use super::error::error_payload;
 
 use crate::api::error::ApiError;
 use axum::http::HeaderMap;
+use std::future::Future;
 
 pub const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
 
@@ -44,6 +45,19 @@ pub fn current_request_id() -> Option<String> {
 
 pub fn current_or_new_request_id() -> String {
     current_request_id().unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+}
+
+/// Run a future with a caller-supplied request trace.  HTTP always uses the
+/// middleware-generated value; this small boundary is also useful for trusted
+/// background/adaptor code and integration tests that need to prove trace
+/// propagation without accepting a client-provided header.
+#[allow(dead_code)]
+pub async fn with_request_id<F, Fut, T>(request_id: String, future: F) -> T
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = T>,
+{
+    REQUEST_ID.scope(request_id, future()).await
 }
 
 fn framework_error_code(status: StatusCode) -> &'static str {

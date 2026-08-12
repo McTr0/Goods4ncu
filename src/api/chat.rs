@@ -25,8 +25,16 @@ use rig::message::{AssistantContent, Text, UserContent};
 use rig::OneOrMany;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use tokio::sync::oneshot;
 use uuid::Uuid;
+
+/// A dropped SSE body cannot await a database write from its `Drop` path.  The
+/// sender below therefore stays alive for the generator's lifetime; if the
+/// client disconnects and drops the generator, a bounded grace period later
+/// the reconciliation task closes a still-started run as cancelled.  Normal
+/// completion explicitly signals the task and avoids an unnecessary wake-up.
+const AGENT_RUN_RECONCILIATION_DELAY: Duration = Duration::from_secs(120);
 
 #[derive(Deserialize)]
 pub(crate) struct ChatRequest {
@@ -304,9 +312,9 @@ async fn finish_agent_run(
     status: &str,
     outcome_code: &str,
     error_code: Option<&str>,
-) {
+) -> bool {
     let duration_ms = Some(run.started_at.elapsed().as_millis().min(i32::MAX as u128) as i32);
-    if let Err(error) = run
+    match run
         .service
         .finish(
             &run.trace_id,
@@ -319,8 +327,49 @@ async fn finish_agent_run(
         )
         .await
     {
-        tracing::warn!(%error, trace_id = %run.trace_id, "failed to finish AgentRun envelope");
+        Ok(finished) => finished,
+        Err(error) => {
+            tracing::warn!(%error, trace_id = %run.trace_id, "failed to finish AgentRun envelope");
+            false
+        }
     }
+}
+
+fn schedule_agent_run_reconciliation(run: AgentRunHandle) -> oneshot::Sender<()> {
+    let (done_tx, done_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        // A normal generator completion sends `()`.  A dropped generator
+        // drops the sender, after which the grace period gives an in-flight
+        // response a chance to finish before we record cancellation.
+        if done_rx.await.is_ok() {
+            return;
+        }
+        tokio::time::sleep(AGENT_RUN_RECONCILIATION_DELAY).await;
+        let duration_ms = Some(run.started_at.elapsed().as_millis().min(i32::MAX as u128) as i32);
+        match run
+            .service
+            .cancel_started(
+                &run.trace_id,
+                run.campus_id,
+                &run.user_id,
+                Some("client_disconnect_or_timeout"),
+                duration_ms,
+            )
+            .await
+        {
+            Ok(true) => tracing::debug!(
+                trace_id = %run.trace_id,
+                "reconciled abandoned AgentRun as cancelled"
+            ),
+            Ok(false) => {}
+            Err(error) => tracing::warn!(
+                %error,
+                trace_id = %run.trace_id,
+                "failed to reconcile abandoned AgentRun"
+            ),
+        }
+    });
+    done_tx
 }
 
 pub(crate) async fn handle_chat(
@@ -777,6 +826,7 @@ async fn handle_chat_stream_request(
 
     let mut stream = agent.stream_chat(message.clone(), chat_history);
     let run_for_stream = run.clone();
+    let reconciliation_tx = run.clone().map(schedule_agent_run_reconciliation);
     let persisted_conversation_id = conversation_id.clone();
     let public_conversation_id = response_conversation_id.clone();
     let persisted_listing_id = resolved_listing_id.clone();
@@ -786,9 +836,36 @@ async fn handle_chat_stream_request(
     let sse_stream = async_stream::stream! {
         let mut full_reply = String::new();
         let mut completed = true;
+        let mut ttft_recorded = false;
         while let Some(result) = stream.next().await {
             let bytes = match result {
                 Ok(token) => {
+                    if !ttft_recorded {
+                        if let Some(run) = &run_for_stream {
+                            let ttft_ms = run
+                                .started_at
+                                .elapsed()
+                                .as_millis()
+                                .min(i32::MAX as u128) as i32;
+                            if let Err(error) = run
+                                .service
+                                .record_ttft(
+                                    &run.trace_id,
+                                    run.campus_id,
+                                    &run.user_id,
+                                    ttft_ms,
+                                )
+                                .await
+                            {
+                                tracing::debug!(
+                                    %error,
+                                    trace_id = %run.trace_id,
+                                    "failed to record AgentRun TTFT"
+                                );
+                            }
+                        }
+                        ttft_recorded = true;
+                    }
                     full_reply.push_str(&token);
                     let payload = serde_json::json!({
                         "token": token,
@@ -829,11 +906,18 @@ async fn handle_chat_stream_request(
             }
         }
 
-        if let Some(run) = &run_for_stream {
+        let finished = if let Some(run) = &run_for_stream {
             if completed {
-                finish_agent_run(run, "completed", "llm_completed", None).await;
+                finish_agent_run(run, "completed", "llm_completed", None).await
             } else {
-                finish_agent_run(run, "failed", "llm_failed", Some("provider_error")).await;
+                finish_agent_run(run, "failed", "llm_failed", Some("provider_error")).await
+            }
+        } else {
+            true
+        };
+        if finished {
+            if let Some(done_tx) = reconciliation_tx {
+                let _ = done_tx.send(());
             }
         }
     };

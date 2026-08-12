@@ -152,7 +152,7 @@ Flutter 的空间布局保持稳定的“对方左上 / 自己右下”映射，
 
 自然语言入口先经过内容审核和 IntentRouter，再根据意图直接回答、检索或调用 Agent。Provider 支持 Gemini、MiniMax 和 OpenAI-compatible chat；embedding 当前仍主要依赖 Gemini 客户端和配置维度。
 
-市场 Agent 已挂载发布、搜索、详情、更新、删除、成交意向、议价和“我的发布”等工具。发布立即执行并进入撤销窗口；更新/删除使用 L2 ActionPlan，成交意向/议价使用独立两步 token 的 L3 ActionPlan。确认与业务事实已原子提交，listing 工具和 HTTP 已共享 command/审核入口；四类关键动作会在提案时保存 `inventory.content_revision`，确认时在锁内比较，HTTP 更新/删除也支持 body 版本或 `If-Match`。提案 `Idempotency-Key` 已按用户/校园和动作参数哈希去重；计划终态已使用受约束的 `result_code`，`agent_action_audits` 在同一事务中记录不含正文/token/args 的行动级 receipt。首版 `agent_runs`/`agent_run_events` 已覆盖活动校园聊天的路由、provider/model、版本、检索聚合、工具类别、耗时和 typed outcome，并提供安全只读列表；版本化风险文案、设备/重新认证绑定、token/TTFT/cancel 对账和完整 `/api/v1` 形态仍待补齐。新增写工具前必须阅读[Agent 系统设计](agent-system.md)。
+市场 Agent 已挂载发布、搜索、详情、更新、删除、成交意向、议价和“我的发布”等工具。发布立即执行并进入撤销窗口；更新/删除使用 L2 ActionPlan，成交意向/议价使用独立两步 token 的 L3 ActionPlan。确认与业务事实已原子提交，listing 工具和 HTTP 已共享 command/审核入口；四类关键动作会在提案时保存 `inventory.content_revision`，确认时在锁内比较，HTTP 更新/删除也支持 body 版本或 `If-Match`。提案 `Idempotency-Key` 已按用户/校园和动作参数哈希去重；计划终态已使用受约束的 `result_code`，`agent_action_audits` 在同一事务中记录不含正文/token/args 的行动级 receipt。聊天提案 receipt 在共享 trace 下可用 `agent_run_id` 显式关联；首版 `agent_runs`/`agent_run_events` 已覆盖活动校园聊天的路由、provider/model、版本、检索聚合、工具类别、SSE TTFT、耗时和 typed outcome，并提供安全只读列表；版本化风险文案、设备/重新认证绑定、token 用量/provider TTFT、持久化 cancel 对账和完整 `/api/v1` 形态仍待补齐。新增写工具前必须阅读[Agent 系统设计](agent-system.md)。
 
 回复助手是受限 agent，只生成三个不超过限制的草稿，不读取媒体，不自动发送，也不挂载成交工具。
 
@@ -201,7 +201,7 @@ Flutter 的空间布局保持稳定的“对方左上 / 自己右下”映射，
 | 进程内事件 | 崩溃可能丢失异步动作 | transactional outbox |
 | 单实例 WebSocket | 多副本无法直接 fan-out | Redis pub/sub + HTTP 补偿 |
 | 媒体兼容路径 | URL-first 与 Base64、静态 uploads 并存 | 私有隔离对象存储和 CDN |
-| Agent listing 写工具 | ActionPlan 已 crash-safe，HTTP 与 Agent 已共享 ListingCommandService；关键动作已有 `content_revision` 快照和冲突保护；提案按用户/校园和动作参数哈希幂等；typed terminal outcome 与行动级 receipt 已落地；聊天首版 AgentRun envelope 已覆盖路由/provider/检索聚合/工具类别/终态 | 设备/重新认证绑定、版本化风险文案、token/TTFT、客户端断开结案、ActionPlan 显式关联和完整对账 |
+| Agent listing 写工具 | ActionPlan 已 crash-safe，HTTP 与 Agent 已共享 ListingCommandService；关键动作已有 `content_revision` 快照和冲突保护；提案按用户/校园和动作参数哈希幂等；typed terminal outcome 与行动级 receipt 已落地；聊天提案 receipt 可通过 `agent_run_id` 显式关联；AgentRun envelope 已覆盖路由/provider/检索聚合/工具类别/SSE TTFT/终态，客户端断开有界取消结案已落地 | 设备/重新认证绑定、版本化风险文案、token 用量/provider TTFT、持久化 cancel 对账和完整 `/api/v1` |
 | Secret Chat | 服务器不可读，治理边界冲突 | 停止生产承诺并迁移 |
 | TEXT/UUID 并存 | join 和 fixture 可能只覆盖一类 ID | repository 兼容封装和分阶段收敛 |
 | 大模块 | user_chat 和页面承担多种职责 | 先补行为测试，再按领域拆分 |

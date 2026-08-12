@@ -269,6 +269,32 @@ impl AgentRunService {
         Ok(true)
     }
 
+    /// Record the time until the first streamed token becomes available.  The
+    /// value is intentionally write-once: retries or later chunks cannot
+    /// replace the first-token measurement, and a run that has already
+    /// reached a terminal state cannot be mutated by a late stream callback.
+    pub async fn record_ttft(
+        &self,
+        trace_id: &str,
+        campus_id: Uuid,
+        user_id: &str,
+        ttft_ms: i32,
+    ) -> anyhow::Result<bool> {
+        let updated = sqlx::query(
+            "UPDATE agent_runs
+             SET ttft_ms = $4, updated_at = NOW()
+             WHERE trace_id = $1 AND campus_id = $2 AND user_id = $3
+               AND status = 'started' AND ttft_ms IS NULL",
+        )
+        .bind(trace_id)
+        .bind(campus_id)
+        .bind(user_id)
+        .bind(ttft_ms.max(0))
+        .execute(&self.db)
+        .await?;
+        Ok(updated.rows_affected() == 1)
+    }
+
     /// Finish a run with a stable outcome category.  Full provider errors are
     /// logged server-side by the caller, while only a bounded error code is
     /// persisted here.
@@ -331,6 +357,29 @@ impl AgentRunService {
         .await?;
         tx.commit().await?;
         Ok(true)
+    }
+
+    /// Close a run that no longer has a live streaming consumer.  This is a
+    /// narrow semantic wrapper around `finish` so callers cannot accidentally
+    /// turn a disconnect reconciliation into a successful outcome.
+    pub async fn cancel_started(
+        &self,
+        trace_id: &str,
+        campus_id: Uuid,
+        user_id: &str,
+        error_code: Option<&str>,
+        duration_ms: Option<i32>,
+    ) -> anyhow::Result<bool> {
+        self.finish(
+            trace_id,
+            campus_id,
+            user_id,
+            "cancelled",
+            "cancelled",
+            error_code,
+            duration_ms,
+        )
+        .await
     }
 
     pub async fn list_recent(

@@ -4,7 +4,9 @@
 use goods4ncu::agents::tools::{
     CreateListingArgs, CreateListingTool, NegotiateItemArgs, NegotiateItemTool, ToolContext,
 };
+use goods4ncu::api::request_context;
 use goods4ncu::services::agent_plan::{AgentPlanService, ConfirmOutcome};
+use goods4ncu::services::agent_run::AgentRunService;
 use goods4ncu::services::moderation_case::ModerationCaseService;
 use goods4ncu::services::notification::NotificationService;
 use goods4ncu::test_infra::{concurrent_test_pool, with_test_pool};
@@ -88,6 +90,68 @@ fn expect_second_token(outcome: ConfirmOutcome) -> String {
         ConfirmOutcome::NeedsSecondConfirmation { confirmation_token } => confirmation_token,
         other => panic!("expected a second-confirmation token, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn action_receipt_links_to_the_originating_agent_run_by_trace() {
+    with_test_pool(|pool| async move {
+        let user_id = format!("plan-run-link-{}", Uuid::new_v4().simple());
+        seed_verified_user(&pool, &user_id).await;
+        let trace_id = format!("plan-run-link-trace-{}", Uuid::new_v4().simple());
+        let run_id = AgentRunService::new(pool.clone())
+            .start(
+                &trace_id,
+                ncu_campus_id(),
+                &user_id,
+                "agent-user-1",
+                "chat",
+                0.5,
+                Some("gemini"),
+                Some("gemini-test-model"),
+            )
+            .await
+            .expect("start originating AgentRun");
+
+        let args = serde_json::json!({ "listing_id": "listing-for-link" });
+        let plan_id = request_context::with_request_id(trace_id.clone(), || async {
+            AgentPlanService::new(pool.clone())
+                .create_plan(goods4ncu::services::agent_plan::CreatePlanInput {
+                    campus_id: ncu_campus_id(),
+                    user_id: &user_id,
+                    action: "purchase_item",
+                    risk_level: "L3",
+                    args: &args,
+                    summary: "link receipt test",
+                    proposal_idempotency_key: None,
+                })
+                .await
+        })
+        .await
+        .expect("create plan with propagated trace");
+
+        let linked_run_id: Option<Uuid> = sqlx::query_scalar(
+            "SELECT agent_run_id
+             FROM agent_action_audits
+             WHERE plan_id = $1 AND event_type = 'proposal_created'",
+        )
+        .bind(plan_id)
+        .fetch_one(&pool)
+        .await
+        .expect("read linked receipt");
+        assert_eq!(linked_run_id, Some(run_id));
+
+        AgentRunService::new(pool.clone())
+            .cancel_started(
+                &trace_id,
+                ncu_campus_id(),
+                &user_id,
+                Some("test_cleanup"),
+                Some(1),
+            )
+            .await
+            .expect("close originating AgentRun");
+    })
+    .await;
 }
 
 #[tokio::test]

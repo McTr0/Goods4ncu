@@ -223,8 +223,8 @@
 ### 安全与质量
 
 - [部分完成] 工具层滥用测试集已落地（`tests/agent_injection_regression.rs`）：跨校园购买/议价、参数污染（空/超长标题、越界成色、非正/天价价格、越界出价）、自买自卖、未认证用户提案全部被拒并有零副作用断言；confirmation token 隔离、跨用户/校园确认拒绝、资源版本快照冲突和原子恢复已有回归覆盖。Agent listing 已与 HTTP 共享同步文本审核、分类/空白/金额规范化；针对真实 LLM 的间接注入与虚假承诺评估仍需线上评测集。
-- [部分完成] ActionPlan 计划终态已保存受约束的 `result_code`；`agent_action_audits` 在同一事务中记录提案、幂等重放/冲突、确认、执行、失败、取消和过期，带租户、trace、风险、耗时和固定元数据，不保存正文、token、args 或完整错误。`agent_runs`/`agent_run_events` 已为活动校园聊天记录路由、检索聚合、provider/model、版本、工具类别、耗时和 typed outcome，并提供 `GET /api/agent/runs` 安全视图；token/TTFT、取消结案、ActionPlan 显式关联、设备绑定和版本化风险文案仍待完成。
-- AgentRun 的安全 envelope 与行动 receipt 各自承担不同职责：前者描述一次请求的运行事实，后者证明一次受确认行动的状态转换；两者不保存敏感正文，不能互相替代。
+- [部分完成] ActionPlan 计划终态已保存受约束的 `result_code`；`agent_action_audits` 在同一事务中记录提案、幂等重放/冲突、确认、执行、失败、取消和过期，带租户、trace、风险、耗时和固定元数据，不保存正文、token、args 或完整错误。聊天提案若与 AgentRun 共享请求 trace，receipt 现在写入可空的 `agent_run_id` 显式关联；确认-only receipt 保持可空。`agent_runs`/`agent_run_events` 已为活动校园聊天记录路由、检索聚合、provider/model、版本、工具类别、SSE TTFT、耗时和 typed outcome，并提供 `GET /api/agent/runs` 安全视图；token 用量、provider 侧 TTFT、生产级取消对账任务、设备绑定和版本化风险文案仍待完成。
+- AgentRun 的安全 envelope 与行动 receipt 各自承担不同职责：前者描述一次请求的运行事实，后者证明一次受确认行动的状态转换；聊天提案在同 trace 下用 `agent_run_id` 显式串联，确认-only 动作不强行伪造运行记录。两者不保存敏感正文，不能互相替代。
 - 无 LLM 时搜索、表单、聊天和成交记录仍可用。
 - Agent 变更采用 feature flag 和 canary，越权执行有立即 kill switch。
 
@@ -297,7 +297,7 @@
 | Secret Chat | Phase 1 | [已实现] 新建默认 403（`SECRET_CHAT_NEW_SESSIONS_ENABLED` 仅迁移窗口可开），移动端入口已移除，历史会话可读有回归覆盖 |
 | 进程内事件 | Phase 4 | [部分完成] outbox 通知与专用 `embedding_jobs` listing 投影已迁移并有回归覆盖；审核投影等其余消费者仍待迁移 |
 | 单实例 WebSocket | Phase 4 | [部分完成] Redis fan-out 已实现并通过双实例端到端测试；断线补偿依赖既有 HTTP 拉取，压测仍待做 |
-| Agent 直接写工具 | Phase 3 | [部分完成] 发布已进入可撤销直接执行，四个计划动作使用 crash-safe ActionPlan；listing command 与资源版本快照已统一，提案幂等、typed terminal outcome、行动级审计和聊天首版 AgentRun envelope 已落地，设备/重新认证绑定、版本化文案、token/TTFT/cancel 对账、ActionPlan 显式关联和完整 `/api/v1` 仍待补 |
+| Agent 直接写工具 | Phase 3 | [部分完成] 发布已进入可撤销直接执行，四个计划动作使用 crash-safe ActionPlan；listing command 与资源版本快照已统一，提案幂等、typed terminal outcome、行动级审计和聊天首版 AgentRun envelope 已落地，SSE TTFT、客户端断开有界取消结案和聊天提案 receipt 显式关联已落地；设备/重新认证绑定、token 用量/provider TTFT、持久化 cancel 对账、版本化文案和完整 `/api/v1` 仍待补 |
 
 ## 路线图维护规则
 
