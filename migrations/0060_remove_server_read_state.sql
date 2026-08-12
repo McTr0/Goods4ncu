@@ -18,9 +18,16 @@ ALTER TABLE chat_conversation_members
 
 -- The legacy permanent-connection table is no longer a write path, but its
 -- unread counter would still look like a server-side reading position during
--- rollback or ad-hoc queries.
-ALTER TABLE chat_connections
-    DROP COLUMN IF EXISTS unread_count;
+-- rollback or ad-hoc queries.  Migration 0019 removes this table on a fresh
+-- schema, while older installations may still have it during the compatibility
+-- window, so keep this step conditional.
+DO $$
+BEGIN
+    IF to_regclass('public.chat_connections') IS NOT NULL THEN
+        ALTER TABLE chat_connections
+            DROP COLUMN IF EXISTS unread_count;
+    END IF;
+END $$;
 
 ALTER TABLE users
     DROP COLUMN IF EXISTS chat_read_receipt_mode;

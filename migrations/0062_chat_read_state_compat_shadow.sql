@@ -26,8 +26,13 @@ BEGIN
     END IF;
 END $$;
 
-ALTER TABLE chat_connections
-    ADD COLUMN IF NOT EXISTS unread_count INTEGER NOT NULL DEFAULT 0;
+DO $$
+BEGIN
+    IF to_regclass('public.chat_connections') IS NOT NULL THEN
+        ALTER TABLE chat_connections
+            ADD COLUMN IF NOT EXISTS unread_count INTEGER NOT NULL DEFAULT 0;
+    END IF;
+END $$;
 
 ALTER TABLE users
     ADD COLUMN IF NOT EXISTS chat_read_receipt_mode TEXT NOT NULL DEFAULT 'auto';
@@ -55,7 +60,12 @@ COMMENT ON COLUMN chat_conversation_members.last_read_message_id IS
     'Retired compatibility shadow; device-local seen markers are authoritative.';
 COMMENT ON COLUMN chat_conversation_members.read_receipt_mode IS
     'Retired compatibility shadow; explicit message acknowledgements replace read preferences.';
-COMMENT ON COLUMN chat_connections.unread_count IS
-    'Retired compatibility shadow; device-local unread markers are authoritative.';
+DO $$
+BEGIN
+    IF to_regclass('public.chat_connections') IS NOT NULL THEN
+        COMMENT ON COLUMN chat_connections.unread_count IS
+            'Retired compatibility shadow; device-local unread markers are authoritative.';
+    END IF;
+END $$;
 COMMENT ON COLUMN users.chat_read_receipt_mode IS
     'Retired compatibility shadow; explicit message acknowledgements replace read preferences.';
