@@ -134,6 +134,47 @@ void main() {
     expect(find.text('已连接'), findsOneWidget);
   });
 
+  testWidgets('full role space fits a 390x844 viewport at 200% text', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const persona = SocialPersona(
+      representationMode: 'role_character',
+      styleVersion: 'v1',
+      appearance: SocialPersonaAppearance(
+        palette: 'plum',
+        silhouette: 'round',
+        accessory: 'leaf',
+        outfit: 'campus',
+      ),
+      selfDescriptions: ['slow_to_warm', 'meetup_friendly'],
+      contactPosture: 'leave_message',
+      status: 'published',
+    );
+    await tester.pumpWidget(
+      _host(
+        MediaQuery(
+          data: const MediaQueryData(
+            textScaler: TextScaler.linear(2),
+            disableAnimations: true,
+          ),
+          child: const RelationshipSpacePreview(
+            otherName: 'Alice',
+            otherPersona: persona,
+            selfPersona: persona,
+            latestEvent: '图书馆见',
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byKey(const Key('relationship-space-preview')), findsOneWidget);
+    expect(find.text('图书馆见'), findsOneWidget);
+    expect(find.byType(SocialPersonaAvatar), findsNWidgets(2));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'shows shared object references without loading their resources',
     (tester) async {
