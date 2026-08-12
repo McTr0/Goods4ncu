@@ -125,3 +125,77 @@ async fn pins_are_idempotent_reversible_and_quotes_are_derived() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn pending_realtime_is_not_projected_as_connected() {
+    with_test_pool(|pool| async move {
+        let campus_id = campus(&pool).await;
+        let alice = user(&pool, "pending-alice").await;
+        let bob = user(&pool, "pending-bob").await;
+        let conversation_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO chat_conversations (
+                 id, client_request_id, campus_id, mode, state,
+                 initiator_id, recipient_id
+             ) VALUES ($1, $2, $3, 'realtime', 'syn_sent', $4, $5)",
+        )
+        .bind(conversation_id)
+        .bind(Uuid::new_v4())
+        .bind(campus_id)
+        .bind(&alice)
+        .bind(&bob)
+        .execute(&pool)
+        .await
+        .expect("insert pending conversation");
+        for member in [&alice, &bob] {
+            sqlx::query(
+                "INSERT INTO chat_conversation_members (conversation_id, user_id)
+                 VALUES ($1, $2)",
+            )
+            .bind(conversation_id)
+            .bind(member)
+            .execute(&pool)
+            .await
+            .expect("insert pending member");
+        }
+
+        let service = ChatConversationService::new(pool.clone());
+        let pending = service
+            .list_threads_for_campus(&alice, campus_id, None, 50)
+            .await
+            .expect("list pending thread")
+            .into_iter()
+            .find(|thread| thread.peer_user_id == bob)
+            .expect("pending thread");
+        assert_eq!(pending.pending_count, 0);
+        assert!(!pending.has_active_realtime);
+        let pending_recipient = service
+            .list_threads_for_campus(&bob, campus_id, None, 50)
+            .await
+            .expect("list recipient thread")
+            .into_iter()
+            .find(|thread| thread.peer_user_id == alice)
+            .expect("recipient thread");
+        assert_eq!(pending_recipient.pending_count, 1);
+        assert!(!pending_recipient.has_active_realtime);
+
+        sqlx::query(
+            "UPDATE chat_conversations
+             SET state = 'active', established_at = now()
+             WHERE id = $1",
+        )
+        .bind(conversation_id)
+        .execute(&pool)
+        .await
+        .expect("activate conversation");
+        let active = service
+            .list_threads_for_campus(&alice, campus_id, None, 50)
+            .await
+            .expect("list active thread")
+            .into_iter()
+            .find(|thread| thread.peer_user_id == bob)
+            .expect("active thread");
+        assert!(active.has_active_realtime);
+    })
+    .await;
+}

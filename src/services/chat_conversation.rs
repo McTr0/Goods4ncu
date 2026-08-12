@@ -1017,7 +1017,7 @@ impl ChatConversationService {
                    )::bigint AS pending_count,
                    BOOL_OR(
                        visible.mode = 'realtime'
-                       AND visible.state IN ('syn_sent', 'syn_ack', 'active')
+                       AND visible.state = 'active'
                    ) AS has_active_realtime,
                    MAX(visible.listing_title) FILTER (WHERE visible.recency_rank = 1)
                        AS latest_listing_title
