@@ -19,6 +19,8 @@
 # mock webhook) and cleans up after itself. Exit 0 = all checks passed.
 #
 # Requires: built binary (cargo build), postgres tools, redis-server, minio, mc, python3.
+# Optional: PGHOST/PGPORT (or REHEARSAL_DB_HOST/REHEARSAL_DB_PORT) for a local
+# PostgreSQL instance that is not listening on the default 5432.
 
 set -euo pipefail
 
@@ -32,6 +34,8 @@ BIN="target/debug/goods4ncu"
 [ -x "$BIN" ] || { echo "[rehearsal] build first: cargo build" >&2; exit 2; }
 
 DB_NAME="goods4ncu_rehearsal_$$"
+REHEARSAL_DB_HOST="${REHEARSAL_DB_HOST:-${PGHOST:-127.0.0.1}}"
+REHEARSAL_DB_PORT="${REHEARSAL_DB_PORT:-${PGPORT:-5432}}"
 REDIS_PORT=6398
 S3_PORT=9102
 S3_BUCKET=rehearsal-media
@@ -76,7 +80,7 @@ DB_NAME="$DB_NAME" APP_ROLE="$APP_ROLE" APP_PASSWORD="$APP_PASSWORD" \
 # Apply the schema before removing the historical seed: the production boot
 # guard deliberately runs after migrations, while the migration set still
 # contains the development-only seed rows.
-APP_DATABASE_URL="postgres://$APP_ROLE:$APP_PASSWORD@127.0.0.1:5432/$DB_NAME"
+APP_DATABASE_URL="postgres://$APP_ROLE:$APP_PASSWORD@$REHEARSAL_DB_HOST:$REHEARSAL_DB_PORT/$DB_NAME"
 DATABASE_URL="$APP_DATABASE_URL" "$BIN" migrate >/dev/null \
     || fail "migration bootstrap failed"
 # Migrations intentionally include the historical demo seed for development,
@@ -135,7 +139,7 @@ disown %% 2>/dev/null || true
 PROD_ENV=(
     "APP_ENV=production"
     "JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')"
-    "DATABASE_URL=postgres://$APP_ROLE:$APP_PASSWORD@127.0.0.1:5432/$DB_NAME"
+    "DATABASE_URL=$APP_DATABASE_URL"
     "REDIS_URL=redis://127.0.0.1:$REDIS_PORT"
     "CORS_ORIGINS=https://app.example.edu"
     "CAMPUS_VERIFICATION_DELIVERY_URL=http://127.0.0.1:$WEBHOOK_PORT/deliver"

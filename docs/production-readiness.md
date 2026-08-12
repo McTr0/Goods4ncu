@@ -64,7 +64,7 @@
 | Transactional outbox（原子入队/至少一次/退避/死信/租约/重放） | `tests/outbox_integration.rs`；通知推送已迁入 |
 | Redis WS fan-out 跨副本投递（双真实进程 + 真实 WebSocket 客户端） | `tests/ws_fanout_integration.rs`（`REDIS_TEST_URL`/`FANOUT_E2E` 门控） |
 | 依赖漏洞门禁（cargo audit 进 CI；唯一 ignore 附不可达论证） | `.cargo/audit.toml`、`.github/workflows/ci.yml` |
-| 空库/升级库迁移均验证（含真实升级库上的 legacy 值归一化） | CI migration job + 0040/0041 升级路径实测 + 全量空库迁移至 `0071`；`0068` 清理 attention 兼容影子列，`0069` 为媒体审核 processing 任务增加可回收 lease，`0070` 为 persona asset 增加对象探测、审核与清理边界，`0071` 为遗弃的 pending upload 增加过期撤销与审计；2026-08-12 在 `0069` 后重跑 production rehearsal，真实 MinIO OSS probe、signed DELETE、撤销审计和远端对象清理均通过 |
+| 空库/升级库迁移均验证（含真实升级库上的 legacy 值归一化） | CI migration job + 0040/0041 升级路径实测 + 全量空库迁移至 `0071`；`0068` 清理 attention 兼容影子列，`0069` 为媒体审核 processing 任务增加可回收 lease，`0070` 为 persona asset 增加对象探测、审核与清理边界，`0071` 为遗弃的 pending upload 增加过期撤销与审计；2026-08-12 在 `0071` 后重跑 production rehearsal（通过 `PGHOST/PGPORT` 接入本地实例），真实 MinIO OSS probe、signed DELETE、撤销审计和远端对象清理均通过 |
 
 ### 多校园与规模（Phase 4 工程部分）
 
