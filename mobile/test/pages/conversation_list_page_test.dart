@@ -49,6 +49,15 @@ class _FakeChatService extends ChatService {
   }
 
   @override
+  Future<ChatThreadDetail> getThread(
+    String peerUserId, {
+    ConversationMode? mode,
+  }) async {
+    final thread = threads.firstWhere((item) => item.peerUserId == peerUserId);
+    return ChatThreadDetail(thread: thread, conversations: const []);
+  }
+
+  @override
   Future<Map<String, dynamic>> createSpace({
     required String kind,
     required String name,
@@ -97,7 +106,38 @@ class _FakeChatService extends ChatService {
   }
 }
 
-class _FakeUserService extends UserService {}
+class _FakeUserService extends UserService {
+  @override
+  Future<SocialPersona?> getSocialPersona() async => const SocialPersona(
+    representationMode: 'role_character',
+    styleVersion: 'v1',
+    appearance: SocialPersonaAppearance(
+      palette: 'teal',
+      silhouette: 'soft',
+      accessory: 'leaf',
+      outfit: 'campus',
+    ),
+    selfDescriptions: [],
+    contactPosture: 'leave_message',
+    status: 'published',
+    publishedAt: '2026-08-12T10:00:00Z',
+  );
+}
+
+const _publishedPeerPersona = SocialPersona(
+  representationMode: 'role_character',
+  styleVersion: 'v1',
+  appearance: SocialPersonaAppearance(
+    palette: 'plum',
+    silhouette: 'round',
+    accessory: 'leaf',
+    outfit: 'campus',
+  ),
+  selfDescriptions: ['slow_to_warm'],
+  contactPosture: 'leave_message',
+  status: 'published',
+  publishedAt: '2026-08-12T10:00:00Z',
+);
 
 Widget _buildPage(
   ChatService service, {
@@ -177,20 +217,7 @@ void main() {
           pendingCount: 1,
           hasActiveRealtime: true,
           latestListingTitle: '二手显示器',
-          peerPersona: SocialPersona(
-            representationMode: 'role_character',
-            styleVersion: 'v1',
-            appearance: const SocialPersonaAppearance(
-              palette: 'plum',
-              silhouette: 'round',
-              accessory: 'leaf',
-              outfit: 'campus',
-            ),
-            selfDescriptions: const ['slow_to_warm'],
-            contactPosture: 'leave_message',
-            status: 'published',
-            publishedAt: '2026-08-12T10:00:00Z',
-          ),
+          peerPersona: _publishedPeerPersona,
         ),
       ],
     );
@@ -208,6 +235,42 @@ void main() {
       tester.getSize(find.byType(SocialPersonaAvatar)),
       const Size(24, 24),
     );
+  });
+
+  testWidgets('thread detail anchors both published roles before connection', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final thread = ChatThread(
+      peerUserId: 'seller-2',
+      peerUsername: 'seller2',
+      latestActivityAt: DateTime.utc(2026, 8, 12, 10),
+      latestPreview: '可以留言',
+      peerPersona: _publishedPeerPersona,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        locale: const Locale('zh'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: ChatThreadPage(
+          peerUserId: 'seller-2',
+          initialThread: thread,
+          chatService: _FakeChatService(threads: [thread]),
+          userService: _FakeUserService(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final avatars = find.byType(SocialPersonaAvatar);
+    expect(avatars, findsNWidgets(3));
+    expect(tester.getSize(avatars.at(0)), const Size(48, 48));
+    expect(tester.getSize(avatars.at(1)), const Size(24, 24));
+    expect(tester.getSize(avatars.at(2)), const Size(24, 24));
   });
 
   testWidgets('conversation inbox uses dark scaffold background', (

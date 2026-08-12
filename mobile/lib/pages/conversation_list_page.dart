@@ -360,6 +360,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
                       : _ChatThreadDetailPane(
                           key: ValueKey(_selectedThread!.peerUserId),
                           chatService: _chatService,
+                          userService: _userService,
                           peerUserId: _selectedThread!.peerUserId,
                           initialThread: _selectedThread,
                           mode: _filter,
@@ -559,18 +560,30 @@ class ChatThreadPage extends StatelessWidget {
     required this.peerUserId,
     this.initialThread,
     this.chatService,
+    this.userService,
   });
 
   final String peerUserId;
   final ChatThread? initialThread;
   final ChatService? chatService;
+  final UserService? userService;
 
   @override
   Widget build(BuildContext context) {
     final service = chatService ?? context.read<ChatService>();
+    UserService? users = userService;
+    if (users == null) {
+      // The role layer is optional for embedders and older test hosts. The
+      // thread still renders with ordinary avatars when no user service is
+      // registered.
+      try {
+        users = context.read<UserService>();
+      } catch (_) {}
+    }
     return Scaffold(
       body: _ChatThreadDetailPane(
         chatService: service,
+        userService: users,
         peerUserId: peerUserId,
         initialThread: initialThread,
       ),
@@ -582,6 +595,7 @@ class _ChatThreadDetailPane extends StatefulWidget {
   const _ChatThreadDetailPane({
     super.key,
     required this.chatService,
+    this.userService,
     required this.peerUserId,
     this.initialThread,
     this.mode,
@@ -590,6 +604,7 @@ class _ChatThreadDetailPane extends StatefulWidget {
   });
 
   final ChatService chatService;
+  final UserService? userService;
   final String peerUserId;
   final ChatThread? initialThread;
   final ConversationMode? mode;
@@ -602,6 +617,7 @@ class _ChatThreadDetailPane extends StatefulWidget {
 
 class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
   ChatThread? _thread;
+  SocialPersona? _selfPersona;
   List<Conversation> _conversations = const [];
   Set<String> _expandedIds = const {};
   bool _loading = true;
@@ -612,6 +628,7 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
     super.initState();
     _thread = widget.initialThread;
     _loadThread();
+    _loadOwnPersona();
   }
 
   @override
@@ -652,6 +669,24 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
         _loading = false;
         _error = error.toString();
       });
+    }
+  }
+
+  Future<void> _loadOwnPersona() async {
+    final service = widget.userService;
+    if (service == null) return;
+    try {
+      final persona = await service.getSocialPersona();
+      if (!mounted) return;
+      setState(() {
+        // A draft or archived record is private presentation state and must
+        // never become a shared-space anchor. The ordinary avatar remains the
+        // safe fallback when the role service is unavailable.
+        _selfPersona = persona?.isPublished == true ? persona : null;
+      });
+    } catch (_) {
+      // The role layer is optional; the thread and message history remain
+      // usable when the persona endpoint is unavailable.
     }
   }
 
@@ -764,6 +799,7 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
             RelationshipSpacePreview(
               otherName: _displayName,
               otherPersona: thread.peerPersona,
+              selfPersona: _selfPersona,
               latestEvent: thread.latestPreview,
               isConnected: thread.hasActiveRealtime,
               compact: true,
