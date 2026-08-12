@@ -11,7 +11,10 @@
 //! - Rate limit rejections
 //! - LLM call counts and errors
 
-use prometheus::{Counter, CounterVec, HistogramOpts, HistogramVec, Opts, Registry, TextEncoder};
+use prometheus::{
+    Counter, CounterVec, Gauge, GaugeVec, Histogram, HistogramOpts, HistogramVec, Opts, Registry,
+    TextEncoder,
+};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -37,6 +40,14 @@ pub struct MetricsService {
     pub ws_stale_connections_pruned_total: Counter,
     pub chat_media_url_messages_total: Counter,
     pub chat_media_base64_messages_total: Counter,
+    // Image moderation worker. Labels are deliberately fixed, low-cardinality
+    // vocabulary; never put provider URLs, job IDs, campuses, or error text in
+    // a metric label.
+    pub moderation_jobs_processed_total: CounterVec,
+    pub moderation_api_calls_total: CounterVec,
+    pub moderation_api_duration_seconds: Histogram,
+    pub moderation_queue_depth: GaugeVec,
+    pub moderation_queue_oldest_age_seconds: Gauge,
 }
 
 impl MetricsService {
@@ -109,6 +120,43 @@ impl MetricsService {
             "Total chat messages carrying base64 media fields",
         )
         .expect("metric definition is valid");
+        let moderation_jobs_processed_total = CounterVec::new(
+            Opts::new(
+                "moderation_jobs_processed_total",
+                "Image moderation jobs finalized or safely re-queued",
+            ),
+            &["outcome"],
+        )
+        .expect("metric definition is valid");
+        let moderation_api_calls_total = CounterVec::new(
+            Opts::new(
+                "moderation_api_calls_total",
+                "Image moderation provider calls by outcome",
+            ),
+            &["outcome"],
+        )
+        .expect("metric definition is valid");
+        let moderation_api_duration_seconds = Histogram::with_opts(
+            HistogramOpts::new(
+                "moderation_api_duration_seconds",
+                "Image moderation provider call latency",
+            )
+            .buckets(vec![0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 8.0, 10.0]),
+        )
+        .expect("metric definition is valid");
+        let moderation_queue_depth = GaugeVec::new(
+            Opts::new(
+                "moderation_queue_depth",
+                "Current image moderation jobs by queue status",
+            ),
+            &["status"],
+        )
+        .expect("metric definition is valid");
+        let moderation_queue_oldest_age_seconds = Gauge::new(
+            "moderation_queue_oldest_age_seconds",
+            "Age of the oldest pending or processing image moderation job",
+        )
+        .expect("metric definition is valid");
 
         // Register all metrics
         registry
@@ -150,6 +198,21 @@ impl MetricsService {
         registry
             .register(Box::new(chat_media_base64_messages_total.clone()))
             .expect("metric is unique");
+        registry
+            .register(Box::new(moderation_jobs_processed_total.clone()))
+            .expect("metric is unique");
+        registry
+            .register(Box::new(moderation_api_calls_total.clone()))
+            .expect("metric is unique");
+        registry
+            .register(Box::new(moderation_api_duration_seconds.clone()))
+            .expect("metric is unique");
+        registry
+            .register(Box::new(moderation_queue_depth.clone()))
+            .expect("metric is unique");
+        registry
+            .register(Box::new(moderation_queue_oldest_age_seconds.clone()))
+            .expect("metric is unique");
 
         Self {
             registry,
@@ -166,6 +229,11 @@ impl MetricsService {
             ws_stale_connections_pruned_total,
             chat_media_url_messages_total,
             chat_media_base64_messages_total,
+            moderation_jobs_processed_total,
+            moderation_api_calls_total,
+            moderation_api_duration_seconds,
+            moderation_queue_depth,
+            moderation_queue_oldest_age_seconds,
         }
     }
 
@@ -231,6 +299,40 @@ impl MetricsService {
         self.chat_media_base64_messages_total.inc();
     }
 
+    /// Record one moderation job outcome. Keep `outcome` to the fixed values
+    /// documented by the worker (`approved`, `rejected`, `failed`, `retry`,
+    /// `lease_lost`, or `finalize_error`).
+    pub fn record_moderation_job(&self, outcome: &'static str) {
+        self.moderation_jobs_processed_total
+            .with_label_values(&[outcome])
+            .inc();
+    }
+
+    /// Record one provider call outcome (`approved`, `rejected`, or `error`).
+    pub fn record_moderation_api_call(&self, outcome: &'static str) {
+        self.moderation_api_calls_total
+            .with_label_values(&[outcome])
+            .inc();
+    }
+
+    pub fn record_moderation_api_duration(&self, duration: Duration) {
+        self.moderation_api_duration_seconds
+            .observe(duration.as_secs_f64());
+    }
+
+    /// Set queue gauges from one database snapshot. The worker supplies only
+    /// counts and age, so no high-cardinality identifiers enter Prometheus.
+    pub fn set_moderation_queue(&self, pending: i64, processing: i64, oldest_age: f64) {
+        self.moderation_queue_depth
+            .with_label_values(&["pending"])
+            .set(pending as f64);
+        self.moderation_queue_depth
+            .with_label_values(&["processing"])
+            .set(processing as f64);
+        self.moderation_queue_oldest_age_seconds
+            .set(oldest_age.max(0.0));
+    }
+
     /// Render all metrics in Prometheus text format.
     pub fn render(&self) -> String {
         let encoder = TextEncoder::new();
@@ -244,5 +346,30 @@ impl MetricsService {
 impl Default for MetricsService {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moderation_metrics_render_only_low_cardinality_series() {
+        let metrics = MetricsService::new();
+        metrics.record_moderation_job("approved");
+        metrics.record_moderation_api_call("error");
+        metrics.record_moderation_api_duration(Duration::from_millis(25));
+        metrics.set_moderation_queue(3, 1, 12.5);
+
+        let rendered = metrics.render();
+        assert!(rendered.contains("moderation_jobs_processed_total"));
+        assert!(rendered.contains("outcome=\"approved\""));
+        assert!(rendered.contains("moderation_api_calls_total"));
+        assert!(rendered.contains("moderation_api_duration_seconds"));
+        assert!(rendered.contains("moderation_queue_depth"));
+        assert!(rendered.contains("status=\"pending\""));
+        assert!(rendered.contains("moderation_queue_oldest_age_seconds 12.5"));
+        assert!(!rendered.contains("job_id"));
+        assert!(!rendered.contains("provider.example"));
     }
 }

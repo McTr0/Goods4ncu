@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 use crate::lifecycle::{sleep_or_shutdown, ShutdownSignal};
@@ -120,6 +120,7 @@ pub async fn process_pending_jobs_once(
     .await?;
 
     if rows.is_empty() {
+        refresh_queue_metrics(db).await;
         return Ok(0);
     }
 
@@ -135,7 +136,7 @@ pub async fn process_pending_jobs_once(
                     ("failed", Some(format!("审核服务错误: {}", e)))
                 } else {
                     // Increment retry count and put back to pending.
-                    if let Err(e) = sqlx::query(
+                    match sqlx::query(
                         "UPDATE moderation_jobs
                          SET status = 'pending', retry_count = retry_count + 1,
                              locked_by = NULL, locked_until = NULL
@@ -147,7 +148,19 @@ pub async fn process_pending_jobs_once(
                     .execute(db)
                     .await
                     {
-                        tracing::error!(job_id = %id, %e, "failed to re-queue moderation job for retry");
+                        Ok(result) if result.rows_affected() == 1 => {
+                            record_moderation_job("retry");
+                        }
+                        Ok(_) => {
+                            record_moderation_job("lease_lost");
+                            tracing::warn!(
+                                job_id = %id,
+                                "moderation lease was lost before retry re-queue"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!(job_id = %id, %e, "failed to re-queue moderation job for retry");
+                        }
                     }
                     continue;
                 }
@@ -165,11 +178,57 @@ pub async fn process_pending_jobs_once(
         )
         .await
         {
+            if e.to_string().contains("lease was lost") {
+                record_moderation_job("lease_lost");
+            } else {
+                record_moderation_job("finalize_error");
+            }
             tracing::error!(job_id = %id, resource_type = %resource_type, resource_id = %resource_id, %e, "failed to finalize moderation job");
+        } else {
+            record_moderation_job(new_status);
         }
     }
 
+    refresh_queue_metrics(db).await;
     Ok(count)
+}
+
+fn record_moderation_job(outcome: &'static str) {
+    if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {
+        metrics.record_moderation_job(outcome);
+    }
+}
+
+async fn refresh_queue_metrics(db: &PgPool) {
+    let snapshot = sqlx::query_as::<_, (i64, i64, f64)>(
+        r#"
+        SELECT
+            COUNT(*) FILTER (WHERE status = 'pending')::BIGINT,
+            COUNT(*) FILTER (WHERE status = 'processing')::BIGINT,
+            COALESCE(
+                EXTRACT(EPOCH FROM (
+                    CURRENT_TIMESTAMP - MIN(created_at)
+                    FILTER (WHERE status IN ('pending', 'processing'))
+                ))::DOUBLE PRECISION,
+                0.0
+            )
+        FROM moderation_jobs
+        WHERE status IN ('pending', 'processing')
+        "#,
+    )
+    .fetch_one(db)
+    .await;
+
+    match snapshot {
+        Ok((pending, processing, oldest_age)) => {
+            if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {
+                metrics.set_moderation_queue(pending, processing, oldest_age);
+            }
+        }
+        Err(error) => {
+            tracing::warn!(%error, "failed to refresh moderation queue metrics");
+        }
+    }
 }
 
 async fn finalize_job(
@@ -219,44 +278,60 @@ async fn moderate_image(image_url: &str, cfg: &ModerationApiConfig) -> anyhow::R
         return Ok(true);
     }
 
-    let api_url = cfg
-        .api_url
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("MODERATION_IMAGE_API_URL is not configured"))?;
-    let api_key = cfg
-        .api_key
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("MODERATION_IMAGE_API_KEY is not configured"))?;
+    let started = Instant::now();
+    let result = async {
+        let api_url = cfg
+            .api_url
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("MODERATION_IMAGE_API_URL is not configured"))?;
+        let api_key = cfg
+            .api_key
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("MODERATION_IMAGE_API_KEY is not configured"))?;
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(8))
-        .build()?;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(8))
+            .build()?;
 
-    let body = serde_json::json!({
-        "image_url": image_url,
-        "source": "goods4ncu"
-    });
+        let body = serde_json::json!({
+            "image_url": image_url,
+            "source": "goods4ncu"
+        });
 
-    let resp = client
-        .post(api_url)
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {api_key}"))
-        .json(&body)
-        .send()
-        .await?;
+        let resp = client
+            .post(api_url)
+            .header(reqwest::header::AUTHORIZATION, format!("Bearer {api_key}"))
+            .json(&body)
+            .send()
+            .await?;
 
-    let status = resp.status();
-    if !status.is_success() {
-        let text = resp.text().await.unwrap_or_default();
-        return Err(anyhow::anyhow!(
-            "moderation api non-success status={} body={}",
-            status,
-            text
-        ));
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!(
+                "moderation api non-success status={} body={}",
+                status,
+                text
+            ));
+        }
+
+        let payload: Value = resp.json().await?;
+        parse_moderation_verdict(&payload)
+            .ok_or_else(|| anyhow::anyhow!("unable to parse moderation verdict from response"))
+    }
+    .await;
+
+    if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {
+        let outcome = match &result {
+            Ok(true) => "approved",
+            Ok(false) => "rejected",
+            Err(_) => "error",
+        };
+        metrics.record_moderation_api_call(outcome);
+        metrics.record_moderation_api_duration(started.elapsed());
     }
 
-    let payload: Value = resp.json().await?;
-    parse_moderation_verdict(&payload)
-        .ok_or_else(|| anyhow::anyhow!("unable to parse moderation verdict from response"))
+    result
 }
 
 fn parse_moderation_verdict(payload: &Value) -> Option<bool> {

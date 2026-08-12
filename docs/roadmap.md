@@ -33,7 +33,7 @@
 - Agent 的更新/下架/成交意向/议价已接入 crash-safe ActionPlan（模型只能提出，L3 需独立 token 的二次确认）；发布采用立即执行 + 条件式撤销。HTTP、Agent 和撤销路径已统一经过 `ListingCommandService`；资源版本快照仍待补。
 - 聊天隐私迁移已完成首阶段：留言/连接二分、服务端已发送、设备本地 `LOCALLY_SEEN`、主动 acknowledgement，以及陌生人/忙碌/联系人静音与重复请求抑制均由当前协议执行。
 - WebSocket 跨副本投递已具备（Redis fan-out，双实例端到端验证）；call signaling 多副本化与压测仍待做，typing 已从协议移除。outbox 基础与通知推送已持久化，其余事件消费者仍在进程内。
-- 媒体隔离、审核公开门槛、缩略图和 Base64 退出不完整；案件事实层已具备，对象存储隔离已用真实 MinIO 完成生产模式演练，媒体审核队列已通过 `0069` 增加可回收 lease，生产 bucket/CDN、图片审核 provider 和人工运营仍需部署侧验收。
+- 媒体隔离、审核公开门槛、缩略图和 Base64 退出不完整；案件事实层已具备，对象存储隔离已用真实 MinIO 完成生产模式演练，媒体审核队列已通过 `0069` 增加可回收 lease，并补齐低基数队列/延迟指标；生产 bucket/CDN、图片审核 provider 和人工运营仍需部署侧验收。
 - API 缺少统一版本和 cursor；[已实现] 未版本化接口已有兼容旧客户端的稳定错误字段、服务端 request ID，以及 listing 发布、wanted response 和成交确认幂等，其他写接口仍需收敛。
 - 首页商品 feed、相似商品、listing wanted matches 与意图撮合均已有统一解释和显式反馈控制；离线质量评估、公平性指标与跨表达软排序仍不足。
 - Secret Chat 与服务器可治理通信目标冲突。

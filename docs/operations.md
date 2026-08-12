@@ -331,7 +331,7 @@ RETURNING listing_id, campus_id, desired_revision;
 
 ## Metrics 和结构化日志
 
-`GET /api/metrics` 暴露 Prometheus 文本格式指标。当前指标覆盖请求计数和延迟、限流拒绝、聊天消息、媒体消息、LLM 调用和错误、WebSocket dropped/pruned、订单创建和状态变化等行为。指标名称以 `src/api/metrics.rs` 中 `MetricsService` 为准。
+`GET /api/metrics` 暴露 Prometheus 文本格式指标。当前指标覆盖请求计数和延迟、限流拒绝、聊天消息、媒体消息、LLM 调用和错误、WebSocket dropped/pruned、订单创建和状态变化，以及图片审核任务结果、provider 延迟、pending/processing 队列深度和最老任务年龄。指标名称以 `src/api/metrics.rs` 中 `MetricsService` 为准。审核队列 gauge 是每个副本从同一数据库读取的快照，跨副本聚合应取 `max` 而不是 `sum`；counter/直方图才按副本求和。
 
 日志使用结构化字段。排错时优先看带字段的日志，例如 `user_id`、`listing_id`、`order_id`、`err`、`provider`、`vector_dim`。不要只看最后一行错误文本；上下文字段往往能直接说明是哪个用户、哪条订单或哪次 provider 调用失败。
 

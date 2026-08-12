@@ -200,6 +200,24 @@ grep -q "WS fanout subscribed" "$SCRATCH/a.log" \
     || fail "replica A did not subscribe to WS fanout"
 say "  ✓ Redis-backed rate limiting and WS fanout active"
 
+# The moderation worker must publish low-cardinality queue gauges even when the
+# external provider is deliberately disabled in this local rehearsal. This
+# proves the production endpoint is wired; it is not provider acceptance.
+say "  checking moderation queue metrics"
+for _ in $(seq 1 30); do
+    metrics_snapshot=$(curl -sf "http://127.0.0.1:$PORT_A/api/metrics" || true)
+    if printf '%s\n' "$metrics_snapshot" | grep -q '^moderation_queue_depth{status="pending"}' \
+        && printf '%s\n' "$metrics_snapshot" | grep -q '^moderation_queue_oldest_age_seconds'; then
+        break
+    fi
+    sleep 0.5
+done
+printf '%s\n' "$metrics_snapshot" | grep -q '^moderation_queue_depth{status="pending"}' \
+    || fail "replica A did not expose moderation queue depth metrics"
+printf '%s\n' "$metrics_snapshot" | grep -q '^moderation_queue_oldest_age_seconds' \
+    || fail "replica A did not expose moderation queue age metrics"
+say "  ✓ moderation queue metrics exposed without high-cardinality labels"
+
 # --- Check 2: SLO smoke on replica A -----------------------------------------
 say "check 2: SLO load smoke against replica A"
 BASE_URL="http://127.0.0.1:$PORT_A"
