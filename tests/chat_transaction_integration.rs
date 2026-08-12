@@ -697,7 +697,7 @@ async fn mail_thread_opens_immediately_allows_reply_and_member_archiving() {
 }
 
 #[tokio::test]
-async fn server_schema_keeps_retired_read_state_as_non_public_compatibility_shadows() {
+async fn server_schema_removes_retired_read_state_after_compatibility_window() {
     with_test_pool(|pool| async move {
         let shadow_columns: i64 = sqlx::query_scalar(
             "SELECT COUNT(*)
@@ -711,19 +711,7 @@ async fn server_schema_keeps_retired_read_state_as_non_public_compatibility_shad
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(shadow_columns, 7);
-
-        let comment: String = sqlx::query_scalar(
-            "SELECT COALESCE(col_description(a.attrelid, a.attnum), '')
-             FROM pg_attribute a
-             WHERE a.attrelid = 'public.chat_messages'::regclass
-               AND a.attname = 'read_at'
-               AND NOT a.attisdropped",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert!(comment.contains("never written or exposed"));
+        assert_eq!(shadow_columns, 0);
     })
     .await;
 }

@@ -1,8 +1,8 @@
 -- Keep the retired attention columns as a rollback shadow during the first
--- privacy migration window.  No application path reads or writes these
+-- privacy migration window. No application path reads or writes these
 -- columns; all public chat state is derived from sent status, local device
--- markers, and explicit acknowledgements.  A later cleanup migration may
--- remove the shadow after old clients and rollback procedures are retired.
+-- markers, and explicit acknowledgements. Migration 0068 removes the shadow
+-- after old clients and rollback procedures are retired.
 
 ALTER TABLE chat_messages
     ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ,

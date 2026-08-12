@@ -41,9 +41,9 @@
 | `RATE_LIMIT_WINDOW_SECS` | 可选 | 限流窗口秒数。 |
 | `BLOCKED_KEYWORDS` | 可选 | 逗号分隔本地策略关键词。内置规则已覆盖违禁交易、低俗成人、博彩、诈骗、暴力风险、骚扰、隐私泄露、联系方式和外链。 |
 | `SECRET_CHAT_NEW_SESSIONS_ENABLED` | 可选 | Secret Chat 已弃用；默认 `false`，新建会话返回 403。仅迁移窗口可临时置 `true`，历史会话始终可读。 |
-| `MODERATION_IMAGE_ENABLED` | 可选 | 是否启用图片审核。 |
-| `MODERATION_IMAGE_API_URL` | 图片审核需要 | 图片审核 API URL。 |
-| `MODERATION_IMAGE_API_KEY` | 图片审核需要 | 图片审核 API key。 |
+| `MODERATION_IMAGE_ENABLED` | 可选 | 是否启用图片审核；生产开启时必须同时提供合法的 provider URL 和 key。 |
+| `MODERATION_IMAGE_API_URL` | 生产图片审核开启时必需 | 图片审核 API URL；生产启动会校验为 `http(s)` URL。 |
+| `MODERATION_IMAGE_API_KEY` | 生产图片审核开启时必需 | 图片审核 API key；生产启动会拒绝空值或过短 key。 |
 | `OSS_ENDPOINT`、`OSS_BUCKET` | 可选 | OSS 直传非敏感配置。 |
 | `OSS_ROLE_ARN`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET` | 上传需要 | 获取 OSS STS 临时凭证需要的配置。 |
 | `CONFIG_FILE` | 可选 | 指定 TOML 配置文件路径。 |
@@ -363,7 +363,7 @@ RETURNING listing_id, campus_id, desired_revision;
 | `chat_conversation_members` | 每个成员的 `archived_at`；新消息提示的本地查看位置不在数据库。 |
 | `chat_conversation_events` | 握手、ACK、关闭、过期等状态事件时间线。 |
 | `chat_blocks` | blocker/blocked 屏蔽关系。 |
-| `chat_messages` | conversation_id、direct_conversation_id、sender、receiver、媒体 URL/Base64、edited_at；`read_at/read_by` 仅作为首阶段兼容影子保留，不写入、不公开。 |
+| `chat_messages` | conversation_id、direct_conversation_id、sender、receiver、媒体 URL/Base64、edited_at；`read_at/read_by` 已由 `0068_remove_chat_attention_compat_shadow` 删除。 |
 | `chat_message_acknowledgements` | 每条消息每个用户最多一条主动确认，`received/will_review/completed` 及创建/更新时间。 |
 | `chat_spaces` 及成员/消息表 | group/channel、owner、成员角色、发言权限和更新时间。 |
 | `chat_secret_sessions` 及消息表 | [实验中][待弃用] 密文、参与者、过期时间和兼容读取。 |
@@ -389,7 +389,7 @@ RETURNING listing_id, campus_id, desired_revision;
 
 本地政策词、校内临时专项词或法务要求的词不要写死进源码，优先通过 `BLOCKED_KEYWORDS` 或 `[moderation].blocked_keywords` 配置。返回给用户的错误只说明类别，不暴露具体命中词，避免教用户绕过。
 
-图片审核仍是异步任务：listing 首次 commit 会把媒体 URL、资源 `pending` 状态和 `moderation_jobs` 原子写入，并从 listing、conversation 或用户 session 继承校园，客户端不能提交校园。后台 Worker 调外部图片审核 API 并回写资源状态；拒绝结果与资源状态、ModerationCase 在同一事务中提交。生产环境应配置 `MODERATION_IMAGE_API_URL` 和 `MODERATION_IMAGE_API_KEY`，否则只能完成文本审核。校园运营可以在 `GET /api/admin/moderation/jobs?status=pending` 和 `GET /api/admin/moderation/cases?status=open` 查看本校积压；平台管理员跨校排查或处置必须同时提交 `campus_id` 和 `reason`。
+图片审核仍是异步任务：listing 首次 commit 会把媒体 URL、资源 `pending` 状态和 `moderation_jobs` 原子写入，并从 listing、conversation 或用户 session 继承校园，客户端不能提交校园。后台 Worker 调外部图片审核 API 并回写资源状态；拒绝结果与资源状态、ModerationCase 在同一事务中提交。生产环境开启图片审核时，启动会 fail-fast 校验 `MODERATION_IMAGE_API_URL` 和 `MODERATION_IMAGE_API_KEY`，避免 provider 缺失时任务静默失败；本地生产 rehearsal 明确关闭该外部依赖，不代表真实 provider 已验收。校园运营可以在 `GET /api/admin/moderation/jobs?status=pending` 和 `GET /api/admin/moderation/cases?status=open` 查看本校积压；平台管理员跨校排查或处置必须同时提交 `campus_id` 和 `reason`。
 
 ## 常见排错
 

@@ -489,6 +489,13 @@ impl AppConfig {
             .or_else(|| file.as_ref()?.moderation.image_api_url.clone());
         let moderation_image_api_key = read_non_empty_env("MODERATION_IMAGE_API_KEY")
             .or_else(|| file.as_ref()?.moderation.image_api_key.clone());
+        validate_image_moderation_config(
+            running_in_production(),
+            moderation_image_enabled,
+            moderation_image_api_url.as_deref(),
+            moderation_image_api_key.as_deref(),
+        )
+        .unwrap_or_else(|message| panic!("{message}"));
 
         // Private-bucket media serving. Default OFF so existing public-bucket
         // deployments keep working; production should enable it together with a
@@ -688,6 +695,41 @@ fn validate_campus_verification_delivery(
     Ok(())
 }
 
+fn validate_image_moderation_config(
+    production: bool,
+    enabled: bool,
+    api_url: Option<&str>,
+    api_key: Option<&str>,
+) -> Result<(), String> {
+    if !production || !enabled {
+        return Ok(());
+    }
+    let Some(api_url) = api_url.filter(|value| !value.trim().is_empty()) else {
+        return Err(
+            "MODERATION_IMAGE_API_URL is required when image moderation is enabled in production"
+                .to_string(),
+        );
+    };
+    let Some(api_key) = api_key.filter(|value| !value.trim().is_empty()) else {
+        return Err(
+            "MODERATION_IMAGE_API_KEY is required when image moderation is enabled in production"
+                .to_string(),
+        );
+    };
+    let parsed = reqwest::Url::parse(api_url)
+        .map_err(|_| "MODERATION_IMAGE_API_URL must be a valid http(s) URL".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("MODERATION_IMAGE_API_URL must be a valid http(s) URL".to_string());
+    }
+    if api_key.len() < 8 {
+        return Err(
+            "MODERATION_IMAGE_API_KEY is too short for production; use the provider secret"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -859,5 +901,30 @@ mod tests {
         )
         .is_ok());
         assert!(validate_campus_verification_delivery(false, None, None).is_ok());
+    }
+
+    #[test]
+    fn production_requires_image_moderation_provider_when_enabled() {
+        assert!(validate_image_moderation_config(true, true, None, None).is_err());
+        assert!(validate_image_moderation_config(
+            true,
+            true,
+            Some("https://moderation.example.test/check"),
+            None
+        )
+        .is_err());
+        assert!(validate_image_moderation_config(
+            true,
+            true,
+            Some("https://moderation.example.test/check"),
+            Some("provider-secret")
+        )
+        .is_ok());
+        assert!(
+            validate_image_moderation_config(true, true, Some("not a url"), Some("secret"))
+                .is_err()
+        );
+        assert!(validate_image_moderation_config(true, false, None, None).is_ok());
+        assert!(validate_image_moderation_config(false, true, None, None).is_ok());
     }
 }

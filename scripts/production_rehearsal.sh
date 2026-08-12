@@ -140,6 +140,10 @@ PROD_ENV=(
     "CORS_ORIGINS=https://app.example.edu"
     "CAMPUS_VERIFICATION_DELIVERY_URL=http://127.0.0.1:$WEBHOOK_PORT/deliver"
     "CAMPUS_VERIFICATION_DELIVERY_TOKEN=rehearsal-delivery-token-0123456789"
+    # The rehearsal does not contact a real image-moderation provider. Keep
+    # this explicitly disabled so production config validation cannot turn a
+    # missing external provider into a silent worker failure.
+    "MODERATION_IMAGE_ENABLED=false"
     "RATE_LIMIT_MAX_REQUESTS=100000"
     "MEDIA_PRIVATE_BUCKET=true"
     "MEDIA_PATH_STYLE=true"

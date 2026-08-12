@@ -2189,9 +2189,18 @@ async fn buyer_reject_counter_finalizes_negotiation_without_order() {
 }
 
 #[tokio::test]
-async fn typing_indicator_endpoint_is_removed_after_attention_migration() {
+async fn retired_attention_endpoints_are_removed_after_compatibility_window() {
     with_test_pool(|pool| async move {
         let conversation_id = Uuid::new_v4();
+        insert_user(
+            &pool,
+            "typing-user-a",
+            &format!("typing_user_a_{}", Uuid::new_v4().simple()),
+            "hash",
+            "user",
+            "active",
+        )
+        .await;
         let state = build_state(pool.clone());
         let app = create_router(state, &[]);
         let (token, _jti, _exp) = generate_access_token(
@@ -2202,16 +2211,159 @@ async fn typing_indicator_endpoint_is_removed_after_attention_migration() {
         )
         .expect("generate access token");
 
-        let req = Request::builder()
-            .method("POST")
-            .uri(format!("/api/chat/conversations/{conversation_id}/typing"))
-            .header("Authorization", bearer(&token))
-            .header("Content-Type", "application/json")
-            .body(Body::empty())
-            .unwrap();
+        for suffix in ["read", "read-preference", "typing"] {
+            let req = Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/chat/conversations/{conversation_id}/{suffix}"
+                ))
+                .header("Authorization", bearer(&token))
+                .header("Content-Type", "application/json")
+                .body(Body::empty())
+                .unwrap();
 
-        let resp = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+            let resp = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::NOT_FOUND,
+                "retired attention endpoint {suffix} must not remain callable"
+            );
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn shared_object_media_endpoint_invalidates_after_revoke() {
+    with_test_pool(|pool| async move {
+        let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("ncu campus");
+        let owner = format!("shared-media-owner-{}", Uuid::new_v4().simple());
+        let viewer = format!("shared-media-viewer-{}", Uuid::new_v4().simple());
+        insert_user(
+            &pool,
+            &owner,
+            &format!("shared_media_owner_{}", Uuid::new_v4().simple()),
+            "hash",
+            "user",
+            "active",
+        )
+        .await;
+        insert_user(
+            &pool,
+            &viewer,
+            &format!("shared_media_viewer_{}", Uuid::new_v4().simple()),
+            "hash",
+            "user",
+            "active",
+        )
+        .await;
+
+        let conversation_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO chat_conversations (
+                 id, client_request_id, campus_id, mode, state,
+                 initiator_id, recipient_id, subject
+             ) VALUES ($1, $2, $3, 'mail', 'open', $4, $5, '媒体撤销回归')",
+        )
+        .bind(conversation_id)
+        .bind(Uuid::new_v4())
+        .bind(campus_id)
+        .bind(&owner)
+        .bind(&viewer)
+        .execute(&pool)
+        .await
+        .expect("insert conversation");
+        for member in [&owner, &viewer] {
+            sqlx::query(
+                "INSERT INTO chat_conversation_members (conversation_id, user_id)
+                 VALUES ($1, $2)",
+            )
+            .bind(conversation_id)
+            .bind(member)
+            .execute(&pool)
+            .await
+            .expect("insert conversation member");
+        }
+
+        let service =
+            goods4ncu::services::chat_conversation::ChatConversationService::new(pool.clone());
+        let pending = service
+            .create_shared_object(
+                goods4ncu::services::chat_conversation::CreateSharedObjectInput {
+                    conversation_id,
+                    campus_id,
+                    created_by: owner.clone(),
+                    kind: goods4ncu::services::chat_conversation::SharedObjectKind::File,
+                    title: "私有讲义.pdf".to_string(),
+                    mime_type: Some("application/pdf".to_string()),
+                    size_bytes: Some(4096),
+                    canonical_url: None,
+                },
+            )
+            .await
+            .expect("create shared object");
+        let object_id = Uuid::parse_str(&pending.id).expect("object id");
+        let active = service
+            .complete_shared_object(
+                goods4ncu::services::chat_conversation::CompleteSharedObjectInput {
+                    object_id,
+                    user_id: owner.clone(),
+                    uploaded_size_bytes: 4096,
+                    uploaded_mime_type: Some("application/pdf".to_string()),
+                    storage_etag: Some("etag-api-regression".to_string()),
+                    moderation_required: false,
+                },
+            )
+            .await
+            .expect("complete shared object");
+        assert_eq!(active.status, "active");
+
+        let (token, _, _) = generate_access_token_for_campus(
+            &owner,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("owner token");
+        let mut state = build_state(pool.clone());
+        state.infra.media_signer = Some(Arc::new(goods4ncu::api::MediaSigner {
+            bucket: goods4ncu::services::storage::PrivateBucket {
+                endpoint: "https://media.example.test".to_string(),
+                bucket: "private-chat".to_string(),
+                region: "us-east-1".to_string(),
+                access_key_id: "test-access".to_string(),
+                secret_access_key: "test-secret".to_string(),
+                path_style: true,
+            },
+            ttl_secs: 300,
+        }));
+        let app = create_router(state, &[]);
+        let media_path = format!("/api/chat/shared-objects/{object_id}/media");
+        let (media_status, media_body) =
+            authenticated_json(&app, Method::GET, &media_path, &token, None).await;
+        assert_eq!(media_status, StatusCode::OK);
+        assert_eq!(media_body["object_id"], object_id.to_string());
+        assert!(media_body["url"]
+            .as_str()
+            .is_some_and(|url| url.contains("X-Amz-Signature=")));
+
+        let revoke_path = format!("/api/chat/shared-objects/{object_id}");
+        let (revoke_status, revoke_body) =
+            authenticated_json(&app, Method::DELETE, &revoke_path, &token, None).await;
+        assert_eq!(revoke_status, StatusCode::OK);
+        assert_eq!(revoke_body["status"], "revoked");
+
+        let (invalidated_status, _) =
+            authenticated_json(&app, Method::GET, &media_path, &token, None).await;
+        assert_eq!(
+            invalidated_status,
+            StatusCode::NOT_FOUND,
+            "revoked shared objects must invalidate the private media endpoint"
+        );
     })
     .await;
 }
