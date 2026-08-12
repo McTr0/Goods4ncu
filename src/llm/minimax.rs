@@ -115,6 +115,10 @@ impl super::LlmProvider for MiniMaxProvider {
         "minimax"
     }
 
+    fn model(&self) -> &str {
+        &self.model
+    }
+
     async fn create_marketplace_agent(
         self: Arc<Self>,
         db_pool: &sqlx::PgPool,

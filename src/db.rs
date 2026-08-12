@@ -83,7 +83,7 @@ pub async fn init_db(database_url: &str) -> Result<PgPool> {
     // files under migrations/ change rather than reusing an older executable.
     // Keep this comment adjacent to the macro so adding a migration also
     // invalidates binaries in environments whose build cache watches files
-    // conservatively.
+    // conservatively. AgentRun migrations 0077/0078 are included in this same set.
     sqlx::migrate!("./migrations").run(&db_pool).await?;
 
     Ok(db_pool)

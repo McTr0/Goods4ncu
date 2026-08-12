@@ -167,6 +167,11 @@ pub trait LlmProvider: Send + Sync {
     #[allow(dead_code)]
     fn name(&self) -> &str;
 
+    /// Stable configured model identifier for the safe AgentRun envelope.
+    /// This is metadata only; prompts and provider payloads never enter the
+    /// run record.
+    fn model(&self) -> &str;
+
     /// Create a marketplace agent. Global dynamic context is intentionally
     /// disabled until retrieval can enforce tenant and visibility scope before
     /// similarity ranking; `SearchInventoryTool` remains the safe search path.

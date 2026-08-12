@@ -4,7 +4,7 @@
 | --- | --- |
 | 适用读者 | 决定是否上线的负责人、执行部署的工程师、验收测试者 |
 | 当前状态 | 关键工程安全门槛已关闭；本机已用真实 Postgres/Redis/MinIO 完成生产模式演练；生产资源开通、真实学生效果/公平性验证与人工运营验收仍待完成 |
-| 事实来源 | 本仓库 Rust/Flutter 测试、`scripts/` 下可执行演练（含真实 MinIO/Redis/Postgres）、迁移 0001–0072 |
+| 事实来源 | 本仓库 Rust/Flutter 测试、`scripts/` 下可执行演练（含真实 MinIO/Redis/Postgres）、迁移 0001–0078 |
 | 验收方式 | 每一项都给出可执行证据；无证据的项目明确标注为部署侧待办 |
 
 本报告把[生产路线图](roadmap.md)的全部退出门槛折叠为一张就绪矩阵。“代码侧关闭”指该门槛由本仓库的代码、schema、测试或可重复脚本强制并验证；“部署侧待办”指需要真实基础设施、账号或人工运营才能执行的验收步骤，本仓库已为其准备了可直接运行的验收程序。
@@ -45,6 +45,7 @@
 | L3 独立两步 token；primary 重试不执行；并发 second token 单赢且终态稳定 | `tests/agent_action_plan_integration.rs::{l3_plan_requires_two_confirmations_before_any_write,retrying_the_primary_l3_token_never_executes_and_replays_the_same_second_token,concurrent_second_token_confirms_share_one_stable_terminal_result}` |
 | 计划绑定原校园；终态写失败时业务事实与计划状态原子回滚，可用同一 second token 重试 | `tests/agent_action_plan_integration.rs::{plans_are_not_visible_or_confirmable_from_another_campus,terminal_plan_update_failure_rolls_back_the_domain_fact_and_is_safely_retryable}` |
 | 工具层滥用测试集（跨校园/参数污染/自买自卖/未认证） | `tests/agent_injection_regression.rs` |
+| AgentRun 安全 envelope（trace 幂等、租户隔离、路由/provider/版本/检索/工具/终态聚合、无正文事件） | `migrations/0077_agent_runs.sql`、`0078_agent_runs_campus_cleanup.sql`、`tests/agent_run_integration.rs`；token/TTFT、客户端断开结案和 ActionPlan 显式关联仍为后续门槛 |
 
 ### 信息流闭环（Phase 2）
 
@@ -64,7 +65,7 @@
 | Transactional outbox（原子入队/至少一次/退避/死信/租约/重放） | `tests/outbox_integration.rs`；通知推送已迁入 |
 | Redis WS fan-out 跨副本投递（双真实进程 + 真实 WebSocket 客户端） | `tests/ws_fanout_integration.rs`（`REDIS_TEST_URL`/`FANOUT_E2E` 门控） |
 | 依赖漏洞门禁（cargo audit 进 CI；唯一 ignore 附不可达论证） | `.cargo/audit.toml`、`.github/workflows/ci.yml` |
-| 空库/升级库迁移均验证（含真实升级库上的 legacy 值归一化） | CI migration job + 0040/0041 升级路径实测 + 全量空库迁移至 `0072`；`0068` 清理 attention 兼容影子列，`0069` 为媒体审核 processing 任务增加可回收 lease，`0070` 为 persona asset 增加对象探测、审核与清理边界，`0071` 为遗弃的 pending upload 增加过期撤销与审计，`0072` 为审核任务保存稳定对象 key；2026-08-12 在 `0072` 后重跑 production rehearsal（通过 `PGHOST/PGPORT` 接入本地实例），双副本空库启动、真实 MinIO OSS probe、presigned PUT/GET、signed DELETE、撤销审计、远端对象清理、RLS、滚动重启、PITR 和有序排空均通过 |
+| 空库/升级库迁移均验证（含真实升级库上的 legacy 值归一化） | CI migration job + 0040/0041 升级路径实测 + 全量空库迁移至 `0078`；`0068` 清理 attention 兼容影子列，`0069` 为媒体审核 processing 任务增加可回收 lease，`0070` 为 persona asset 增加对象探测、审核与清理边界，`0071` 为遗弃的 pending upload 增加过期撤销与审计，`0072` 为审核任务保存稳定对象 key，`0077`/`0078` 为 AgentRun envelope 及校园清理约束；2026-08-12 在 `0072` 后重跑 production rehearsal（通过 `PGHOST/PGPORT` 接入本地实例），双副本空库启动、真实 MinIO OSS probe、presigned PUT/GET、signed DELETE、撤销审计、远端对象清理、RLS、滚动重启、PITR 和有序排空均通过；AgentRun 数据库回归另在升级到 `0078` 后通过 |
 
 ### 多校园与规模（Phase 4 工程部分）
 

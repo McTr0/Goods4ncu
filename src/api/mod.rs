@@ -15,6 +15,7 @@ use axum::{
 };
 pub mod admin;
 pub mod agent_plans;
+pub mod agent_runs;
 pub mod agreements;
 pub mod auth;
 pub mod campuses;
@@ -753,6 +754,7 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .route("/api/auth/mfa/totp/setup", post(mfa::totp_setup))
         .route("/api/auth/mfa/totp/confirm", post(mfa::totp_confirm))
         .route("/api/agent/plans", get(agent_plans::list_plans))
+        .route("/api/agent/runs", get(agent_runs::list_runs))
         .route(
             "/api/agent/plans/{id}/confirm",
             post(agent_plans::confirm_plan),

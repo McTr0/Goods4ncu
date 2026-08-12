@@ -51,6 +51,53 @@ void main() {
     });
   });
 
+  group('AgentRun', () {
+    test('parses the safe operational envelope without message content', () {
+      final run = AgentRun.fromJson({
+        'id': 'run-1',
+        'trace_id': 'trace-1',
+        'conversation_id': 'conversation-1',
+        'route': 'search',
+        'route_confidence': 0.85,
+        'provider': 'gemini',
+        'model': 'gemini-test',
+        'prompt_template_version': 'marketplace-prompt-v1',
+        'tool_schema_version': 'marketplace-tools-v1',
+        'status': 'completed',
+        'outcome_code': 'llm_completed',
+        'retrieval_count': 2,
+        'retrieval_filtered_count': 1,
+        'tool_call_count': 1,
+        'final_resource_ids': ['listing-a', 'listing-b'],
+        'duration_ms': 25,
+        'created_at': '2026-08-12T10:00:00Z',
+        'completed_at': '2026-08-12T10:00:01Z',
+      });
+
+      expect(run.traceId, 'trace-1');
+      expect(run.routeConfidence, 0.85);
+      expect(run.provider, 'gemini');
+      expect(run.retrievalCount, 2);
+      expect(run.finalResourceIds, ['listing-a', 'listing-b']);
+      expect(run.completed, isTrue);
+      expect(run.createdAt, DateTime.parse('2026-08-12T10:00:00Z'));
+    });
+
+    test('uses safe defaults for a legacy or partial envelope', () {
+      final run = AgentRun.fromJson({
+        'id': 'run-2',
+        'trace_id': 'trace-2',
+        'conversation_id': 'conversation-2',
+      });
+
+      expect(run.route, 'chat');
+      expect(run.status, 'started');
+      expect(run.toolCallCount, 0);
+      expect(run.finalResourceIds, isEmpty);
+      expect(run.completed, isFalse);
+    });
+  });
+
   group('RelationshipSpace', () {
     test('parses a deterministic event rail and cursor', () {
       final space = RelationshipSpace.fromJson({

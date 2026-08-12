@@ -21,6 +21,22 @@ class ChatService extends BaseService {
         .toList();
   }
 
+  /// GET /api/agent/runs — recent safe AgentRun envelopes for this user.
+  /// Prompts, transcripts, tool arguments and provider errors are never
+  /// returned by this endpoint.
+  Future<List<AgentRun>> getAgentRuns({int limit = 20}) async {
+    final headers = await authHeaders();
+    final uri = Uri.parse('$baseUrl/api/agent/runs').replace(
+      queryParameters: {'limit': '$limit'},
+    );
+    final response = await get(uri, headers);
+    final data = handleResponse(response, (d) => d as Map<String, dynamic>);
+    final items = data['items'] as List<dynamic>? ?? [];
+    return items
+        .map((e) => AgentRun.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   /// POST /api/agent/plans/{id}/confirm — confirm a proposed agent action.
   /// L2 plans execute on the first confirmation; L3 plans return
   /// `needs_second_confirmation` first and execute on the second call.

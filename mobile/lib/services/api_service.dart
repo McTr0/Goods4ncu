@@ -374,6 +374,9 @@ class ApiService extends BaseService {
 
   Future<List<AgentPlan>> getAgentPlans() => _chatService.getAgentPlans();
 
+  Future<List<AgentRun>> getAgentRuns({int limit = 20}) =>
+      _chatService.getAgentRuns(limit: limit);
+
   Future<AgentPlanConfirmResult> confirmAgentPlan(
     String id,
     String confirmationToken,

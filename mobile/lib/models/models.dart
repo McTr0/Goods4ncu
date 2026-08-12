@@ -2019,6 +2019,79 @@ class AgentPlanConfirmResult {
   bool get executed => status == 'executed';
 }
 
+/// A safe operational envelope for one marketplace Agent request.  This is
+/// metadata only: prompts, transcripts, tool arguments and provider errors are
+/// intentionally absent from the wire model.
+class AgentRun {
+  final String id;
+  final String traceId;
+  final String conversationId;
+  final String route;
+  final double? routeConfidence;
+  final String? provider;
+  final String? model;
+  final String promptTemplateVersion;
+  final String toolSchemaVersion;
+  final String status;
+  final String? outcomeCode;
+  final int? retrievalCount;
+  final int? retrievalFilteredCount;
+  final int toolCallCount;
+  final List<String> finalResourceIds;
+  final int? ttftMs;
+  final int? durationMs;
+  final DateTime? createdAt;
+  final DateTime? completedAt;
+
+  AgentRun({
+    required this.id,
+    required this.traceId,
+    required this.conversationId,
+    required this.route,
+    this.routeConfidence,
+    this.provider,
+    this.model,
+    this.promptTemplateVersion = '',
+    this.toolSchemaVersion = '',
+    this.status = 'started',
+    this.outcomeCode,
+    this.retrievalCount,
+    this.retrievalFilteredCount,
+    this.toolCallCount = 0,
+    this.finalResourceIds = const [],
+    this.ttftMs,
+    this.durationMs,
+    this.createdAt,
+    this.completedAt,
+  });
+
+  factory AgentRun.fromJson(Map<String, dynamic> json) => AgentRun(
+    id: json['id']?.toString() ?? '',
+    traceId: json['trace_id']?.toString() ?? '',
+    conversationId: json['conversation_id']?.toString() ?? '',
+    route: json['route']?.toString() ?? 'chat',
+    routeConfidence: (json['route_confidence'] as num?)?.toDouble(),
+    provider: json['provider']?.toString(),
+    model: json['model']?.toString(),
+    promptTemplateVersion: json['prompt_template_version']?.toString() ?? '',
+    toolSchemaVersion: json['tool_schema_version']?.toString() ?? '',
+    status: json['status']?.toString() ?? 'started',
+    outcomeCode: json['outcome_code']?.toString(),
+    retrievalCount: (json['retrieval_count'] as num?)?.toInt(),
+    retrievalFilteredCount: (json['retrieval_filtered_count'] as num?)?.toInt(),
+    toolCallCount: (json['tool_call_count'] as num?)?.toInt() ?? 0,
+    finalResourceIds: (json['final_resource_ids'] as List<dynamic>? ?? const [])
+        .map((value) => value.toString())
+        .toList(growable: false),
+    ttftMs: (json['ttft_ms'] as num?)?.toInt(),
+    durationMs: (json['duration_ms'] as num?)?.toInt(),
+    createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
+    completedAt: DateTime.tryParse(json['completed_at']?.toString() ?? ''),
+  );
+
+  bool get completed => status == 'completed';
+}
+
 /// An action the assistant already carried out that can still be reverted.
 ///
 /// The counterpart to [AgentPlan]: plans are writes waiting on the user, these

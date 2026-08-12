@@ -263,7 +263,7 @@ ORDER BY updated_at;
 - confirmation token 不写日志、不进模型上下文，token-bearing API 响应必须保持 `Cache-Control: no-store`。
 - 事务内只允许数据库副作用。新增外部调用必须先写 transactional outbox，由幂等 worker 在 commit 后投递，不能把网络请求塞进确认事务。
 
-当前没有自动化 `interrupted` 对账/结案界面，也没有把聊天、路由、provider 和检索统一进完整 AgentRun envelope。ActionPlan 的 typed terminal outcome 已落地；`agent_action_audits` 记录行动级 receipt（提案、重放/冲突、确认、执行、失败、取消、过期），与计划终态同事务提交，并明确不保存正文、token、args 或完整错误。listing 关键动作的资源版本快照与冲突保护、Agent 提案按用户/校园和动作参数哈希的幂等已经落地。
+当前没有自动化 `interrupted` 对账/结案界面；首版 `agent_runs`/`agent_run_events` 已把活动校园聊天的路由、provider/model、版本、检索聚合、工具类别、耗时和 typed outcome 放入安全 envelope，并由 `GET /api/agent/runs` 提供只读视图。SSE 客户端在生成器尚未自然结束时可能暂时保持 `started`，不能当作成功或失败。ActionPlan 的 typed terminal outcome 已落地；`agent_action_audits` 记录行动级 receipt（提案、重放/冲突、确认、执行、失败、取消、过期），与计划终态同事务提交，并明确不保存正文、token、args 或完整错误。listing 关键动作的资源版本快照与冲突保护、Agent 提案按用户/校园和动作参数哈希的幂等已经落地。token/TTFT、取消结案、ActionPlan 显式关联、设备/重新认证绑定和版本化风险文案仍需补齐。
 
 只读排查可按 trace 或计划串起行动链路；事件元数据只用于安全运营，不应被当成消息阅读、在线或注意力信号：
 
@@ -271,6 +271,18 @@ ORDER BY updated_at;
 SELECT trace_id, plan_id, action, risk_level, event_type,
        outcome_code, duration_ms, created_at
 FROM agent_action_audits
+WHERE campus_id = '<active-campus-uuid>'
+  AND user_id = '<authenticated-user-id>'
+ORDER BY created_at DESC
+LIMIT 100;
+```
+
+AgentRun 只读排查使用同一租户和用户边界；不要为了追查失败去读取 prompt 或拼接聊天正文：
+
+```sql
+SELECT trace_id, route, provider, model, status, outcome_code,
+       retrieval_count, tool_call_count, duration_ms, created_at, completed_at
+FROM agent_runs
 WHERE campus_id = '<active-campus-uuid>'
   AND user_id = '<authenticated-user-id>'
 ORDER BY created_at DESC
@@ -383,6 +395,7 @@ RETURNING listing_id, campus_id, desired_revision;
 | `watchlist` | 用户和商品关系，是否收藏自己的商品。 |
 | `notifications` | `campus_id`、unread、event_type、related_order/listing、是否已推送但未读。 |
 | `admin_audit_logs` | campus_id、管理员操作、target、scope_reason；跨校园读取和写入是否都有审计。 |
+| `agent_runs` / `agent_run_events` | Agent 请求的安全运行 envelope 与事件；按 campus/user 隔离，保存路由、provider/model、版本、计数、受限资源 ID、耗时和 typed outcome，不保存 prompt、正文、token 或完整 provider 错误。 |
 | `moderation_jobs` | campus_id、资源归属、pending/processing/approved/rejected/failed 状态，以及 processing 期间的 `locked_by/locked_until` lease；平台对象另外保存稳定 `storage_key`，私有 bucket worker 每次领取都重新签发短期 provider URL，旧任务仍可用 `image_url` fallback；到期任务可重领，终态会清空 lease。 |
 | `social_persona_assets` | persona/user/campus 归属、服务器生成 `persona/{campus}/{persona}/{asset}` key、对象探测后的大小/MIME、pending_upload/pending_review/active/revoked/deleted 生命周期、moderation 状态与远端清理 lease。超过 24 小时仍未完成的 `pending_upload` 会由 cleanup worker 撤销并记录 `asset_expired` 审计；只有 active 且 approved/not_required 的选中素材可公开。 |
 | `chat_shared_objects` | file/link 权威对象、`pending_upload`/审核/撤销状态；文件撤销后的远端清理请求、尝试次数、下一次重试、错误与完成时间也保存在同一行。 |
@@ -395,7 +408,7 @@ RETURNING listing_id, campus_id, desired_revision;
 
 [已实现] `0030_normalize_money_bigint.sql` 修复历史升级库可能遗留的 `INT4` 金额列，将商品价格、成交价和议价金额统一为 `BIGINT`。若空库测试正常但现有环境列表接口出现金额 decode 错误，先检查 migration 是否已经执行到 0030，不要在应用层把金额退回 32 位。
 
-[已实现] `0034_moderation_cases.sql` 新增 `moderation_cases`、`moderation_case_events`、`moderation_appeals`，并把媒体拒绝任务和聊天举报回填为案件；`0053_content_reports.sql` 为商品和用户举报增加同校园 intake，并在同一事务中关联统一案件。`0037_outbox_events.sql` 已新增 `outbox_events`（见 Transactional Outbox 一节），`0038_agent_action_plans.sql` 已实现需确认的 Agent 写动作计划，`0075_agent_action_audit.sql`/`0076_agent_action_audit_campus_cleanup.sql` 已实现租户隔离的行动 receipt；统一 `agent_runs` 仍是目标态。
+[已实现] `0034_moderation_cases.sql` 新增 `moderation_cases`、`moderation_case_events`、`moderation_appeals`，并把媒体拒绝任务和聊天举报回填为案件；`0053_content_reports.sql` 为商品和用户举报增加同校园 intake，并在同一事务中关联统一案件。`0037_outbox_events.sql` 已新增 `outbox_events`（见 Transactional Outbox 一节），`0038_agent_action_plans.sql` 已实现需确认的 Agent 写动作计划，`0075_agent_action_audit.sql`/`0076_agent_action_audit_campus_cleanup.sql` 已实现租户隔离的行动 receipt，`0077_agent_runs.sql`/`0078_agent_runs_campus_cleanup.sql` 已实现首版安全运行 envelope；token/TTFT、取消结案、ActionPlan 显式关联和统一对账仍是目标态。
 
 ## 内容审核策略
 
@@ -513,7 +526,7 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 
 [已实现] `scripts/backup_pitr_drill.sh` 在一次性本地集群上完整演练恢复路径：initdb（开启 WAL 归档）→ `pg_basebackup` → 记录 T1 → 写入“灾难”行 → 以 `recovery_target_time = T1` 恢复 → 断言好状态存在、灾难行被排除。脚本幂等、自清理、以退出码表示演练结果，可直接进 CI 或 cron。生产化差异：归档目标换为对象存储、备份调度化、按季度对生产快照演练并记录实际 RPO/RTO。
 
-另注意：当前 19 张租户表已启用 FORCE RLS（`0042` 及后续领域迁移）。策略在 `app.campus_id` GUC 未设置时放行（应用层为主边界），事务内 `SET LOCAL app.campus_id = '<uuid>'` 即可武装隔离。两条纪律：生产应用角色绝不可是 superuser（superuser 完全绕过 RLS）；备份/迁移以未武装会话运行即可看到全量数据。
+另注意：当前所有已声明的租户表（包括 `agent_runs`/`agent_run_events`）已启用 FORCE RLS（`0042` 及后续领域迁移）。策略在 `app.campus_id` GUC 未设置时放行（应用层为主边界），事务内 `SET LOCAL app.campus_id = '<uuid>'` 即可武装隔离。两条纪律：生产应用角色绝不可是 superuser（superuser 完全绕过 RLS）；备份/迁移以未武装会话运行即可看到全量数据。
 
 ### 原 Runbook 目标（生产化仍需执行）
 

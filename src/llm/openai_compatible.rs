@@ -108,6 +108,10 @@ impl super::LlmProvider for OpenAiCompatibleProvider {
         &self.provider_name
     }
 
+    fn model(&self) -> &str {
+        &self.model
+    }
+
     async fn create_marketplace_agent(
         self: Arc<Self>,
         db_pool: &PgPool,

@@ -94,6 +94,10 @@ impl super::LlmProvider for GeminiProvider {
         "gemini"
     }
 
+    fn model(&self) -> &str {
+        &self.model
+    }
+
     async fn create_marketplace_agent(
         self: Arc<Self>,
         db_pool: &PgPool,

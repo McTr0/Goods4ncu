@@ -330,7 +330,7 @@ node scripts/codex_browser_api_driver.mjs call-secret
 | Provider 故障 | 断开 LLM | 保留输入，提供搜索/表单/手工聊天。 |
 | 工具故障 | 数据库 409/timeout | 不自动重复写，不显示虚假成功。 |
 
-当前每个 ActionPlan 必须断言 plan/user/tenant/过期时间、两步 token、listing 资源版本快照、业务事实与计划终态的原子性，不能只看最终页面 toast；过期版本必须返回冲突且不产生副作用。提案 `Idempotency-Key` 还必须断言同 key 重试复用计划、改参数拒绝且不产生副作用；统一 AgentRun/审计信封仍是待补门槛。
+当前每个 ActionPlan 必须断言 plan/user/tenant/过期时间、两步 token、listing 资源版本快照、业务事实与计划终态的原子性，不能只看最终页面 toast；过期版本必须返回冲突且不产生副作用。提案 `Idempotency-Key` 还必须断言同 key 重试复用计划、改参数拒绝且不产生副作用。`agent_run_integration.rs` 断言 AgentRun 按 trace 幂等、跨校园隔离、路由/provider/版本/检索/工具/终态聚合、重复 finish 不重复事件，且事件元数据不含 prompt、正文或参数；聊天 API/SSE 仍需补客户端断开后取消结案和 ActionPlan 显式关联门槛。
 
 ## 审核与申诉测试
 

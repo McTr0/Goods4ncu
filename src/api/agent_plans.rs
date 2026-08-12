@@ -104,7 +104,7 @@ pub async fn confirm_plan(
     }
 }
 
-fn no_store_json(value: serde_json::Value) -> Response {
+pub(crate) fn no_store_json(value: serde_json::Value) -> Response {
     let mut response = Json(value).into_response();
     response
         .headers_mut()

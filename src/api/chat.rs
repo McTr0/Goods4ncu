@@ -13,6 +13,7 @@ use crate::api::error::ApiError;
 use crate::api::session::Session;
 use crate::api::{normalize_platform_media_url, AppState, PeerAddr};
 use crate::llm::MarketplaceAgent;
+use crate::services::agent_run::AgentRunService;
 use crate::services::chat::{ChatService, AGENT_CONVERSATION_SENTINEL};
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
@@ -24,6 +25,7 @@ use rig::message::{AssistantContent, Text, UserContent};
 use rig::OneOrMany;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
+use std::time::Instant;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -243,6 +245,84 @@ fn history_to_rig_messages(entries: &[crate::services::chat::ChatHistoryEntry]) 
         .collect()
 }
 
+#[derive(Clone)]
+struct AgentRunHandle {
+    service: AgentRunService,
+    trace_id: String,
+    campus_id: Uuid,
+    user_id: String,
+    started_at: Instant,
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn begin_agent_run(
+    db: &sqlx::PgPool,
+    trace_id: String,
+    campus_id: Option<Uuid>,
+    user_id: &str,
+    conversation_id: &str,
+    route: &str,
+    route_confidence: f32,
+    provider: Option<&str>,
+    model: Option<&str>,
+) -> Option<AgentRunHandle> {
+    let Some(campus_id) = campus_id else {
+        // Legacy access tokens without an active campus remain compatible;
+        // they cannot create a tenant-scoped run until the session is bound.
+        return None;
+    };
+    let service = AgentRunService::new(db.clone());
+    match service
+        .start(
+            &trace_id,
+            campus_id,
+            user_id,
+            conversation_id,
+            route,
+            route_confidence,
+            provider,
+            model,
+        )
+        .await
+    {
+        Ok(_) => Some(AgentRunHandle {
+            service,
+            trace_id,
+            campus_id,
+            user_id: user_id.to_string(),
+            started_at: Instant::now(),
+        }),
+        Err(error) => {
+            tracing::warn!(%error, "failed to start AgentRun envelope");
+            None
+        }
+    }
+}
+
+async fn finish_agent_run(
+    run: &AgentRunHandle,
+    status: &str,
+    outcome_code: &str,
+    error_code: Option<&str>,
+) {
+    let duration_ms = Some(run.started_at.elapsed().as_millis().min(i32::MAX as u128) as i32);
+    if let Err(error) = run
+        .service
+        .finish(
+            &run.trace_id,
+            run.campus_id,
+            &run.user_id,
+            status,
+            outcome_code,
+            error_code,
+            duration_ms,
+        )
+        .await
+    {
+        tracing::warn!(%error, trace_id = %run.trace_id, "failed to finish AgentRun envelope");
+    }
+}
+
 pub(crate) async fn handle_chat(
     State(state): State<AppState>,
     PeerAddr(addr): PeerAddr,
@@ -310,6 +390,18 @@ pub(crate) async fn handle_chat(
     tracing::debug!(intent = ?intent_result.intent.as_str(), confidence = %intent_result.confidence, "Router classification");
 
     if let Some(reply) = intent_result.direct_response(&message) {
+        let run = begin_agent_run(
+            &state.infra.db,
+            crate::api::request_context::current_or_new_request_id(),
+            session_campus_id,
+            &current_user_id,
+            &conversation_id,
+            intent_result.intent.as_str(),
+            intent_result.confidence,
+            None,
+            None,
+        )
+        .await;
         if is_assistant_conversation {
             chat_svc
                 .log_message(
@@ -341,6 +433,9 @@ pub(crate) async fn handle_chat(
                 )
                 .await
                 .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
+        }
+        if let Some(run) = run {
+            finish_agent_run(&run, "completed", "direct_response", None).await;
         }
         return Ok(Json(ChatResponse {
             reply,
@@ -380,7 +475,20 @@ pub(crate) async fn handle_chat(
 
     state.infra.metrics.record_chat_message();
 
-    let agent: Box<dyn MarketplaceAgent> = state
+    let run = begin_agent_run(
+        &state.infra.db,
+        crate::api::request_context::current_or_new_request_id(),
+        session_campus_id,
+        &current_user_id,
+        &conversation_id,
+        intent_result.intent.as_str(),
+        intent_result.confidence,
+        Some(state.agents.llm_provider.name()),
+        Some(state.agents.llm_provider.model()),
+    )
+    .await;
+
+    let agent: Box<dyn MarketplaceAgent> = match state
         .agents
         .llm_provider
         .create_marketplace_agent(
@@ -392,18 +500,41 @@ pub(crate) async fn handle_chat(
             state.infra.moderation.clone(),
         )
         .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!(e)))?;
+    {
+        Ok(agent) => agent,
+        Err(error) => {
+            if let Some(run) = &run {
+                finish_agent_run(
+                    run,
+                    "failed",
+                    "provider_unavailable",
+                    Some("provider_unavailable"),
+                )
+                .await;
+            }
+            return Err(ApiError::Internal(anyhow::anyhow!(error)));
+        }
+    };
 
-    let reply = agent
+    let reply = match agent
         .prompt_with_history(message.clone(), chat_history)
         .await
-        .map_err(|e| {
-            tracing::error!(err = %e, "LLM prompt failed");
+    {
+        Ok(reply) => reply,
+        Err(error) => {
+            tracing::error!(err = %error, "LLM prompt failed");
             state.infra.metrics.record_llm_error();
-            ApiError::Internal(anyhow::anyhow!(e))
-        })?;
+            if let Some(run) = &run {
+                finish_agent_run(run, "failed", "llm_failed", Some("provider_error")).await;
+            }
+            return Err(ApiError::Internal(anyhow::anyhow!(error)));
+        }
+    };
 
     state.infra.metrics.record_llm_call();
+    if let Some(run) = &run {
+        finish_agent_run(run, "completed", "llm_completed", None).await;
+    }
 
     // Fire-and-forget: agent reply persistence — errors are non-fatal.
     if let Err(e) = persist_context_message(
@@ -515,6 +646,18 @@ async fn handle_chat_stream_request(
     tracing::debug!(intent = ?intent_result.intent.as_str(), confidence = %intent_result.confidence, "SSE Router classification");
 
     if let Some(reply) = intent_result.direct_response(&message) {
+        let run = begin_agent_run(
+            &state.infra.db,
+            crate::api::request_context::current_or_new_request_id(),
+            session_campus_id,
+            &current_user_id,
+            &conversation_id,
+            intent_result.intent.as_str(),
+            intent_result.confidence,
+            None,
+            None,
+        )
+        .await;
         if is_assistant_conversation {
             chat_svc
                 .log_message(
@@ -546,6 +689,9 @@ async fn handle_chat_stream_request(
                 )
                 .await
                 .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
+        }
+        if let Some(run) = &run {
+            finish_agent_run(run, "completed", "direct_response", None).await;
         }
         let sse_payload = serde_json::json!({
             "token": reply,
@@ -586,7 +732,22 @@ async fn handle_chat_stream_request(
         return Err(ApiError::NotFound);
     }
 
-    let agent: Box<dyn MarketplaceAgent> = state
+    let provider_name = state.agents.llm_provider.name().to_string();
+    let provider_model = state.agents.llm_provider.model().to_string();
+    let run = begin_agent_run(
+        &state.infra.db,
+        crate::api::request_context::current_or_new_request_id(),
+        session_campus_id,
+        &current_user_id,
+        &conversation_id,
+        intent_result.intent.as_str(),
+        intent_result.confidence,
+        Some(&provider_name),
+        Some(&provider_model),
+    )
+    .await;
+
+    let agent: Box<dyn MarketplaceAgent> = match state
         .agents
         .llm_provider
         .create_marketplace_agent(
@@ -598,9 +759,24 @@ async fn handle_chat_stream_request(
             state.infra.moderation.clone(),
         )
         .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!(e)))?;
+    {
+        Ok(agent) => agent,
+        Err(error) => {
+            if let Some(run) = &run {
+                finish_agent_run(
+                    run,
+                    "failed",
+                    "provider_unavailable",
+                    Some("provider_unavailable"),
+                )
+                .await;
+            }
+            return Err(ApiError::Internal(anyhow::anyhow!(error)));
+        }
+    };
 
     let mut stream = agent.stream_chat(message.clone(), chat_history);
+    let run_for_stream = run.clone();
     let persisted_conversation_id = conversation_id.clone();
     let public_conversation_id = response_conversation_id.clone();
     let persisted_listing_id = resolved_listing_id.clone();
@@ -650,6 +826,14 @@ async fn handle_chat_stream_request(
                 .await
             {
                 tracing::warn!(%error, "failed to persist streamed assistant reply");
+            }
+        }
+
+        if let Some(run) = &run_for_stream {
+            if completed {
+                finish_agent_run(run, "completed", "llm_completed", None).await;
+            } else {
+                finish_agent_run(run, "failed", "llm_failed", Some("provider_error")).await;
             }
         }
     };

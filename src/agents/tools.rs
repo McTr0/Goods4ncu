@@ -220,6 +220,22 @@ async fn propose_action_plan<A: serde::Serialize>(
         .await
         .map_err(|e| ToolError(format!("创建待确认操作失败: {}", e)))?;
 
+    if let Some(trace_id) = crate::api::request_context::current_request_id() {
+        if let Err(error) = crate::services::agent_run::AgentRunService::new(ctx.db_pool.clone())
+            .record_tool(
+                &trace_id,
+                campus_id,
+                &user_id,
+                action,
+                Some(risk_level),
+                "proposal_created",
+            )
+            .await
+        {
+            tracing::warn!(%error, "failed to record AgentRun action event");
+        }
+    }
+
     Ok(format!(
         "已创建待确认操作：{}。该操作需要你在应用中确认后才会执行（10 分钟内有效，计划编号 {}）。请在“待确认操作”里查看并确认或取消。",
         summary, plan
@@ -647,6 +663,31 @@ impl Tool for SearchInventoryTool {
             .fetch_all(&self.ctx.db_pool)
             .await
             .map_err(|e| ToolError(format!("Search query error: {}", e)))?;
+
+        // Search telemetry is an aggregate-only AgentRun event.  It is
+        // best-effort so a rollout/migration issue never turns a safe read
+        // tool into a user-visible failure; no keyword or title is persisted.
+        if let (Some(user_id), Some(trace_id)) = (
+            self.ctx.current_user_id.as_deref(),
+            crate::api::request_context::current_request_id(),
+        ) {
+            let resource_ids = rows.iter().map(|row| row.id.clone()).collect();
+            if let Err(error) =
+                crate::services::agent_run::AgentRunService::new(self.ctx.db_pool.clone())
+                    .record_retrieval(
+                        &trace_id,
+                        campus_id,
+                        user_id,
+                        Self::NAME,
+                        rows.len() as i32,
+                        None,
+                        resource_ids,
+                    )
+                    .await
+            {
+                tracing::warn!(%error, "failed to record AgentRun retrieval event");
+            }
+        }
 
         if rows.is_empty() {
             return Ok("No items found matching your criteria.".to_string());
