@@ -41,6 +41,8 @@ env NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
   flutter run -d web-server --web-hostname 0.0.0.0 --web-port 3001
 ```
 
+2026-08-12 的一次新库验收使用隔离 PostgreSQL 从零执行 `cargo run -- migrate`，随后启动后端和 Flutter Web。`buyer1 / Test1234` 登录成功，打开 `seller1` 关系空间后分别走通“写封留言”和“发起实时邀请”入口；留言回到空间后显示“已发送”，实时入口显示“等待对方接通/已连接”等协议状态。页面没有产生在线、正在输入或已读提示。完整的双账号接受/结束连接和主动 acknowledgement 仍以 API driver 与回归测试作为多角色验收路径。
+
 测试账号来自 `migrations/0005_seed_data.sql`，默认密码均为 `Test1234`：
 
 | 用户 | 角色 | 用途 |
