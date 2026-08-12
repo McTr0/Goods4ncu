@@ -324,6 +324,40 @@ void main() {
       },
     );
 
+    testWidgets(
+      'keeps acknowledgement actions reachable on a 390x844 viewport',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(390, 844));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final message = ConversationMessage(
+          id: 'narrow-1',
+          conversationId: 'conv-1',
+          senderId: 'user-other',
+          content: '窄屏也要能明确表达我会看',
+          sentAt: DateTime.now(),
+          status: 'sent',
+        );
+
+        await tester.pumpWidget(
+          buildTestableWidget(
+            MessageBubble(
+              message: message,
+              isMe: false,
+              isConnected: false,
+              onAcknowledge: (_) {},
+            ),
+          ),
+        );
+        await tester.longPress(find.text('窄屏也要能明确表达我会看'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('收到'), findsOneWidget);
+        expect(find.text('我会看'), findsOneWidget);
+        expect(find.text('已处理'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     testWidgets('exposes message actions through accessibility semantics', (
       tester,
     ) async {
