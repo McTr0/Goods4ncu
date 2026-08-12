@@ -41,7 +41,7 @@ env NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
   flutter run -d web-server --web-hostname 0.0.0.0 --web-port 3001
 ```
 
-2026-08-12 的一次新库验收使用隔离 PostgreSQL 从零执行 `cargo run -- migrate`，随后启动后端和 Flutter Web。`buyer1 / Test1234` 登录成功，打开 `seller1` 关系空间后分别走通“写封留言”和“发起实时邀请”入口；留言回到空间后显示“已发送”，实时入口显示“等待对方接通/已连接”等协议状态。页面没有产生在线、正在输入或已读提示。完整的双账号接受/结束连接和主动 acknowledgement 仍以 API driver 与回归测试作为多角色验收路径。
+2026-08-12 的一次新库验收使用隔离 PostgreSQL 从零执行 `cargo run -- migrate`，随后启动后端和 Flutter Web。`buyer1 / Test1234` 登录成功，打开 `seller1` 关系空间后分别走通“写封留言”和“发起实时邀请”入口；留言回到空间后显示“已发送”，实时入口显示“等待对方接通/已连接”等协议状态。页面没有产生在线、正在输入或已读提示。随后在另一组干净种子账号 `buyer2 / seller2` 上完成了真实 UI 的“发起 → 卖家接通 → 买家确认 → 结束”双账号旅程：卖家端看到“对方想现在聊聊”，接通后显示“已接受连接”，买家端确认后进入“本次会话已接通”，结束后回到历史状态。显式 acknowledgement 的“收到 / 我会看 / 已处理”菜单仍以 Flutter widget 测试和 `r2-chat` API driver 验收，未把打开消息当成确认。
 
 测试账号来自 `migrations/0005_seed_data.sql`，默认密码均为 `Test1234`：
 
