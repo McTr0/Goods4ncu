@@ -30,7 +30,7 @@ class SocialPersonaPreviewCard extends StatelessWidget {
     final content = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _PersonaIllustration(persona: persona, compact: compact),
+        SocialPersonaAvatar(persona: persona, size: compact ? 48 : 76),
         SizedBox(width: compact ? AppTheme.sp12 : AppTheme.sp16),
         Expanded(
           child: Column(
@@ -48,7 +48,7 @@ class SocialPersonaPreviewCard extends StatelessWidget {
               Text(
                 _postureLabel(l, persona.contactPosture),
                 style: TextStyle(
-                  color: _paletteColor(persona.appearance.palette),
+                  color: _personaAccent(context, persona.appearance.palette),
                   fontWeight: FontWeight.w700,
                   fontSize: compact ? 12 : 13,
                 ),
@@ -95,31 +95,42 @@ class SocialPersonaPreviewCard extends StatelessWidget {
   }
 }
 
-class _PersonaIllustration extends StatelessWidget {
-  const _PersonaIllustration({required this.persona, required this.compact});
+/// Deterministic role token used at list (24), profile (48), and card/space
+/// (160) scales. It is deliberately static: a role token never reflects
+/// online, typing, read, push, or background activity.
+class SocialPersonaAvatar extends StatelessWidget {
+  const SocialPersonaAvatar({
+    super.key,
+    required this.persona,
+    this.size = 48,
+    this.semanticLabel,
+  }) : assert(size > 0);
 
   final SocialPersona persona;
-  final bool compact;
+  final double size;
+  final String? semanticLabel;
 
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
-    final color = _paletteColor(persona.appearance.palette);
+    final color = _personaAccent(context, persona.appearance.palette);
     final radius = switch (persona.appearance.silhouette) {
-      'round' => 28.0,
-      'sharp' => 10.0,
-      _ => 18.0,
+      'round' => size * 0.37,
+      'sharp' => size * 0.13,
+      _ => size * 0.24,
     };
-    final size = compact ? 58.0 : 76.0;
     final accessory = switch (persona.appearance.accessory) {
       'glasses' => Icons.visibility_outlined,
       'headphones' => Icons.headphones_outlined,
       'leaf' => Icons.eco_outlined,
       _ => Icons.person_outline_rounded,
     };
+    final accessorySize = (size * 0.21).clamp(7.0, 16.0).toDouble();
+    final accessoryInset = (size * 0.07).clamp(2.0, 6.0).toDouble();
+    final accessoryPadding = (size * 0.04).clamp(1.0, 3.0).toDouble();
 
     return Semantics(
-      label: l.socialPersonaPreviewRole,
+      label: semanticLabel ?? l.socialPersonaPreviewRole,
       image: true,
       child: Container(
         width: size,
@@ -134,8 +145,8 @@ class _PersonaIllustration extends StatelessWidget {
           children: [
             Icon(Icons.face_rounded, size: size * 0.62, color: color),
             Positioned(
-              right: compact ? 4 : 6,
-              bottom: compact ? 4 : 6,
+              right: accessoryInset,
+              bottom: accessoryInset,
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: Theme.of(context).cardColor,
@@ -143,8 +154,8 @@ class _PersonaIllustration extends StatelessWidget {
                   border: Border.all(color: color.withValues(alpha: 0.28)),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(3),
-                  child: Icon(accessory, size: compact ? 13 : 16, color: color),
+                  padding: EdgeInsets.all(accessoryPadding),
+                  child: Icon(accessory, size: accessorySize, color: color),
                 ),
               ),
             ),
@@ -463,3 +474,11 @@ Color _paletteColor(String palette) => switch (palette) {
   'slate' => const Color(0xff475569),
   _ => const Color(0xff0f766e),
 };
+
+Color _personaAccent(BuildContext context, String palette) {
+  final base = _paletteColor(palette);
+  if (Theme.of(context).brightness != Brightness.dark) return base;
+  // Keep the same token identity in dark mode while lifting slate/teal enough
+  // to remain legible. The token is still static and does not encode status.
+  return Color.lerp(base, Colors.white, 0.22)!;
+}
