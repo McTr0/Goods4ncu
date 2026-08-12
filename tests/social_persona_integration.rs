@@ -2,6 +2,7 @@
 
 use goods4ncu::services::moderation::ModerationService;
 use goods4ncu::services::moderation_worker::{process_pending_jobs_once, ModerationApiConfig};
+use goods4ncu::services::shared_object_cleanup::expire_stale_persona_uploads;
 use goods4ncu::services::social_persona::{
     CompleteSocialPersonaAssetInput, CreateSocialPersonaAssetInput, SocialPersonaInput,
     SocialPersonaService,
@@ -278,6 +279,79 @@ async fn persona_assets_require_verified_upload_review_and_explicit_selection() 
         .await
         .expect("cleanup marker");
         assert!(cleanup_requested.is_some());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn abandoned_persona_uploads_are_revoked_and_audited() {
+    with_test_pool(|pool| async move {
+        let campus_id = campus(&pool).await;
+        let user_id = member(&pool, campus_id, "asset-expiry").await;
+        let service = SocialPersonaService::new(pool.clone());
+        let persona = service
+            .upsert_draft(&user_id, campus_id, input())
+            .await
+            .expect("persona draft");
+        let asset = service
+            .create_asset(
+                &user_id,
+                campus_id,
+                CreateSocialPersonaAssetInput {
+                    asset_type: "illustration".to_string(),
+                    declared_mime_type: "image/png".to_string(),
+                    declared_size_bytes: 1024,
+                },
+            )
+            .await
+            .expect("create asset");
+        sqlx::query(
+            "UPDATE social_persona_assets
+             SET created_at = NOW() - INTERVAL '2 days'
+             WHERE id = $1",
+        )
+        .bind(Uuid::parse_str(&asset.id).expect("asset id"))
+        .execute(&pool)
+        .await
+        .expect("age asset");
+
+        assert_eq!(
+            expire_stale_persona_uploads(&pool).await.expect("expire"),
+            1
+        );
+        let expired = service
+            .get_asset(
+                &user_id,
+                campus_id,
+                Uuid::parse_str(&asset.id).expect("asset id"),
+            )
+            .await
+            .expect("expired asset");
+        assert_eq!(expired.status, "revoked");
+        let cleanup_requested: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
+            "SELECT cleanup_requested_at FROM social_persona_assets WHERE id = $1",
+        )
+        .bind(Uuid::parse_str(&asset.id).expect("asset id"))
+        .fetch_one(&pool)
+        .await
+        .expect("cleanup marker");
+        assert!(cleanup_requested.is_some());
+        let action: String = sqlx::query_scalar(
+            "SELECT action FROM social_persona_audits
+             WHERE persona_id = $1 AND action = 'asset_expired'
+             ORDER BY id DESC LIMIT 1",
+        )
+        .bind(Uuid::parse_str(&persona.id).expect("persona id"))
+        .fetch_one(&pool)
+        .await
+        .expect("expiry audit");
+        assert_eq!(action, "asset_expired");
+        assert_eq!(
+            expire_stale_persona_uploads(&pool)
+                .await
+                .expect("idempotent expiry"),
+            0
+        );
     })
     .await;
 }

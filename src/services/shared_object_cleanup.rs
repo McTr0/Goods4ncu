@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::lifecycle::{sleep_or_shutdown, ShutdownSignal};
@@ -18,6 +18,10 @@ const POLL_INTERVAL_SECS: u64 = 30;
 const MAX_CLAIMS_PER_CYCLE: i64 = 32;
 const CLAIM_LEASE_SECS: i64 = 300;
 const MAX_BACKOFF_SECS: i64 = 3600;
+/// A client may resume an upload for a while, but an abandoned server-keyed
+/// candidate must not retain a bucket object forever.  Expiry only applies to
+/// `pending_upload`; verified/reviewing assets remain governed by moderation.
+const PENDING_UPLOAD_TTL_SECS: i64 = 24 * 60 * 60;
 
 #[derive(Clone)]
 pub struct SharedObjectCleanupConfig {
@@ -72,10 +76,72 @@ pub async fn run(db: PgPool, config: SharedObjectCleanupConfig, shutdown: Shutdo
     tracing::info!("shared-object cleanup worker stopped");
 }
 
-async fn process_cycle(db: &PgPool, config: &SharedObjectCleanupConfig) -> anyhow::Result<i64> {
+pub async fn process_cycle(db: &PgPool, config: &SharedObjectCleanupConfig) -> anyhow::Result<i64> {
+    let expired_persona_assets = expire_stale_persona_uploads(db).await?;
     let shared_objects = process_shared_object_cycle(db, config).await?;
     let persona_assets = process_persona_asset_cycle(db, config).await?;
-    Ok(shared_objects + persona_assets)
+    Ok(expired_persona_assets + shared_objects + persona_assets)
+}
+
+/// Move abandoned `pending_upload` rows into the normal revoked/cleanup
+/// lifecycle.  This is deliberately separate from object deletion: the
+/// database transition is durable first, and the following cleanup cycle can
+/// retry the remote signed DELETE without making the asset selectable.
+pub async fn expire_stale_persona_uploads(db: &PgPool) -> anyhow::Result<i64> {
+    let mut tx = db.begin().await?;
+    let rows = sqlx::query(
+        "WITH candidates AS (
+             SELECT id
+             FROM social_persona_assets
+             WHERE status = 'pending_upload'
+               AND cleanup_requested_at IS NULL
+               AND created_at <= NOW() - ($1 * INTERVAL '1 second')
+             ORDER BY created_at ASC, id ASC
+             LIMIT $2
+             FOR UPDATE SKIP LOCKED
+         )
+         UPDATE social_persona_assets asset
+         SET status = 'revoked',
+             revoked_at = COALESCE(asset.revoked_at, NOW()),
+             cleanup_requested_at = NOW(),
+             cleanup_next_attempt_at = NULL,
+             updated_at = NOW()
+         FROM candidates
+         WHERE asset.id = candidates.id
+         RETURNING asset.id, asset.persona_id, asset.user_id, asset.campus_id,
+                   asset.asset_type, asset.status, asset.moderation_status",
+    )
+    .bind(PENDING_UPLOAD_TTL_SECS)
+    .bind(MAX_CLAIMS_PER_CYCLE)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    for row in &rows {
+        let snapshot = serde_json::json!({
+            "asset_id": row.get::<Uuid, _>("id"),
+            "asset_type": row.get::<String, _>("asset_type"),
+            "status": row.get::<String, _>("status"),
+            "moderation_status": row.get::<String, _>("moderation_status"),
+            "reason": "upload_timeout",
+            "expiry_seconds": PENDING_UPLOAD_TTL_SECS,
+        });
+        sqlx::query(
+            "INSERT INTO social_persona_audits
+                (persona_id, user_id, campus_id, action, snapshot)
+             VALUES ($1, $2, $3, 'asset_expired', $4)",
+        )
+        .bind(row.get::<Uuid, _>("persona_id"))
+        .bind(row.get::<String, _>("user_id"))
+        .bind(row.get::<Uuid, _>("campus_id"))
+        .bind(snapshot)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    if !rows.is_empty() {
+        tracing::info!(count = rows.len(), "stale persona uploads revoked");
+    }
+    Ok(rows.len() as i64)
 }
 
 async fn process_shared_object_cycle(

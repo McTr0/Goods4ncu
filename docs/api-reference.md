@@ -255,7 +255,7 @@ Content-Type: application/json
 
 [已实现] 服务端对生成的 key 做平台对象探测，核对真实大小、MIME 和 PNG/JPEG/WebP 文件头。图片审核开启时进入 `pending_review`，否则进入 `active`；审核前不能选择或公开。重复调用在已验证对象上幂等返回，不会重新宣称上传成功。
 
-客户端上传顺序是：创建候选 → 使用同一会话的 `/api/upload/token` 将图片 PUT 到返回的 `upload_key` → 调用 `complete`。Profile 页只允许用户主动选择本地图片/相机来源，并在完成探测后展示审核事实；它不会把本地预览、上传请求或图片加载成功当作公开状态。
+客户端上传顺序是：创建候选 → 使用同一会话的 `/api/upload/token` 将图片 PUT 到返回的 `upload_key` → 调用 `complete`。Profile 页只允许用户主动选择本地图片/相机来源，并在完成探测后展示审核事实；它不会把本地预览、上传请求或图片加载成功当作公开状态。若候选在 24 小时内仍未完成上传，后台 cleanup worker 会将其撤销并进入远端清理，不会继续等待或公开。
 
 ### POST `/api/user/persona/assets/{id}/select` 与 `/revoke`
 
