@@ -302,6 +302,34 @@ async fn main() -> Result<(), anyhow::Error> {
         None
     };
 
+    // Revoked shared files retain their server-generated key until the
+    // durable cleanup worker receives a successful platform DELETE. Reuse the
+    // deployment's long-lived OSS credentials (the same credentials used to
+    // obtain upload STS tokens); without them the worker stays explicitly
+    // disabled rather than claiming cleanup succeeded.
+    let shared_object_cleanup_bucket = match (
+        config.oss_access_key_id.clone(),
+        config.oss_access_key_secret.clone(),
+    ) {
+        (Some(access_key_id), Some(secret_access_key)) => Some(services::storage::PrivateBucket {
+            endpoint: config.oss_endpoint.clone(),
+            bucket: config.oss_bucket.clone(),
+            region: config.media_region.clone(),
+            access_key_id,
+            secret_access_key,
+            path_style: config.media_path_style,
+        }),
+        _ => None,
+    };
+    let shared_object_cleanup_handle = tokio::spawn(services::shared_object_cleanup::run(
+        db_pool.clone(),
+        services::shared_object_cleanup::SharedObjectCleanupConfig {
+            bucket: shared_object_cleanup_bucket,
+            request_timeout_secs: 10,
+        },
+        shutdown.clone(),
+    ));
+
     let app_state = api::AppState {
         secrets: api::ApiSecrets {
             jwt_secret: config.jwt_secret.clone(),
@@ -435,6 +463,7 @@ async fn main() -> Result<(), anyhow::Error> {
             hitl_expire_handle,
             order_worker_handle,
             moderation_worker_handle,
+            shared_object_cleanup_handle,
             token_cleanup_handle,
             chat_expiry_handle,
             denylist_handle,
@@ -454,14 +483,15 @@ async fn main() -> Result<(), anyhow::Error> {
             ("hitl_expire", workers.0),
             ("order_worker", workers.1),
             ("moderation_worker", workers.2),
-            ("token_cleanup", workers.3),
-            ("chat_expiry", workers.4),
-            ("denylist_cleanup", workers.5),
-            ("outbox", workers.6),
-            ("undo_prune", workers.7),
-            ("intent_expiry", workers.8),
-            ("space_formation", workers.9),
-            ("embedding_worker", workers.10),
+            ("shared_object_cleanup", workers.3),
+            ("token_cleanup", workers.4),
+            ("chat_expiry", workers.5),
+            ("denylist_cleanup", workers.6),
+            ("outbox", workers.7),
+            ("undo_prune", workers.8),
+            ("intent_expiry", workers.9),
+            ("space_formation", workers.10),
+            ("embedding_worker", workers.11),
         ] {
             if let Err(e) = result {
                 tracing::error!(worker = name, %e, "Worker task failed during shutdown");

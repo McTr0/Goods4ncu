@@ -1661,7 +1661,14 @@ impl ChatConversationService {
         if row.get::<String, _>("status") != "revoked" {
             sqlx::query(
                 "UPDATE chat_shared_objects
-                 SET status = 'revoked', revoked_at = NOW(), updated_at = NOW()
+                 SET status = 'revoked',
+                     revoked_at = COALESCE(revoked_at, NOW()),
+                     cleanup_requested_at = CASE
+                         WHEN kind = 'file' THEN COALESCE(cleanup_requested_at, NOW())
+                         ELSE cleanup_requested_at
+                     END,
+                     cleanup_next_attempt_at = NULL,
+                     updated_at = NOW()
                  WHERE id = $1",
             )
             .bind(object_id)

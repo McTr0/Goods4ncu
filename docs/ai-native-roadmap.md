@@ -153,7 +153,7 @@
 - 消息**降级为注释**：AI 从对话抽取状态变更并**提议**——"他说周三下午 → 把时间改成周三 15:00？"一键采纳
 - 变更全部留痕（谁改的、依据哪句话），可回溯
 - 现有 `chat_conversations` 保留，作为共识空间的会话载体
-- 为同校园无序用户对生成稳定 relationship key；已增加只读事件 cursor、显式幂等 Pin，以及 `0065_chat_shared_objects`/`0066_shared_object_upload_lifecycle` 的 file/link 平台权威引用与上传审核边界，再评估通用权威 Event Log
+- 为同校园无序用户对生成稳定 relationship key；已增加只读事件 cursor、显式幂等 Pin，以及 `0065_chat_shared_objects`/`0066_shared_object_upload_lifecycle`/`0067_shared_object_storage_cleanup` 的 file/link 平台权威引用、上传审核和远端清理边界，再评估通用权威 Event Log
 - 角色分身先采用统一画风、模板编辑和三档静态资产；AI 只生成候选，用户确认与媒体审核后公开
 - Memory Rail 的语义主题和自然语言回忆后置，并为每个结果保存 `source_event_ids`
 

@@ -104,6 +104,25 @@ impl PrivateBucket {
         expires_in_secs: u32,
         now: chrono::DateTime<chrono::Utc>,
     ) -> String {
+        self.presigned_request_at("GET", object_key, expires_in_secs, now)
+    }
+
+    /// Presigned DELETE URL valid for `expires_in_secs` from now.
+    ///
+    /// Cleanup uses the same bucket authority as media serving. A missing
+    /// object is treated as success by the cleanup worker, so retries are
+    /// idempotent even after a partial delete.
+    pub fn presigned_delete(&self, object_key: &str, expires_in_secs: u32) -> String {
+        self.presigned_request_at("DELETE", object_key, expires_in_secs, chrono::Utc::now())
+    }
+
+    fn presigned_request_at(
+        &self,
+        method: &str,
+        object_key: &str,
+        expires_in_secs: u32,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> String {
         let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
         let date_stamp = now.format("%Y%m%d").to_string();
         let scope = format!("{}/{}/s3/aws4_request", date_stamp, self.region);
@@ -130,8 +149,8 @@ impl PrivateBucket {
 
         let canonical_path = self.canonical_path(object_key);
         let canonical_request = format!(
-            "GET\n{}\n{}\nhost:{}\n\nhost\nUNSIGNED-PAYLOAD",
-            canonical_path, canonical_query, host
+            "{}\n{}\n{}\nhost:{}\n\nhost\nUNSIGNED-PAYLOAD",
+            method, canonical_path, canonical_query, host
         );
         let string_to_sign = format!(
             "AWS4-HMAC-SHA256\n{}\n{}\n{}",
@@ -250,6 +269,18 @@ mod tests {
             url.starts_with("https://media.oss.example.com/k.jpg?"),
             "{url}"
         );
+    }
+
+    #[test]
+    fn presigned_delete_uses_delete_method_and_same_object_scope() {
+        let at = chrono::DateTime::from_timestamp(1_700_000_000, 0)
+            .expect("timestamp")
+            .to_utc();
+        let delete = bucket().presigned_request_at("DELETE", "chat/object.bin", 300, at);
+        let get = bucket().presigned_get_at("chat/object.bin", 300, at);
+        assert!(delete.contains("X-Amz-Signature="));
+        assert_ne!(delete, get, "HTTP method must be part of the signature");
+        assert!(delete.contains("/media/chat/object.bin?"));
     }
 
     #[test]

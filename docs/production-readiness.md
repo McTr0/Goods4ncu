@@ -4,7 +4,7 @@
 | --- | --- |
 | 适用读者 | 决定是否上线的负责人、执行部署的工程师、验收测试者 |
 | 当前状态 | 关键工程安全门槛已关闭；本机已用真实 Postgres/Redis/MinIO 完成生产模式演练；生产资源开通、真实学生效果/公平性验证与人工运营验收仍待完成 |
-| 事实来源 | 本仓库 Rust/Flutter 测试、`scripts/` 下可执行演练（含真实 MinIO/Redis/Postgres）、迁移 0001–0066 |
+| 事实来源 | 本仓库 Rust/Flutter 测试、`scripts/` 下可执行演练（含真实 MinIO/Redis/Postgres）、迁移 0001–0067 |
 | 验收方式 | 每一项都给出可执行证据；无证据的项目明确标注为部署侧待办 |
 
 本报告把[生产路线图](roadmap.md)的全部退出门槛折叠为一张就绪矩阵。“代码侧关闭”指该门槛由本仓库的代码、schema、测试或可重复脚本强制并验证；“部署侧待办”指需要真实基础设施、账号或人工运营才能执行的验收步骤，本仓库已为其准备了可直接运行的验收程序。
@@ -19,7 +19,7 @@
 | 平台管理员 TOTP MFA（注册/确认/step-up 强制/防重放） | `tests/admin_auth_regression.rs`（RFC 4226/6238 向量见 `src/services/totp.rs`） |
 | 关键写接口 verified membership 门禁（含 STS 凭证） | `tests/api_regressions.rs::upload_token_requires_verified_campus_membership` |
 | 19 张租户表 FORCE RLS（事务级 `app.campus_id` 武装） | `migrations/0042` 及后续领域迁移 + `tests/rls_integration.rs`（读隐藏、写拒绝与 feed controls 隔离） |
-| 应用以 NOSUPERUSER 角色运行，RLS 对其真实生效；pgvector 由管理员预装 | `scripts/provision_app_role.sh`（校验两条不变量）+ 生产演练 check 2c；`src/db.rs` 在缺失扩展时给出可执行修复指引 |
+| 应用以 NOSUPERUSER 角色运行，RLS 对其真实生效；pgvector 由管理员预装 | `scripts/provision_app_role.sh`（校验两条不变量）+ 生产演练 check 2d；`src/db.rs` 在缺失扩展时给出可执行修复指引 |
 | 双校园隔离（市场/推荐/通知/直聊/后台/审核/案件） | `tests/tenant_scope_integration.rs`、`tests/api_regressions.rs`、`tests/admin_auth_regression.rs` |
 | 生产密钥卫生（开发标记/低熵 JWT_SECRET 拒绝启动） | `src/config.rs` 单元测试 + `scripts/production_rehearsal.sh` check 0（真实二进制验证） |
 
@@ -61,7 +61,7 @@
 | Transactional outbox（原子入队/至少一次/退避/死信/租约/重放） | `tests/outbox_integration.rs`；通知推送已迁入 |
 | Redis WS fan-out 跨副本投递（双真实进程 + 真实 WebSocket 客户端） | `tests/ws_fanout_integration.rs`（`REDIS_TEST_URL`/`FANOUT_E2E` 门控） |
 | 依赖漏洞门禁（cargo audit 进 CI；唯一 ignore 附不可达论证） | `.cargo/audit.toml`、`.github/workflows/ci.yml` |
-| 空库/升级库迁移均验证（含真实升级库上的 legacy 值归一化） | CI migration job + 0040/0041 升级路径实测 + 2026-08-12 全量空库迁移至 `0066`；生产 OSS probe、审核回调和对象清理仍需演练 |
+| 空库/升级库迁移均验证（含真实升级库上的 legacy 值归一化） | CI migration job + 0040/0041 升级路径实测 + 全量空库迁移至 `0067`；2026-08-12 生产 rehearsal 已通过真实 MinIO OSS probe、signed DELETE、撤销审计和远端对象清理 |
 
 ### 多校园与规模（Phase 4 工程部分）
 

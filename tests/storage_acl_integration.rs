@@ -192,3 +192,39 @@ async fn api_serves_approved_media_as_a_working_presigned_url() {
         ok.status()
     );
 }
+
+/// Opt-in destructive check for the cleanup authority. The rehearsal creates a
+/// dedicated object and sets `S3_TEST_DELETE_OBJECT`; normal ACL runs do not
+/// delete their shared fixture.
+#[tokio::test]
+async fn presigned_delete_removes_opt_in_object() {
+    let Some(bucket) = bucket_from_env() else {
+        eprintln!("skipping: set S3_TEST_* to run storage ACL tests");
+        return;
+    };
+    let Some(object) = std::env::var("S3_TEST_DELETE_OBJECT").ok() else {
+        eprintln!("skipping: set S3_TEST_DELETE_OBJECT for destructive cleanup check");
+        return;
+    };
+    let response = client()
+        .delete(bucket.presigned_delete(&object, 300))
+        .send()
+        .await
+        .expect("presigned DELETE request");
+    assert!(
+        response.status().is_success() || response.status() == reqwest::StatusCode::NOT_FOUND,
+        "presigned DELETE must be accepted (got {} for {})",
+        response.status(),
+        object
+    );
+    let verify = client()
+        .get(bucket.presigned_get(&object, 300))
+        .send()
+        .await
+        .expect("verify deleted object");
+    assert_eq!(
+        verify.status(),
+        reqwest::StatusCode::NOT_FOUND,
+        "deleted object must no longer be readable through a signed URL"
+    );
+}

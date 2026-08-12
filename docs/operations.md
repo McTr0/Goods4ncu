@@ -173,9 +173,12 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3999/api/readyz   # 50
 2. 双副本对空库完成生产模式引导（迁移、pgvector 扩展带 advisory lock 串行化——该演练发现并修复了双副本并发 `CREATE EXTENSION` 的真实竞态）。
 3. Redis 分布式限流与 WS fan-out 激活确认。
 4. SLO 负载冒烟（`scripts/load_smoke.sh`，普通 API p95<300ms、Feed<500ms）。
-5. 滚动重启：B 副本排空并回归期间，A 副本承载负载零失败请求。
-6. PITR 恢复演练（`scripts/backup_pitr_drill.sh`）。
-7. 双副本按序排空。
+5. 私有 MinIO/OSS bucket 验收：匿名直连拒绝、presigned serving、共享文件 `/complete` probe、撤销后的 signed DELETE 与远端清理审计（rehearsal checks 2b–2c）。
+6. 滚动重启：B 副本排空并回归期间，A 副本承载负载零失败请求。
+7. PITR 恢复演练（`scripts/backup_pitr_drill.sh`）。
+8. 双副本按序排空。
+
+共享文件撤销清理由 `shared_object_cleanup` worker 执行：`DELETE` 使用平台 bucket 签名，HTTP 404 视为幂等成功；失败会写入 `cleanup_attempts`、`cleanup_next_attempt_at` 和截断后的 `cleanup_last_error`，按 30 秒到 1 小时退避重试。若日志显示 worker idle，先检查 `OSS_ACCESS_KEY_ID`/`OSS_ACCESS_KEY_SECRET` 是否存在；不要手动把 `cleanup_completed_at` 改成成功，必须让平台删除或由运维确认远端对象已不存在。
 
 全部资源（演练库、独立 Redis、mock webhook）为一次性并自动清理。生产部署把同一清单跑在真实基础设施上即可作为发布验收。
 
@@ -195,7 +198,7 @@ DB_NAME=goods4ncu APP_PASSWORD=<secret> ./scripts/provision_app_role.sh
 
 该脚本幂等，创建 NOSUPERUSER 应用角色与其拥有的数据库、安装 pgvector，并**校验**这两条不变量后才返回。若扩展缺失且角色无权创建，应用启动会给出可直接执行的修复命令而不是含糊的权限错误。
 
-本机验证记录：以 superuser 运行时 RLS 无效（armed context 仍可见全部行）；换为 NOSUPERUSER 角色后同一查询可见 0 行，且应用正常启动与服务。生产演练 check 2c 每次都会复验这一点。
+本机验证记录：以 superuser 运行时 RLS 无效（armed context 仍可见全部行）；换为 NOSUPERUSER 角色后同一查询可见 0 行，且应用正常启动与服务。生产演练 check 2d 每次都会复验这一点。
 
 ## 本机持久部署（两校园实例）
 
@@ -368,6 +371,7 @@ RETURNING listing_id, campus_id, desired_revision;
 | `notifications` | `campus_id`、unread、event_type、related_order/listing、是否已推送但未读。 |
 | `admin_audit_logs` | campus_id、管理员操作、target、scope_reason；跨校园读取和写入是否都有审计。 |
 | `moderation_jobs` | campus_id、资源归属，以及 pending、processing、approved、rejected、failed 状态。 |
+| `chat_shared_objects` | file/link 权威对象、`pending_upload`/审核/撤销状态；文件撤销后的远端清理请求、尝试次数、下一次重试、错误与完成时间也保存在同一行。 |
 | `moderation_cases` | campus_id、subject、来源、状态、公开原因、resolution 和 pending appeal；普通用户接口不得返回 internal_details。 |
 | `moderation_case_events` | 案件创建、复核、处置、恢复和申诉状态转换的时间线。 |
 | `moderation_appeals` | 每个案件每个当事人一次申诉、独立复核者、决定和公开说明。 |
@@ -414,6 +418,8 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 如果消息看起来丢了，先查 `chat_messages.direct_conversation_id` 是否等于会话 id，再查 sender/receiver 是否是会话成员。新留言徽标来自接收设备的 `LOCALLY_SEEN`，服务器没有可查询的阅读位置。排查状态跳转时看 `chat_conversation_events`，它能说明会话是被接通、关闭、屏蔽还是 worker 过期。
 
 如果实时信号异常，确认 WebSocket 收到的是 `conversation_created`、`conversation_state_changed`、`new_message` 或 `message_acknowledgement_changed`。服务端不广播 `message_read`、`typing` 或在线状态。媒体问题先确认 `image_url`、`audio_url` 属于平台 bucket 或代理，Base64 字段只是兼容 fallback。
+
+如果共享文件已显示 `revoked` 但 bucket 仍有对象，先查 `chat_shared_objects.cleanup_attempts/cleanup_next_attempt_at/cleanup_last_error` 和 `shared-object cleanup worker` 日志，再用平台 CLI 以同一 bucket 凭据确认对象是否存在。不要从消息 quote 或客户端 URL 反推清理状态；数据库完成时间只会在 signed DELETE 成功或平台返回 404 后写入。
 
 ### 语义搜索或推荐异常
 

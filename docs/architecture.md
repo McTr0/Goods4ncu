@@ -140,7 +140,7 @@ Message / ConversationEvent / Quote / Listing / Acknowledgement
         +--> 可选语义索引（带 source_event_ids）
 ```
 
-迁移不先建万能事件表。第一步由查询层为同校园无序用户对生成稳定的 relationship key，并从现有表按 cursor 返回规范化事件（当前已由 Thread 与 `space-events` 只读接口提供）；客户端据此实现时间、最近连接恢复点和共享对象引用。显式 Pin 通过 `0064_relationship_space_pins` 作为单独的用户动作事实保存，file/link 通过 `0065_chat_shared_objects`/`0066_shared_object_upload_lifecycle` 保存平台权威引用；文件只有在服务端 probe 和必要审核完成后才进入共享投影。它们都不是消息副本，也不是自动事件。只有证明回放一致、双写原子、旧客户端兼容和重建成本可控后，通用 `SpaceEvent` 才能成为新的权威写入口。
+迁移不先建万能事件表。第一步由查询层为同校园无序用户对生成稳定的 relationship key，并从现有表按 cursor 返回规范化事件（当前已由 Thread 与 `space-events` 只读接口提供）；客户端据此实现时间、最近连接恢复点和共享对象引用。显式 Pin 通过 `0064_relationship_space_pins` 作为单独的用户动作事实保存，file/link 通过 `0065_chat_shared_objects`/`0066_shared_object_upload_lifecycle`/`0067_shared_object_storage_cleanup` 保存平台权威引用、上传审核和远端清理状态；文件只有在服务端 probe 和必要审核完成后才进入共享投影，撤销后的远端 DELETE 由可重试 worker 执行。它们都不是消息副本，也不是自动事件。只有证明回放一致、双写原子、旧客户端兼容和重建成本可控后，通用 `SpaceEvent` 才能成为新的权威写入口。
 
 投影必须可丢弃重建，不能保存模型生成的无来源“事实”。语义摘要或主题索引保存来源事件、模型版本和权限范围；源内容删除、隐藏、审核限制或 membership 变化时触发失效。LLM/embedding 故障只移除语义增强，不影响留言、连接、时间轨迹、Pin、文件和商品对象。
 

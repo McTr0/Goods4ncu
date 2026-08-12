@@ -39,6 +39,8 @@ WEBHOOK_PORT=4299
 PORT_A=4201
 PORT_B=4202
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/goods4ncu_rehearsal.XXXXXX")"
+REHEARSAL_BUYER_ID="d1000000-0000-0000-0000-000000000001"
+REHEARSAL_SELLER_ID="d2000000-0000-0000-0000-000000000001"
 
 PIDS=()
 cleanup() {
@@ -71,6 +73,26 @@ APP_ROLE="rehearsal_app_$$"
 APP_PASSWORD="rehearsal-app-secret"
 DB_NAME="$DB_NAME" APP_ROLE="$APP_ROLE" APP_PASSWORD="$APP_PASSWORD" \
     ./scripts/provision_app_role.sh >/dev/null || fail "database provisioning failed"
+# Apply the schema before removing the historical seed: the production boot
+# guard deliberately runs after migrations, while the migration set still
+# contains the development-only seed rows.
+APP_DATABASE_URL="postgres://$APP_ROLE:$APP_PASSWORD@127.0.0.1:5432/$DB_NAME"
+DATABASE_URL="$APP_DATABASE_URL" "$BIN" migrate >/dev/null \
+    || fail "migration bootstrap failed"
+# Migrations intentionally include the historical demo seed for development,
+# while production startup refuses those public credentials. Replace them with
+# two throwaway rehearsal identities before booting production mode.
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -f scripts/remove_demo_seed.sql >/dev/null \
+    || fail "demo seed removal failed"
+psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -v buyer_id="$REHEARSAL_BUYER_ID" -v seller_id="$REHEARSAL_SELLER_ID" <<'SQL' >/dev/null
+INSERT INTO users (id, username, password_hash, role, status) VALUES
+    (:'buyer_id', 'rehearsal-buyer', '$argon2id$v=19$m=19456,t=2,p=1$i34OLeEjAmU8MY2ks6AZ+g$R53wbYe3bluW4y0mIvLeaAZtdep9kgdftfaoj1ElVTs', 'user', 'active'),
+    (:'seller_id', 'rehearsal-seller', '$argon2id$v=19$m=19456,t=2,p=1$i34OLeEjAmU8MY2ks6AZ+g$R53wbYe3bluW4y0mIvLeaAZtdep9kgdftfaoj1ElVTs', 'user', 'active');
+INSERT INTO campus_memberships (campus_id, user_id, status, role, verification_method, verified_at)
+VALUES
+    ('c0000000-0000-0000-0000-000000000001', :'buyer_id', 'verified', 'member', 'production_rehearsal', NOW()),
+    ('c0000000-0000-0000-0000-000000000001', :'seller_id', 'verified', 'member', 'production_rehearsal', NOW());
+SQL
 redis-server --port "$REDIS_PORT" --daemonize yes --save '' >/dev/null
 redis-cli -p "$REDIS_PORT" ping >/dev/null || fail "redis did not start"
 
@@ -91,6 +113,8 @@ mc alias set rehearsal "http://127.0.0.1:$S3_PORT" rehearsal rehearsal-secret-ke
 mc mb --ignore-existing "rehearsal/$S3_BUCKET" >/dev/null
 echo "rehearsal media object" > "$SCRATCH/media-probe.txt"
 mc cp "$SCRATCH/media-probe.txt" "rehearsal/$S3_BUCKET/media-probe.txt" >/dev/null
+echo "rehearsal cleanup object" > "$SCRATCH/cleanup-probe.txt"
+mc cp "$SCRATCH/cleanup-probe.txt" "rehearsal/$S3_BUCKET/cleanup-probe.txt" >/dev/null
 [ "$(mc anonymous get "rehearsal/$S3_BUCKET" 2>&1 | grep -c private)" -ge 1 ] \
     || fail "rehearsal bucket is not private"
 
@@ -174,7 +198,8 @@ say "  ✓ Redis-backed rate limiting and WS fanout active"
 
 # --- Check 2: SLO smoke on replica A -----------------------------------------
 say "check 2: SLO load smoke against replica A"
-BASE_URL="http://127.0.0.1:$PORT_A" ./scripts/load_smoke.sh 200 16 \
+BASE_URL="http://127.0.0.1:$PORT_A"
+BASE_URL="$BASE_URL" ./scripts/load_smoke.sh 200 16 \
     || fail "SLO smoke failed"
 
 # --- Check 2b: object-storage ACL boundary ------------------------------------
@@ -188,12 +213,78 @@ say "  ✓ anonymous direct object access refused (403)"
 S3_TEST_ENDPOINT="http://127.0.0.1:$S3_PORT" S3_TEST_BUCKET="$S3_BUCKET" \
     S3_TEST_ACCESS_KEY=rehearsal S3_TEST_SECRET_KEY=rehearsal-secret-key \
     S3_TEST_OBJECT=media-probe.txt \
+    S3_TEST_DELETE_OBJECT=cleanup-probe.txt \
     cargo test --test storage_acl_integration -- --test-threads=1 >/dev/null 2>&1 \
     || fail "storage ACL integration tests failed against the rehearsal bucket"
 say "  ✓ presigned serving verified against the live bucket"
 
-# --- Check 2c: RLS is live for the application role ---------------------------
-say "check 2c: RLS applies to the non-superuser app role"
+# --- Check 2c: durable shared-object cleanup ---------------------------------
+say "check 2c: revoked shared objects are deleted by the worker"
+CAMPUS_ID="c0000000-0000-0000-0000-000000000001"
+OBJECT_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+CONVERSATION_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+CLEANUP_KEY="chat/$CAMPUS_ID/$OBJECT_ID"
+echo "rehearsal shared-object cleanup" > "$SCRATCH/shared-object-cleanup.txt"
+mc cp "$SCRATCH/shared-object-cleanup.txt" "rehearsal/$S3_BUCKET/$CLEANUP_KEY" >/dev/null
+DECLARED_SIZE=$(wc -c < "$SCRATCH/shared-object-cleanup.txt" | tr -d ' ')
+PGPASSWORD="$APP_PASSWORD" psql -h 127.0.0.1 -U "$APP_ROLE" -d "$DB_NAME" \
+    -v campus_id="$CAMPUS_ID" -v conversation_id="$CONVERSATION_ID" \
+    -v object_id="$OBJECT_ID" -v cleanup_key="$CLEANUP_KEY" \
+    -v declared_size="$DECLARED_SIZE" -v buyer_id="$REHEARSAL_BUYER_ID" \
+    -v seller_id="$REHEARSAL_SELLER_ID" <<'SQL' >/dev/null
+INSERT INTO chat_conversations (
+    id, client_request_id, mode, state, initiator_id, recipient_id, subject
+) VALUES (
+    :'conversation_id'::uuid, gen_random_uuid(), 'mail', 'open',
+    :'buyer_id',
+    :'seller_id',
+    'production cleanup rehearsal'
+);
+INSERT INTO chat_conversation_members (conversation_id, user_id)
+VALUES
+    (:'conversation_id'::uuid, :'buyer_id'),
+    (:'conversation_id'::uuid, :'seller_id');
+INSERT INTO chat_shared_objects (
+    id, campus_id, conversation_id, created_by, kind, title,
+    storage_key, mime_type, size_bytes, status, moderation_status
+) VALUES (
+    :'object_id'::uuid, :'campus_id'::uuid, :'conversation_id'::uuid,
+    :'buyer_id', 'file', 'cleanup rehearsal',
+    :'cleanup_key', 'text/plain', :'declared_size'::bigint, 'pending_upload', 'not_required'
+);
+SQL
+LOGIN_CODE=$(curl -sS -o "$SCRATCH/login.json" -w '%{http_code}' \
+    -X POST "$BASE_URL/api/auth/login" \
+    -H 'Content-Type: application/json' \
+    -d '{"username":"rehearsal-buyer","password":"Test1234"}')
+[ "$LOGIN_CODE" = "200" ] || { cat "$SCRATCH/login.json" >&2; fail "cleanup rehearsal login failed with $LOGIN_CODE"; }
+LOGIN_JSON=$(cat "$SCRATCH/login.json")
+BUYER_TOKEN=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' <<<"$LOGIN_JSON")
+COMPLETE_CODE=$(curl -sS -o "$SCRATCH/complete.json" -w '%{http_code}' \
+    -X POST "$BASE_URL/api/chat/shared-objects/$OBJECT_ID/complete" \
+    -H "Authorization: Bearer $BUYER_TOKEN" \
+    -H 'Content-Type: application/json' -d '{}')
+[ "$COMPLETE_CODE" = "200" ] || { cat "$SCRATCH/complete.json" >&2; fail "shared-object completion returned $COMPLETE_CODE"; }
+grep -q '"status":"active"' "$SCRATCH/complete.json" \
+    || fail "shared-object completion did not expose active status"
+REVOKE_CODE=$(curl -sS -o "$SCRATCH/revoke.json" -w '%{http_code}' \
+    -X DELETE "$BASE_URL/api/chat/shared-objects/$OBJECT_ID" \
+    -H "Authorization: Bearer $BUYER_TOKEN")
+[ "$REVOKE_CODE" = "200" ] || { cat "$SCRATCH/revoke.json" >&2; fail "shared-object revoke returned $REVOKE_CODE"; }
+for _ in $(seq 1 80); do
+    completed=$(PGPASSWORD="$APP_PASSWORD" psql -h 127.0.0.1 -U "$APP_ROLE" -d "$DB_NAME" -qtA \
+        -c "SELECT cleanup_completed_at IS NOT NULL FROM chat_shared_objects WHERE id = '$OBJECT_ID';")
+    [ "$completed" = "t" ] && break
+    sleep 1
+done
+[ "$completed" = "t" ] || fail "shared-object cleanup worker did not acknowledge DELETE"
+if mc stat "rehearsal/$S3_BUCKET/$CLEANUP_KEY" >/dev/null 2>&1; then
+    fail "revoked shared-object remote key still exists after cleanup"
+fi
+say "  ✓ revoked shared-object row retained an audit result and remote key was deleted"
+
+# --- Check 2d: RLS is live for the application role ---------------------------
+say "check 2d: RLS applies to the non-superuser app role"
 is_super=$(psql -d postgres -qtA -c "SELECT rolsuper FROM pg_roles WHERE rolname='$APP_ROLE';")
 [ "$is_super" = "f" ] || fail "app role is a superuser — RLS would be bypassed"
 armed=$(PGPASSWORD="$APP_PASSWORD" psql -h 127.0.0.1 -U "$APP_ROLE" -d "$DB_NAME" -qtA <<'SQL'

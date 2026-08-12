@@ -222,7 +222,7 @@ AI 只能生成候选外观、资料草稿或单次回复草稿；不能自动�
   -> 文件、链接、商品、地点或明确约定成为可回到的共享对象
 ```
 
-第一阶段不把通用 Event Log 变成消息服务器写模型：移动端以 `Thread + Conversation + Message` 为事实源生成空间投影。当前 API 已提供活动校园作用域的稳定 `relationship_key` 与只读 `space-events` cursor；`0064_relationship_space_pins` 保存用户明确执行的 Pin，`0065_chat_shared_objects`/`0066_shared_object_upload_lifecycle` 保存 file/link 的平台权威引用与文件上传审核状态，商品对象继续从现有 Message/Quote 派生。通用 Event Log 必须等双写、回放、幂等和旧客户端兼容方案完成后再成为权威写模型。
+第一阶段不把通用 Event Log 变成消息服务器写模型：移动端以 `Thread + Conversation + Message` 为事实源生成空间投影。当前 API 已提供活动校园作用域的稳定 `relationship_key` 与只读 `space-events` cursor；`0064_relationship_space_pins` 保存用户明确执行的 Pin，`0065_chat_shared_objects`/`0066_shared_object_upload_lifecycle`/`0067_shared_object_storage_cleanup` 保存 file/link 的平台权威引用、文件上传审核和撤销清理状态，商品对象继续从现有 Message/Quote 派生。通用 Event Log 必须等双写、回放、幂等和旧客户端兼容方案完成后再成为权威写模型。
 
 `Memory Rail` 首版仅索引时间与用户 Pin。连接开始/结束、文件、链接、结构化 quote、主动 acknowledgement 和共享对象变更可以形成确定性节点；普通正文不会因为模型“觉得重要”就自动变成记忆。可选语义主题必须保留来源事件标识，删除、隐藏、权限变化或源事件不可见时同步失效。
 
