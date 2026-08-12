@@ -1073,6 +1073,7 @@ class ChatThread {
     required this.peerUserId,
     required this.peerUsername,
     required this.latestActivityAt,
+    this.relationshipKey,
     this.latestPreview,
     this.unreadCount = 0,
     this.conversationCount = 0,
@@ -1086,6 +1087,11 @@ class ChatThread {
   final String peerUserId;
   final String peerUsername;
   final DateTime latestActivityAt;
+
+  /// Server-provided campus-scoped relationship key. Legacy servers may omit
+  /// it; absence is kept as null rather than inventing a relationship fact on
+  /// the device.
+  final String? relationshipKey;
   final String? latestPreview;
   final int unreadCount;
   final int conversationCount;
@@ -1099,6 +1105,7 @@ class ChatThread {
     peerUserId: peerUserId,
     peerUsername: peerUsername,
     latestActivityAt: latestActivityAt,
+    relationshipKey: relationshipKey,
     latestPreview: latestPreview,
     unreadCount: unreadCount ?? this.unreadCount,
     conversationCount: conversationCount,
@@ -1116,6 +1123,7 @@ class ChatThread {
       latestActivityAt:
           DateTime.tryParse(json['latest_activity_at']?.toString() ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0),
+      relationshipKey: json['relationship_key']?.toString(),
       latestPreview: json['latest_preview']?.toString(),
       // The server no longer stores a read position.  Inbox badges are
       // derived from the device-local marker in ConversationListPage.
@@ -1142,6 +1150,63 @@ class ChatThreadDetail {
       conversations: (json['conversations'] as List<dynamic>? ?? const [])
           .map((item) => Conversation.fromJson(item as Map<String, dynamic>))
           .toList(),
+    );
+  }
+}
+
+class RelationshipSpaceEvent {
+  const RelationshipSpaceEvent({
+    required this.id,
+    required this.sourceType,
+    required this.sourceId,
+    required this.eventType,
+    required this.conversationId,
+    required this.actorId,
+    required this.occurredAt,
+  });
+
+  final String id;
+  final String sourceType;
+  final String sourceId;
+  final String eventType;
+  final String conversationId;
+  final String? actorId;
+  final DateTime occurredAt;
+
+  factory RelationshipSpaceEvent.fromJson(Map<String, dynamic> json) {
+    return RelationshipSpaceEvent(
+      id: json['id']?.toString() ?? '',
+      sourceType: json['source_type']?.toString() ?? '',
+      sourceId: json['source_id']?.toString() ?? '',
+      eventType: json['event_type']?.toString() ?? '',
+      conversationId: json['conversation_id']?.toString() ?? '',
+      actorId: json['actor_id']?.toString(),
+      occurredAt:
+          DateTime.tryParse(json['occurred_at']?.toString() ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
+class RelationshipSpace {
+  const RelationshipSpace({
+    required this.relationshipKey,
+    required this.events,
+    this.nextCursor,
+  });
+
+  final String relationshipKey;
+  final List<RelationshipSpaceEvent> events;
+  final String? nextCursor;
+
+  factory RelationshipSpace.fromJson(Map<String, dynamic> json) {
+    return RelationshipSpace(
+      relationshipKey: json['relationship_key']?.toString() ?? '',
+      events: (json['events'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(RelationshipSpaceEvent.fromJson)
+          .toList(),
+      nextCursor: json['next_cursor']?.toString(),
     );
   }
 }

@@ -126,6 +126,28 @@ wanted matches 使用活动 campus、分类、预算、成色和 active 状态�
 
 当前 `src/api/user_chat/message.rs` 和部分 Flutter 聊天页面职责密度较高。拆分时保持 Conversation 状态转换集中在 service，不要把复杂度从一个大文件搬到另一个大文件。
 
+### 目标投影：Relationship Space 与 Memory Rail
+
+关系空间采用“事实写入一次，多种可重建投影”的架构：
+
+```text
+现有业务事实
+Message / ConversationEvent / Quote / Listing / Acknowledgement
+        |
+        +--> 消息与会话投影（当前 UI）
+        +--> Relationship Space 投影
+        +--> 确定性 Memory Rail
+        +--> 可选语义索引（带 source_event_ids）
+```
+
+迁移不先建万能事件表。第一步由查询层为同校园无序用户对生成稳定的 relationship key，并从现有表按 cursor 返回规范化事件（当前已由 Thread 与 `space-events` 只读接口提供）；客户端据此实现时间 + Pin 轨迹、最近连接恢复点和共享对象引用。第二步再补持久 Pin、SharedObject 及投影 checkpoint。只有证明回放一致、双写原子、旧客户端兼容和重建成本可控后，通用 `SpaceEvent` 才能成为新的权威写入口。
+
+投影必须可丢弃重建，不能保存模型生成的无来源“事实”。语义摘要或主题索引保存来源事件、模型版本和权限范围；源内容删除、隐藏、审核限制或 membership 变化时触发失效。LLM/embedding 故障只移除语义增强，不影响留言、连接、时间轨迹、Pin、文件和商品对象。
+
+Flutter 的空间布局保持稳定的“对方左上 / 自己右下”映射，但角色尺寸由本地视口、滚动密度和无障碍设置决定，绝不订阅 typing/read/online。连接开始时可以缩细 Rail、弱化角色；这是本地投影状态，不是对外 presence 事件。
+
+`SocialPersona` 是独立的受审核展示资源。校园认证徽标仍从 membership 读取，公开接近方式从用户显式设置读取；Agent 头像、Agent 参与提示与用户角色资产使用不同组件和事件，避免把“用户分身出现”误解为“AI 已进入私聊”。
+
 ## 当前 Agent 与 RAG
 
 自然语言入口先经过内容审核和 IntentRouter，再根据意图直接回答、检索或调用 Agent。Provider 支持 Gemini、MiniMax 和 OpenAI-compatible chat；embedding 当前仍主要依赖 Gemini 客户端和配置维度。

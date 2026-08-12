@@ -447,11 +447,15 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 ### GET `/api/chat/threads`
 
-需要登录。按 `other_user_id` 聚合收件箱，让同一聊天对象只返回一个 Thread。支持 `mode=all|realtime|mail`。返回对方标识、最近活动/预览、conversation/mail/realtime/pending 数量和 active realtime 状态。新客户端根据设备本地的 `LOCALLY_SEEN` 标记显示“新留言”，不读取服务器未读数。
+需要登录。按 `other_user_id` 聚合收件箱，让同一聊天对象只返回一个 Thread。支持 `mode=all|realtime|mail`。返回对方标识、最近活动/预览、conversation/mail/realtime/pending 数量、active realtime 状态，以及只读的 `relationship_key`。当请求带有服务端推导的活动校园时，key 是该校园内无序用户对的稳定标识；无校园的 legacy 读取使用独立命名空间。新客户端根据设备本地的 `LOCALLY_SEEN` 标记显示“新留言”，不读取服务器未读数。
 
 ### GET `/api/chat/threads/{peer_user_id}`
 
-需要登录。返回当前用户与指定对方之间的 Conversation 卡组，按最近活动排序。只包含当前用户参与的会话，不泄露第三方历史。Thread 是查询聚合，不改变底层 Conversation ID 和状态机。
+需要登录。返回当前用户与指定对方之间的 Conversation 卡组，按最近活动排序，并在 `thread.relationship_key` 中返回同校园无序用户对的只读稳定标识。只包含当前用户参与的会话，不泄露第三方历史。Thread 是查询聚合，不改变底层 Conversation ID 和状态机，也不产生在线、输入中或已读事实。
+
+### GET `/api/chat/threads/{peer_user_id}/space-events`
+
+需要登录。按 `cursor` 和 `limit` 返回同一 Thread 的只读 Relationship Space 时间轨迹。事件由现有 `chat_conversation_events` 与当前用户可见的 `chat_messages` 确定性投影而来，包含 `source_type/source_id`、事件类型、会话、行动者和发生时间；消息正文、媒体、Pin 与共享对象仍分别通过既有资源接口处理。返回的 `next_cursor` 只用于继续读取，不写入阅读位置，也不会因为打开或滚动而广播注意力状态。
 
 ### POST `/api/chat/conversations`
 

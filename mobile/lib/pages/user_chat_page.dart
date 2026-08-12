@@ -15,6 +15,7 @@ import '../services/user_service.dart';
 import '../services/ws_service.dart';
 import '../theme/app_theme.dart';
 import '../components/contact_conversation_sheet.dart';
+import '../components/relationship_space_preview.dart';
 import '../l10n/app_localizations.dart';
 import 'user_chat_composer_controller.dart';
 import 'user_chat_components.dart';
@@ -730,6 +731,13 @@ class _UserChatPageState extends State<UserChatPage> {
     final body = Column(
       children: [
         if (widget.embedded) _buildEmbeddedHeader(),
+        if (!widget.embedded)
+          RelationshipSpacePreview(
+            otherName: _displayName,
+            latestEvent: _messages.isEmpty ? null : _messages.last.content,
+            isConnected: _conversation?.state == ConversationState.active,
+            compact: true,
+          ),
         // Pinned above the messages: the whole point is that "how much, when,
         // where" stops living in the scrollback.
         if (_agreement != null)

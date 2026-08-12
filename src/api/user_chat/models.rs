@@ -3,7 +3,8 @@ use uuid::Uuid;
 
 use crate::services::chat_conversation::{
     AcknowledgementKind, ChatThreadDetail, ChatThreadView, ConversationDecision,
-    ConversationMessageRecord, ConversationMode, ConversationView,
+    ConversationMessageRecord, ConversationMode, ConversationView, RelationshipSpaceEventView,
+    RelationshipSpaceView,
 };
 
 #[derive(Debug, Deserialize)]
@@ -51,6 +52,29 @@ impl From<ChatThreadDetail> for ThreadDetailResponse {
         Self {
             thread: value.thread,
             conversations: value.conversations,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SpaceEventQuery {
+    pub cursor: Option<String>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RelationshipSpaceResponse {
+    pub relationship_key: String,
+    pub events: Vec<RelationshipSpaceEventView>,
+    pub next_cursor: Option<String>,
+}
+
+impl From<RelationshipSpaceView> for RelationshipSpaceResponse {
+    fn from(value: RelationshipSpaceView) -> Self {
+        Self {
+            relationship_key: value.relationship_key,
+            events: value.events,
+            next_cursor: value.next_cursor,
         }
     }
 }

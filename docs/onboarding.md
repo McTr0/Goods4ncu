@@ -95,7 +95,7 @@ offer 仍然 active
 
 ```text
 现在聊 -> realtime，会经过 syn_sent -> syn_ack -> active
-写封留言 -> mail，主题和正文直接送达
+写封留言 -> mail，主题和正文提交到服务器
 ```
 
 每次联系仍是独立 Conversation，但收件箱按聊天对象聚合成 Thread。因此同一个 `seller2` 不应在首页重复出现很多次；进入联系人线程后，用户才能看到多段实时、留言和历史卡组。

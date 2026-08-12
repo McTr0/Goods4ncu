@@ -5,12 +5,14 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../components/contact_conversation_sheet.dart';
+import '../components/relationship_space_preview.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
 import '../services/chat_local_seen_storage.dart';
 import '../services/user_service.dart';
 import '../services/ws_service.dart';
+import '../theme/app_theme.dart';
 import '../utils/category_utils.dart';
 import 'chat_page.dart';
 import 'user_chat_page.dart';
@@ -705,41 +707,58 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
         color: scheme.surface,
         border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _Avatar(name: _displayName),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _displayName,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900,
-                  ),
+          Row(
+            children: [
+              _Avatar(name: _displayName),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _displayName,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      thread == null
+                          ? l.conversationThreadLoading
+                          : thread.latestPreview ??
+                                l.conversationThreadStats(
+                                  thread.realtimeCount,
+                                  thread.mailCount,
+                                  thread.conversationCount,
+                                ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  thread == null
-                      ? l.conversationThreadLoading
-                      : l.conversationThreadStats(
-                          thread.realtimeCount,
-                          thread.mailCount,
-                          thread.conversationCount,
-                        ),
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                ),
-              ],
+              ),
+              const SizedBox(width: 12),
+              FilledButton.icon(
+                onPressed: thread == null ? null : _startConversation,
+                icon: const Icon(Icons.add_comment_outlined, size: 18),
+                label: Text(l.conversationReconnect),
+              ),
+            ],
+          ),
+          if (thread != null) ...[
+            const SizedBox(height: AppTheme.sp12),
+            RelationshipSpacePreview(
+              otherName: _displayName,
+              latestEvent: thread.latestPreview,
+              isConnected: thread.hasActiveRealtime,
+              compact: true,
             ),
-          ),
-          const SizedBox(width: 12),
-          FilledButton.icon(
-            onPressed: thread == null ? null : _startConversation,
-            icon: const Icon(Icons.add_comment_outlined, size: 18),
-            label: Text(l.conversationReconnect),
-          ),
+          ],
         ],
       ),
     );

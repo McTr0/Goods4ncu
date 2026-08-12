@@ -17,6 +17,9 @@
 4. 聊天文本不构成正式报价或成交确认，`DealRecord` 才是平台记录的业务事实。
 5. Agent 不能直接创造高风险事实，只能生成计划并调用受权限控制的 service。
 6. 所有校园范围数据都必须能回答“属于哪个 campus”。
+7. 关系空间中的事实先来自用户动作和确定性领域事件，AI 摘要只是带来源的投影。
+8. 校园认证身份、用户自述和角色化外观必须分层，角色不能充当身份验证。
+9. 注意力与人格不能从阅读、输入、在线或消息历史中推断为公开事实。
 
 ## 领域总图
 
@@ -28,6 +31,12 @@ flowchart LR
     Intent --> Match[Match]
     Match --> Response[Response]
     Response --> Conversation[Conversation / Thread]
+    User --> Persona[SocialPersona]
+    Conversation --> Relationship[Relationship / Space]
+    Persona --> Relationship
+    Relationship --> SpaceEvent[SpaceEvent projection]
+    SpaceEvent --> Memory[MemoryIndex]
+    SpaceEvent --> Shared[SharedObject]
     Conversation --> Deal[DealRecord]
     Intent --> Moderation[ModerationCase]
     Conversation --> Moderation
@@ -166,7 +175,44 @@ round_state = closed
 
 Conversation 终止后不可复活。重新联系会创建新 Conversation，但仍显示在同一个 Thread 中。
 
-目标态下，`Conversation` 仍然是一次留言或连接的边界；`Thread` 只是关系级查询聚合。服务器只保存消息送达所需的技术事实和用户主动发出的 acknowledgement，不从页面打开、Push、解密、媒体播放或键盘活动推导“已读”。多设备可以各自维护 `LocalSeen`，因此设备间的新留言提示允许暂时不同步，以换取更清晰的隐私边界。
+目标态下，`Conversation` 仍然是一次留言或连接的边界；`Thread` 只是关系级查询聚合。服务器只公开消息已成功持久化的技术事实和用户主动发出的 acknowledgement，不从页面打开、Push、解密、媒体播放或键盘活动推导“已读”。多设备可以各自维护 `LocalSeen`，因此设备间的新留言提示允许暂时不同步，以换取更清晰的隐私边界。
+
+### SocialPersona、RelationshipSpace 与 SpaceEvent
+
+[目标态] `SocialPersona` 是用户在某个校园中的角色化呈现，不是账号、membership 或 Agent 身份。建议字段分组为：
+
+```text
+user_id / campus_id
+representation_mode: photo_stylized | trait_mapped | role_character
+style_version / appearance_config / approved_asset_id
+self_descriptions[]          # 用户主动选择
+contact_posture              # 用户主动公开的粗粒度接近方式
+published_at / updated_at
+```
+
+`contact_posture` 可以表达可留言、可请求连接、忙或稍后，但不能保存或派生 online、last seen、typing 或 read。角色素材复用媒体隔离与审核；`representation_mode` 只是展示披露，不证明外貌真实性。用户未发布分身时继续使用普通头像和文字资料，核心联系能力不能被 AI 生成服务绑架。
+
+`Relationship` 表示同一校园内两个人之间的长期入口；`RelationshipSpace` 是它的交互投影。当前没有必要立刻新增权威关系表：`campus_id + 无序用户对` 的 Thread 聚合可以作为迁移桥梁，屏蔽、membership 和可见性依旧由现有事实控制。当前 API 已在活动校园作用域返回只读 `relationship_key`（`relationship:v1:{campus}:{lo}:{hi}`）；它只用于投影缓存和未来 cursor 的关联，不授予权限，也不代表在线或注意力状态。
+
+```text
+RelationshipSpace
+├── Participants / SocialPersona refs
+├── Conversations / Sessions
+├── SpaceEvents
+├── SharedObjects
+└── MemoryIndex projections
+```
+
+`SpaceEvent` 统一描述可以回放的空间变化，例如 `message.sent`、`connection.started`、`connection.ended`、`file.shared`、`link.shared`、`memory.pinned`、`acknowledgement.changed` 和 `shared_object.updated`。首阶段它只是从 `chat_messages`、`chat_conversation_events`、quote、reaction 和领域对象派生的只读投影，不另建一套可能与原表分叉的事实。若后续成为通用写模型，必须具备全局事件 id、aggregate/version、campus、actor、source reference、幂等键和 cursor，并与业务写入同事务提交。
+
+`SharedObject` 是双方围绕某件事互动的稳定入口，可以引用商品、文件、链接、地点或约定。它不复制权威业务状态：listing 价格与状态从 `IntentItem/inventory` 读取，成交从 `DealRecord` 读取，双方共识必须记录谁明确采纳。模型从对话抽取出的地点、时间或价格只能先形成 proposal，不能直接写成 agreed value。
+
+`MemoryIndex` 有两层：
+
+- 确定性索引：时间、连接起止、文件、链接、结构化 quote、用户 Pin 和 SharedObject 变更，可由原始事件完全重建。
+- 可选语义索引：主题、摘要和自然语言检索结果，每条必须保存 `source_event_ids`、模型/规则版本与生成时间。
+
+源事件删除、隐藏、跨校园、权限变化或审核限制后，对应投影必须失效或重建。语义摘要不能反向成为消息、约定、成交或用户人格事实；LLM 是索引，不是 source of truth。
 
 ### DealRecord
 

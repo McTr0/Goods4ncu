@@ -137,6 +137,8 @@ GOOD4NCU_API_BASE=http://127.0.0.1:3000 \
 | 主动确认 | `seller1` 对消息选择“收到 / 我会看 / 已处理” | `buyer1` 观察消息 | 只有显式动作产生对应 acknowledgement 和 `message_acknowledgement_changed`，可替换或撤销；打开消息不自动确认。 |
 | 跨校园确认隔离 | 同一账号的设备分别停在两个校园 | A 校园接收 acknowledgement | 只有 A 校园 socket 收到事件；B 校园只能通过自己的 HTTP 会话看到自己的会话，不能收到 A 的消息或确认。 |
 | 连接不是在线 | `buyer1` 发起连接，`seller1` 接受并结束 | 双方观察状态 | 只显示 `请求连接 -> 已连接 -> 已结束`；不额外显示 online、last seen 或 typing。 |
+| 共同空间投影（R0） | 打开联系人线程，再打开一段留言或连接 | 双方观察页面 | 显示双方角色锚点、时间轨迹和明确的“可以留言/已连接”；页面打开、滚动和角色缩放不产生对方可见事件。390×844 与桌面分栏都不得遮挡正文。 |
+| 共同空间事件轨迹（R2） | API driver 按 `relationship_key` 首页读取，再用 `next_cursor` 翻页 | 对方尝试跨校园或访问未参与的 peer | 只返回当前用户可见的会话事件与消息来源；cursor 不改变 `LOCALLY_SEEN`，跨校园/越权返回 404，不产生 read/typing/online 事实。 |
 | 回复引用 | `buyer1` 长按回复 | `seller1` 发一条消息 | 引用气泡展示原发送者和摘要。 |
 | 表情反应 | `buyer1` 添加反应 | 无 | 反应出现在气泡下方，自己的反应高亮。 |
 | 仅对自己删除 | `buyer1` 删除消息 | `seller1` 读取同一会话 | buyer 看不到，seller 仍看得到。 |

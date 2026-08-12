@@ -22,8 +22,9 @@ use crate::services::notification::NewNotification;
 use super::{
     ArchiveConversationBody, BlockListResponse, BlockUserBody, BlockedUserEntry,
     ConnectionPreferencesBody, ContactPermissionBody, ConversationListQuery,
-    ConversationListResponse, CreateConversationBody, RespondConversationBody,
-    ThreadDetailResponse, ThreadListQuery, ThreadListResponse,
+    ConversationListResponse, CreateConversationBody, RelationshipSpaceResponse,
+    RespondConversationBody, SpaceEventQuery, ThreadDetailResponse, ThreadListQuery,
+    ThreadListResponse,
 };
 
 pub async fn create_conversation(
@@ -281,6 +282,27 @@ pub async fn get_thread(
         }
     };
     Ok(Json(detail.into()))
+}
+
+pub async fn get_relationship_space(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(peer_user_id): Path<String>,
+    Query(query): Query<SpaceEventQuery>,
+) -> Result<Json<RelationshipSpaceResponse>, ApiError> {
+    let session = authenticated_session(&state, &headers)?;
+    let campus_id = ensure_active_campus(&state, &session).await?;
+    let service = ChatConversationService::new(state.infra.db.clone());
+    let view = service
+        .get_relationship_space(
+            &session.user_id,
+            &peer_user_id,
+            campus_id,
+            query.cursor.as_deref(),
+            query.limit.unwrap_or(50),
+        )
+        .await?;
+    Ok(Json(view.into()))
 }
 
 pub async fn get_conversation(

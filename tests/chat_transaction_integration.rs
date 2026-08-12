@@ -148,6 +148,10 @@ async fn threads_group_multiple_conversations_by_peer_without_merging_history() 
         let threads = service.list_threads("user-b", None, 20).await.unwrap();
         assert_eq!(threads.len(), 1);
         let thread = &threads[0];
+        assert_eq!(
+            thread.relationship_key,
+            "relationship:v1:legacy:user-a:user-b"
+        );
         assert_eq!(thread.peer_user_id, "user-a");
         assert_eq!(thread.peer_username, "alice");
         assert_eq!(thread.conversation_count, 2);
@@ -184,6 +188,16 @@ async fn threads_group_multiple_conversations_by_peer_without_merging_history() 
                 .len(),
             1
         );
+        let campus_thread = service
+            .list_threads_for_campus("user-b", ncu, None, 20)
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(
+            campus_thread.relationship_key,
+            "relationship:v1:c0000000-0000-0000-0000-000000000001:user-a:user-b"
+        );
         assert!(service
             .list_threads_for_campus("user-b", other_campus, None, 20)
             .await
@@ -195,6 +209,41 @@ async fn threads_group_multiple_conversations_by_peer_without_merging_history() 
             .unwrap()
             .0
             .is_empty());
+        assert!(matches!(
+            service
+                .get_relationship_space("user-b", "user-a", Some(other_campus), None, 50)
+                .await,
+            Err(ApiError::NotFound)
+        ));
+
+        let space = service
+            .get_relationship_space("user-b", "user-a", None, None, 50)
+            .await
+            .unwrap();
+        assert_eq!(
+            space.relationship_key,
+            "relationship:v1:legacy:user-a:user-b"
+        );
+        assert!(space
+            .events
+            .iter()
+            .any(|event| event.event_type == "message.opening"));
+        assert!(space
+            .events
+            .iter()
+            .any(|event| event.event_type == "conversation.created"));
+        let first_cursor = space.next_cursor.clone();
+        if let Some(cursor) = first_cursor {
+            let cursor_time = cursor.split('|').next().unwrap().to_string();
+            let next_page = service
+                .get_relationship_space("user-b", "user-a", None, Some(&cursor), 50)
+                .await
+                .unwrap();
+            assert!(next_page
+                .events
+                .iter()
+                .all(|event| event.occurred_at.as_str() <= cursor_time.as_str()));
+        }
     })
     .await;
 }

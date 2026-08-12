@@ -214,6 +214,23 @@ class ChatService extends BaseService {
     );
   }
 
+  Future<RelationshipSpace> getRelationshipSpace(
+    String peerUserId, {
+    String? cursor,
+    int limit = 50,
+  }) async {
+    final headers = await authHeaders();
+    final query = <String, String>{'limit': '$limit', 'cursor': ?cursor};
+    final uri = Uri.parse(
+      '$baseUrl/api/chat/threads/$peerUserId/space-events',
+    ).replace(queryParameters: query);
+    final response = await get(uri, headers);
+    return handleResponse(
+      response,
+      (data) => RelationshipSpace.fromJson(data as Map<String, dynamic>),
+    );
+  }
+
   Future<Conversation> getConversation(String conversationId) async {
     final headers = await authHeaders();
     final response = await get(

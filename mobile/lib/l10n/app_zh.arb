@@ -875,6 +875,13 @@
     }
   },
   "conversationTimelineFallback": "查看沟通时间线",
+  "relationshipSpaceTitle": "共同空间",
+  "relationshipSpaceSubtitle": "异步时保留历史，连接时只显示明确的连接状态。",
+  "relationshipSpaceMe": "我",
+  "relationshipSpaceAsync": "可以留言",
+  "relationshipSpaceConnected": "已连接",
+  "relationshipSpaceTimeline": "时间轨迹",
+  "relationshipSpaceNoEvent": "还没有共同记录",
   "conversationRealtimeCount": "实时 {count}",
   "@conversationRealtimeCount": {
     "placeholders": {

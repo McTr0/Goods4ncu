@@ -249,21 +249,39 @@ abstract class AppLocalizations {
   String get connectionRequestSent;
 
   /// No description provided for @connectionPrivacyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Connection privacy'**
   String get connectionPrivacyTitle;
 
   /// No description provided for @connectionPrivacySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose who may interrupt you with realtime requests.'**
   String get connectionPrivacySubtitle;
 
   /// No description provided for @allowStrangersTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow strangers to connect'**
   String get allowStrangersTitle;
 
   /// No description provided for @allowStrangersSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'When off, strangers can still leave a message but cannot start realtime.'**
   String get allowStrangersSubtitle;
 
   /// No description provided for @busyModeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Pause realtime requests for one hour'**
   String get busyModeTitle;
 
   /// No description provided for @busyModeSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Mail remains available while you are busy.'**
   String get busyModeSubtitle;
 
   /// No description provided for @contactSeller.
@@ -3231,7 +3249,7 @@ abstract class AppLocalizations {
   /// No description provided for @contactModeMailDescription.
   ///
   /// In en, this message translates to:
-  /// **'Deliver it directly without online, typing, or read indicators.'**
+  /// **'Send it directly without online, typing, or read indicators.'**
   String get contactModeMailDescription;
 
   /// No description provided for @contactOpeningRequired.
@@ -3297,7 +3315,7 @@ abstract class AppLocalizations {
   /// No description provided for @contactMailSubmit.
   ///
   /// In en, this message translates to:
-  /// **'Deliver message'**
+  /// **'Send message'**
   String get contactMailSubmit;
 
   /// No description provided for @contactRealtimeSubmit.
@@ -3839,6 +3857,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'View conversation timeline'**
   String get conversationTimelineFallback;
+
+  /// No description provided for @relationshipSpaceTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Shared space'**
+  String get relationshipSpaceTitle;
+
+  /// No description provided for @relationshipSpaceSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep history while asynchronous; show only explicit connection state when connected.'**
+  String get relationshipSpaceSubtitle;
+
+  /// No description provided for @relationshipSpaceMe.
+  ///
+  /// In en, this message translates to:
+  /// **'Me'**
+  String get relationshipSpaceMe;
+
+  /// No description provided for @relationshipSpaceAsync.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave a message'**
+  String get relationshipSpaceAsync;
+
+  /// No description provided for @relationshipSpaceConnected.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected'**
+  String get relationshipSpaceConnected;
+
+  /// No description provided for @relationshipSpaceTimeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Timeline'**
+  String get relationshipSpaceTimeline;
+
+  /// No description provided for @relationshipSpaceNoEvent.
+  ///
+  /// In en, this message translates to:
+  /// **'No shared events yet'**
+  String get relationshipSpaceNoEvent;
 
   /// No description provided for @conversationRealtimeCount.
   ///
@@ -4467,7 +4527,7 @@ abstract class AppLocalizations {
   /// No description provided for @mailProtocolSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Async delivery · no online, typing, or read status'**
+  /// **'Async sending · no online, typing, or read status'**
   String get mailProtocolSubtitle;
 
   /// No description provided for @incomingRealtimeTitle.

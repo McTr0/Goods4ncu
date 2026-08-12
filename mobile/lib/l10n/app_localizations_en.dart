@@ -2065,6 +2065,28 @@ class AppLocalizationsEn extends AppLocalizations {
   String get conversationTimelineFallback => 'View conversation timeline';
 
   @override
+  String get relationshipSpaceTitle => 'Shared space';
+
+  @override
+  String get relationshipSpaceSubtitle =>
+      'Keep history while asynchronous; show only explicit connection state when connected.';
+
+  @override
+  String get relationshipSpaceMe => 'Me';
+
+  @override
+  String get relationshipSpaceAsync => 'Leave a message';
+
+  @override
+  String get relationshipSpaceConnected => 'Connected';
+
+  @override
+  String get relationshipSpaceTimeline => 'Timeline';
+
+  @override
+  String get relationshipSpaceNoEvent => 'No shared events yet';
+
+  @override
   String conversationRealtimeCount(int count) {
     return 'Realtime $count';
   }

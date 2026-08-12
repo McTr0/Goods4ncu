@@ -128,6 +128,10 @@ pub struct ConversationView {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatThreadView {
+    /// Stable identifier for the same-campus unordered user pair.  This is a
+    /// query projection only; it is not a new relationship authority or a
+    /// presence signal.
+    pub relationship_key: String,
     pub peer_user_id: String,
     pub peer_username: String,
     pub latest_activity_at: String,
@@ -144,6 +148,27 @@ pub struct ChatThreadView {
 pub struct ChatThreadDetail {
     pub thread: ChatThreadView,
     pub conversations: Vec<ConversationView>,
+}
+
+/// A deterministic, read-only event projection for a relationship space.
+/// Message bodies and media remain behind the existing conversation/message
+/// endpoints; this rail only exposes the source fact and its ordering.
+#[derive(Debug, Clone, Serialize)]
+pub struct RelationshipSpaceEventView {
+    pub id: String,
+    pub source_type: String,
+    pub source_id: String,
+    pub event_type: String,
+    pub conversation_id: String,
+    pub actor_id: Option<String>,
+    pub occurred_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RelationshipSpaceView {
+    pub relationship_key: String,
+    pub events: Vec<RelationshipSpaceEventView>,
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -986,8 +1011,10 @@ impl ChatConversationService {
             .into_iter()
             .map(|row| {
                 let latest_activity_at: DateTime<Utc> = row.get("latest_activity_at");
+                let peer_user_id: String = row.get("peer_user_id");
                 ChatThreadView {
-                    peer_user_id: row.get("peer_user_id"),
+                    relationship_key: relationship_key(campus_id, user_id, &peer_user_id),
+                    peer_user_id,
                     peer_username: row.get("peer_username"),
                     latest_activity_at: latest_activity_at.to_rfc3339(),
                     latest_preview: row.get("latest_preview"),
@@ -1074,6 +1101,163 @@ impl ChatConversationService {
         Ok(ChatThreadDetail {
             thread,
             conversations,
+        })
+    }
+
+    /// Return a stable, read-only timeline assembled from the existing
+    /// conversation event and message facts.  No new event is written and no
+    /// attention state is inferred while building this projection.
+    pub async fn get_relationship_space(
+        &self,
+        user_id: &str,
+        peer_user_id: &str,
+        campus_id: Option<Uuid>,
+        cursor: Option<&str>,
+        limit: i64,
+    ) -> Result<RelationshipSpaceView, ApiError> {
+        if user_id == peer_user_id {
+            return Err(ApiError::BadRequest("不能查看自己的关系空间".to_string()));
+        }
+        let limit = limit.clamp(1, 100);
+        let cursor = parse_space_cursor(cursor)?;
+        let visible: bool = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM chat_conversations c
+                JOIN chat_conversation_members member
+                  ON member.conversation_id = c.id AND member.user_id = $1
+                WHERE member.archived_at IS NULL
+                  AND ($3::uuid IS NULL OR c.campus_id = $3)
+                  AND (
+                      (c.initiator_id = $1 AND c.recipient_id = $2)
+                      OR (c.initiator_id = $2 AND c.recipient_id = $1)
+                  )
+            )
+            "#,
+        )
+        .bind(user_id)
+        .bind(peer_user_id)
+        .bind(campus_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(db_error)?;
+        if !visible {
+            return Err(ApiError::NotFound);
+        }
+        let rows = sqlx::query(
+            r#"
+            WITH visible_conversations AS (
+                SELECT c.id
+                FROM chat_conversations c
+                JOIN chat_conversation_members member
+                  ON member.conversation_id = c.id AND member.user_id = $1
+                WHERE member.archived_at IS NULL
+                  AND ($3::uuid IS NULL OR c.campus_id = $3)
+                  AND (
+                      (c.initiator_id = $1 AND c.recipient_id = $2)
+                      OR (c.initiator_id = $2 AND c.recipient_id = $1)
+                  )
+            ), projected AS (
+                SELECT
+                    'conversation_event'::text AS source_type,
+                    event.id::bigint AS source_id,
+                    CASE event.event_type
+                        WHEN 'conversation_created' THEN 'conversation.created'
+                        WHEN 'conversation_accepted' THEN 'connection.accepted'
+                        WHEN 'conversation_acknowledged' THEN 'connection.started'
+                        WHEN 'conversation_acknowledged_by_message' THEN 'connection.started'
+                        WHEN 'mutual_open' THEN 'connection.started'
+                        WHEN 'conversation_closed' THEN 'connection.ended'
+                        WHEN 'conversation_expired' THEN 'connection.ended'
+                        WHEN 'conversation_declined' THEN 'connection.declined'
+                        ELSE 'conversation.state_changed'
+                    END AS event_type,
+                    event.conversation_id,
+                    event.actor_id,
+                    event.created_at AS occurred_at
+                FROM chat_conversation_events event
+                JOIN visible_conversations visible ON visible.id = event.conversation_id
+                UNION ALL
+                SELECT
+                    'message'::text AS source_type,
+                    message.id::bigint AS source_id,
+                    CASE message.kind
+                        WHEN 'opening' THEN 'message.opening'
+                        ELSE 'message.sent'
+                    END AS event_type,
+                    message.direct_conversation_id AS conversation_id,
+                    message.sender AS actor_id,
+                    message.timestamp AS occurred_at
+                FROM chat_messages message
+                JOIN visible_conversations visible
+                  ON visible.id = message.direct_conversation_id
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM chat_message_hidden_members hidden
+                    WHERE hidden.message_id = message.id AND hidden.user_id = $1
+                )
+            )
+            SELECT source_type, source_id, event_type, conversation_id, actor_id, occurred_at
+            FROM projected
+            WHERE (
+                $4::timestamptz IS NULL
+                OR occurred_at < $4
+                OR (
+                    occurred_at = $4
+                    AND (source_type, source_id) < ($5::text, $6::bigint)
+                )
+            )
+            ORDER BY occurred_at DESC, source_type DESC, source_id DESC
+            LIMIT $7
+            "#,
+        )
+        .bind(user_id)
+        .bind(peer_user_id)
+        .bind(campus_id)
+        .bind(cursor.as_ref().map(|value| value.occurred_at))
+        .bind(cursor.as_ref().map(|value| value.source_type.as_str()))
+        .bind(cursor.as_ref().map(|value| value.source_id))
+        .bind(limit + 1)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_error)?;
+
+        let has_more = rows.len() as i64 > limit;
+        let events: Vec<RelationshipSpaceEventView> = rows
+            .into_iter()
+            .take(limit as usize)
+            .map(|row| {
+                let source_type: String = row.get("source_type");
+                let source_id: i64 = row.get("source_id");
+                let occurred_at: DateTime<Utc> = row.get("occurred_at");
+                RelationshipSpaceEventView {
+                    id: format!("{source_type}:{source_id}"),
+                    source_type,
+                    source_id: source_id.to_string(),
+                    event_type: row.get("event_type"),
+                    conversation_id: row.get::<Uuid, _>("conversation_id").to_string(),
+                    actor_id: row.get("actor_id"),
+                    occurred_at: occurred_at.to_rfc3339(),
+                }
+            })
+            .collect();
+
+        let next_cursor = if has_more {
+            events.last().map(|event| {
+                format!(
+                    "{}|{}|{}",
+                    event.occurred_at, event.source_type, event.source_id
+                )
+            })
+        } else {
+            None
+        };
+
+        Ok(RelationshipSpaceView {
+            relationship_key: relationship_key(campus_id, user_id, peer_user_id),
+            events,
+            next_cursor,
         })
     }
 
@@ -1812,6 +1996,54 @@ impl ChatConversationService {
 
     async fn begin(&self) -> Result<Transaction<'_, Postgres>, ApiError> {
         self.pool.begin().await.map_err(db_error)
+    }
+}
+
+/// Build the first version of the relationship-space key without creating a
+/// second relationship table.  The campus is part of the key whenever the
+/// caller has an active campus scope; legacy unscoped reads remain explicitly
+/// namespaced so they cannot be mistaken for a campus-scoped relationship.
+fn relationship_key(campus_id: Option<Uuid>, user_id: &str, peer_user_id: &str) -> String {
+    let (first, second) = if user_id <= peer_user_id {
+        (user_id, peer_user_id)
+    } else {
+        (peer_user_id, user_id)
+    };
+    match campus_id {
+        Some(campus_id) => format!("relationship:v1:{campus_id}:{first}:{second}"),
+        None => format!("relationship:v1:legacy:{first}:{second}"),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SpaceCursor {
+    occurred_at: DateTime<Utc>,
+    source_type: String,
+    source_id: i64,
+}
+
+fn parse_space_cursor(raw: Option<&str>) -> Result<Option<SpaceCursor>, ApiError> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let mut parts = raw.splitn(3, '|');
+    let occurred_at = parts
+        .next()
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc));
+    let source_type = parts
+        .next()
+        .filter(|value| matches!(*value, "message" | "conversation_event"));
+    let source_id = parts.next().and_then(|value| value.parse::<i64>().ok());
+    match (occurred_at, source_type, source_id) {
+        (Some(occurred_at), Some(source_type), Some(source_id)) if source_id > 0 => {
+            Ok(Some(SpaceCursor {
+                occurred_at,
+                source_type: source_type.to_string(),
+                source_id,
+            }))
+        }
+        _ => Err(ApiError::BadRequest("关系空间 cursor 无效".to_string())),
     }
 }
 
@@ -2713,6 +2945,39 @@ mod tests {
         assert!(validate_create_input(&input).is_err());
         input.subject = Some("关于商品".to_string());
         assert!(validate_create_input(&input).is_ok());
+    }
+
+    #[test]
+    fn relationship_key_is_unordered_and_campus_scoped() {
+        let campus_id = Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap();
+        let from_a = relationship_key(Some(campus_id), "user-a", "user-b");
+        let from_b = relationship_key(Some(campus_id), "user-b", "user-a");
+        assert_eq!(from_a, from_b);
+        assert_eq!(
+            from_a,
+            "relationship:v1:c0000000-0000-0000-0000-000000000001:user-a:user-b"
+        );
+        assert_ne!(
+            from_a,
+            relationship_key(
+                Some(Uuid::parse_str("c0000000-0000-0000-0000-000000000002").unwrap()),
+                "user-a",
+                "user-b"
+            )
+        );
+        assert_ne!(from_a, relationship_key(None, "user-a", "user-b"));
+    }
+
+    #[test]
+    fn relationship_space_cursor_is_strict_and_typed() {
+        let parsed = parse_space_cursor(Some("2026-08-12T10:00:00Z|message|42"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(parsed.source_type, "message");
+        assert_eq!(parsed.source_id, 42);
+        assert!(parse_space_cursor(Some("bad-cursor")).is_err());
+        assert!(parse_space_cursor(Some("2026-08-12T10:00:00Z|read|42")).is_err());
+        assert!(parse_space_cursor(Some("2026-08-12T10:00:00Z|message|0")).is_err());
     }
 
     #[test]

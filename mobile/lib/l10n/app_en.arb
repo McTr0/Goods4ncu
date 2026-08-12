@@ -902,6 +902,13 @@
     }
   },
   "conversationTimelineFallback": "View conversation timeline",
+  "relationshipSpaceTitle": "Shared space",
+  "relationshipSpaceSubtitle": "Keep history while asynchronous; show only explicit connection state when connected.",
+  "relationshipSpaceMe": "Me",
+  "relationshipSpaceAsync": "Leave a message",
+  "relationshipSpaceConnected": "Connected",
+  "relationshipSpaceTimeline": "Timeline",
+  "relationshipSpaceNoEvent": "No shared events yet",
   "conversationRealtimeCount": "Realtime {count}",
   "@conversationRealtimeCount": {
     "placeholders": {

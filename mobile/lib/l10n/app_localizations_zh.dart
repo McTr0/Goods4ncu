@@ -1967,6 +1967,27 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationTimelineFallback => '查看沟通时间线';
 
   @override
+  String get relationshipSpaceTitle => '共同空间';
+
+  @override
+  String get relationshipSpaceSubtitle => '异步时保留历史，连接时只显示明确的连接状态。';
+
+  @override
+  String get relationshipSpaceMe => '我';
+
+  @override
+  String get relationshipSpaceAsync => '可以留言';
+
+  @override
+  String get relationshipSpaceConnected => '已连接';
+
+  @override
+  String get relationshipSpaceTimeline => '时间轨迹';
+
+  @override
+  String get relationshipSpaceNoEvent => '还没有共同记录';
+
+  @override
   String conversationRealtimeCount(int count) {
     return '实时 $count';
   }

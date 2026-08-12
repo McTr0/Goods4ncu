@@ -2,6 +2,60 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 
 void main() {
+  group('ChatThread', () {
+    test('reads the server relationship key without attention fields', () {
+      final thread = ChatThread.fromJson({
+        'peer_user_id': 'user-b',
+        'peer_username': 'Bob',
+        'latest_activity_at': '2026-08-12T10:00:00Z',
+        'relationship_key': 'relationship:v1:campus:user-a:user-b',
+        'has_active_realtime': true,
+      });
+
+      expect(thread.relationshipKey, 'relationship:v1:campus:user-a:user-b');
+      expect(thread.unreadCount, 0);
+    });
+
+    test('keeps the key absent for a legacy server response', () {
+      final thread = ChatThread.fromJson({
+        'peer_user_id': 'user-b',
+        'peer_username': 'Bob',
+        'latest_activity_at': '2026-08-12T10:00:00Z',
+      });
+
+      expect(thread.relationshipKey, isNull);
+    });
+  });
+
+  group('RelationshipSpace', () {
+    test('parses a deterministic event rail and cursor', () {
+      final space = RelationshipSpace.fromJson({
+        'relationship_key': 'relationship:v1:campus:user-a:user-b',
+        'events': [
+          {
+            'id': 'message:42',
+            'source_type': 'message',
+            'source_id': '42',
+            'event_type': 'message.sent',
+            'conversation_id': 'conversation-1',
+            'actor_id': 'user-a',
+            'occurred_at': '2026-08-12T10:00:00Z',
+          },
+        ],
+        'next_cursor': '2026-08-12T10:00:00Z|message|42',
+      });
+
+      expect(space.relationshipKey, 'relationship:v1:campus:user-a:user-b');
+      expect(space.events, hasLength(1));
+      expect(space.events.single.eventType, 'message.sent');
+      expect(
+        space.events.single.occurredAt,
+        DateTime.parse('2026-08-12T10:00:00Z'),
+      );
+      expect(space.nextCursor, '2026-08-12T10:00:00Z|message|42');
+    });
+  });
+
   group('ConversationMessage', () {
     test('fromJson parses all fields correctly', () {
       final json = {
@@ -611,23 +665,26 @@ void main() {
       expect(conversation.unreadCount, 0);
     });
 
-    test('parses connection privacy controls without online presence fields', () {
-      final preferences = ConnectionPreferences.fromJson({
-        'allow_strangers': false,
-        'busy_until': '2026-08-11T18:00:00Z',
-      });
-      final permission = ContactPermission.fromJson({
-        'peer_user_id': 'peer-1',
-        'allow_connection': true,
-        'muted_until': null,
-      });
+    test(
+      'parses connection privacy controls without online presence fields',
+      () {
+        final preferences = ConnectionPreferences.fromJson({
+          'allow_strangers': false,
+          'busy_until': '2026-08-11T18:00:00Z',
+        });
+        final permission = ContactPermission.fromJson({
+          'peer_user_id': 'peer-1',
+          'allow_connection': true,
+          'muted_until': null,
+        });
 
-      expect(preferences.allowStrangers, isFalse);
-      expect(preferences.busyUntil, DateTime.parse('2026-08-11T18:00:00Z'));
-      expect(permission.peerUserId, 'peer-1');
-      expect(permission.allowConnection, isTrue);
-      expect(permission.mutedUntil, isNull);
-    });
+        expect(preferences.allowStrangers, isFalse);
+        expect(preferences.busyUntil, DateTime.parse('2026-08-11T18:00:00Z'));
+        expect(permission.peerUserId, 'peer-1');
+        expect(permission.allowConnection, isTrue);
+        expect(permission.mutedUntil, isNull);
+      },
+    );
 
     test('canRespond is true only for pending incoming requests', () {
       final pendingAsReceiver = Conversation(

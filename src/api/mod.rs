@@ -834,6 +834,10 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             get(user_chat::get_thread),
         )
         .route(
+            "/api/chat/threads/{peer_user_id}/space-events",
+            get(user_chat::get_relationship_space),
+        )
+        .route(
             "/api/chat/conversations/{id}",
             get(user_chat::get_conversation),
         )
