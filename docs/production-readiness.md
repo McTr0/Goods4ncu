@@ -4,7 +4,7 @@
 | --- | --- |
 | 适用读者 | 决定是否上线的负责人、执行部署的工程师、验收测试者 |
 | 当前状态 | 关键工程安全门槛已关闭；本机已用真实 Postgres/Redis/MinIO 完成生产模式演练；生产资源开通、真实学生效果/公平性验证与人工运营验收仍待完成 |
-| 事实来源 | 本仓库 Rust/Flutter 测试、`scripts/` 下可执行演练（含真实 MinIO/Redis/Postgres）、迁移 0001–0071 |
+| 事实来源 | 本仓库 Rust/Flutter 测试、`scripts/` 下可执行演练（含真实 MinIO/Redis/Postgres）、迁移 0001–0072 |
 | 验收方式 | 每一项都给出可执行证据；无证据的项目明确标注为部署侧待办 |
 
 本报告把[生产路线图](roadmap.md)的全部退出门槛折叠为一张就绪矩阵。“代码侧关闭”指该门槛由本仓库的代码、schema、测试或可重复脚本强制并验证；“部署侧待办”指需要真实基础设施、账号或人工运营才能执行的验收步骤，本仓库已为其准备了可直接运行的验收程序。
@@ -31,7 +31,7 @@
 | 存储层媒体隔离：生产强制私有 bucket + presigned PUT/serving（匿名 403/篡改拒绝/过期拒绝，对真实 S3 验证） | `src/config.rs::validate_media_storage_config` fail-fast + `src/services/storage.rs` + `tests/storage_acl_integration.rs` + 生产演练 check 2b |
 | 提交审核与资源置 pending 同事务（崩溃不产生“永不审核却公开”） | `tests/api_regressions.rs::image_submission_quarantines_resource_with_job` |
 | 生产图片审核配置不完整时 fail-fast | `src/config.rs::validate_image_moderation_config` 单元回归；`scripts/production_rehearsal.sh` 明确关闭未接入的外部 provider |
-| SocialPersona 图片候选不越过对象/审核门槛 | `0070_social_persona_assets`、`0071_social_persona_asset_upload_expiry`、`tests/social_persona_integration.rs::persona_assets_require_verified_upload_review_and_explicit_selection`；服务器 key、真实大小/MIME、pending review、显式选择/撤销、过期孤儿上传撤销和公开回退均由服务端约束 |
+| SocialPersona 图片候选不越过对象/审核门槛 | `0070_social_persona_assets`、`0071_social_persona_asset_upload_expiry`、`0072_moderation_job_storage_key`、`tests/social_persona_integration.rs::persona_assets_require_verified_upload_review_and_explicit_selection`；服务器 key、真实大小/MIME、pending review、每次审核尝试重新签发 provider URL、显式选择/撤销、过期孤儿上传撤销和公开回退均由服务端约束 |
 | 审核 worker 崩溃恢复与低基数可观测性 | `0069_moderation_job_leases.sql`、`tests/moderation_worker_integration.rs`；`src/api/metrics.rs` 暴露 job outcome、provider latency、pending/processing depth 和 oldest age，且不含 job/campus/provider 高基数标签；`scripts/production_rehearsal.sh` check 1 验证双副本实际暴露队列 gauge |
 | listing case-owned 组合限制：紧急 manual case、案件 restrict/restore、申诉单 case 释放、owner relist 门禁、全公开/交易面 fail-closed、并发与跨校园隔离 | `0056_listing_restriction_effects.sql`；`tests/admin_auth_regression.rs::{listing_restrictions_compose_and_never_overwrite_owner_lifecycle,listing_appeal_releases_only_the_appealed_case_effect,admin_listing_restriction_http_contract_gates_public_and_commercial_paths,restricted_wanted_keeps_its_current_epoch_pending_response_frozen,concurrent_manual_restore_and_appeal_review_release_once_without_deadlock}`；`tests/rls_integration.rs::armed_tenant_context_isolates_listing_restriction_effects` |
 | Secret Chat 弃用（默认 403 新建、移动端入口移除、历史可读） | `tests/api_regressions.rs::secret_chat_creation_is_disabled_by_default_but_history_stays_readable` |
@@ -64,7 +64,7 @@
 | Transactional outbox（原子入队/至少一次/退避/死信/租约/重放） | `tests/outbox_integration.rs`；通知推送已迁入 |
 | Redis WS fan-out 跨副本投递（双真实进程 + 真实 WebSocket 客户端） | `tests/ws_fanout_integration.rs`（`REDIS_TEST_URL`/`FANOUT_E2E` 门控） |
 | 依赖漏洞门禁（cargo audit 进 CI；唯一 ignore 附不可达论证） | `.cargo/audit.toml`、`.github/workflows/ci.yml` |
-| 空库/升级库迁移均验证（含真实升级库上的 legacy 值归一化） | CI migration job + 0040/0041 升级路径实测 + 全量空库迁移至 `0071`；`0068` 清理 attention 兼容影子列，`0069` 为媒体审核 processing 任务增加可回收 lease，`0070` 为 persona asset 增加对象探测、审核与清理边界，`0071` 为遗弃的 pending upload 增加过期撤销与审计；2026-08-12 在 `0071` 后重跑 production rehearsal（通过 `PGHOST/PGPORT` 接入本地实例），真实 MinIO OSS probe、signed DELETE、撤销审计和远端对象清理均通过 |
+| 空库/升级库迁移均验证（含真实升级库上的 legacy 值归一化） | CI migration job + 0040/0041 升级路径实测 + 全量空库迁移至 `0072`；`0068` 清理 attention 兼容影子列，`0069` 为媒体审核 processing 任务增加可回收 lease，`0070` 为 persona asset 增加对象探测、审核与清理边界，`0071` 为遗弃的 pending upload 增加过期撤销与审计，`0072` 为审核任务保存稳定对象 key；2026-08-12 在 `0072` 后重跑 production rehearsal（通过 `PGHOST/PGPORT` 接入本地实例），双副本空库启动、真实 MinIO OSS probe、presigned PUT/GET、signed DELETE、撤销审计、远端对象清理、RLS、滚动重启、PITR 和有序排空均通过 |
 
 ### 多校园与规模（Phase 4 工程部分）
 
@@ -82,7 +82,7 @@
 | 待办 | 为什么必须在部署环境 | 就绪的验收程序 |
 | --- | --- | --- |
 | 生产 bucket 开通 + CDN 前置 | 需 OSS 账号；私有 bucket、角色素材单对象 presigned PUT 和 presigned serving 已实现并对真实 S3 验证，剩下的是把 endpoint/凭据指向生产 bucket、确认其 ACL/CORS 为私有部署所需配置，并接入 CDN/缩略图派生 | `MEDIA_PRIVATE_BUCKET=true` + `tests/storage_acl_integration.rs`（对生产 endpoint 运行即验收） |
-| 真实图片审核 provider 开通与回写验收 | 需 provider 账号、数据处理协议和真实审核样本；代码侧已 fail-fast 校验配置并在异步 worker 中隔离失败，不能用本地 stub 代替供应商验收 | `MODERATION_IMAGE_ENABLED=true` + `MODERATION_IMAGE_API_URL`/`MODERATION_IMAGE_API_KEY`，再运行图片提交、approved/rejected/failed 与 ModerationCase 旅程 |
+| 真实图片审核 provider 开通与回写验收 | 需 provider 账号、数据处理协议、可访问生产 bucket 的网络路径和真实审核样本；代码侧已 fail-fast 校验配置、按次 fresh-sign URL 并在异步 worker 中隔离失败，不能用本地 stub 代替供应商验收 | `MODERATION_IMAGE_ENABLED=true` + `MODERATION_IMAGE_API_URL`/`MODERATION_IMAGE_API_KEY`，确认 provider 接受 `{"image_url","source"}` Bearer 契约，再运行图片提交、approved/rejected/failed 与 ModerationCase 旅程 |
 | staging/production 独立实例的生产开通 | 需部署平台的实例与 secret manager；隔离模型本身已用两套真实独立集群 + 每校园独立 bucket 验证 | `scripts/tenant_isolation_drill.sh`（对生产端点重跑即验收）+ `.env.staging.example` / `.env.production.example` |
 | 生产级持续压测（数百 RPS、真实行为分布） | 需生产硬件与真实流量形态 | `scripts/load_smoke.sh` / `scripts/capacity_drill.sh` 作为基线与门槛 |
 | 真实第二校园运营接入 | 需要该校的邮箱域、运营人员与政策批准；接入机制已在持久部署上以两个已实例化校园实跑验证 | `scripts/deploy_local.sh` 的校园创建/激活/成员认证段即为运营接入手册 |

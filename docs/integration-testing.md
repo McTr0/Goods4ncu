@@ -143,6 +143,7 @@ GOOD4NCU_API_BASE=http://127.0.0.1:3000 \
 | 旧注意力协议已退役 | 旧客户端请求 conversation `read`、`read-preference` 或 `typing` 路由 | 服务端回归与数据库 schema | 路由统一 `404`，不广播、不写入注意力事实；迁移 `0068` 后旧 read/typing 兼容字段不存在。 |
 | 图片审核 worker 崩溃恢复 | 一个任务停在 `processing`，分别使用仍存活和已过期的 `locked_by/locked_until` | `tests/moderation_worker_integration.rs` | 存活 lease 不会被另一副本抢走；过期 lease 只被下一副本重领并清空锁后完成，`0069` 约束不允许终态残留 lease。 |
 | 图片审核可观测性 | 运行一次 worker cycle 并渲染 `/api/metrics` | `src/api/metrics.rs::moderation_metrics_render_only_low_cardinality_series` 与 worker queue snapshot | 只出现固定 outcome/status 标签、provider 延迟和队列 oldest age，不泄露 job id、campus 或 provider URL；多副本 queue gauge 取 max。 |
+| 图片审核 provider contract | `tests/moderation_worker_integration.rs::private_provider_attempt_receives_a_fresh_signed_object_url` 启动临时 HTTP provider，验证 Bearer key、稳定 `storage_key`、fresh presigned GET 和 approved 回写 | provider 超时/非 2xx/未知 verdict、队列等待导致旧签名过期、伪造 persona key | 私有任务每次领取重新签发 URL；legacy/public job 才回退持久 `image_url`；未知 verdict 不得自动通过；真实 provider 账号与样本仍需部署侧验收。 |
 | 主动确认 | `seller1` 对消息选择“收到 / 我会看 / 已处理” | `buyer1` 观察消息 | 只有显式动作产生对应 acknowledgement 和 `message_acknowledgement_changed`，可替换或撤销；打开消息不自动确认。 |
 | 跨校园确认隔离 | 同一账号的设备分别停在两个校园 | A 校园接收 acknowledgement | 只有 A 校园 socket 收到事件；B 校园只能通过自己的 HTTP 会话看到自己的会话，不能收到 A 的消息或确认。 |
 | 连接不是在线 | `buyer1` 发起连接，`seller1` 接受并结束 | 双方观察状态 | `syn_sent/syn_ack` 在线程摘要和会话卡片中都只显示等待/确认，只有 `active` 才显示 `请求连接 -> 已连接 -> 已结束`；不额外显示 online、last seen 或 typing。 |

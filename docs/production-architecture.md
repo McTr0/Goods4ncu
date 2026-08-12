@@ -189,6 +189,7 @@ client asks for an owner-scoped upload target
 要求：
 
 - 使用短期、最小 scope 的上传凭证。
+- 审核队列只持久化服务器对象 key；worker 领取任务时重新签发 provider 可读的短期 GET，避免排队时间让 presigned URL 过期。
 - Web 端直传时，bucket CORS 只允许已登记的 `CORS_ORIGINS` 对应来源、`PUT` 和 `Content-Type`；不使用 `*`，移动端不依赖 CORS。
 - 文件名不作为权限或 MIME 来源。
 - 原图、缩略图、头像、商品图、聊天媒体和收款码使用不同策略。

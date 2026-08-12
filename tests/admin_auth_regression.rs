@@ -1243,6 +1243,11 @@ async fn campus_operator_reads_only_own_campus_and_cannot_mutate() {
             .expect("moderation jobs")
             .iter()
             .any(|job| job["id"] == ncu_job_id));
+        assert!(body["jobs"]
+            .as_array()
+            .expect("moderation jobs")
+            .iter()
+            .all(|job| job.get("storage_key").is_none()));
         assert!(!body["jobs"]
             .as_array()
             .expect("moderation jobs")

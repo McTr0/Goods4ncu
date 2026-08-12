@@ -775,6 +775,10 @@ pub struct ModerationJobInfo {
     pub resource_type: String,
     pub resource_id: String,
     pub image_url: String,
+    /// Internal stable object key. It is never serialized; the handler uses it
+    /// to mint a fresh review URL instead of returning a stale presigned URL.
+    #[serde(skip_serializing)]
+    pub storage_key: Option<String>,
     pub status: String,
     pub reject_reason: Option<String>,
     pub retry_count: i32,
@@ -804,8 +808,8 @@ pub async fn get_moderation_jobs(
     )
     .await?;
     record_cross_campus_read(&state, &scope, "moderation_jobs").await;
-    let jobs = sqlx::query_as::<_, ModerationJobInfo>(
-        "SELECT id, campus_id, resource_type, resource_id, image_url, status,
+    let mut jobs = sqlx::query_as::<_, ModerationJobInfo>(
+        "SELECT id, campus_id, resource_type, resource_id, image_url, storage_key, status,
                 reject_reason, retry_count, created_at, processed_at
          FROM moderation_jobs
          WHERE campus_id = $1 AND ($2::text IS NULL OR status = $2)
@@ -818,6 +822,17 @@ pub async fn get_moderation_jobs(
     .fetch_all(&state.infra.db)
     .await
     .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+    for job in &mut jobs {
+        if let Some(storage_key) = job.storage_key.as_deref() {
+            // Never fall back to a persisted presigned URL for a platform
+            // object: it may have expired or, worse, be an untrusted legacy
+            // value. An invalid server key is represented as an empty URL and
+            // remains visible in the queue for operator remediation.
+            job.image_url = state
+                .public_platform_media_url(storage_key)
+                .unwrap_or_default();
+        }
+    }
     let total = sqlx::query_scalar(
         "SELECT COUNT(*) FROM moderation_jobs
          WHERE campus_id = $1 AND ($2::text IS NULL OR status = $2)",

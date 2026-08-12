@@ -518,6 +518,29 @@ impl ModerationService {
         image_url: &str,
         resource_type: &str,
     ) -> Result<String, sqlx::Error> {
+        self.submit_image_job_in_tx_with_storage_key(
+            tx,
+            campus_id,
+            resource_id,
+            image_url,
+            None,
+            resource_type,
+        )
+        .await
+    }
+
+    /// Submit a platform-owned image with its stable storage key. The URL is
+    /// retained as a compatibility/fallback value, while private deployments
+    /// let the moderation worker sign a fresh URL for every attempt.
+    pub async fn submit_image_job_in_tx_with_storage_key(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        campus_id: uuid::Uuid,
+        resource_id: &str,
+        image_url: &str,
+        storage_key: Option<&str>,
+        resource_type: &str,
+    ) -> Result<String, sqlx::Error> {
         if !self.image_enabled {
             set_media_moderation_status(tx, resource_type, resource_id, "approved").await?;
             return Ok(String::new());
@@ -526,14 +549,15 @@ impl ModerationService {
         let id = uuid::Uuid::new_v4().to_string();
         sqlx::query(
             r#"INSERT INTO moderation_jobs (
-                   id, campus_id, resource_type, resource_id, image_url, status
-               ) VALUES ($1, $2, $3, $4, $5, 'pending')"#,
+                   id, campus_id, resource_type, resource_id, image_url, storage_key, status
+               ) VALUES ($1, $2, $3, $4, $5, $6, 'pending')"#,
         )
         .bind(&id)
         .bind(campus_id)
         .bind(resource_type)
         .bind(resource_id)
         .bind(image_url)
+        .bind(storage_key)
         .execute(&mut **tx)
         .await?;
         set_media_moderation_status(tx, resource_type, resource_id, "pending").await?;

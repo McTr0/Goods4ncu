@@ -29,6 +29,30 @@ fn default_env_filter() -> anyhow::Result<tracing_subscriber::EnvFilter> {
     Ok(filter)
 }
 
+fn build_private_media_bucket(
+    config: &config::AppConfig,
+) -> Result<Option<services::storage::PrivateBucket>, anyhow::Error> {
+    if !config.media_private_bucket {
+        return Ok(None);
+    }
+    let (Some(access_key_id), Some(secret_access_key)) = (
+        config.oss_access_key_id.clone(),
+        config.oss_access_key_secret.clone(),
+    ) else {
+        return Err(anyhow::anyhow!(
+            "MEDIA_PRIVATE_BUCKET=true requires OSS_ACCESS_KEY_ID and OSS_ACCESS_KEY_SECRET"
+        ));
+    };
+    Ok(Some(services::storage::PrivateBucket {
+        endpoint: config.oss_endpoint.clone(),
+        bucket: config.oss_bucket.clone(),
+        region: config.media_region.clone(),
+        access_key_id,
+        secret_access_key,
+        path_style: config.media_path_style,
+    }))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     dotenvy::dotenv().ok();
@@ -50,6 +74,7 @@ async fn main() -> Result<(), anyhow::Error> {
     // Load unified configuration at startup — fail fast if env vars are missing.
     // Merges TOML config file with env vars (env vars take precedence).
     let config = config::AppConfig::load_with_file(None);
+    let private_media_bucket = build_private_media_bucket(&config)?;
     tracing::info!(provider = %config.llm_provider, vector_dim = config.vector_dim, "Initializing LLM provider");
 
     // Metrics service — shared across all request handlers
@@ -214,7 +239,8 @@ async fn main() -> Result<(), anyhow::Error> {
         config.moderation_image_enabled,
         config.moderation_image_api_url.clone(),
         config.moderation_image_api_key.clone(),
-    );
+    )
+    .with_media_bucket(private_media_bucket.clone(), config.media_url_ttl_secs);
     let moderation_worker_handle =
         tokio::spawn(services::moderation_worker::run_moderation_worker(
             db_pool.clone(),
@@ -273,29 +299,14 @@ async fn main() -> Result<(), anyhow::Error> {
     // Private-bucket media: build the presigner when enabled and fully
     // configured. Missing credentials with the flag on is a configuration
     // error, not a silent downgrade to public serving.
-    let media_signer = if config.media_private_bucket {
-        let (Some(access_key_id), Some(secret_access_key)) = (
-            config.oss_access_key_id.clone(),
-            config.oss_access_key_secret.clone(),
-        ) else {
-            return Err(anyhow::anyhow!(
-                "MEDIA_PRIVATE_BUCKET=true requires OSS_ACCESS_KEY_ID and OSS_ACCESS_KEY_SECRET"
-            ));
-        };
+    let media_signer = if let Some(bucket) = private_media_bucket.clone() {
         tracing::info!(
             bucket = %config.oss_bucket,
             ttl_secs = config.media_url_ttl_secs,
             "Private media bucket enabled; persona uploads and approved media use presigned URLs"
         );
         Some(Arc::new(api::MediaSigner {
-            bucket: services::storage::PrivateBucket {
-                endpoint: config.oss_endpoint.clone(),
-                bucket: config.oss_bucket.clone(),
-                region: config.media_region.clone(),
-                access_key_id,
-                secret_access_key,
-                path_style: config.media_path_style,
-            },
+            bucket,
             ttl_secs: config.media_url_ttl_secs,
         }))
     } else {

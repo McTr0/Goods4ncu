@@ -42,8 +42,8 @@
 | `BLOCKED_KEYWORDS` | 可选 | 逗号分隔本地策略关键词。内置规则已覆盖违禁交易、低俗成人、博彩、诈骗、暴力风险、骚扰、隐私泄露、联系方式和外链。 |
 | `SECRET_CHAT_NEW_SESSIONS_ENABLED` | 可选 | Secret Chat 已弃用；默认 `false`，新建会话返回 403。仅迁移窗口可临时置 `true`，历史会话始终可读。 |
 | `MODERATION_IMAGE_ENABLED` | 可选 | 是否启用图片审核；生产开启时必须同时提供合法的 provider URL 和 key。 |
-| `MODERATION_IMAGE_API_URL` | 生产图片审核开启时必需 | 图片审核 API URL；生产启动会校验为 `http(s)` URL。 |
-| `MODERATION_IMAGE_API_KEY` | 生产图片审核开启时必需 | 图片审核 API key；生产启动会拒绝空值或过短 key。 |
+| `MODERATION_IMAGE_API_URL` | 生产图片审核开启时必需 | 图片审核 API URL；生产启动会校验为 `http(s)` URL。Worker 发送 `{"image_url":"短期 URL","source":"goods4ncu"}`，使用 Bearer key。 |
+| `MODERATION_IMAGE_API_KEY` | 生产图片审核开启时必需 | 图片审核 API key；生产启动会拒绝空值或过短 key。Provider 必须返回 `approved: true/false`，或受文档约束的 `status/result/verdict` 状态词。 |
 | `MEDIA_PRIVATE_BUCKET` | 生产必需为 `true` | 私有 bucket + presigned PUT/serving 开关；生产启动会拒绝公开媒体退化路径，并同时要求 OSS endpoint/bucket/凭据。开发和测试可关闭。 |
 | `OSS_ENDPOINT`、`OSS_BUCKET` | 可选 | OSS 直传非敏感配置。 |
 | `OSS_ROLE_ARN`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET` | 上传需要 | 获取 OSS STS 临时凭证需要的配置。 |
@@ -371,7 +371,7 @@ RETURNING listing_id, campus_id, desired_revision;
 | `watchlist` | 用户和商品关系，是否收藏自己的商品。 |
 | `notifications` | `campus_id`、unread、event_type、related_order/listing、是否已推送但未读。 |
 | `admin_audit_logs` | campus_id、管理员操作、target、scope_reason；跨校园读取和写入是否都有审计。 |
-| `moderation_jobs` | campus_id、资源归属、pending/processing/approved/rejected/failed 状态，以及 processing 期间的 `locked_by/locked_until` lease；到期任务可重领，终态会清空 lease。 |
+| `moderation_jobs` | campus_id、资源归属、pending/processing/approved/rejected/failed 状态，以及 processing 期间的 `locked_by/locked_until` lease；平台对象另外保存稳定 `storage_key`，私有 bucket worker 每次领取都重新签发短期 provider URL，旧任务仍可用 `image_url` fallback；到期任务可重领，终态会清空 lease。 |
 | `social_persona_assets` | persona/user/campus 归属、服务器生成 `persona/{campus}/{persona}/{asset}` key、对象探测后的大小/MIME、pending_upload/pending_review/active/revoked/deleted 生命周期、moderation 状态与远端清理 lease。超过 24 小时仍未完成的 `pending_upload` 会由 cleanup worker 撤销并记录 `asset_expired` 审计；只有 active 且 approved/not_required 的选中素材可公开。 |
 | `chat_shared_objects` | file/link 权威对象、`pending_upload`/审核/撤销状态；文件撤销后的远端清理请求、尝试次数、下一次重试、错误与完成时间也保存在同一行。 |
 | `moderation_cases` | campus_id、subject、来源、状态、公开原因、resolution 和 pending appeal；普通用户接口不得返回 internal_details。 |
@@ -391,7 +391,7 @@ RETURNING listing_id, campus_id, desired_revision;
 
 本地政策词、校内临时专项词或法务要求的词不要写死进源码，优先通过 `BLOCKED_KEYWORDS` 或 `[moderation].blocked_keywords` 配置。返回给用户的错误只说明类别，不暴露具体命中词，避免教用户绕过。
 
-图片审核仍是异步任务：listing 首次 commit、共享对象完成上传和 persona asset `complete` 会把媒体 URL、资源 `pending` 状态和 `moderation_jobs` 原子写入，并从 listing、conversation、persona 或用户 session 继承校园，客户端不能提交校园。后台 Worker 调外部图片审核 API 并回写资源状态；拒绝结果与资源状态、ModerationCase 在同一事务中提交。`0069` 之后，Worker 认领任务时写入唯一 `locked_by` 和过期时间 `locked_until`；只有持有 lease 的副本能重试或提交终态，租约到期的 processing 行才会被下一副本回收。`0071` 之后，cleanup worker 每轮先把超过 24 小时仍为 `pending_upload` 的 persona asset 变成 `revoked`，记录 `asset_expired` 审计，再沿同一私有 bucket signed DELETE 路径清理；过期上传不能被选择或公开。persona asset 的显式撤销也会进入同一私有 bucket 清理 worker，远端 DELETE 失败只记录截断错误并按退避重试，不能重新公开素材。生产环境开启图片审核时，启动会 fail-fast 校验 `MODERATION_IMAGE_API_URL` 和 `MODERATION_IMAGE_API_KEY`，避免 provider 缺失时任务静默失败；本地生产 rehearsal 明确关闭该外部依赖，不代表真实 provider 已验收。校园运营可以在 `GET /api/admin/moderation/jobs?status=pending` 和 `GET /api/admin/moderation/cases?status=open` 查看本校积压；排查时同时观察 `locked_by/locked_until` 和 `last_error`；平台管理员跨校排查或处置必须同时提交 `campus_id` 和 `reason`。
+图片审核仍是异步任务：listing 首次 commit、共享对象完成上传和 persona asset `complete` 会把媒体 URL、资源 `pending` 状态和 `moderation_jobs` 原子写入，并从 listing、conversation、persona 或用户 session 继承校园，客户端不能提交校园。平台对象同时保存服务器生成的 `storage_key`；私有 bucket 的 worker 在每次领取时重新签发短期 provider URL，不把可能过期的 presigned URL 当作长期任务事实，legacy job 或公开 bucket 才使用持久 `image_url`。管理员队列读取也会按 `storage_key` 重新生成短期 URL，不把历史签名直接暴露给运营页面。后台 Worker 调外部图片审核 API 并回写资源状态；拒绝结果与资源状态、ModerationCase 在同一事务中提交。`0069` 之后，Worker 认领任务时写入唯一 `locked_by` 和过期时间 `locked_until`；只有持有 lease 的副本能重试或提交终态，租约到期的 processing 行才会被下一副本回收。`0071` 之后，cleanup worker 每轮先把超过 24 小时仍为 `pending_upload` 的 persona asset 变成 `revoked`，记录 `asset_expired` 审计，再沿同一私有 bucket signed DELETE 路径清理；过期上传不能被选择或公开。`0072` 为审核任务补充稳定对象 key，避免队列延迟让审核 provider 读取过期签名。persona asset 的显式撤销也会进入同一私有 bucket 清理 worker，远端 DELETE 失败只记录截断错误并按退避重试，不能重新公开素材。生产环境开启图片审核时，启动会 fail-fast 校验 `MODERATION_IMAGE_API_URL` 和 `MODERATION_IMAGE_API_KEY`，避免 provider 缺失时任务静默失败；本地生产 rehearsal 明确关闭该外部依赖，不代表真实 provider 已验收。校园运营可以在 `GET /api/admin/moderation/jobs?status=pending` 和 `GET /api/admin/moderation/cases?status=open` 查看本校积压；排查时同时观察 `locked_by/locked_until` 和 `last_error`；平台管理员跨校排查或处置必须同时提交 `campus_id` 和 `reason`。
 
 ## 常见排错
 

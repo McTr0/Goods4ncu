@@ -199,16 +199,28 @@ async fn persona_assets_require_verified_upload_review_and_explicit_selection() 
             .is_none());
 
         let moderation = ModerationService::new_for_test(true);
+        let mut moderation_tx = pool.begin().await.expect("moderation transaction");
         moderation
-            .submit_image_job(
-                &pool,
+            .submit_image_job_in_tx_with_storage_key(
+                &mut moderation_tx,
                 campus_id,
                 &completed.id,
-                "https://media.example.test/persona.png",
+                "https://expired.example.test/persona.png",
+                completed.upload_key.as_deref(),
                 "social_persona_asset",
             )
             .await
             .expect("enqueue asset moderation");
+        moderation_tx.commit().await.expect("commit moderation job");
+        let stored_key: Option<String> = sqlx::query_scalar(
+            "SELECT storage_key FROM moderation_jobs
+             WHERE resource_type = 'social_persona_asset' AND resource_id = $1",
+        )
+        .bind(&completed.id)
+        .fetch_one(&pool)
+        .await
+        .expect("stored moderation key");
+        assert_eq!(stored_key, completed.upload_key);
         process_pending_jobs_once(
             &pool,
             &ModerationApiConfig::from_parts(false, None, None),

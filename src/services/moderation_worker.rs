@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::lifecycle::{sleep_or_shutdown, ShutdownSignal};
 use crate::services::moderation_case::create_case_for_rejected_job;
+use crate::services::storage::PrivateBucket;
 
 /// Polling interval between batch scans.
 const POLL_INTERVAL_SECS: u64 = 5;
@@ -30,6 +31,10 @@ pub struct ModerationApiConfig {
     pub enabled: bool,
     pub api_url: Option<String>,
     pub api_key: Option<String>,
+    /// Private-bucket authority used to mint a fresh provider URL for a
+    /// server-owned `storage_key` on every attempt.
+    pub media_bucket: Option<PrivateBucket>,
+    pub media_url_ttl_secs: u32,
 }
 
 impl ModerationApiConfig {
@@ -38,7 +43,19 @@ impl ModerationApiConfig {
             enabled,
             api_url,
             api_key,
+            media_bucket: None,
+            media_url_ttl_secs: 600,
         }
+    }
+
+    pub fn with_media_bucket(
+        mut self,
+        media_bucket: Option<PrivateBucket>,
+        media_url_ttl_secs: u32,
+    ) -> Self {
+        self.media_bucket = media_bucket;
+        self.media_url_ttl_secs = media_url_ttl_secs.max(60);
+        self
     }
 }
 
@@ -93,10 +110,10 @@ pub async fn process_pending_jobs_once(
 ) -> anyhow::Result<i64> {
     // Claim pending jobs and expired processing jobs atomically. The owner and
     // expiry are persisted so another worker cannot finalize an old attempt.
-    let rows = sqlx::query_as::<_, (String, String, String, String, i32)>(
+    let rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, i32)>(
         r#"
         WITH claimed AS (
-            SELECT id, resource_type, resource_id, image_url, retry_count
+            SELECT id, resource_type, resource_id, image_url, storage_key, retry_count
             FROM moderation_jobs
             WHERE status IN ('pending', 'processing')
               AND (status = 'pending' OR locked_until <= NOW())
@@ -110,7 +127,7 @@ pub async fn process_pending_jobs_once(
             locked_until = NOW() + make_interval(secs => $3)
         FROM claimed c
         WHERE m.id = c.id
-        RETURNING m.id, c.resource_type, c.resource_id, c.image_url, c.retry_count
+        RETURNING m.id, c.resource_type, c.resource_id, c.image_url, c.storage_key, c.retry_count
         "#,
     )
     .bind(MAX_JOBS_PER_CYCLE)
@@ -125,8 +142,12 @@ pub async fn process_pending_jobs_once(
     }
 
     let count = rows.len() as i64;
-    for (id, resource_type, resource_id, image_url, retry_count) in rows {
-        let result = moderate_image(&image_url, cfg).await;
+    for (id, resource_type, resource_id, image_url, storage_key, retry_count) in rows {
+        let result =
+            match moderation_source_url(&image_url, storage_key.as_deref(), &resource_type, cfg) {
+                Ok(url) => moderate_image(&url, cfg).await,
+                Err(error) => Err(error),
+            };
         let (new_status, reject_reason) = match result {
             Ok(true) => ("approved", None),
             Ok(false) => ("rejected", Some("图片内容不合规".to_string())),
@@ -191,6 +212,69 @@ pub async fn process_pending_jobs_once(
 
     refresh_queue_metrics(db).await;
     Ok(count)
+}
+
+/// Prefer a freshly signed URL for platform-owned objects. Legacy jobs and
+/// public-bucket deployments continue using their persisted `image_url`.
+fn moderation_source_url(
+    image_url: &str,
+    storage_key: Option<&str>,
+    resource_type: &str,
+    cfg: &ModerationApiConfig,
+) -> anyhow::Result<String> {
+    let Some(key) = storage_key.map(str::trim).filter(|key| !key.is_empty()) else {
+        return Ok(image_url.to_string());
+    };
+    let Some(bucket) = cfg.media_bucket.as_ref() else {
+        return Ok(image_url.to_string());
+    };
+    if key.starts_with('/')
+        || key.contains("..")
+        || key.contains('?')
+        || key.contains('#')
+        || key.contains("://")
+    {
+        anyhow::bail!("invalid moderation storage key")
+    }
+    if resource_type == "social_persona_asset" && !is_valid_persona_asset_key(key) {
+        anyhow::bail!("invalid persona moderation storage key")
+    }
+    if resource_type == "chat_shared_object" && !is_valid_shared_object_key(key) {
+        anyhow::bail!("invalid shared-object moderation storage key")
+    }
+    Ok(bucket.presigned_get(key, cfg.media_url_ttl_secs))
+}
+
+fn is_valid_persona_asset_key(key: &str) -> bool {
+    let mut parts = key.split('/');
+    matches!(parts.next(), Some("persona"))
+        && parts
+            .next()
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .is_some()
+        && parts
+            .next()
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .is_some()
+        && parts
+            .next()
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .is_some()
+        && parts.next().is_none()
+}
+
+fn is_valid_shared_object_key(key: &str) -> bool {
+    let mut parts = key.split('/');
+    matches!(parts.next(), Some("chat"))
+        && parts
+            .next()
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .is_some()
+        && parts
+            .next()
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .is_some()
+        && parts.next().is_none()
 }
 
 fn record_moderation_job(outcome: &'static str) {
@@ -432,5 +516,88 @@ mod tests {
     fn parse_verdict_unknown_shape_returns_none() {
         let p = serde_json::json!({"foo": "bar"});
         assert_eq!(parse_moderation_verdict(&p), None);
+    }
+
+    #[test]
+    fn private_moderation_refreshes_a_stable_storage_key() {
+        let cfg = ModerationApiConfig::from_parts(true, None, None).with_media_bucket(
+            Some(PrivateBucket {
+                endpoint: "https://oss.example.com".to_string(),
+                bucket: "goods".to_string(),
+                region: "us-east-1".to_string(),
+                access_key_id: "access".to_string(),
+                secret_access_key: "secret".to_string(),
+                path_style: false,
+            }),
+            300,
+        );
+        let url = moderation_source_url(
+            "https://expired.example.test/old",
+            Some(&format!(
+                "persona/{}/{}/{}",
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                Uuid::new_v4()
+            )),
+            "social_persona_asset",
+            &cfg,
+        )
+        .expect("fresh URL");
+        assert!(url.starts_with("https://goods.oss.example.com/"));
+        assert!(url.contains("X-Amz-Expires=300"));
+        assert!(url.contains("persona/"));
+    }
+
+    #[test]
+    fn legacy_moderation_keeps_persisted_url_without_bucket_authority() {
+        let cfg = ModerationApiConfig::from_parts(true, None, None);
+        assert_eq!(
+            moderation_source_url(
+                "https://legacy.example/image",
+                Some("chat/key"),
+                "listing_image",
+                &cfg,
+            )
+            .expect("legacy URL"),
+            "https://legacy.example/image"
+        );
+    }
+
+    #[test]
+    fn moderation_source_rejects_untrusted_storage_keys() {
+        let cfg = ModerationApiConfig::from_parts(true, None, None).with_media_bucket(
+            Some(PrivateBucket {
+                endpoint: "https://oss.example.com".to_string(),
+                bucket: "goods".to_string(),
+                region: "us-east-1".to_string(),
+                access_key_id: "access".to_string(),
+                secret_access_key: "secret".to_string(),
+                path_style: false,
+            }),
+            300,
+        );
+        for key in ["../secret", "https://evil.example/object", "/absolute"] {
+            assert!(moderation_source_url(
+                "https://fallback",
+                Some(key),
+                "social_persona_asset",
+                &cfg,
+            )
+            .is_err());
+        }
+        assert!(moderation_source_url(
+            "https://fallback",
+            Some(&format!("chat/{}/{}", Uuid::new_v4(), Uuid::new_v4())),
+            "chat_shared_object",
+            &cfg,
+        )
+        .is_ok());
+        assert!(moderation_source_url(
+            "https://fallback",
+            Some("chat/not-a-campus/not-an-object"),
+            "chat_shared_object",
+            &cfg,
+        )
+        .is_err());
     }
 }

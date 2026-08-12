@@ -355,11 +355,12 @@ async fn ensure_persona_asset_moderation_job(
         state
             .infra
             .moderation
-            .submit_image_job_in_tx(
+            .submit_image_job_in_tx_with_storage_key(
                 &mut tx,
                 campus_id,
                 asset.id.as_str(),
                 &media_url,
+                Some(&key),
                 "social_persona_asset",
             )
             .await

@@ -259,13 +259,14 @@ async fn ensure_shared_object_moderation_job(
     state
         .infra
         .moderation
-        .submit_image_job_in_tx(
+        .submit_image_job_in_tx_with_storage_key(
             &mut tx,
             Uuid::parse_str(&object.campus_id).map_err(|error| {
                 ApiError::Internal(anyhow::anyhow!("invalid campus id: {error}"))
             })?,
             &object.id,
             &media_url,
+            Some(key),
             "chat_shared_object",
         )
         .await

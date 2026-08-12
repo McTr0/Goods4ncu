@@ -186,7 +186,7 @@ Flutter 的空间布局保持稳定的“对方左上 / 自己右下”映射，
 | `chat_*` | 直聊、线程基础、群组/频道、通话、反应、举报和 Secret Chat 原型 |
 | `watchlist` | 收藏关系 |
 | `notifications` | 持久通知事实 |
-| `moderation_jobs` | 带 campus_id 的异步媒体审核任务；状态含 pending/processing/approved/rejected/failed |
+| `moderation_jobs` | 带 campus_id 的异步媒体审核任务；状态含 pending/processing/approved/rejected/failed，并可保存服务器对象 `storage_key` 以便私有 worker 每次领取时重新签发短期 provider URL |
 | `admin_audit_logs` | 带 campus_id 和跨校园 scope_reason 的管理员关键操作审计 |
 
 完整关系和目标对象见[信息模型](information-model.md)。
