@@ -141,7 +141,7 @@ GOOD4NCU_API_BASE=http://127.0.0.1:3000 \
 | 本地查看不回执 | `seller1` 打开留言、查看 Push 或通知预览 | `buyer1` 观察消息 | 不产生发送方可见的 `read_at`/read 事件；`LOCALLY_SEEN` 只留在接收设备。 |
 | 主动确认 | `seller1` 对消息选择“收到 / 我会看 / 已处理” | `buyer1` 观察消息 | 只有显式动作产生对应 acknowledgement 和 `message_acknowledgement_changed`，可替换或撤销；打开消息不自动确认。 |
 | 跨校园确认隔离 | 同一账号的设备分别停在两个校园 | A 校园接收 acknowledgement | 只有 A 校园 socket 收到事件；B 校园只能通过自己的 HTTP 会话看到自己的会话，不能收到 A 的消息或确认。 |
-| 连接不是在线 | `buyer1` 发起连接，`seller1` 接受并结束 | 双方观察状态 | 只显示 `请求连接 -> 已连接 -> 已结束`；不额外显示 online、last seen 或 typing。 |
+| 连接不是在线 | `buyer1` 发起连接，`seller1` 接受并结束 | 双方观察状态 | `syn_sent/syn_ack` 在线程摘要和会话卡片中都只显示等待/确认，只有 `active` 才显示 `请求连接 -> 已连接 -> 已结束`；不额外显示 online、last seen 或 typing。 |
 | 共同空间投影（R0） | 打开联系人线程，再打开一段留言或连接 | 双方观察页面 | 显示双方角色锚点、时间轨迹和明确的“可以留言/已连接”；页面打开、滚动和角色缩放不产生对方可见事件。390×844 与桌面分栏都不得遮挡正文。 |
 | 共同空间事件轨迹（R2） | API driver 按 `relationship_key` 首页读取，再用 `next_cursor` 翻页 | 对方尝试跨校园或访问未参与的 peer | 只返回当前用户可见的会话事件与消息来源；cursor 不改变 `LOCALLY_SEEN`，跨校园/越权返回 404，不产生 read/typing/online 事实。 |
 | 共同空间 Pin 与共享对象（R2） | 双方在一条已有消息上分别 Pin、撤销 Pin，再读取 `space-events` | 重复 Pin、撤销不存在的 Pin、隐藏源消息、跨校园读取 | Pin 幂等且可撤销；`actor_id` 保留主动者；quote 只读派生为共享对象；Flutter 在关系空间显示商品/成交/文件/链接引用的只读 rail，不自动加载资源；源消息隐藏/删除/失权后当前投影失效，不产生 read/typing/online 事实。 |
