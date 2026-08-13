@@ -106,7 +106,7 @@ async fn draft_publish_archive_and_public_campus_boundary() {
 }
 
 #[tokio::test]
-async fn persona_assets_require_verified_upload_review_and_explicit_selection() {
+async fn legacy_persona_assets_are_never_projected_after_catalog_migration() {
     with_test_pool(|pool| async move {
         let campus_id = campus(&pool).await;
         let user_id = member(&pool, campus_id, "asset-owner").await;
@@ -259,12 +259,9 @@ async fn persona_assets_require_verified_upload_review_and_explicit_selection() 
             .await
             .expect("public projection")
             .expect("published persona");
-        let public_asset = public.asset.expect("selected asset projection");
-        assert_eq!(public_asset.id, completed.id);
-        assert!(public_asset.storage_key.is_some());
         assert!(
-            public_asset.url.is_none(),
-            "API decorates URLs, not the DB service"
+            public.asset.is_none(),
+            "legacy user-imported assets must never re-enter the public projection"
         );
 
         let revoked = service
@@ -282,7 +279,10 @@ async fn persona_assets_require_verified_upload_review_and_explicit_selection() 
             .expect("persona")
             .expect("persona row");
         assert!(persona.selected_asset_id.is_none());
-        assert_eq!(persona.status, "draft");
+        assert_eq!(
+            persona.status, "published",
+            "publishing a catalog persona must not be downgraded by revoking a legacy asset"
+        );
         let cleanup_requested: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
             "SELECT cleanup_requested_at FROM social_persona_assets WHERE id = $1",
         )

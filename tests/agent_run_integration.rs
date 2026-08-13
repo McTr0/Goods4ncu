@@ -97,13 +97,15 @@ async fn agent_run_is_idempotent_typed_and_body_free() {
             .await
             .expect("record tool"));
         assert!(service
-            .finish(
+            .finish_with_usage(
                 &trace_id,
                 ncu_campus_id(),
                 &user_id,
                 "completed",
                 "llm_completed",
                 None,
+                Some(111),
+                Some(37),
                 Some(25),
             )
             .await
@@ -164,6 +166,14 @@ async fn agent_run_is_idempotent_typed_and_body_free() {
         );
         assert_eq!(run.duration_ms, Some(25));
         assert_eq!(run.ttft_ms, Some(17));
+
+        let (token_input, token_output): (i32, i32) =
+            sqlx::query_as("SELECT token_input, token_output FROM agent_runs WHERE id = $1")
+                .bind(run_id)
+                .fetch_one(&pool)
+                .await
+                .expect("read token usage");
+        assert_eq!((token_input, token_output), (111, 37));
 
         let event_count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM agent_run_events WHERE run_id = $1")
@@ -247,6 +257,72 @@ async fn abandoned_agent_run_can_be_reconciled_as_cancelled() {
                 .await
                 .expect("read cancellation error code");
         assert_eq!(error_code.as_deref(), Some("client_disconnect_or_timeout"));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn stale_started_runs_are_reconciled_once_by_the_durable_worker_path() {
+    with_test_pool(|pool| async move {
+        let user_id = format!("agent-run-stale-{}", Uuid::new_v4().simple());
+        seed_verified_user(&pool, &user_id).await;
+        let service = AgentRunService::new(pool.clone());
+        let trace_id = format!("agent-run-stale-trace-{}", Uuid::new_v4().simple());
+        let run_id = service
+            .start(
+                &trace_id,
+                ncu_campus_id(),
+                &user_id,
+                "agent-user-1",
+                "chat",
+                0.5,
+                Some("gemini"),
+                Some("gemini-test-model"),
+            )
+            .await
+            .expect("start stale run");
+        sqlx::query(
+            "UPDATE agent_runs
+             SET updated_at = NOW() - interval '5 minutes'
+             WHERE id = $1",
+        )
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .expect("age stale run");
+
+        let reconciled = service
+            .reconcile_stale_started(chrono::Utc::now() - chrono::Duration::minutes(3), 100)
+            .await
+            .expect("reconcile stale run");
+        assert_eq!(reconciled, 1);
+        assert_eq!(
+            service
+                .reconcile_stale_started(chrono::Utc::now() - chrono::Duration::minutes(3), 100,)
+                .await
+                .expect("reconcile is idempotent"),
+            0
+        );
+
+        let (status, outcome, error): (String, String, String) =
+            sqlx::query_as("SELECT status, outcome_code, error_code FROM agent_runs WHERE id = $1")
+                .bind(run_id)
+                .fetch_one(&pool)
+                .await
+                .expect("read stale outcome");
+        assert_eq!(status, "cancelled");
+        assert_eq!(outcome, "cancelled");
+        assert_eq!(error, "stale_reconciliation");
+
+        let metadata: String = sqlx::query_scalar(
+            "SELECT metadata::text FROM agent_run_events
+             WHERE run_id = $1 AND event_type = 'outcome'",
+        )
+        .bind(run_id)
+        .fetch_one(&pool)
+        .await
+        .expect("read stale outcome event");
+        assert!(metadata.contains("reconciled"));
     })
     .await;
 }

@@ -189,15 +189,15 @@ appearance_config             # palette / silhouette / accessory / outfit 白名
 self_descriptions[]           # 最多三个用户主动选择的标签
 contact_posture               # leave_message | connection_allowed | busy | later
 status: draft | published | archived
-selected_asset_id -> SocialPersonaAsset (optional, explicitly chosen)
+selected_asset_id -> legacy SocialPersonaAsset (always null for current public data)
 published_at / created_at / updated_at
 ```
 
-`contact_posture` 可以表达可留言、可请求连接、忙或稍后，但不能保存或派生 online、last seen、typing 或 read。角色素材复用媒体隔离与审核；`representation_mode` 只是展示披露，不证明外貌真实性。用户未发布分身时继续使用普通头像和文字资料，核心联系能力不能被 AI 生成服务绑架。
+`contact_posture` 可以表达可留言、可请求连接、忙或稍后，但不能保存或派生 online、last seen、typing 或 read。角色目录由平台统一审核和版本化；`representation_mode` 只是展示披露，不证明外貌真实性。用户未发布分身时继续使用普通头像和文字资料，核心联系能力不能被 AI 生成服务绑架。
 
 当前 API 通过 `VerifiedTenant` 只允许活动校园的 verified member 创建、编辑、发布和归档；草稿只对本人返回，公开接口只返回同一校园中已发布的配置。Thread 列表和详情可以在活动校园中附带同一份已发布 `persona` 投影，legacy 无校园读取不附带角色；该字段只是展示资源，不改变会话权限。每次创建、编辑、发布和归档都写入 `social_persona_audits`。`archived` 会恢复普通头像展示。
 
-`0070_social_persona_assets` 与 `0071_social_persona_asset_upload_expiry` 为图片候选提供独立生命周期：服务端生成 `persona/{campus}/{persona}/{asset}` key，客户端只能在创建后上传；`complete` 会探测平台对象并核对大小、MIME 和 PNG/JPEG/WebP 文件头，之后进入 `pending_review` 或（审核关闭时）`active`。只有 `active + approved|not_required + storage_verified_at` 的候选才可由本人显式选择；超过 24 小时仍未完成的 `pending_upload` 会由 cleanup worker 变为 `revoked`，写入 `asset_expired` 审计并进入耐久远端删除。`0072_moderation_job_storage_key` 让审核任务保存稳定对象 key；私有 bucket worker 每次领取时重新签发短期 provider URL，避免队列延迟使审核 URL 过期，legacy job 仍可使用原始 `image_url`。显式撤销同样会清除选中引用并交给耐久 worker 删除远端对象。公开投影只返回短期平台 `asset.url`，不返回 storage key；URL 过期、审核失败或撤销时回退受控 token。`photo_stylized` 只是素材来源标签，不证明外貌真实性，也不自动生成或替用户发布。
+角色与皮肤来自服务端 `SocialPersonaCatalog`（当前 `style_version=v1`）的稳定 token；客户端只能选择目录项，服务端在写入时再次白名单校验，不接受图片、角色包、外部 URL 或 prompt。`0070_social_persona_assets` 与 `0071_social_persona_asset_upload_expiry` 只保留历史回滚/清理所需的表和字段；`0080_system_persona_catalog_only` 撤销既有用户素材、清空 `selected_asset_id`，公开投影和 Thread 聚合不再读取这些图片。这样角色资源可以被平台统一审核、版本化和下线，而不会开放用户导入入口。
 
 `Relationship` 表示同一校园内两个人之间的长期入口；`RelationshipSpace` 是它的交互投影。当前没有必要立刻新增权威关系表：`campus_id + 无序用户对` 的 Thread 聚合可以作为迁移桥梁，屏蔽、membership 和可见性依旧由现有事实控制。当前 API 已在活动校园作用域返回只读 `relationship_key`（`relationship:v1:{campus}:{lo}:{hi}`）；它只用于投影缓存和未来 cursor 的关联，不授予权限，也不代表在线或注意力状态。
 
@@ -252,7 +252,7 @@ listing 已使用 case-owned、可组合的 `listing_restriction_effects`：effe
 
 ### AgentRun 与 AgentActionPlan
 
-[部分完成] `agent_runs` 与 `agent_run_events` 是活动校园内一条 Agent 请求的安全运行信封，不是 prompt、聊天正文或 provider transcript 的副本。普通 JSON/SSE 聊天会记录稳定 `trace_id`、路由和置信度、provider/model、prompt/tool schema 版本、状态/typed outcome、SSE 首 token 延迟、耗时，以及检索数量、过滤数量、最近一批受限资源 ID 和工具调用类别；`GET /api/agent/runs` 只向本人返回这些受限字段。直接规则回复和 provider 失败也有明确 outcome。检索关键词、消息正文、工具参数、confirmation token、密钥和完整错误不入库。客户端断开后的有界取消结案已落地；聊天提案 receipt 通过可空 `agent_action_audits.agent_run_id` 显式关联。当前仍缺 token 用量、provider 侧 TTFT、持久化取消对账、设备/重新认证绑定和 `/api/v1` 对账接口。
+[部分完成] `agent_runs` 与 `agent_run_events` 是活动校园内一条 Agent 请求的安全运行信封，不是 prompt、聊天正文或 provider transcript 的副本。普通 JSON/SSE 聊天会记录稳定 `trace_id`、路由和置信度、provider/model、prompt/tool schema 版本、状态/typed outcome、SSE 首 token 延迟、耗时，以及检索数量、过滤数量、最近一批受限资源 ID 和工具调用类别；服务端另外保存有界的 input/output token 计数，`GET /api/agent/runs` 只向本人返回不含 token 的受限字段。直接规则回复和 provider 失败也有明确 outcome。检索关键词、消息正文、工具参数、confirmation token、密钥和完整错误不入库。客户端断开后的有界取消结案和跨进程 stale-run durable reconciliation 已落地；当前仍缺 provider 侧 TTFT、设备/重新认证绑定、版本化风险文案和 `/api/v1` 对账接口。
 
 ActionPlan 的行动级 receipt 已集中到租户隔离的 `agent_action_audits`，并为计划终态增加受约束的 `result_code`。需要事前确认的修改、删除、成交意向和议价形成 `AgentActionPlan`；低风险发布立即执行并进入撤销窗口：
 

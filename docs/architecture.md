@@ -146,13 +146,13 @@ Message / ConversationEvent / Quote / Listing / Acknowledgement
 
 Flutter 的空间布局保持稳定的“对方左上 / 自己右下”映射，但角色尺寸由本地视口、滚动密度和无障碍设置决定，绝不订阅 typing/read/online。连接开始时可以缩细 Rail、弱化角色；这是本地投影状态，不是对外 presence 事件。
 
-`SocialPersona` 是独立的受审核展示资源。校园认证徽标仍从 membership 读取，公开接近方式从用户显式设置读取；`0070_social_persona_assets` 与 `0071_social_persona_asset_upload_expiry` 的图片候选必须经过服务器对象探测、必要审核和用户显式选择，撤销或上传超时后由私有 bucket cleanup worker 清理。Agent 头像、Agent 参与提示与用户角色资产使用不同组件和事件，避免把“用户分身出现”误解为“AI 已进入私聊”。
+`SocialPersona` 是独立的系统目录展示资源。校园认证徽标仍从 membership 读取，公开接近方式从用户显式设置读取；角色和皮肤只能选服务端版本化 token，不能上传、导入图片或外部 URL。`0070_social_persona_assets` 与 `0071_social_persona_asset_upload_expiry` 只保留历史回滚/清理字段，`0080` 撤销既有用户素材且公开查询不再读取它们。Agent 头像、Agent 参与提示与用户角色 token 使用不同组件和事件，避免把“用户分身出现”误解为“AI 已进入私聊”。
 
 ## 当前 Agent 与 RAG
 
 自然语言入口先经过内容审核和 IntentRouter，再根据意图直接回答、检索或调用 Agent。Provider 支持 Gemini、MiniMax 和 OpenAI-compatible chat；embedding 当前仍主要依赖 Gemini 客户端和配置维度。
 
-市场 Agent 已挂载发布、搜索、详情、更新、删除、成交意向、议价和“我的发布”等工具。发布立即执行并进入撤销窗口；更新/删除使用 L2 ActionPlan，成交意向/议价使用独立两步 token 的 L3 ActionPlan。确认与业务事实已原子提交，listing 工具和 HTTP 已共享 command/审核入口；四类关键动作会在提案时保存 `inventory.content_revision`，确认时在锁内比较，HTTP 更新/删除也支持 body 版本或 `If-Match`。提案 `Idempotency-Key` 已按用户/校园和动作参数哈希去重；计划终态已使用受约束的 `result_code`，`agent_action_audits` 在同一事务中记录不含正文/token/args 的行动级 receipt。聊天提案 receipt 在共享 trace 下可用 `agent_run_id` 显式关联；首版 `agent_runs`/`agent_run_events` 已覆盖活动校园聊天的路由、provider/model、版本、检索聚合、工具类别、SSE TTFT、耗时和 typed outcome，并提供安全只读列表；版本化风险文案、设备/重新认证绑定、token 用量/provider TTFT、持久化 cancel 对账和完整 `/api/v1` 形态仍待补齐。新增写工具前必须阅读[Agent 系统设计](agent-system.md)。
+市场 Agent 已挂载发布、搜索、详情、更新、删除、成交意向、议价和“我的发布”等工具。发布立即执行并进入撤销窗口；更新/删除使用 L2 ActionPlan，成交意向/议价使用独立两步 token 的 L3 ActionPlan。确认与业务事实已原子提交，listing 工具和 HTTP 已共享 command/审核入口；四类关键动作会在提案时保存 `inventory.content_revision`，确认时在锁内比较，HTTP 更新/删除也支持 body 版本或 `If-Match`。提案 `Idempotency-Key` 已按用户/校园和动作参数哈希去重；计划终态已使用受约束的 `result_code`，`agent_action_audits` 在同一事务中记录不含正文/token/args 的行动级 receipt。聊天提案 receipt 在共享 trace 下可用 `agent_run_id` 显式关联；首版 `agent_runs`/`agent_run_events` 已覆盖活动校园聊天的路由、provider/model、版本、检索聚合、工具类别、SSE TTFT、耗时和 typed outcome，并提供安全只读列表；服务端保存有界 input/output token 计数，客户端断开有界取消结案和 stale-run durable reconciliation 已落地；版本化风险文案、设备/重新认证绑定、provider TTFT 和完整 `/api/v1` 形态仍待补齐。新增写工具前必须阅读[Agent 系统设计](agent-system.md)。
 
 回复助手是受限 agent，只生成三个不超过限制的草稿，不读取媒体，不自动发送，也不挂载成交工具。
 
@@ -189,7 +189,7 @@ Flutter 的空间布局保持稳定的“对方左上 / 自己右下”映射，
 | `moderation_jobs` | 带 campus_id 的异步媒体审核任务；状态含 pending/processing/approved/rejected/failed，并可保存服务器对象 `storage_key` 以便私有 worker 每次领取时重新签发短期 provider URL |
 | `admin_audit_logs` | 带 campus_id 和跨校园 scope_reason 的管理员关键操作审计 |
 | `agent_action_audits` | 用户 ActionPlan 的租户隔离行动级 receipt；只保存 trace、动作/风险、结果类别、耗时和固定元数据 |
-| `agent_runs` / `agent_run_events` | Agent 请求的租户级安全运行信封和路由/检索/工具/终态事件；只保存受限元数据、计数和资源 ID，不保存 prompt、正文、token 或完整 provider 错误 |
+| `agent_runs` / `agent_run_events` | Agent 请求的租户级安全运行信封和路由/检索/工具/终态事件；保存受限元数据、计数、资源 ID 和有界 input/output token 计数，不保存 prompt、正文或完整 provider 错误；安全列表不返回 token 计数 |
 
 完整关系和目标对象见[信息模型](information-model.md)。
 
@@ -201,7 +201,7 @@ Flutter 的空间布局保持稳定的“对方左上 / 自己右下”映射，
 | 进程内事件 | 崩溃可能丢失异步动作 | transactional outbox |
 | 单实例 WebSocket | 多副本无法直接 fan-out | Redis pub/sub + HTTP 补偿 |
 | 媒体兼容路径 | URL-first 与 Base64、静态 uploads 并存 | 私有隔离对象存储和 CDN |
-| Agent listing 写工具 | ActionPlan 已 crash-safe，HTTP 与 Agent 已共享 ListingCommandService；关键动作已有 `content_revision` 快照和冲突保护；提案按用户/校园和动作参数哈希幂等；typed terminal outcome 与行动级 receipt 已落地；聊天提案 receipt 可通过 `agent_run_id` 显式关联；AgentRun envelope 已覆盖路由/provider/检索聚合/工具类别/SSE TTFT/终态，客户端断开有界取消结案已落地 | 设备/重新认证绑定、版本化风险文案、token 用量/provider TTFT、持久化 cancel 对账和完整 `/api/v1` |
+| Agent listing 写工具 | ActionPlan 已 crash-safe，HTTP 与 Agent 已共享 ListingCommandService；关键动作已有 `content_revision` 快照和冲突保护；提案按用户/校园和动作参数哈希幂等；typed terminal outcome 与行动级 receipt 已落地；聊天提案 receipt 可通过 `agent_run_id` 显式关联；AgentRun envelope 已覆盖路由/provider/检索聚合/工具类别/SSE TTFT/终态，服务端 token 计数、客户端断开有界取消结案和 stale-run durable reconciliation 已落地 | 设备/重新认证绑定、版本化风险文案、provider TTFT、运维对账和完整 `/api/v1` |
 | Secret Chat | 服务器不可读，治理边界冲突 | 停止生产承诺并迁移 |
 | TEXT/UUID 并存 | join 和 fixture 可能只覆盖一类 ID | repository 兼容封装和分阶段收敛 |
 | 大模块 | user_chat 和页面承担多种职责 | 先补行为测试，再按领域拆分 |

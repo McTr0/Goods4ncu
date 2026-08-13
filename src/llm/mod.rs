@@ -6,6 +6,7 @@ use crate::services::BusinessEvent;
 use async_trait::async_trait;
 use futures::Stream;
 use rig::completion::Message;
+use serde::Serialize;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -151,6 +152,44 @@ pub trait EmbeddingGenerator: Send + Sync {
     async fn generate(&self, normalized_text: &str) -> anyhow::Result<Vec<f64>>;
 }
 
+/// Provider-reported completion usage.  A zero-valued provider response is
+/// treated as unavailable by `from_rig`; estimates are never substituted for
+/// provider facts in the AgentRun envelope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct AgentTokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_input_tokens: u64,
+}
+
+impl AgentTokenUsage {
+    pub fn from_rig(usage: rig::completion::Usage) -> Option<Self> {
+        if usage.input_tokens == 0 && usage.output_tokens == 0 && usage.total_tokens == 0 {
+            return None;
+        }
+        Some(Self {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cached_input_tokens: usage.cached_input_tokens,
+        })
+    }
+
+    pub fn bounded_i32(self) -> (Option<i32>, Option<i32>) {
+        let input = i32::try_from(self.input_tokens).ok();
+        let output = i32::try_from(self.output_tokens).ok();
+        (input, output)
+    }
+}
+
+/// A stream item from a marketplace agent.  Usage is emitted only after the
+/// provider's final response metadata arrives and is never sent to clients as
+/// chat content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentStreamChunk {
+    Text(String),
+    Usage(AgentTokenUsage),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmbeddingModelMetadata {
     pub provider: &'static str,
@@ -207,13 +246,25 @@ pub trait MarketplaceAgent: Send + Sync {
         history: Vec<Message>,
     ) -> anyhow::Result<String>;
 
+    /// Same completion with provider-reported token usage when the provider
+    /// exposes it.  The default preserves compatibility for adapters that do
+    /// not yet surface usage metadata.
+    async fn prompt_with_history_with_usage(
+        &self,
+        msg: String,
+        history: Vec<Message>,
+    ) -> anyhow::Result<(String, Option<AgentTokenUsage>)> {
+        let reply = self.prompt_with_history(msg, history).await?;
+        Ok((reply, None))
+    }
+
     /// Stream chat response tokens as they arrive.
     /// Returns a stream of text chunks and a final conversation_id.
     fn stream_chat(
         &self,
         msg: String,
         history: Vec<Message>,
-    ) -> Pin<Box<dyn Stream<Item = Result<String, anyhow::Error>> + Send>>;
+    ) -> Pin<Box<dyn Stream<Item = Result<AgentStreamChunk, anyhow::Error>> + Send>>;
 }
 
 /// Marker trait for negotiation agents.

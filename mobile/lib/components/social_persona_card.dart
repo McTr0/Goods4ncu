@@ -6,9 +6,9 @@ import '../theme/app_theme.dart';
 
 /// A token-based preview for a user's role presentation.
 ///
-/// Approved platform-hosted assets may be shown when the server explicitly
-/// projects one. Until then (or if the short-lived URL expires), the same
-/// selected tokens render a deterministic fallback on every device.
+/// The role and skin always come from the server-owned catalog. There is no
+/// user-imported image fallback, so the same selected tokens render
+/// deterministically on every device.
 class SocialPersonaPreviewCard extends StatelessWidget {
   const SocialPersonaPreviewCard({
     super.key,
@@ -99,9 +99,8 @@ class SocialPersonaPreviewCard extends StatelessWidget {
 }
 
 /// Role token used at list (24), profile (48), and card/space (160) scales.
-/// The fallback is deliberately static, and an approved asset is only shown
-/// when the server explicitly projects it; neither representation reflects
-/// online, typing, read, push, or background activity.
+/// The rendering is deliberately static and never reflects online, typing,
+/// read, push, or background activity.
 class SocialPersonaAvatar extends StatelessWidget {
   const SocialPersonaAvatar({
     super.key,
@@ -132,7 +131,6 @@ class SocialPersonaAvatar extends StatelessWidget {
     final accessorySize = (size * 0.21).clamp(7.0, 16.0).toDouble();
     final accessoryInset = (size * 0.07).clamp(2.0, 6.0).toDouble();
     final accessoryPadding = (size * 0.04).clamp(1.0, 3.0).toDouble();
-    final assetUrl = persona.asset?.url;
     final fallback = Stack(
       alignment: Alignment.center,
       children: [
@@ -166,19 +164,7 @@ class SocialPersonaAvatar extends StatelessWidget {
           borderRadius: BorderRadius.circular(radius),
           border: Border.all(color: color.withValues(alpha: 0.42)),
         ),
-        child: assetUrl == null || assetUrl.trim().isEmpty
-            ? fallback
-            : ClipRRect(
-                borderRadius: BorderRadius.circular(radius),
-                child: Image.network(
-                  assetUrl,
-                  width: size,
-                  height: size,
-                  fit: BoxFit.cover,
-                  filterQuality: FilterQuality.medium,
-                  errorBuilder: (context, error, stackTrace) => fallback,
-                ),
-              ),
+        child: fallback,
       ),
     );
   }
@@ -189,12 +175,14 @@ class SocialPersonaAvatar extends StatelessWidget {
 class SocialPersonaDraft {
   const SocialPersonaDraft({
     required this.representationMode,
+    required this.styleVersion,
     required this.appearanceConfig,
     required this.selfDescriptions,
     required this.contactPosture,
   });
 
   final String representationMode;
+  final String styleVersion;
   final Map<String, String> appearanceConfig;
   final List<String> selfDescriptions;
   final String contactPosture;
@@ -202,20 +190,23 @@ class SocialPersonaDraft {
 
 Future<SocialPersonaDraft?> showSocialPersonaEditor(
   BuildContext context,
-  SocialPersona? initial,
-) {
+  SocialPersona? initial, {
+  SocialPersonaCatalog? catalog,
+}) {
   return showModalBottomSheet<SocialPersonaDraft>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (_) => _SocialPersonaEditorSheet(initial: initial),
+    builder: (_) =>
+        _SocialPersonaEditorSheet(initial: initial, catalog: catalog),
   );
 }
 
 class _SocialPersonaEditorSheet extends StatefulWidget {
-  const _SocialPersonaEditorSheet({required this.initial});
+  const _SocialPersonaEditorSheet({required this.initial, this.catalog});
 
   final SocialPersona? initial;
+  final SocialPersonaCatalog? catalog;
 
   @override
   State<_SocialPersonaEditorSheet> createState() =>
@@ -235,18 +226,65 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
   void initState() {
     super.initState();
     final persona = widget.initial;
-    _representationMode = persona?.representationMode ?? 'trait_mapped';
-    _palette = persona?.appearance.palette ?? 'teal';
-    _silhouette = persona?.appearance.silhouette ?? 'soft';
-    _accessory = persona?.appearance.accessory ?? 'none';
-    _outfit = persona?.appearance.outfit ?? 'campus';
-    _contactPosture = persona?.contactPosture ?? 'leave_message';
-    _selfDescriptions = {...?persona?.selfDescriptions};
+    _representationMode = _initialValue(
+      persona?.representationMode,
+      widget.catalog?.representationModes,
+      'trait_mapped',
+    );
+    _palette = _initialValue(
+      persona?.appearance.palette,
+      widget.catalog?.appearance['palette'],
+      'teal',
+    );
+    _silhouette = _initialValue(
+      persona?.appearance.silhouette,
+      widget.catalog?.appearance['silhouette'],
+      'soft',
+    );
+    _accessory = _initialValue(
+      persona?.appearance.accessory,
+      widget.catalog?.appearance['accessory'],
+      'none',
+    );
+    _outfit = _initialValue(
+      persona?.appearance.outfit,
+      widget.catalog?.appearance['outfit'],
+      'campus',
+    );
+    _contactPosture = _initialValue(
+      persona?.contactPosture,
+      widget.catalog?.contactPostures,
+      'leave_message',
+    );
+    final allowedLabels = widget.catalog?.selfDescriptions ?? _labelCodes;
+    _selfDescriptions = {
+      ...?persona?.selfDescriptions.where(allowedLabels.contains),
+    };
   }
+
+  String _initialValue(
+    String? current,
+    List<String>? allowed,
+    String fallback,
+  ) {
+    final values = allowed == null || allowed.isEmpty ? [fallback] : allowed;
+    return current != null && values.contains(current) ? current : values.first;
+  }
+
+  List<String> _catalogValues(String key, List<String> fallback) {
+    final values = widget.catalog?.appearance[key];
+    return values == null || values.isEmpty ? fallback : values;
+  }
+
+  Map<String, String> _localizedItems(
+    List<String> values,
+    String Function(String) labelFor,
+  ) => {for (final value in values) value: labelFor(value)};
 
   SocialPersona get _previewPersona => SocialPersona(
     representationMode: _representationMode,
-    styleVersion: 'v1',
+    styleVersion:
+        widget.catalog?.styleVersion ?? widget.initial?.styleVersion ?? 'v1',
     appearance: SocialPersonaAppearance(
       palette: _palette,
       silhouette: _silhouette,
@@ -295,10 +333,15 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
                 _dropdown(
                   label: l.socialPersonaRepresentationMode,
                   value: _representationMode,
-                  items: {
-                    'trait_mapped': l.socialPersonaTraitMapped,
-                    'role_character': l.socialPersonaRoleCharacter,
-                  },
+                  items: _localizedItems(
+                    widget.catalog?.representationModes ??
+                        const ['trait_mapped', 'role_character'],
+                    (value) => switch (value) {
+                      'role_character' => l.socialPersonaRoleCharacter,
+                      'trait_mapped' => l.socialPersonaTraitMapped,
+                      _ => value,
+                    },
+                  ),
                   onChanged: (value) => setState(
                     () => _representationMode = value ?? _representationMode,
                   ),
@@ -306,47 +349,82 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
                 _dropdown(
                   label: l.socialPersonaPalette,
                   value: _palette,
-                  items: {
-                    'teal': l.socialPersonaPaletteTeal,
-                    'plum': l.socialPersonaPalettePlum,
-                    'sun': l.socialPersonaPaletteSun,
-                    'slate': l.socialPersonaPaletteSlate,
-                  },
+                  items: _localizedItems(
+                    _catalogValues('palette', const [
+                      'teal',
+                      'plum',
+                      'sun',
+                      'slate',
+                    ]),
+                    (value) => switch (value) {
+                      'teal' => l.socialPersonaPaletteTeal,
+                      'plum' => l.socialPersonaPalettePlum,
+                      'sun' => l.socialPersonaPaletteSun,
+                      'slate' => l.socialPersonaPaletteSlate,
+                      _ => value,
+                    },
+                  ),
                   onChanged: (value) =>
                       setState(() => _palette = value ?? _palette),
                 ),
                 _dropdown(
                   label: l.socialPersonaSilhouette,
                   value: _silhouette,
-                  items: {
-                    'soft': l.socialPersonaSilhouetteSoft,
-                    'round': l.socialPersonaSilhouetteRound,
-                    'sharp': l.socialPersonaSilhouetteSharp,
-                  },
+                  items: _localizedItems(
+                    _catalogValues('silhouette', const [
+                      'soft',
+                      'round',
+                      'sharp',
+                    ]),
+                    (value) => switch (value) {
+                      'soft' => l.socialPersonaSilhouetteSoft,
+                      'round' => l.socialPersonaSilhouetteRound,
+                      'sharp' => l.socialPersonaSilhouetteSharp,
+                      _ => value,
+                    },
+                  ),
                   onChanged: (value) =>
                       setState(() => _silhouette = value ?? _silhouette),
                 ),
                 _dropdown(
                   label: l.socialPersonaAccessory,
                   value: _accessory,
-                  items: {
-                    'none': l.socialPersonaAccessoryNone,
-                    'glasses': l.socialPersonaAccessoryGlasses,
-                    'headphones': l.socialPersonaAccessoryHeadphones,
-                    'leaf': l.socialPersonaAccessoryLeaf,
-                  },
+                  items: _localizedItems(
+                    _catalogValues('accessory', const [
+                      'none',
+                      'glasses',
+                      'headphones',
+                      'leaf',
+                    ]),
+                    (value) => switch (value) {
+                      'none' => l.socialPersonaAccessoryNone,
+                      'glasses' => l.socialPersonaAccessoryGlasses,
+                      'headphones' => l.socialPersonaAccessoryHeadphones,
+                      'leaf' => l.socialPersonaAccessoryLeaf,
+                      _ => value,
+                    },
+                  ),
                   onChanged: (value) =>
                       setState(() => _accessory = value ?? _accessory),
                 ),
                 _dropdown(
                   label: l.socialPersonaOutfit,
                   value: _outfit,
-                  items: {
-                    'campus': l.socialPersonaOutfitCampus,
-                    'workwear': l.socialPersonaOutfitWorkwear,
-                    'casual': l.socialPersonaOutfitCasual,
-                    'lab': l.socialPersonaOutfitLab,
-                  },
+                  items: _localizedItems(
+                    _catalogValues('outfit', const [
+                      'campus',
+                      'workwear',
+                      'casual',
+                      'lab',
+                    ]),
+                    (value) => switch (value) {
+                      'campus' => l.socialPersonaOutfitCampus,
+                      'workwear' => l.socialPersonaOutfitWorkwear,
+                      'casual' => l.socialPersonaOutfitCasual,
+                      'lab' => l.socialPersonaOutfitLab,
+                      _ => value,
+                    },
+                  ),
                   onChanged: (value) =>
                       setState(() => _outfit = value ?? _outfit),
                 ),
@@ -359,12 +437,22 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
                 _dropdown(
                   label: l.socialPersonaContactPosture,
                   value: _contactPosture,
-                  items: {
-                    'leave_message': l.socialPersonaLeaveMessage,
-                    'connection_allowed': l.socialPersonaConnectionAllowed,
-                    'busy': l.socialPersonaBusy,
-                    'later': l.socialPersonaLater,
-                  },
+                  items: _localizedItems(
+                    widget.catalog?.contactPostures ??
+                        const [
+                          'leave_message',
+                          'connection_allowed',
+                          'busy',
+                          'later',
+                        ],
+                    (value) => switch (value) {
+                      'leave_message' => l.socialPersonaLeaveMessage,
+                      'connection_allowed' => l.socialPersonaConnectionAllowed,
+                      'busy' => l.socialPersonaBusy,
+                      'later' => l.socialPersonaLater,
+                      _ => value,
+                    },
+                  ),
                   onChanged: (value) => setState(
                     () => _contactPosture = value ?? _contactPosture,
                   ),
@@ -378,7 +466,7 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: _labelCodes
+                  children: (widget.catalog?.selfDescriptions ?? _labelCodes)
                       .map(
                         (code) => FilterChip(
                           label: Text(_labelForCode(l, code)),
@@ -414,6 +502,10 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
                     context,
                     SocialPersonaDraft(
                       representationMode: _representationMode,
+                      styleVersion:
+                          widget.catalog?.styleVersion ??
+                          widget.initial?.styleVersion ??
+                          'v1',
                       appearanceConfig: {
                         'palette': _palette,
                         'silhouette': _silhouette,

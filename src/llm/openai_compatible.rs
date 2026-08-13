@@ -1,6 +1,7 @@
 use super::{
-    CircuitBreaker, EmbeddingGenerator, EmbeddingModelMetadata, MarketplaceAgent, NegotiateAgent,
-    ReplyAssistant, LLM_CIRCUIT_BREAKER, NEGOTIATION_PREAMBLE, PREAMBLE, REPLY_ASSISTANT_PREAMBLE,
+    AgentStreamChunk, AgentTokenUsage, CircuitBreaker, EmbeddingGenerator, EmbeddingModelMetadata,
+    MarketplaceAgent, NegotiateAgent, ReplyAssistant, LLM_CIRCUIT_BREAKER, NEGOTIATION_PREAMBLE,
+    PREAMBLE, REPLY_ASSISTANT_PREAMBLE,
 };
 use crate::agents::models::Document;
 use crate::agents::tools::ToolContext;
@@ -9,7 +10,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use rig::agent::Agent;
 use rig::client::CompletionClient;
-use rig::completion::{Message, Prompt};
+use rig::completion::{GetTokenUsage, Message, Prompt};
 use rig::embeddings::EmbeddingsBuilder;
 use rig::providers::gemini;
 use rig::providers::openai;
@@ -231,11 +232,39 @@ impl MarketplaceAgent for OpenAiCompatibleMarketplaceAgent {
         }
     }
 
+    async fn prompt_with_history_with_usage(
+        &self,
+        msg: String,
+        history: Vec<Message>,
+    ) -> anyhow::Result<(String, Option<AgentTokenUsage>)> {
+        if LLM_CIRCUIT_BREAKER.is_open().await {
+            tracing::warn!("LLM circuit breaker: prompt_with_history rejected (circuit open)");
+            return Err(anyhow::anyhow!(CircuitBreaker::degraded_message()));
+        }
+        let mut h = history;
+        match self
+            .0
+            .prompt(rig::completion::Message::user(msg))
+            .with_history(&mut h)
+            .extended_details()
+            .await
+        {
+            Ok(response) => {
+                LLM_CIRCUIT_BREAKER.record_success().await;
+                Ok((response.output, AgentTokenUsage::from_rig(response.usage)))
+            }
+            Err(error) => {
+                LLM_CIRCUIT_BREAKER.record_failure().await;
+                Err(anyhow::anyhow!(error))
+            }
+        }
+    }
+
     fn stream_chat(
         &self,
         msg: String,
         history: Vec<Message>,
-    ) -> Pin<Box<dyn futures::Stream<Item = Result<String, anyhow::Error>> + Send>> {
+    ) -> Pin<Box<dyn futures::Stream<Item = Result<AgentStreamChunk, anyhow::Error>> + Send>> {
         let h = history;
         let agent = self.0.clone();
         let circuit_breaker = LLM_CIRCUIT_BREAKER.clone();
@@ -276,7 +305,7 @@ impl MarketplaceAgent for OpenAiCompatibleMarketplaceAgent {
                 while let Some(content) = stream.next().await {
                     match content.map_err(|e| anyhow::anyhow!("completion error: {}", e))? {
                         StreamedAssistantContent::Text(text) => {
-                            yield text.text;
+                            yield AgentStreamChunk::Text(text.text);
                             did_call_tool = false;
                             call_succeeded = true;
                         }
@@ -294,14 +323,18 @@ impl MarketplaceAgent for OpenAiCompatibleMarketplaceAgent {
                         StreamedAssistantContent::Reasoning(reasoning) => {
                             let rendered = reasoning.display_text();
                             if !rendered.is_empty() {
-                                yield rendered;
+                                yield AgentStreamChunk::Text(rendered);
                             }
                             did_call_tool = false;
                             call_succeeded = true;
                         }
                         StreamedAssistantContent::ToolCallDelta { .. } => {}
                         StreamedAssistantContent::ReasoningDelta { .. } => {}
-                        StreamedAssistantContent::Final(_) => {}
+                        StreamedAssistantContent::Final(response) => {
+                            if let Some(usage) = response.token_usage().and_then(AgentTokenUsage::from_rig) {
+                                yield AgentStreamChunk::Usage(usage);
+                            }
+                        }
                     }
                 }
 

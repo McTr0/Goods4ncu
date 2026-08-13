@@ -36,12 +36,19 @@ pub struct SocialPersonaResponse {
     pub persona: Option<SocialPersonaView>,
 }
 
+/// System-owned role and skin choices.  This endpoint intentionally contains
+/// tokens only; there is no user-provided image, URL, or prompt field.
+pub async fn get_catalog() -> Json<crate::services::social_persona::SocialPersonaCatalogView> {
+    Json(SocialPersonaService::catalog())
+}
+
 #[derive(Debug, Serialize)]
 pub struct PublicSocialPersonaResponse {
     pub persona: Option<PublicSocialPersonaView>,
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct CreateSocialPersonaAssetRequest {
     pub asset_type: String,
     pub declared_mime_type: String,
@@ -49,16 +56,19 @@ pub struct CreateSocialPersonaAssetRequest {
 }
 
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 pub struct SocialPersonaAssetsResponse {
     pub assets: Vec<SocialPersonaAssetView>,
 }
 
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 pub struct SocialPersonaAssetResponse {
     pub asset: SocialPersonaAssetView,
 }
 
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 pub struct SocialPersonaAssetUploadTargetResponse {
     pub asset_id: String,
     pub upload_key: String,
@@ -146,7 +156,11 @@ pub async fn get_public_persona(
     Ok(Json(PublicSocialPersonaResponse { persona }))
 }
 
+/// Legacy asset adapters retained for migration/rollback code only.  These
+/// handlers are intentionally not registered in `create_router`; no current
+/// client can create, upload, select, or revoke a user-owned role asset.
 /// GET /api/user/persona/assets — private upload/moderation state for the owner.
+#[allow(dead_code)]
 pub async fn list_assets(
     State(state): State<AppState>,
     tenant: VerifiedTenant,
@@ -158,6 +172,7 @@ pub async fn list_assets(
 }
 
 /// POST /api/user/persona/assets — create a server-keyed pending upload.
+#[allow(dead_code)]
 pub async fn create_asset(
     State(state): State<AppState>,
     tenant: VerifiedTenant,
@@ -180,6 +195,7 @@ pub async fn create_asset(
 /// POST /api/user/persona/assets/:id/upload-target — issue a PUT URL scoped
 /// to the server-generated key.  The target is owner- and campus-scoped; a
 /// client cannot choose a different object key or reuse it for another asset.
+#[allow(dead_code)]
 pub async fn upload_target(
     State(state): State<AppState>,
     tenant: VerifiedTenant,
@@ -211,6 +227,7 @@ pub async fn upload_target(
 
 /// POST /api/user/persona/assets/:id/complete — probe the platform object and
 /// move it to active or the moderation quarantine.
+#[allow(dead_code)]
 pub async fn complete_asset(
     State(state): State<AppState>,
     tenant: VerifiedTenant,
@@ -261,6 +278,7 @@ pub async fn complete_asset(
 }
 
 /// POST /api/user/persona/assets/:id/select — explicit owner selection.
+#[allow(dead_code)]
 pub async fn select_asset(
     State(state): State<AppState>,
     tenant: VerifiedTenant,
@@ -276,6 +294,7 @@ pub async fn select_asset(
 
 /// POST /api/user/persona/assets/:id/revoke — remove the asset from future
 /// public projections and enqueue durable remote cleanup.
+#[allow(dead_code)]
 pub async fn revoke_asset(
     State(state): State<AppState>,
     tenant: VerifiedTenant,
@@ -297,6 +316,7 @@ pub fn decorate_public_persona_media(state: &AppState, persona: &mut PublicSocia
     }
 }
 
+#[allow(dead_code)]
 async fn ensure_persona_asset_moderation_job(
     state: &AppState,
     asset: &SocialPersonaAssetView,

@@ -12,7 +12,6 @@ class _FakeApiService extends ApiService {
     this.memberships = const [],
     String? activeCampusId,
     this.persona,
-    this.personaAssets = const [],
   }) : activeCampusId =
            activeCampusId ??
            (memberships.isEmpty ? null : memberships.first.campusId);
@@ -21,7 +20,6 @@ class _FakeApiService extends ApiService {
   List<CampusMembership> memberships;
   String? activeCampusId;
   SocialPersona? persona;
-  List<SocialPersonaAsset> personaAssets;
   String? switchedCampusId;
   int verificationRequests = 0;
   String? confirmedCode;
@@ -33,8 +31,31 @@ class _FakeApiService extends ApiService {
   Future<SocialPersona?> getSocialPersona() async => persona;
 
   @override
-  Future<List<SocialPersonaAsset>> getSocialPersonaAssets() async =>
-      personaAssets;
+  Future<SocialPersonaCatalog> getSocialPersonaCatalog() async =>
+      const SocialPersonaCatalog(
+        styleVersion: 'v1',
+        representationModes: ['trait_mapped', 'role_character'],
+        appearance: {
+          'palette': ['teal', 'plum', 'sun', 'slate'],
+          'silhouette': ['soft', 'round', 'sharp'],
+          'accessory': ['none', 'glasses', 'headphones', 'leaf'],
+          'outfit': ['campus', 'workwear', 'casual', 'lab'],
+        },
+        selfDescriptions: [
+          'slow_to_warm',
+          'business_only',
+          'meetup_friendly',
+          'casual_chat',
+          'reply_later',
+          'tech_enthusiast',
+        ],
+        contactPostures: [
+          'leave_message',
+          'connection_allowed',
+          'busy',
+          'later',
+        ],
+      );
 
   @override
   Future<List<CampusMembership>> getCampusMemberships() async => memberships;
@@ -248,9 +269,7 @@ void main() {
       expect(find.text(l.campusSwitchSuccess), findsOneWidget);
     });
 
-    testWidgets('shows reviewed persona assets in the owner profile', (
-      tester,
-    ) async {
+    testWidgets('does not offer user-imported persona assets', (tester) async {
       final persona = SocialPersona(
         id: 'persona-1',
         userId: 'student-1',
@@ -285,29 +304,15 @@ void main() {
           ),
         ],
         persona: persona,
-        personaAssets: [
-          SocialPersonaAsset(
-            id: 'asset-1',
-            personaId: 'persona-1',
-            assetType: 'illustration',
-            declaredMimeType: 'image/png',
-            declaredSizeBytes: 1024,
-            uploadedSizeBytes: 1024,
-            uploadedMimeType: 'image/png',
-            storageVerifiedAt: DateTime.utc(2026, 8, 12),
-            moderationStatus: 'approved',
-            status: 'active',
-          ),
-        ],
       );
 
       await tester.pumpWidget(_buildTestApp(ProfilePage(apiService: api)));
       await tester.pumpAndSettle();
       final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
 
-      expect(find.text(l.socialPersonaAssetsTitle), findsOneWidget);
-      expect(find.text(l.socialPersonaAssetReady), findsOneWidget);
-      expect(find.text(l.socialPersonaAssetUse), findsOneWidget);
+      expect(find.text(l.socialPersonaTitle), findsOneWidget);
+      expect(find.text(l.socialPersonaAssetAdd), findsNothing);
+      expect(find.byIcon(Icons.add_photo_alternate_outlined), findsNothing);
     });
   });
 }

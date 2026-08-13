@@ -259,6 +259,13 @@ async fn main() -> Result<(), anyhow::Error> {
         shutdown.clone(),
     ));
 
+    // Durable AgentRun reconciliation covers process restarts and request
+    // tasks that disappear before their in-process stream watchdog can write.
+    let agent_run_reconciler_handle = tokio::spawn(services::agent_run_reconciler::run(
+        db_pool.clone(),
+        shutdown.clone(),
+    ));
+
     // Undo retention worker: prunes reversible_actions past their retention.
     let undo_prune_handle = tokio::spawn(services::undo::run_prune_worker(
         db_pool.clone(),
@@ -477,6 +484,7 @@ async fn main() -> Result<(), anyhow::Error> {
             shared_object_cleanup_handle,
             token_cleanup_handle,
             chat_expiry_handle,
+            agent_run_reconciler_handle,
             denylist_handle,
             outbox_worker_handle,
             undo_prune_handle,
@@ -497,12 +505,13 @@ async fn main() -> Result<(), anyhow::Error> {
             ("shared_object_cleanup", workers.3),
             ("token_cleanup", workers.4),
             ("chat_expiry", workers.5),
-            ("denylist_cleanup", workers.6),
-            ("outbox", workers.7),
-            ("undo_prune", workers.8),
-            ("intent_expiry", workers.9),
-            ("space_formation", workers.10),
-            ("embedding_worker", workers.11),
+            ("agent_run_reconciler", workers.6),
+            ("denylist_cleanup", workers.7),
+            ("outbox", workers.8),
+            ("undo_prune", workers.9),
+            ("intent_expiry", workers.10),
+            ("space_formation", workers.11),
+            ("embedding_worker", workers.12),
         ] {
             if let Err(e) = result {
                 tracing::error!(worker = name, %e, "Worker task failed during shutdown");

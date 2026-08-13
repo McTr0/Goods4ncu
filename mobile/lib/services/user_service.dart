@@ -139,110 +139,18 @@ class UserService extends BaseService {
         : null;
   }
 
-  /// List the current user's private persona image candidates. The response
-  /// may include the server-generated upload key; it is never part of a
-  /// public persona projection.
-  Future<List<SocialPersonaAsset>> getSocialPersonaAssets() async {
-    final headers = await authHeaders();
-    final response = await get(
-      Uri.parse('$baseUrl/api/user/persona/assets'),
-      headers,
-    );
-    final data = handleResponse(
-      response,
-      (value) => value as Map<String, dynamic>,
-    );
-    final assets = data['assets'];
-    if (assets is! List) return const [];
-    return assets
-        .whereType<Map>()
-        .map(
-          (asset) => SocialPersonaAsset.fromJson(
-            asset.cast<String, dynamic>(),
-          ),
-        )
-        .toList(growable: false);
-  }
-
-  /// Create a server-keyed pending persona image upload.
-  Future<SocialPersonaAsset> createSocialPersonaAsset({
-    required String assetType,
-    required String declaredMimeType,
-    required int declaredSizeBytes,
-  }) async {
-    final headers = await authHeaders();
-    final response = await post(
-      Uri.parse('$baseUrl/api/user/persona/assets'),
-      headers,
-      jsonEncode({
-        'asset_type': assetType,
-        'declared_mime_type': declaredMimeType,
-        'declared_size_bytes': declaredSizeBytes,
-      }),
-    );
-    return _parseSocialPersonaAssetEnvelope(response);
-  }
-
-  /// Request an owner-scoped direct PUT target for one server-generated key.
-  /// Private deployments return a presigned URL; development deployments may
-  /// return null and let the caller use the legacy STS fallback.
-  Future<SocialPersonaAssetUploadTarget> getSocialPersonaAssetUploadTarget(
-    String assetId,
-  ) async {
-    final headers = await authHeaders();
-    final response = await post(
-      Uri.parse(
-        '$baseUrl/api/user/persona/assets/${Uri.encodeComponent(assetId)}/upload-target',
-      ),
-      headers,
-      '{}',
-    );
+  /// Read the server-owned role and skin catalog. This endpoint is public so
+  /// the editor can render the same allow-list that the write path enforces.
+  /// GET /api/persona/catalog
+  Future<SocialPersonaCatalog> getSocialPersonaCatalog() async {
+    final response = await get(Uri.parse('$baseUrl/api/persona/catalog'), {
+      'Content-Type': 'application/json',
+    });
     return handleResponse(
       response,
-      (data) => SocialPersonaAssetUploadTarget.fromJson(
-        (data as Map).cast<String, dynamic>(),
-      ),
+      (data) =>
+          SocialPersonaCatalog.fromJson((data as Map).cast<String, dynamic>()),
     );
-  }
-
-  /// Confirm a direct upload. The server probes the object and applies the
-  /// moderation gate before it can become selectable.
-  Future<SocialPersonaAsset> completeSocialPersonaAsset(String assetId) async {
-    final headers = await authHeaders();
-    final response = await post(
-      Uri.parse(
-        '$baseUrl/api/user/persona/assets/${Uri.encodeComponent(assetId)}/complete',
-      ),
-      headers,
-      '{}',
-    );
-    return _parseSocialPersonaAssetEnvelope(response);
-  }
-
-  /// Explicitly select an approved asset. Selection does not publish a draft.
-  Future<SocialPersona> selectSocialPersonaAsset(String assetId) async {
-    final headers = await authHeaders();
-    final response = await post(
-      Uri.parse(
-        '$baseUrl/api/user/persona/assets/${Uri.encodeComponent(assetId)}/select',
-      ),
-      headers,
-      '{}',
-    );
-    return _parseSocialPersonaEnvelope(response);
-  }
-
-  /// Revoke a persona asset and remove it from future public projections.
-  Future<SocialPersonaAsset> revokeSocialPersonaAsset(String assetId) async {
-    final headers = await authHeaders();
-    final response = await post(
-      Uri.parse(
-        '$baseUrl/api/user/persona/assets/${Uri.encodeComponent(assetId)}/revoke',
-      ),
-      headers,
-      '{}',
-    );
-    return _parseSocialPersonaAssetEnvelope(response);
   }
 
   /// Save a private role presentation draft.
@@ -303,18 +211,6 @@ class UserService extends BaseService {
       throw ServerException(200, '服务器未返回角色呈现');
     }
     return SocialPersona.fromJson(persona.cast<String, dynamic>());
-  }
-
-  SocialPersonaAsset _parseSocialPersonaAssetEnvelope(dynamic response) {
-    final data = handleResponse(
-      response,
-      (value) => value as Map<String, dynamic>,
-    );
-    final asset = data['asset'];
-    if (asset is! Map) {
-      throw ServerException(200, '服务器未返回角色图片');
-    }
-    return SocialPersonaAsset.fromJson(asset.cast<String, dynamic>());
   }
 
   /// Get another user's published role presentation in the resolved campus.

@@ -243,27 +243,11 @@ Content-Type: application/json
 
 `representation_mode` 当前为 `trait_mapped|role_character`；`self_descriptions` 最多三个且必须来自固定标签；外观字段不能扩展或写入自由文本。保存会把已发布记录退回 `draft`，旧发布不会继续公开，并写入 `social_persona_audits`。
 
-### GET `/api/user/persona/assets`
+### GET `/api/persona/catalog`
 
-[已实现] 仅本人可读当前校园的图片候选及其私有生命周期。返回的 `upload_key` 只用于向平台私有 bucket 上传，不是公开 URL。
+[已实现] 返回当前服务端提供的角色与皮肤目录（`style_version`、`representation_modes`、`appearance`、标签和接近方式 token）。这是唯一可用的外观来源；客户端只能从目录中选择，不能上传角色/皮肤、提交图片或外部 URL，也不能用自由文本 prompt 生成公开素材。服务端在 `PUT /api/user/persona` 再次校验 token，旧客户端不能绕过目录。
 
-### POST `/api/user/persona/assets`
-
-[已实现] 创建服务器生成 key 的图片候选。body 为 `{ "asset_type": "illustration|photo_stylized", "declared_mime_type": "image/png|image/jpeg|image/webp", "declared_size_bytes": 1..10485760 }`。服务端不接受客户端自选 storage key，也不把创建记录当作上传成功。
-
-### POST `/api/user/persona/assets/{id}/upload-target`
-
-[已实现] 仅候选 owner 可调用。私有媒体部署返回只绑定该 `upload_key` 的 presigned PUT URL 和有效期；开发/公开 bucket 部署返回 `upload_url: null`，客户端才回退到现有 verified-membership STS 流程。两条路径都必须随后调用 `complete`，服务端不会把 PUT 的 HTTP 成功当作审核或公开事实。
-
-### POST `/api/user/persona/assets/{id}/complete`
-
-[已实现] 服务端对生成的 key 做平台对象探测，核对真实大小、MIME 和 PNG/JPEG/WebP 文件头。图片审核开启时进入 `pending_review`，否则进入 `active`；审核前不能选择或公开。重复调用在已验证对象上幂等返回，不会重新宣称上传成功。
-
-客户端上传顺序是：创建候选 → 请求 `upload-target` → 私有部署用单对象 presigned PUT（否则使用同一会话的 `/api/upload/token` PUT 到返回的 `upload_key`）→ 调用 `complete`。Profile 页只允许用户主动选择本地图片/相机来源，并在完成探测后展示审核事实；它不会把本地预览、上传请求或图片加载成功当作公开状态。若候选在 24 小时内仍未完成上传，后台 cleanup worker 会将其撤销并进入远端清理，不会继续等待或公开。
-
-### POST `/api/user/persona/assets/{id}/select` 与 `/revoke`
-
-[已实现] 只有本人可以显式选择已审核的 `active` 候选或撤销候选。选择新素材会把已发布 persona 退回私有 `draft`，仍需再次显式发布；撤销会清除选中引用、停止公开投影，并交给耐久清理 worker 删除远端对象。图片只是角色呈现，不是身份认证；照片风格化也不会声称与真人一一对应。
+`/api/user/persona/assets` 及其 `upload-target`、`complete`、`select`、`revoke` 路径已从当前路由移除。`0070`/`0071` 的表和清理字段只为历史回滚与远端清理保留；迁移 `0080` 会撤销既有用户素材、清空公开引用，公开 Persona 和 Thread 投影只使用静态系统 token。
 
 ### POST `/api/user/persona/publish`
 
@@ -279,7 +263,7 @@ Content-Type: application/json
 
 ### GET `/api/users/{id}/persona`
 
-[已实现] 游客或登录用户均可读取，但校园由当前登录 session 的活动校园解析，游客使用默认公开校园。响应为 `{ "persona": null | {...} }`；只有目标用户在该校园有 verified membership 且明确 `published` 时才返回角色配置。草稿、归档、非活动校园和未认证成员统一返回 `persona: null`，不泄漏存在性。响应包含受控 token、用户标签、主动 `contact_posture`、`published_at`，以及在 `selected_asset_id` 对应候选已通过对象探测和审核时的短期平台 `asset.url`；不返回 storage key、账号、认证或注意力状态。URL 失效或素材撤销后客户端应回退 token，不把图片加载失败解释为在线或已读信号。
+[已实现] 游客或登录用户均可读取，但校园由当前登录 session 的活动校园解析，游客使用默认公开校园。响应为 `{ "persona": null | {...} }`；只有目标用户在该校园有 verified membership 且明确 `published` 时才返回角色配置。草稿、归档、非活动校园和未认证成员统一返回 `persona: null`，不泄漏存在性。响应包含受控 token、用户标签、主动 `contact_posture` 和 `published_at`；不返回用户素材、storage key、账号、认证或注意力状态。旧客户端若仍理解 `asset` 字段会收到 `null`，不得把图片加载或资源失败解释为在线或已读信号。
 
 ### POST `/api/users/{id}/report`
 
@@ -839,7 +823,7 @@ Flutter 在 wanted 详情按当前用户身份展示“收到的推荐”或“�
 - `POST /api/agent/plans/{id}/confirm` — body `{ "confirmation_token": "..." }`。L2 计划一次确认后执行。L3 第一次必须提交 primary token，响应为 `{ "status": "needs_second_confirmation", "outcome_code": "needs_second_confirmation", "confirmation_token": "<独立的第二步 token>" }`；只有返回的第二步 token 可以执行。primary 请求的传输重试只会重放同一挑战，不会被计为第二次确认。终态重试返回同一执行结果并带 `outcome_code: already_executed`。过期、执行失败或不可确认分别使用稳定错误 code `agent_plan_expired`、`agent_plan_execution_failed`、`agent_plan_not_confirmable`；错误 token、其他用户、其他校园或不存在统一 `404`（不泄露归属）。
 - `POST /api/agent/plans/{id}/cancel` — 取消当前校园内的 `pending` 或 `confirmed_once` 计划。
 
-- `GET /api/agent/runs?limit=20` — 返回当前用户、当前活动校园最近的安全 AgentRun envelope（`limit` 会在服务端限制为 1–50）。字段包括 `trace_id`、路由/置信度、provider/model、prompt/tool schema 版本、`started|completed|failed|cancelled` 状态、typed `outcome_code`、检索/工具聚合、最近一批受限资源 ID、SSE 首 token 延迟（`ttft_ms`，可空）、耗时和时间戳。该接口不返回 prompt、聊天正文、工具参数、确认 token、token 用量或完整 provider 错误，并使用 `no-store`；SSE 客户端中途断开会在有界 grace period 后结案为 `cancelled`，在此之前仍可能暂时保持 `started`，不能据此推断成功。
+- `GET /api/agent/runs?limit=20` — 返回当前用户、当前活动校园最近的安全 AgentRun envelope（`limit` 会在服务端限制为 1–50）。字段包括 `trace_id`、路由/置信度、provider/model、prompt/tool schema 版本、`started|completed|failed|cancelled` 状态、typed `outcome_code`、检索/工具聚合、最近一批受限资源 ID、SSE 首 token 延迟（`ttft_ms`，可空）、耗时和时间戳。服务端只为运维保存有界 `token_input`/`token_output` 计数，该接口不返回它们，也不返回 prompt、聊天正文、工具参数、确认 token 或完整 provider 错误，并使用 `no-store`；SSE 客户端中途断开会在有界 grace period 后结案为 `cancelled`，跨进程 worker 也会关闭超过阈值的遗留 `started` 行；在此之前仍可能暂时保持 `started`，不能据此推断成功。
 
 确认从锁定计划行、重新校验校园资格/所有权/商品状态/金额，到业务事实、适用时的通知/outbox 和计划终态都位于同一个数据库事务。业务执行使用 savepoint：校验失败不会留下部分事实；进程在 commit 前中断时整笔事务回滚，原 token 可安全重试。升级前遗留的已提交 `executing` 行被迁移为 `interrupted`，必须人工核对，系统绝不自动重放。
 
@@ -1173,7 +1157,7 @@ GET  /api/v1/agent/runs?limit=20
 
 这是目标 `/api/v1` 形态，不等同于上方当前未版本化接口。目标创建协议还应返回 `idempotency_key`、`confirmation_mode`、版本化预览和风险文案；L3 继续使用相互独立的两步 token。
 
-当前 confirm 已重新验证 tenant、membership、owner、状态和金额，并把业务事实、typed terminal outcome 和计划终态原子提交。listing 更新、下架、成交意向和议价计划已携带 `inventory.content_revision` 快照并在锁内拒绝过期写入；当前聊天入口已支持按用户/校园和动作参数哈希绑定的通用提案 `Idempotency-Key`，相同请求重试复用原计划，改参数拒绝。`agent_action_audits` 记录同事务内的行动级 receipt，聊天提案在同 trace 下可通过可空 `agent_run_id` 与 `agent_runs` 显式关联；两者都不保存正文、token、args 或完整错误。设备/重新认证绑定、token 用量、provider 侧 TTFT、持久化 cancel 对账和 `/api/v1` 前缀仍是目标态。
+当前 confirm 已重新验证 tenant、membership、owner、状态和金额，并把业务事实、typed terminal outcome 和计划终态原子提交。listing 更新、下架、成交意向和议价计划已携带 `inventory.content_revision` 快照并在锁内拒绝过期写入；当前聊天入口已支持按用户/校园和动作参数哈希绑定的通用提案 `Idempotency-Key`，相同请求重试复用原计划，改参数拒绝。`agent_action_audits` 记录同事务内的行动级 receipt，聊天提案在同 trace 下可通过可空 `agent_run_id` 与 `agent_runs` 显式关联；行动审计仍不保存正文、token、args 或完整错误，AgentRun 仅在服务端保存有界 input/output token 计数且安全列表不返回；客户端断开有界取消结案和 stale-run durable reconciliation 已落地。设备/重新认证绑定、provider 侧 TTFT、版本化风险文案、运维对账和 `/api/v1` 前缀仍是目标态。
 
 ### Moderation 与申诉
 

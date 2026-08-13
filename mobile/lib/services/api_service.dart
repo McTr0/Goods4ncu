@@ -175,32 +175,8 @@ class ApiService extends BaseService {
 
   Future<SocialPersona?> getSocialPersona() => _userService.getSocialPersona();
 
-  Future<List<SocialPersonaAsset>> getSocialPersonaAssets() =>
-      _userService.getSocialPersonaAssets();
-
-  Future<SocialPersonaAsset> createSocialPersonaAsset({
-    required String assetType,
-    required String declaredMimeType,
-    required int declaredSizeBytes,
-  }) => _userService.createSocialPersonaAsset(
-    assetType: assetType,
-    declaredMimeType: declaredMimeType,
-    declaredSizeBytes: declaredSizeBytes,
-  );
-
-  Future<SocialPersonaAssetUploadTarget> getSocialPersonaAssetUploadTarget(
-    String assetId,
-  ) =>
-      _userService.getSocialPersonaAssetUploadTarget(assetId);
-
-  Future<SocialPersonaAsset> completeSocialPersonaAsset(String assetId) =>
-      _userService.completeSocialPersonaAsset(assetId);
-
-  Future<SocialPersona> selectSocialPersonaAsset(String assetId) =>
-      _userService.selectSocialPersonaAsset(assetId);
-
-  Future<SocialPersonaAsset> revokeSocialPersonaAsset(String assetId) =>
-      _userService.revokeSocialPersonaAsset(assetId);
+  Future<SocialPersonaCatalog> getSocialPersonaCatalog() =>
+      _userService.getSocialPersonaCatalog();
 
   Future<SocialPersona> upsertSocialPersona({
     required String representationMode,
@@ -307,12 +283,11 @@ class ApiService extends BaseService {
     String id,
     Map<String, dynamic> updates, {
     int? expectedContentRevision,
-  }) =>
-      _listingService.updateListing(
-        id,
-        updates,
-        expectedContentRevision: expectedContentRevision,
-      );
+  }) => _listingService.updateListing(
+    id,
+    updates,
+    expectedContentRevision: expectedContentRevision,
+  );
 
   Future<void> fulfillWanted(String id) => _listingService.fulfillWanted(id);
 

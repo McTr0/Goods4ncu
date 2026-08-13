@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 import '../components/social_persona_card.dart';
-import '../components/social_persona_asset_panel.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
 import '../services/admin_role_cache.dart';
-import '../services/upload_service.dart';
 import '../services/ws_service.dart';
 import '../services/token_storage.dart';
 import '../services/user_service.dart';
@@ -17,9 +14,8 @@ import '../theme/responsive.dart';
 
 class ProfilePage extends StatefulWidget {
   final ApiService? apiService;
-  final UploadService? uploadService;
 
-  const ProfilePage({super.key, this.apiService, this.uploadService});
+  const ProfilePage({super.key, this.apiService});
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -27,21 +23,18 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   late final ApiService _apiService;
-  late final UploadService _uploadService;
   Map<String, dynamic>? _profile;
   SocialPersona? _persona;
-  List<SocialPersonaAsset> _personaAssets = const [];
+  SocialPersonaCatalog? _personaCatalog;
   List<CampusMembership> _campusMemberships = const [];
   String? _activeCampusId;
   bool _loading = true;
-  bool _personaAssetBusy = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
     _apiService = widget.apiService ?? context.read<ApiService>();
-    _uploadService = widget.uploadService ?? UploadService();
     _loadProfile();
   }
 
@@ -50,7 +43,6 @@ class _ProfilePageState extends State<ProfilePage> {
       _loading = true;
       _error = null;
       _persona = null;
-      _personaAssets = const [];
     });
     try {
       final results = await Future.wait<dynamic>([
@@ -66,20 +58,17 @@ class _ProfilePageState extends State<ProfilePage> {
           _loading = false;
         });
       }
+      try {
+        final catalog = await _apiService.getSocialPersonaCatalog();
+        if (mounted) setState(() => _personaCatalog = catalog);
+      } catch (_) {}
       // The role layer is optional: a transient persona failure must not hide
       // the ordinary profile, campus membership, or contact controls.
       try {
         final persona = await _apiService.getSocialPersona();
-        var assets = const <SocialPersonaAsset>[];
-        if (persona != null) {
-          try {
-            assets = await _apiService.getSocialPersonaAssets();
-          } catch (_) {}
-        }
         if (mounted) {
           setState(() {
             _persona = persona;
-            _personaAssets = assets;
           });
         }
       } catch (_) {}
@@ -96,19 +85,23 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _editPersona() async {
-    final draft = await showSocialPersonaEditor(context, _persona);
+    final draft = await showSocialPersonaEditor(
+      context,
+      _persona,
+      catalog: _personaCatalog,
+    );
     if (draft == null || !mounted) return;
     final l = AppLocalizations.of(context)!;
     try {
       final persona = await _apiService.upsertSocialPersona(
         representationMode: draft.representationMode,
+        styleVersion: draft.styleVersion,
         appearanceConfig: draft.appearanceConfig,
         selfDescriptions: draft.selfDescriptions,
         contactPosture: draft.contactPosture,
       );
       if (!mounted) return;
       setState(() => _persona = persona);
-      await _refreshPersonaAssets();
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -171,227 +164,6 @@ class _ProfilePageState extends State<ProfilePage> {
         context,
       ).showSnackBar(SnackBar(content: Text('${l.error}: $error')));
     }
-  }
-
-  Future<void> _refreshPersonaAssets() async {
-    if (_persona == null) return;
-    try {
-      final assets = await _apiService.getSocialPersonaAssets();
-      if (mounted) setState(() => _personaAssets = assets);
-    } catch (_) {
-      // Asset management is optional; keep the role editor usable if the
-      // private candidate endpoint is temporarily unavailable.
-    }
-  }
-
-  Future<void> _addPersonaAsset() async {
-    if (_persona == null || _personaAssetBusy) return;
-    final l = AppLocalizations.of(context)!;
-    final source = await _pickPersonaImageSource();
-    if (source == null || !mounted) return;
-    final picked = await ImagePicker().pickImage(
-      source: source,
-      maxWidth: 1600,
-      maxHeight: 1600,
-      imageQuality: 92,
-    );
-    if (picked == null || !mounted) return;
-
-    setState(() => _personaAssetBusy = true);
-    try {
-      final bytes = await picked.readAsBytes();
-      if (bytes.isEmpty || bytes.length > 10 * 1024 * 1024) {
-        throw Exception(l.socialPersonaAssetSizeInvalid);
-      }
-      final extension = _personaImageExtension(picked.path);
-      final contentType = _personaImageContentType(extension);
-      final created = await _apiService.createSocialPersonaAsset(
-        assetType: 'illustration',
-        declaredMimeType: contentType,
-        declaredSizeBytes: bytes.length,
-      );
-      final uploadKey = created.uploadKey;
-      if (uploadKey == null || uploadKey.trim().isEmpty) {
-        throw Exception(l.socialPersonaAssetUploadTargetMissing);
-      }
-      final target = await _apiService.getSocialPersonaAssetUploadTarget(
-        created.id,
-      );
-      if (target.assetId != created.id || target.uploadKey != uploadKey) {
-        throw Exception(l.socialPersonaAssetUploadTargetMissing);
-      }
-      final targetUrl = target.uploadUrl;
-      if (targetUrl != null && targetUrl.trim().isNotEmpty) {
-        await _uploadService.uploadBytesToPresignedUrl(
-          bytes,
-          uploadUrl: targetUrl,
-          contentType: contentType,
-        );
-      } else {
-        // Public/development deployments retain the existing STS path; the
-        // server-generated key and complete probe remain mandatory there too.
-        await _uploadService.uploadBytesToObjectKey(
-          bytes,
-          objectKey: target.uploadKey,
-          contentType: contentType,
-        );
-      }
-      final completed = await _apiService.completeSocialPersonaAsset(
-        created.id,
-      );
-      await _refreshPersonaAssets();
-      if (!mounted) return;
-      final message = completed.status == 'active'
-          ? l.socialPersonaAssetReady
-          : l.socialPersonaAssetPendingReview;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${l.socialPersonaAssetUploadFailed}: $error')),
-      );
-      await _refreshPersonaAssets();
-    } finally {
-      if (mounted) setState(() => _personaAssetBusy = false);
-    }
-  }
-
-  Future<void> _selectPersonaAsset(SocialPersonaAsset asset) async {
-    if (_personaAssetBusy || !asset.isReady) return;
-    final l = AppLocalizations.of(context)!;
-    setState(() => _personaAssetBusy = true);
-    try {
-      final persona = await _apiService.selectSocialPersonaAsset(asset.id);
-      if (!mounted) return;
-      setState(() => _persona = persona);
-      await _refreshPersonaAssets();
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(l.socialPersonaAssetSelected)));
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('${l.error}: $error')));
-    } finally {
-      if (mounted) setState(() => _personaAssetBusy = false);
-    }
-  }
-
-  Future<void> _completePersonaAsset(SocialPersonaAsset asset) async {
-    if (_personaAssetBusy ||
-        (asset.status != 'pending_upload' &&
-            asset.status != 'pending_review')) {
-      return;
-    }
-    final l = AppLocalizations.of(context)!;
-    setState(() => _personaAssetBusy = true);
-    try {
-      final completed = await _apiService.completeSocialPersonaAsset(asset.id);
-      await _refreshPersonaAssets();
-      if (!mounted) return;
-      final message = completed.status == 'active'
-          ? l.socialPersonaAssetReady
-          : l.socialPersonaAssetPendingReview;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${l.socialPersonaAssetUploadFailed}: $error')),
-      );
-    } finally {
-      if (mounted) setState(() => _personaAssetBusy = false);
-    }
-  }
-
-  Future<void> _revokePersonaAsset(SocialPersonaAsset asset) async {
-    if (_personaAssetBusy ||
-        asset.status == 'revoked' ||
-        asset.status == 'deleted') {
-      return;
-    }
-    final l = AppLocalizations.of(context)!;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(l.socialPersonaAssetRevokeConfirmTitle),
-        content: Text(l.socialPersonaAssetRevokeConfirmBody),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: Text(l.cancel),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text(l.socialPersonaAssetRevoke),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    setState(() => _personaAssetBusy = true);
-    try {
-      await _apiService.revokeSocialPersonaAsset(asset.id);
-      final persona = await _apiService.getSocialPersona();
-      if (!mounted) return;
-      setState(() => _persona = persona);
-      await _refreshPersonaAssets();
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(l.socialPersonaAssetRevoked)));
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('${l.error}: $error')));
-    } finally {
-      if (mounted) setState(() => _personaAssetBusy = false);
-    }
-  }
-
-  Future<ImageSource?> _pickPersonaImageSource() {
-    final l = AppLocalizations.of(context)!;
-    return showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: Text(l.gallery),
-              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
-            ),
-            ListTile(
-              leading: const Icon(Icons.camera_alt_outlined),
-              title: Text(l.camera),
-              onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _personaImageExtension(String path) {
-    final lower = path.toLowerCase();
-    if (lower.endsWith('.png')) return 'png';
-    if (lower.endsWith('.webp')) return 'webp';
-    return 'jpg';
-  }
-
-  String _personaImageContentType(String extension) {
-    return switch (extension) {
-      'png' => 'image/png',
-      'webp' => 'image/webp',
-      _ => 'image/jpeg',
-    };
   }
 
   Future<void> _logout() async {
@@ -678,13 +450,7 @@ class _ProfilePageState extends State<ProfilePage> {
               const SizedBox(height: AppTheme.sp20),
               _SocialPersonaSection(
                 persona: _persona,
-                assets: _personaAssets,
                 onEdit: _editPersona,
-                onAddAsset: _persona == null ? null : _addPersonaAsset,
-                onSelectAsset: _selectPersonaAsset,
-                onCompleteAsset: _completePersonaAsset,
-                onRevokeAsset: _revokePersonaAsset,
-                assetBusy: _personaAssetBusy,
                 onPublish: _persona == null || _persona!.isPublished
                     ? null
                     : _publishPersona,
@@ -757,25 +523,13 @@ class _ProfilePageState extends State<ProfilePage> {
 class _SocialPersonaSection extends StatelessWidget {
   const _SocialPersonaSection({
     required this.persona,
-    required this.assets,
     required this.onEdit,
-    required this.onSelectAsset,
-    required this.onCompleteAsset,
-    required this.onRevokeAsset,
-    this.onAddAsset,
-    this.assetBusy = false,
     this.onPublish,
     this.onArchive,
   });
 
   final SocialPersona? persona;
-  final List<SocialPersonaAsset> assets;
   final VoidCallback onEdit;
-  final VoidCallback? onAddAsset;
-  final ValueChanged<SocialPersonaAsset> onSelectAsset;
-  final ValueChanged<SocialPersonaAsset> onCompleteAsset;
-  final ValueChanged<SocialPersonaAsset> onRevokeAsset;
-  final bool assetBusy;
   final VoidCallback? onPublish;
   final VoidCallback? onArchive;
 
@@ -825,17 +579,6 @@ class _SocialPersonaSection extends StatelessWidget {
           )
         else ...[
           SocialPersonaPreviewCard(persona: current),
-          if (onAddAsset != null) ...[
-            const SizedBox(height: AppTheme.sp12),
-            SocialPersonaAssetPanel(
-              assets: assets,
-              busy: assetBusy,
-              onAdd: onAddAsset!,
-              onSelect: onSelectAsset,
-              onComplete: onCompleteAsset,
-              onRevoke: onRevokeAsset,
-            ),
-          ],
           const SizedBox(height: AppTheme.sp8),
           Text(switch (current.status) {
             'published' => l.socialPersonaPublished,

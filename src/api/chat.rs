@@ -12,7 +12,7 @@ use crate::api::auth;
 use crate::api::error::ApiError;
 use crate::api::session::Session;
 use crate::api::{normalize_platform_media_url, AppState, PeerAddr};
-use crate::llm::MarketplaceAgent;
+use crate::llm::{AgentStreamChunk, AgentTokenUsage, MarketplaceAgent};
 use crate::services::agent_run::AgentRunService;
 use crate::services::chat::{ChatService, AGENT_CONVERSATION_SENTINEL};
 use axum::extract::{Query, State};
@@ -313,16 +313,31 @@ async fn finish_agent_run(
     outcome_code: &str,
     error_code: Option<&str>,
 ) -> bool {
+    finish_agent_run_with_usage(run, status, outcome_code, error_code, None).await
+}
+
+async fn finish_agent_run_with_usage(
+    run: &AgentRunHandle,
+    status: &str,
+    outcome_code: &str,
+    error_code: Option<&str>,
+    usage: Option<AgentTokenUsage>,
+) -> bool {
     let duration_ms = Some(run.started_at.elapsed().as_millis().min(i32::MAX as u128) as i32);
+    let (token_input, token_output) = usage
+        .map(AgentTokenUsage::bounded_i32)
+        .unwrap_or((None, None));
     match run
         .service
-        .finish(
+        .finish_with_usage(
             &run.trace_id,
             run.campus_id,
             &run.user_id,
             status,
             outcome_code,
             error_code,
+            token_input,
+            token_output,
             duration_ms,
         )
         .await
@@ -565,8 +580,8 @@ pub(crate) async fn handle_chat(
         }
     };
 
-    let reply = match agent
-        .prompt_with_history(message.clone(), chat_history)
+    let (reply, usage) = match agent
+        .prompt_with_history_with_usage(message.clone(), chat_history)
         .await
     {
         Ok(reply) => reply,
@@ -582,7 +597,7 @@ pub(crate) async fn handle_chat(
 
     state.infra.metrics.record_llm_call();
     if let Some(run) = &run {
-        finish_agent_run(run, "completed", "llm_completed", None).await;
+        finish_agent_run_with_usage(run, "completed", "llm_completed", None, usage).await;
     }
 
     // Fire-and-forget: agent reply persistence — errors are non-fatal.
@@ -835,11 +850,12 @@ async fn handle_chat_stream_request(
     let persist_service = chat_svc.clone();
     let sse_stream = async_stream::stream! {
         let mut full_reply = String::new();
+        let mut usage = None;
         let mut completed = true;
         let mut ttft_recorded = false;
         while let Some(result) = stream.next().await {
             let bytes = match result {
-                Ok(token) => {
+                Ok(AgentStreamChunk::Text(token)) => {
                     if !ttft_recorded {
                         if let Some(run) = &run_for_stream {
                             let ttft_ms = run
@@ -872,6 +888,10 @@ async fn handle_chat_stream_request(
                         "conversation_id": public_conversation_id
                     });
                     encode_sse_data(&payload)
+                }
+                Ok(AgentStreamChunk::Usage(reported_usage)) => {
+                    usage = Some(reported_usage);
+                    continue;
                 }
                 Err(error) => {
                     completed = false;
@@ -908,7 +928,7 @@ async fn handle_chat_stream_request(
 
         let finished = if let Some(run) = &run_for_stream {
             if completed {
-                finish_agent_run(run, "completed", "llm_completed", None).await
+                finish_agent_run_with_usage(run, "completed", "llm_completed", None, usage).await
             } else {
                 finish_agent_run(run, "failed", "llm_failed", Some("provider_error")).await
             }

@@ -309,11 +309,39 @@ impl AgentRunService {
         error_code: Option<&str>,
         duration_ms: Option<i32>,
     ) -> anyhow::Result<bool> {
+        self.finish_with_usage(
+            trace_id,
+            campus_id,
+            user_id,
+            status,
+            outcome_code,
+            error_code,
+            None,
+            None,
+            duration_ms,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn finish_with_usage(
+        &self,
+        trace_id: &str,
+        campus_id: Uuid,
+        user_id: &str,
+        status: &str,
+        outcome_code: &str,
+        error_code: Option<&str>,
+        token_input: Option<i32>,
+        token_output: Option<i32>,
+        duration_ms: Option<i32>,
+    ) -> anyhow::Result<bool> {
         let mut tx = self.db.begin().await?;
         let run_id: Option<Uuid> = sqlx::query_scalar(
             "UPDATE agent_runs
              SET status = $4, outcome_code = $5, error_code = $6,
-                 duration_ms = $7,
+                 token_input = $7, token_output = $8,
+                 duration_ms = $9,
                  completed_at = CASE WHEN $4 IN ('completed', 'failed', 'cancelled')
                                      THEN NOW() ELSE completed_at END,
                  updated_at = NOW()
@@ -327,6 +355,8 @@ impl AgentRunService {
         .bind(status)
         .bind(outcome_code)
         .bind(error_code)
+        .bind(token_input)
+        .bind(token_output)
         .bind(duration_ms)
         .fetch_optional(&mut *tx)
         .await?;
@@ -380,6 +410,77 @@ impl AgentRunService {
             duration_ms,
         )
         .await
+    }
+
+    /// Reconcile abandoned runs after a process restart or a lost request
+    /// task. The caller supplies a cutoff so the worker can keep a generous
+    /// grace period; row locks and `SKIP LOCKED` make this safe across replicas.
+    pub async fn reconcile_stale_started(
+        &self,
+        cutoff: DateTime<Utc>,
+        limit: i64,
+    ) -> anyhow::Result<usize> {
+        let mut tx = self.db.begin().await?;
+        let rows = sqlx::query(
+            "WITH candidates AS (
+                 SELECT id
+                 FROM agent_runs
+                 WHERE status = 'started' AND updated_at < $1
+                 ORDER BY updated_at ASC
+                 LIMIT $2
+                 FOR UPDATE SKIP LOCKED
+             )
+             UPDATE agent_runs AS run
+             SET status = 'cancelled',
+                 outcome_code = 'cancelled',
+                 error_code = 'stale_reconciliation',
+                 duration_ms = GREATEST(
+                     0,
+                     LEAST(
+                         2147483647,
+                         (EXTRACT(EPOCH FROM (NOW() - run.created_at)) * 1000)::bigint
+                     )
+                 )::int,
+                 completed_at = NOW(),
+                 updated_at = NOW()
+             FROM candidates
+             WHERE run.id = candidates.id
+             RETURNING run.id, run.trace_id, run.campus_id, run.user_id,
+                       run.duration_ms",
+        )
+        .bind(cutoff)
+        .bind(limit.clamp(1, 500))
+        .fetch_all(&mut *tx)
+        .await?;
+
+        for row in &rows {
+            let run_id: Uuid = row.get("id");
+            let trace_id: String = row.get("trace_id");
+            let campus_id: Uuid = row.get("campus_id");
+            let user_id: String = row.get("user_id");
+            let duration_ms: Option<i32> = row.get("duration_ms");
+            insert_event(
+                &mut tx,
+                EventRecord {
+                    run_id,
+                    trace_id: &trace_id,
+                    campus_id,
+                    user_id: &user_id,
+                    event_type: "outcome",
+                    tool_name: None,
+                    risk_level: None,
+                    outcome_code: Some("cancelled"),
+                    duration_ms,
+                    result_count: None,
+                    filtered_count: None,
+                    resource_ids: serde_json::json!([]),
+                    metadata: serde_json::json!({ "reconciled": true }),
+                },
+            )
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(rows.len())
     }
 
     pub async fn list_recent(

@@ -15,9 +15,8 @@ class UploadService extends BaseService {
   final Uuid _uuid = const Uuid();
 
   /// Upload bytes to an owner-scoped presigned PUT URL. No application or STS
-  /// credentials are sent to the object store; the server already bound the
-  /// URL to one persona asset key. The completion API still probes the object
-  /// before it can enter review or become selectable.
+  /// credentials are sent to the object store; this is used for shared chat
+  /// objects and other media flows, never for SocialPersona roles or skins.
   Future<String> uploadBytesToPresignedUrl(
     List<int> bytes, {
     required String uploadUrl,

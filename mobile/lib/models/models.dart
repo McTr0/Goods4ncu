@@ -13,6 +13,7 @@ class Listing {
   static const String adminActionRestore = 'restore';
 
   final String id;
+
   /// Database-owned optimistic-concurrency version. Older servers may omit
   /// it during rollout, in which case writes keep their legacy behavior.
   final int? contentRevision;
@@ -1473,6 +1474,49 @@ class SocialPersonaAppearance {
     'accessory': accessory,
     'outfit': outfit,
   };
+}
+
+/// Server-owned role/skin choices. The editor may only submit values present
+/// here; there is intentionally no image, URL, or free-form import field.
+class SocialPersonaCatalog {
+  const SocialPersonaCatalog({
+    required this.styleVersion,
+    required this.representationModes,
+    required this.appearance,
+    required this.selfDescriptions,
+    required this.contactPostures,
+  });
+
+  final String styleVersion;
+  final List<String> representationModes;
+  final Map<String, List<String>> appearance;
+  final List<String> selfDescriptions;
+  final List<String> contactPostures;
+
+  factory SocialPersonaCatalog.fromJson(Map<String, dynamic> json) {
+    final rawAppearance = json['appearance'];
+    final appearance = <String, List<String>>{};
+    if (rawAppearance is Map) {
+      for (final entry in rawAppearance.entries) {
+        final values = entry.value;
+        if (values is List) {
+          appearance[entry.key.toString()] = values
+              .map((value) => value.toString())
+              .toList(growable: false);
+        }
+      }
+    }
+    List<String> list(String key) => (json[key] as List<dynamic>? ?? const [])
+        .map((value) => value.toString())
+        .toList(growable: false);
+    return SocialPersonaCatalog(
+      styleVersion: json['style_version']?.toString() ?? 'v1',
+      representationModes: list('representation_modes'),
+      appearance: appearance,
+      selfDescriptions: list('self_descriptions'),
+      contactPostures: list('contact_postures'),
+    );
+  }
 }
 
 class SocialPersonaAsset {

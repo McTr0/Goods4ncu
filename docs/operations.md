@@ -174,7 +174,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3999/api/readyz   # 50
 2. 双副本对空库完成生产模式引导（迁移、pgvector 扩展带 advisory lock 串行化——该演练发现并修复了双副本并发 `CREATE EXTENSION` 的真实竞态）。
 3. Redis 分布式限流与 WS fan-out 激活确认。
 4. SLO 负载冒烟（`scripts/load_smoke.sh`，普通 API p95<300ms、Feed<500ms）。
-5. 私有 MinIO/OSS bucket 验收：匿名直连拒绝、角色素材单对象 presigned PUT、presigned serving、共享文件 `/complete` probe、撤销后的 signed DELETE 与远端清理审计（rehearsal checks 2b–2c）。
+5. 私有 MinIO/OSS bucket 验收：匿名直连拒绝、商品/头像/共享文件的 presigned PUT、presigned serving、`/complete` probe、撤销后的 signed DELETE 与远端清理审计（rehearsal checks 2b–2c）。SocialPersona 角色/皮肤不走用户上传，只验收 `/api/persona/catalog` 的版本和 allow-list。
 6. 滚动重启：B 副本排空并回归期间，A 副本承载负载零失败请求。
 7. PITR 恢复演练（`scripts/backup_pitr_drill.sh`）。
 8. 双副本按序排空。
@@ -263,7 +263,7 @@ ORDER BY updated_at;
 - confirmation token 不写日志、不进模型上下文，token-bearing API 响应必须保持 `Cache-Control: no-store`。
 - 事务内只允许数据库副作用。新增外部调用必须先写 transactional outbox，由幂等 worker 在 commit 后投递，不能把网络请求塞进确认事务。
 
-当前没有自动化 `interrupted` 对账/结案界面；首版 `agent_runs`/`agent_run_events` 已把活动校园聊天的路由、provider/model、版本、检索聚合、工具类别、SSE TTFT、耗时和 typed outcome 放入安全 envelope，并由 `GET /api/agent/runs` 提供只读视图。SSE 客户端丢弃生成器后，进程内 reconciliation task 会在有界 grace period 后把仍为 `started` 的运行标记为 `cancelled`；正常结束会提前终止该任务。ActionPlan 的 typed terminal outcome 已落地；`agent_action_audits` 记录行动级 receipt（提案、重放/冲突、确认、执行、失败、取消、过期），与计划终态同事务提交，并明确不保存正文、token、args 或完整错误；聊天提案在同一 trace 下可通过 `agent_run_id` 显式关联。listing 关键动作的资源版本快照与冲突保护、Agent 提案按用户/校园和动作参数哈希的幂等已经落地。token 用量、provider 侧 TTFT、持久化取消对账任务、设备/重新认证绑定和版本化风险文案仍需补齐。
+当前没有自动化 `interrupted` 对账/结案界面；首版 `agent_runs`/`agent_run_events` 已把活动校园聊天的路由、provider/model、版本、检索聚合、工具类别、SSE TTFT、耗时和 typed outcome 放入安全 envelope，并由 `GET /api/agent/runs` 提供只读视图。SSE 客户端丢弃生成器后，进程内 reconciliation task 会在有界 grace period 后把仍为 `started` 的运行标记为 `cancelled`；正常结束会提前终止该任务，独立 worker 还会定期关闭跨进程遗留的 stale `started` 行。服务端保存有界 input/output token 计数，但安全视图不暴露它们。ActionPlan 的 typed terminal outcome 已落地；`agent_action_audits` 记录行动级 receipt（提案、重放/冲突、确认、执行、失败、取消、过期），与计划终态同事务提交，并明确不保存正文、token、args 或完整错误；聊天提案在同一 trace 下可通过 `agent_run_id` 显式关联。listing 关键动作的资源版本快照与冲突保护、Agent 提案按用户/校园和动作参数哈希的幂等已经落地。provider 侧 TTFT、设备/重新认证绑定和版本化风险文案仍需补齐。
 
 只读排查可按 trace 或计划串起行动链路；事件元数据只用于安全运营，不应被当成消息阅读、在线或注意力信号：
 
@@ -395,9 +395,9 @@ RETURNING listing_id, campus_id, desired_revision;
 | `watchlist` | 用户和商品关系，是否收藏自己的商品。 |
 | `notifications` | `campus_id`、unread、event_type、related_order/listing、是否已推送但未读。 |
 | `admin_audit_logs` | campus_id、管理员操作、target、scope_reason；跨校园读取和写入是否都有审计。 |
-| `agent_runs` / `agent_run_events` | Agent 请求的安全运行 envelope 与事件；按 campus/user 隔离，保存路由、provider/model、版本、计数、受限资源 ID、耗时和 typed outcome，不保存 prompt、正文、token 或完整 provider 错误。 |
+| `agent_runs` / `agent_run_events` | Agent 请求的安全运行 envelope 与事件；按 campus/user 隔离，保存路由、provider/model、版本、计数、受限资源 ID、耗时、typed outcome 和有界 input/output token 计数，不保存 prompt、正文或完整 provider 错误；安全只读视图不返回 token 计数。 |
 | `moderation_jobs` | campus_id、资源归属、pending/processing/approved/rejected/failed 状态，以及 processing 期间的 `locked_by/locked_until` lease；平台对象另外保存稳定 `storage_key`，私有 bucket worker 每次领取都重新签发短期 provider URL，旧任务仍可用 `image_url` fallback；到期任务可重领，终态会清空 lease。 |
-| `social_persona_assets` | persona/user/campus 归属、服务器生成 `persona/{campus}/{persona}/{asset}` key、对象探测后的大小/MIME、pending_upload/pending_review/active/revoked/deleted 生命周期、moderation 状态与远端清理 lease。超过 24 小时仍未完成的 `pending_upload` 会由 cleanup worker 撤销并记录 `asset_expired` 审计；只有 active 且 approved/not_required 的选中素材可公开。 |
+| `social_persona_assets` | legacy persona/user/campus 归属和远端清理字段，仅用于历史回滚；`0080` 后既有行撤销、`selected_asset_id` 清空，当前公开 Persona 不读取图片。新的角色/皮肤由 `/api/persona/catalog` 的静态 token 提供。 |
 | `chat_shared_objects` | file/link 权威对象、`pending_upload`/审核/撤销状态；文件撤销后的远端清理请求、尝试次数、下一次重试、错误与完成时间也保存在同一行。 |
 | `moderation_cases` | campus_id、subject、来源、状态、公开原因、resolution 和 pending appeal；普通用户接口不得返回 internal_details。 |
 | `moderation_case_events` | 案件创建、复核、处置、恢复和申诉状态转换的时间线。 |
@@ -408,7 +408,7 @@ RETURNING listing_id, campus_id, desired_revision;
 
 [已实现] `0030_normalize_money_bigint.sql` 修复历史升级库可能遗留的 `INT4` 金额列，将商品价格、成交价和议价金额统一为 `BIGINT`。若空库测试正常但现有环境列表接口出现金额 decode 错误，先检查 migration 是否已经执行到 0030，不要在应用层把金额退回 32 位。
 
-[已实现] `0034_moderation_cases.sql` 新增 `moderation_cases`、`moderation_case_events`、`moderation_appeals`，并把媒体拒绝任务和聊天举报回填为案件；`0053_content_reports.sql` 为商品和用户举报增加同校园 intake，并在同一事务中关联统一案件。`0037_outbox_events.sql` 已新增 `outbox_events`（见 Transactional Outbox 一节），`0038_agent_action_plans.sql` 已实现需确认的 Agent 写动作计划，`0075_agent_action_audit.sql`/`0076_agent_action_audit_campus_cleanup.sql` 已实现租户隔离的行动 receipt，`0077_agent_runs.sql`/`0078_agent_runs_campus_cleanup.sql`/`0079_agent_action_audit_run_link.sql` 已实现首版安全运行 envelope、SSE TTFT、bounded cancellation reconciliation 和聊天提案的可空显式 receipt 关联；token 用量、provider 侧 TTFT、持久化取消对账和统一版本化 API 仍是目标态。
+[已实现] `0034_moderation_cases.sql` 新增 `moderation_cases`、`moderation_case_events`、`moderation_appeals`，并把媒体拒绝任务和聊天举报回填为案件；`0053_content_reports.sql` 为商品和用户举报增加同校园 intake，并在同一事务中关联统一案件。`0037_outbox_events.sql` 已新增 `outbox_events`（见 Transactional Outbox 一节），`0038_agent_action_plans.sql` 已实现需确认的 Agent 写动作计划，`0075_agent_action_audit.sql`/`0076_agent_action_audit_campus_cleanup.sql` 已实现租户隔离的行动 receipt，`0077_agent_runs.sql`/`0078_agent_runs_campus_cleanup.sql`/`0079_agent_action_audit_run_link.sql` 已实现首版安全运行 envelope、SSE TTFT、bounded cancellation reconciliation 和聊天提案的可空显式 receipt 关联；`0080_system_persona_catalog_only.sql` 将角色/皮肤收敛为系统目录并撤销旧导入资产；AgentRun 服务端有界 token 计数和 stale-run durable reconciliation 已实现，provider 侧 TTFT、设备绑定和统一版本化 API 仍是目标态。
 
 ## 内容审核策略
 
@@ -416,7 +416,7 @@ RETURNING listing_id, campus_id, desired_revision;
 
 本地政策词、校内临时专项词或法务要求的词不要写死进源码，优先通过 `BLOCKED_KEYWORDS` 或 `[moderation].blocked_keywords` 配置。返回给用户的错误只说明类别，不暴露具体命中词，避免教用户绕过。
 
-图片审核仍是异步任务：listing 首次 commit、共享对象完成上传和 persona asset `complete` 会把媒体 URL、资源 `pending` 状态和 `moderation_jobs` 原子写入，并从 listing、conversation、persona 或用户 session 继承校园，客户端不能提交校园。平台对象同时保存服务器生成的 `storage_key`；私有 bucket 的 worker 在每次领取时重新签发短期 provider URL，不把可能过期的 presigned URL 当作长期任务事实，legacy job 或公开 bucket 才使用持久 `image_url`。管理员队列读取也会按 `storage_key` 重新生成短期 URL，不把历史签名直接暴露给运营页面。后台 Worker 调外部图片审核 API 并回写资源状态；拒绝结果与资源状态、ModerationCase 在同一事务中提交。`0069` 之后，Worker 认领任务时写入唯一 `locked_by` 和过期时间 `locked_until`；只有持有 lease 的副本能重试或提交终态，租约到期的 processing 行才会被下一副本回收。`0071` 之后，cleanup worker 每轮先把超过 24 小时仍为 `pending_upload` 的 persona asset 变成 `revoked`，记录 `asset_expired` 审计，再沿同一私有 bucket signed DELETE 路径清理；过期上传不能被选择或公开。`0072` 为审核任务补充稳定对象 key，避免队列延迟让审核 provider 读取过期签名。persona asset 的显式撤销也会进入同一私有 bucket 清理 worker，远端 DELETE 失败只记录截断错误并按退避重试，不能重新公开素材。生产环境开启图片审核时，启动会 fail-fast 校验 `MODERATION_IMAGE_API_URL` 和 `MODERATION_IMAGE_API_KEY`，避免 provider 缺失时任务静默失败；本地生产 rehearsal 明确关闭该外部依赖，不代表真实 provider 已验收。校园运营可以在 `GET /api/admin/moderation/jobs?status=pending` 和 `GET /api/admin/moderation/cases?status=open` 查看本校积压；排查时同时观察 `locked_by/locked_until` 和 `last_error`；平台管理员跨校排查或处置必须同时提交 `campus_id` 和 `reason`。
+图片审核仍是异步任务：listing 首次 commit 和共享对象完成上传会把媒体 URL、资源 `pending` 状态和 `moderation_jobs` 原子写入，并从 listing、conversation 或用户 session 继承校园，客户端不能提交校园。Persona 角色/皮肤只走系统目录，不产生图片审核任务；`0080` 只把历史素材撤销并交给已有清理 worker。平台对象同时保存服务器生成的 `storage_key`；私有 bucket 的 worker 在每次领取时重新签发短期 provider URL，不把可能过期的 presigned URL 当作长期任务事实，legacy job 或公开 bucket 才使用持久 `image_url`。管理员队列读取也会按 `storage_key` 重新生成短期 URL，不把历史签名直接暴露给运营页面。后台 Worker 调外部图片审核 API 并回写资源状态；拒绝结果与资源状态、ModerationCase 在同一事务中提交。`0069` 之后，Worker 认领任务时写入唯一 `locked_by` 和过期时间 `locked_until`；只有持有 lease 的副本能重试或提交终态，租约到期的 processing 行才会被下一副本回收。生产环境开启图片审核时，启动会 fail-fast 校验 `MODERATION_IMAGE_API_URL` 和 `MODERATION_IMAGE_API_KEY`，避免 provider 缺失时任务静默失败；本地生产 rehearsal 明确关闭该外部依赖，不代表真实 provider 已验收。校园运营可以在 `GET /api/admin/moderation/jobs?status=pending` 和 `GET /api/admin/moderation/cases?status=open` 查看本校积压；排查时同时观察 `locked_by/locked_until` 和 `last_error`；平台管理员跨校排查或处置必须同时提交 `campus_id` 和 `reason`。
 
 ## 常见排错
 

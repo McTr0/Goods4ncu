@@ -27,7 +27,7 @@ Agent 的价值是把用户意图翻译为可理解、可检查、可撤销的�
 
 [已实现] 可恢复的发布会立即执行并提供撤销窗口；更新/删除生成 L2 ActionPlan，成交意向/议价生成使用独立两步 token 的 L3 ActionPlan。确认锁、业务事实、适用时的通知/outbox 和计划终态原子提交，commit 前中断可安全重试。
 
-[已实现] Agent listing 创建/更新与 HTTP 路径已收敛到同一 `ListingCommandService`，共享文本审核、分类/空白规范化、金额类型和事务入口。更新/下架/成交意向/议价计划在提案时保存数据库 `content_revision`，确认时在同一锁内比较，过期计划安全失败；HTTP 更新支持 `expected_content_revision`/`If-Match`。Agent 提案可携带认证请求的 `Idempotency-Key`，服务端按用户/校园和动作参数 SHA-256 绑定重试；相同 key 的相同请求复用原计划，参数变化安全拒绝。计划终态现在同时保存受限的 `result_code`；`agent_action_audits` 在同一事务中记录提案、重放、确认、执行、失败、取消和过期事件，只保留 trace、租户、动作/风险、结果类别、耗时和固定元数据，不保存正文、token 或完整错误。聊天提案 receipt 在共享 trace 下通过可空 `agent_run_id` 与 `agent_runs` 显式关联；`agent_runs`/`agent_run_events` 已为活动校园聊天写入受限的路由、provider/model、版本、检索聚合、工具类别、SSE TTFT、耗时和 typed outcome，并提供只读安全列表；设备/重新认证绑定、版本化风险文案、token 用量、provider 侧 TTFT 和持久化 cancel 对账仍待补齐。
+[已实现] Agent listing 创建/更新与 HTTP 路径已收敛到同一 `ListingCommandService`，共享文本审核、分类/空白规范化、金额类型和事务入口。更新/下架/成交意向/议价计划在提案时保存数据库 `content_revision`，确认时在同一锁内比较，过期计划安全失败；HTTP 更新支持 `expected_content_revision`/`If-Match`。Agent 提案可携带认证请求的 `Idempotency-Key`，服务端按用户/校园和动作参数 SHA-256 绑定重试；相同 key 的相同请求复用原计划，参数变化安全拒绝。计划终态现在同时保存受限的 `result_code`；`agent_action_audits` 在同一事务中记录提案、重放、确认、执行、失败、取消和过期事件，只保留 trace、租户、动作/风险、结果类别、耗时和固定元数据，不保存正文、token 或完整错误。聊天提案 receipt 在共享 trace 下通过可空 `agent_run_id` 与 `agent_runs` 显式关联；`agent_runs`/`agent_run_events` 已为活动校园聊天写入受限的路由、provider/model、版本、检索聚合、工具类别、SSE TTFT、耗时和 typed outcome，并在服务端保存有界的 input/output token 计数（安全只读列表不返回这些计数）。客户端断开后的有界取消结案与跨进程 durable stale-run reconciliation 已落地；设备/重新认证绑定、版本化风险文案、provider 侧 TTFT 和完整 `/api/v1` 对账接口仍待补齐。
 
 ## 权限等级
 
@@ -125,7 +125,7 @@ legacy executing -> interrupted
 - 旧协议中无法判断副作用的 durable `executing` 迁移为 `interrupted`，必须人工核对，永不自动重放。
 - `agent_action_audits` 是行动级 receipt，不等同于完整 AgentRun：它在同一外层事务中记录可验证的状态转换，元数据有数据库大小上限，且不携带聊天正文、确认 token 或完整 provider 错误。
 
-[部分完成] listing 更新、下架、成交意向和议价已在提案时保存 `inventory.content_revision`，确认时按锁内版本比较；HTTP 更新/删除也支持 body 版本或 `If-Match`，旧客户端省略版本时保留兼容行为。提案 `Idempotency-Key` 已在同一用户/校园范围内落库并绑定动作、风险等级和参数哈希；相同 key 重试复用同一计划，改参数返回安全错误。typed terminal outcome、行动级审计和聊天首版 AgentRun envelope 已落地；SSE TTFT、客户端断开后的有界取消结案和聊天提案 receipt 的可空显式关联已落地；仍需补设备/重新认证绑定、版本化风险文案、token 用量、provider 侧 TTFT、持久化对账界面。当前与目标 `/api/v1` 的区别见 [API 参考](api-reference.md)。
+[部分完成] listing 更新、下架、成交意向和议价已在提案时保存 `inventory.content_revision`，确认时按锁内版本比较；HTTP 更新/删除也支持 body 版本或 `If-Match`，旧客户端省略版本时保留兼容行为。提案 `Idempotency-Key` 已在同一用户/校园范围内落库并绑定动作、风险等级和参数哈希；相同 key 重试复用同一计划，改参数返回安全错误。typed terminal outcome、行动级审计和聊天首版 AgentRun envelope 已落地；SSE TTFT、客户端断开后的有界取消结案、跨进程 stale-run durable reconciliation、服务端有界 input/output token 计数和聊天提案 receipt 的可空显式关联已落地；仍需补设备/重新认证绑定、版本化风险文案、provider 侧 TTFT、运维对账界面。当前与目标 `/api/v1` 的区别见 [API 参考](api-reference.md)。
 
 ## 工具设计
 
@@ -155,7 +155,7 @@ audit category
 5. 工具错误分为用户可修复、状态冲突、权限拒绝、依赖故障和内部错误。
 6. 工具描述不能承诺 service 实际不支持的行为。
 
-当前成交/议价的核心约束已复用事务内执行函数；listing 创建、更新和下架现已通过统一 `ListingCommandService` 进入规范化、文本审核和事务入口。关键 listing 写动作已捕获并校验数据库维护的资源版本，避免 Agent 依据旧内容覆盖新事实；提案幂等和行动级审计已落地，聊天首版 AgentRun 运行事实已按 trace 记录，完整对账仍是后续工作。
+当前成交/议价的核心约束已复用事务内执行函数；listing 创建、更新和下架现已通过统一 `ListingCommandService` 进入规范化、文本审核和事务入口。关键 listing 写动作已捕获并校验数据库维护的资源版本，避免 Agent 依据旧内容覆盖新事实；提案幂等和行动级审计已落地，聊天首版 AgentRun 运行事实已按 trace 记录，token 计数和 stale-run durable reconciliation 已落地，完整对账界面仍是后续工作。
 
 ## 记忆与上下文
 
@@ -187,7 +187,7 @@ audit category
 - 源事件被删除、隐藏、审核限制或不再可见时，对应 embedding、摘要和缓存同步失效。
 - 不从私聊推断用户人格标签、关系强度或对外公开的接近方式。
 
-角色化社交分身同样不是代理人格。Agent 可以根据用户输入生成统一风格的候选外观、角色卡文案或单次回复草稿，但发布分身、修改公开边界和发送消息都需要用户主动动作。禁止自动模仿用户长期对话、替用户维持关系或让对方误以为模型就是本人。
+角色化社交分身同样不是代理人格。Agent 可以协助生成角色卡文案或单次回复草稿，但角色与皮肤只能从服务端系统目录选择，不能由 Agent 或用户导入、上传、提交 URL 或 prompt 生成公开素材。发布分身、修改公开边界和发送消息都需要用户主动动作。禁止自动模仿用户长期对话、替用户维持关系或让对方误以为模型就是本人。
 
 平台 Agent 与用户分身使用不同的标识、入口和上下文提示。只有用户明确“请 Agent 帮忙”后，受限回复助手才能读取既有最小上下文；生成结果仍只进入草稿，不自动发送，也不能改变 acknowledgement 或连接状态。
 
@@ -241,7 +241,7 @@ Provider 层统一 chat、streaming、tool calling 和 embedding 能力，但不
 - 租户、用户、plan、动作、风险等级、稳定 `outcome_code`、耗时和固定 allow-list 元数据。
 - 不记录密钥、完整 token、密码、完整收款码、消息正文、动作参数或完整 provider 错误。
 
-仍需补充 token 用量、provider 侧首 token 计时、设备/重新认证绑定、版本化风险文案和 `/api/v1` 对账接口。SSE 生成器被客户端丢弃后会在有界 grace period 后把仍为 `started` 的运行结案为 `cancelled`；正常结束会即时取消该对账任务。上述字段不能通过把敏感正文塞进当前行动审计表来“补齐”。
+服务端已保存有界 input/output token 计数，并由独立 worker 定期把超过阈值的 `started` 运行标记为 `cancelled`；安全只读列表仍不返回 token 计数。仍需补充 provider 侧首 token 计时、设备/重新认证绑定、版本化风险文案和 `/api/v1` 对账接口。SSE 生成器被客户端丢弃后会在有界 grace period 后把仍为 `started` 的运行结案为 `cancelled`；正常结束会即时取消该对账任务。上述字段不能通过把敏感正文塞进当前行动审计表来“补齐”。
 
 Metrics 关注成功路径与安全护栏：草稿采纳率、确认取消率、工具冲突率、provider 错误率、越权拦截数和每次有效闭环成本。
 

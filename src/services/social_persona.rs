@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::{PgPool, Postgres, Row, Transaction};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
@@ -25,6 +25,19 @@ const SILHOUETTES: &[&str] = &["soft", "round", "sharp"];
 const ACCESSORIES: &[&str] = &["none", "glasses", "headphones", "leaf"];
 const OUTFITS: &[&str] = &["campus", "workwear", "casual", "lab"];
 
+/// The only persona choices exposed to clients.  These values are deliberately
+/// compiled into the server contract: a client can select a catalog token, but
+/// it cannot upload a role/skin, provide an arbitrary URL, or submit a prompt
+/// that becomes a public identity asset.
+#[derive(Debug, Clone, Serialize)]
+pub struct SocialPersonaCatalogView {
+    pub style_version: String,
+    pub representation_modes: Vec<String>,
+    pub appearance: BTreeMap<String, Vec<String>>,
+    pub self_descriptions: Vec<String>,
+    pub contact_postures: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SocialPersonaView {
     pub id: String,
@@ -43,6 +56,7 @@ pub struct SocialPersonaView {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
 pub struct SocialPersonaAssetView {
     pub id: String,
     pub persona_id: String,
@@ -62,6 +76,7 @@ pub struct SocialPersonaAssetView {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct PublicSocialPersonaAssetView {
     pub id: String,
     pub asset_type: String,
@@ -104,6 +119,7 @@ struct NormalizedPersonaInput {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct CreateSocialPersonaAssetInput {
     pub asset_type: String,
     pub declared_mime_type: String,
@@ -111,6 +127,7 @@ pub struct CreateSocialPersonaAssetInput {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct CompleteSocialPersonaAssetInput {
     pub uploaded_size_bytes: i64,
     pub uploaded_mime_type: String,
@@ -122,9 +139,55 @@ pub struct SocialPersonaService {
     pool: PgPool,
 }
 
+#[allow(dead_code)]
 impl SocialPersonaService {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    /// Return the server-owned catalog used by the persona editor.  Keeping
+    /// the catalog beside the validator makes the UI discoverable while the
+    /// write path remains authoritative when an older client sends a value.
+    pub fn catalog() -> SocialPersonaCatalogView {
+        let mut appearance = BTreeMap::new();
+        appearance.insert(
+            "palette".to_string(),
+            PALETTES.iter().map(|value| (*value).to_string()).collect(),
+        );
+        appearance.insert(
+            "silhouette".to_string(),
+            SILHOUETTES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+        );
+        appearance.insert(
+            "accessory".to_string(),
+            ACCESSORIES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+        );
+        appearance.insert(
+            "outfit".to_string(),
+            OUTFITS.iter().map(|value| (*value).to_string()).collect(),
+        );
+        SocialPersonaCatalogView {
+            style_version: SOCIAL_PERSONA_STYLE_VERSION.to_string(),
+            representation_modes: REPRESENTATION_MODES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            appearance,
+            self_descriptions: SELF_DESCRIPTION_CODES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            contact_postures: CONTACT_POSTURES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+        }
     }
 
     pub async fn get_for_user(
@@ -462,11 +525,7 @@ impl SocialPersonaService {
             r#"
             SELECT p.representation_mode, p.style_version, p.appearance_config,
                    p.self_descriptions, p.contact_posture, p.published_at,
-                   CASE WHEN asset.id IS NULL THEN NULL ELSE json_build_object(
-                       'id', asset.id,
-                       'asset_type', asset.asset_type,
-                       'storage_key', asset.storage_key
-                   ) END AS asset
+                   NULL::json AS asset
             FROM social_personas p
             JOIN users user_account
               ON user_account.id = p.user_id
@@ -477,12 +536,6 @@ impl SocialPersonaService {
              AND membership.status = 'verified'
             JOIN campuses campus
               ON campus.id = p.campus_id AND campus.status = 'active'
-            LEFT JOIN social_persona_assets asset
-              ON asset.id = p.selected_asset_id
-             AND asset.persona_id = p.id
-             AND asset.status = 'active'
-             AND asset.moderation_status IN ('approved', 'not_required')
-             AND asset.storage_verified_at IS NOT NULL
             WHERE p.user_id = $1 AND p.campus_id = $2 AND p.status = 'published'
             "#,
         )
@@ -541,6 +594,7 @@ impl SocialPersonaService {
                 appearance_config = EXCLUDED.appearance_config,
                 self_descriptions = EXCLUDED.self_descriptions,
                 contact_posture = EXCLUDED.contact_posture,
+                selected_asset_id = NULL,
                 status = 'draft',
                 published_at = NULL,
                 updated_at = NOW()
@@ -574,7 +628,10 @@ impl SocialPersonaService {
         let row = sqlx::query(
             r#"
             UPDATE social_personas
-            SET status = 'published', published_at = NOW(), updated_at = NOW()
+            SET status = 'published',
+                selected_asset_id = NULL,
+                published_at = NOW(),
+                updated_at = NOW()
             WHERE user_id = $1 AND campus_id = $2
             RETURNING id, user_id, campus_id, representation_mode, style_version,
                       appearance_config, self_descriptions, contact_posture,
@@ -602,7 +659,10 @@ impl SocialPersonaService {
         let row = sqlx::query(
             r#"
             UPDATE social_personas
-            SET status = 'archived', published_at = NULL, updated_at = NOW()
+            SET status = 'archived',
+                selected_asset_id = NULL,
+                published_at = NULL,
+                updated_at = NOW()
             WHERE user_id = $1 AND campus_id = $2
             RETURNING id, user_id, campus_id, representation_mode, style_version,
                       appearance_config, self_descriptions, contact_posture,
@@ -666,6 +726,7 @@ async fn insert_audit(
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn insert_asset_audit(
     tx: &mut Transaction<'_, Postgres>,
     persona_id: Uuid,
@@ -718,6 +779,7 @@ fn row_to_view(row: &sqlx::postgres::PgRow) -> SocialPersonaView {
     }
 }
 
+#[allow(dead_code)]
 fn asset_row_to_view(row: sqlx::postgres::PgRow) -> SocialPersonaAssetView {
     SocialPersonaAssetView {
         id: row.get::<Uuid, _>("id").to_string(),
@@ -788,6 +850,7 @@ fn normalize_input(input: SocialPersonaInput) -> Result<NormalizedPersonaInput, 
     })
 }
 
+#[allow(dead_code)]
 fn normalize_asset_type(value: &str) -> Result<String, ApiError> {
     let value = value.trim();
     if matches!(value, "illustration" | "photo_stylized") {
@@ -797,6 +860,7 @@ fn normalize_asset_type(value: &str) -> Result<String, ApiError> {
     }
 }
 
+#[allow(dead_code)]
 fn normalize_asset_mime_type(value: &str) -> Result<String, ApiError> {
     let value = value.trim().to_ascii_lowercase();
     if matches!(value.as_str(), "image/png" | "image/jpeg" | "image/webp") {
@@ -811,6 +875,7 @@ fn normalize_asset_mime_type(value: &str) -> Result<String, ApiError> {
 /// Validate the small, non-ambiguous magic headers used by the supported
 /// persona image formats. MIME metadata alone is not authoritative because a
 /// direct object upload can lie about Content-Type.
+#[allow(dead_code)]
 pub fn image_header_matches(mime_type: &str, prefix: &[u8]) -> bool {
     match mime_type.trim().to_ascii_lowercase().as_str() {
         "image/png" => prefix.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]),
@@ -820,6 +885,7 @@ pub fn image_header_matches(mime_type: &str, prefix: &[u8]) -> bool {
     }
 }
 
+#[allow(dead_code)]
 fn validate_asset_size(size_bytes: i64) -> Result<(), ApiError> {
     if (1..=10 * 1024 * 1024).contains(&size_bytes) {
         Ok(())
@@ -907,6 +973,35 @@ mod tests {
         assert_eq!(normalized.style_version, "v1");
         assert_eq!(normalized.appearance_config["silhouette"], "soft");
         assert_eq!(normalized.appearance_config["outfit"], "campus");
+    }
+
+    #[test]
+    fn catalog_is_system_owned_and_matches_the_write_allowlist() {
+        let catalog = SocialPersonaService::catalog();
+        assert_eq!(catalog.style_version, "v1");
+        assert_eq!(
+            catalog.representation_modes,
+            vec!["trait_mapped".to_string(), "role_character".to_string()]
+        );
+        assert_eq!(
+            catalog.appearance["palette"],
+            vec![
+                "teal".to_string(),
+                "plum".to_string(),
+                "sun".to_string(),
+                "slate".to_string()
+            ]
+        );
+        assert_eq!(
+            catalog.appearance["outfit"],
+            vec![
+                "campus".to_string(),
+                "workwear".to_string(),
+                "casual".to_string(),
+                "lab".to_string()
+            ]
+        );
+        assert!(!catalog.appearance.contains_key("image_url"));
     }
 
     #[test]

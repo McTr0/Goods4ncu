@@ -1149,13 +1149,7 @@ impl ChatConversationService {
                            'self_descriptions', persona.self_descriptions,
                            'contact_posture', persona.contact_posture,
                            'published_at', persona.published_at,
-                           'asset', CASE WHEN persona_asset.id IS NULL THEN NULL ELSE
-                               json_build_object(
-                                   'id', persona_asset.id,
-                                   'asset_type', persona_asset.asset_type,
-                                   'storage_key', persona_asset.storage_key
-                               )
-                           END
+                           'asset', NULL::json
                        )
                        FROM social_personas persona
                        JOIN users persona_user
@@ -1168,12 +1162,6 @@ impl ChatConversationService {
                        JOIN campuses persona_campus
                          ON persona_campus.id = persona.campus_id
                         AND persona_campus.status = 'active'
-                       LEFT JOIN social_persona_assets persona_asset
-                         ON persona_asset.id = persona.selected_asset_id
-                        AND persona_asset.persona_id = persona.id
-                        AND persona_asset.status = 'active'
-                        AND persona_asset.moderation_status IN ('approved', 'not_required')
-                        AND persona_asset.storage_verified_at IS NOT NULL
                        WHERE persona.user_id = visible.peer_user_id
                          AND persona.campus_id = $4
                          AND persona.status = 'published'

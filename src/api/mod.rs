@@ -886,26 +886,6 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             get(social_persona::get_persona).put(social_persona::upsert_persona),
         )
         .route(
-            "/api/user/persona/assets",
-            get(social_persona::list_assets).post(social_persona::create_asset),
-        )
-        .route(
-            "/api/user/persona/assets/{id}/upload-target",
-            post(social_persona::upload_target),
-        )
-        .route(
-            "/api/user/persona/assets/{id}/complete",
-            post(social_persona::complete_asset),
-        )
-        .route(
-            "/api/user/persona/assets/{id}/select",
-            post(social_persona::select_asset),
-        )
-        .route(
-            "/api/user/persona/assets/{id}/revoke",
-            post(social_persona::revoke_asset),
-        )
-        .route(
             "/api/user/persona/publish",
             post(social_persona::publish_persona),
         )
@@ -932,6 +912,7 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             "/api/users/{id}/listings",
             get(user::get_public_user_listings),
         )
+        .route("/api/persona/catalog", get(social_persona::get_catalog))
         .route(
             "/api/users/{id}/persona",
             get(social_persona::get_public_persona),

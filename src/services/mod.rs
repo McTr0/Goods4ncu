@@ -6,6 +6,7 @@ pub mod admin;
 pub mod admin_mfa;
 pub mod agent_plan;
 pub mod agent_run;
+pub mod agent_run_reconciler;
 pub mod aggregation;
 pub mod agreement;
 pub mod campus;

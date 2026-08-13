@@ -186,6 +186,9 @@ client asks for an owner-scoped upload target
 这是当前仓库的真实路径；生产 CDN 前置、缩略图派生和 quarantine-to-delivery
 对象复制仍是部署侧/后续阶段，不应在 API 响应或验收记录中提前宣称已接入。
 
+SocialPersona 角色与皮肤不经过这条媒体路径：它们只能从 `/api/persona/catalog`
+选择系统提供的静态 token，不能由用户上传、导入或绑定外部 URL。
+
 要求：
 
 - 使用短期、最小 scope 的上传凭证。
