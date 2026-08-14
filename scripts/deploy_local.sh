@@ -226,6 +226,7 @@ sys.exit(0 if codes.get('probe@example.test') == '000000' else 1)
 # --- Two production-mode replicas ---------------------------------------------
 start_replica() {
     local port="$1"
+    # Local demo disables external image moderation provider; production deployments must configure a real provider.
     env APP_ENV=production \
         JWT_SECRET="$JWT_SECRET" \
         DATABASE_URL="postgres://$APP_ROLE:$APP_PASSWORD@127.0.0.1:5432/$DB_NAME" \
@@ -236,6 +237,7 @@ start_replica() {
         MEDIA_PRIVATE_BUCKET=true MEDIA_PATH_STYLE=true MEDIA_URL_TTL_SECS=600 \
         OSS_ENDPOINT="http://127.0.0.1:$S3_PORT" OSS_BUCKET=media-ncu \
         OSS_ACCESS_KEY_ID=campus-ncu OSS_ACCESS_KEY_SECRET="$APP_PASSWORD" \
+        MODERATION_IMAGE_ENABLED=false \
         RATE_LIMIT_MAX_REQUESTS=100000 \
         SERVER_PORT="$port" SHUTDOWN_DRAIN_SECS=2 \
         "$BIN" >> "$DEPLOY_HOME/logs/replica-$port.log" 2>&1 &
@@ -388,6 +390,12 @@ say "  ✓ members routed by email domain: ncu -> ncu, $CAMPUS_DOMAIN -> $CAMPUS
 publish() {
     local token="$1"
     local title="$2"
+    local category="${3:-other}"
+    local brand="${4:-Deploy}"
+    local condition="${5:-8}"
+    local price="${6:-120.0}"
+    local direction="${7:-offer}"
+    local description="${8:-校园闲置，当面验货交接}"
     local existing
     existing=$(psql -d "$DB_NAME" -qtA \
         -c "SELECT id FROM inventory WHERE title = '$title' LIMIT 1" | tr -d ' ')
@@ -395,16 +403,26 @@ publish() {
         echo "$existing"
         return
     fi
-    curl -s -X POST "$API/api/listings" -H 'Content-Type: application/json' \
+    local resp
+    resp=$(curl -s -X POST "$API/api/listings" -H 'Content-Type: application/json' \
         -H "Authorization: Bearer $token" \
         -H "Idempotency-Key: $(printf '%s' "deploy-$title" | shasum | cut -c1-32)" \
-        -d "{\"title\":\"$title\",\"category\":\"other\",\"brand\":\"Deploy\",\"condition_score\":8,\"suggested_price_cny\":120.0,\"defects\":[]}" \
-        | jq_get id
+        -d "{\"title\":\"$title\",\"category\":\"$category\",\"brand\":\"$brand\",\"condition_score\":$condition,\"suggested_price_cny\":$price,\"direction\":\"$direction\",\"description\":\"$description\",\"defects\":[]}")
+    local id
+    id=$(printf '%s' "$resp" | jq_get id)
+    if [ -z "$id" ]; then
+        fail "publishing '$title' failed: $resp"
+    fi
+    echo "$id"
 }
-say "publishing a listing in each campus"
-NCU_LISTING=$(publish "$NCU_TOKEN" "NCU deploy listing")
-JX_LISTING=$(publish "$JX_TOKEN" "$CAMPUS_SLUG deploy listing")
-[ -n "$NCU_LISTING" ] && [ -n "$JX_LISTING" ] || fail "publishing failed"
+say "publishing demo listings and requests in each campus"
+NCU_LISTING=$(publish "$NCU_TOKEN" "NCU deploy listing" "other" "Deploy" 8 120.0 "offer")
+SEED_BOOK=$(publish "$NCU_TOKEN" "高等数学（第七版）上下册" "books" "高等教育出版社" 8 35.0 "offer" "大学教材，笔记清晰，期末复习必备")
+SEED_MOUSE=$(publish "$NCU_TOKEN" "罗技无线静音鼠标 M330" "electronics" "Logitech" 9 45.0 "offer" "95新，轻音微动，带无线接收器")
+SEED_DESK=$(publish "$NCU_TOKEN" "宿舍用折叠小桌子" "dailyGoods" "简易" 8 20.0 "offer" "放床上写作业看网课很方便")
+SEED_WANTED=$(publish "$BUYER_TOKEN" "想收一本考研英语二真题" "books" "不限" 7 30.0 "wanted" "近五年真题即可，无大量涂改")
+JX_LISTING=$(publish "$JX_TOKEN" "$CAMPUS_SLUG deploy listing" "other" "Deploy" 8 120.0 "offer")
+[ -n "$NCU_LISTING" ] && [ -n "$SEED_BOOK" ] && [ -n "$SEED_MOUSE" ] && [ -n "$SEED_DESK" ] && [ -n "$SEED_WANTED" ] && [ -n "$JX_LISTING" ] || fail "publishing failed"
 say "  ✓ listings created in both campuses"
 
 # --- Verify cross-campus isolation THROUGH THE API ----------------------------
