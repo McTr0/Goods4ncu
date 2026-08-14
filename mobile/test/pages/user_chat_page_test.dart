@@ -15,6 +15,7 @@ import 'package:goods4ncu_mobile/services/reputation_service.dart';
 import 'package:goods4ncu_mobile/services/upload_service.dart';
 import 'package:goods4ncu_mobile/services/chat_service.dart';
 import 'package:goods4ncu_mobile/services/user_service.dart';
+import 'package:goods4ncu_mobile/components/user_avatar.dart';
 
 class _FakePageChatService extends ChatService {
   @override
@@ -90,11 +91,17 @@ UserChatPage _pageWith({
 );
 
 void main() {
-  Widget buildTestableWidget(Widget child) {
+  Widget buildTestableWidget(Widget child, {double textScale = 1}) {
     return MaterialApp(
       locale: const Locale('zh'),
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(
+          context,
+        ).copyWith(textScaler: TextScaler.linear(textScale)),
+        child: child!,
+      ),
       // UserChatPage takes most of its collaborators as parameters; this is the
       // one it still reads from context.
       home: Provider<UploadService>(
@@ -217,6 +224,73 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.byType(UserChatPage), findsOneWidget);
     });
+
+    testWidgets(
+      'shows a scroll affordance when the shared context exceeds a narrow viewport',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(390, 844));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final terms = [
+          const AgreementTerm(
+            slot: 'item',
+            value: '教材',
+            proposedBy: 'user-other',
+            agreedBy: ['user-other'],
+            isSuggestion: false,
+          ),
+          const AgreementTerm(
+            slot: 'price',
+            value: '300 元',
+            proposedBy: 'user-other',
+            agreedBy: ['user-other'],
+            isSuggestion: false,
+          ),
+          const AgreementTerm(
+            slot: 'time',
+            value: '周五',
+            proposedBy: 'user-other',
+            agreedBy: ['user-other'],
+            isSuggestion: false,
+          ),
+          const AgreementTerm(
+            slot: 'place',
+            value: '校门口',
+            proposedBy: 'user-other',
+            agreedBy: ['user-other'],
+            isSuggestion: false,
+          ),
+          const AgreementTerm(
+            slot: 'conditions',
+            value: '当面确认',
+            proposedBy: 'user-other',
+            agreedBy: ['user-other'],
+            isSuggestion: false,
+          ),
+        ];
+        await tester.pumpWidget(
+          buildTestableWidget(
+            _pageWith(
+              agreements: _FakePageAgreementService(
+                agreement: _pageAgreement(terms: terms),
+              ),
+              reputation: _FakePageReputationService(),
+            ),
+            textScale: 2,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const Key('relationship-context-scroll')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('relationship-context-scroll-hint')),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
   });
 
   group('MessageBubble', () {
@@ -981,5 +1055,36 @@ void main() {
       expect(find.byIcon(Icons.check), findsOneWidget);
       expect(find.byIcon(Icons.close), findsOneWidget);
     });
+
+    testWidgets(
+      'embedded header renders 48px UserAvatar without single-letter CircleAvatar',
+      (tester) async {
+        await tester.pumpWidget(
+          buildTestableWidget(
+            UserChatPage(
+              conversationId: 'conv-embed-1',
+              otherUserId: 'user-seller-1',
+              otherUsername: 'seller1',
+              embedded: true,
+              chatService: _FakePageChatService(),
+              userService: _FakePageUserService(),
+              agreementService: _FakePageAgreementService(
+                agreement: _pageAgreement(),
+              ),
+              reputationService: _FakePageReputationService(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('seller1'), findsOneWidget);
+        // Renders 48px UserAvatar
+        expect(find.byType(UserAvatar), findsOneWidget);
+        expect(tester.getSize(find.byType(UserAvatar)), const Size(48, 48));
+        // Must NOT render old single-letter CircleAvatar
+        expect(find.byType(CircleAvatar), findsNothing);
+        expect(find.text('S'), findsNothing);
+      },
+    );
   });
 }

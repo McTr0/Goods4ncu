@@ -12,34 +12,67 @@ Widget _host(Widget child, {Locale locale = const Locale('zh')}) {
     locale: locale,
     localizationsDelegates: AppLocalizations.localizationsDelegates,
     supportedLocales: AppLocalizations.supportedLocales,
-    home: Scaffold(body: child),
+    home: Scaffold(body: SingleChildScrollView(child: child)),
   );
 }
 
 void main() {
-  testWidgets('shows a shared space without presence claims', (tester) async {
+  testWidgets(
+    'shows a shared space with verifiable event and without presence claims',
+    (tester) async {
+      final now = DateTime.utc(2026, 8, 13, 10, 0);
+      await tester.pumpWidget(
+        _host(
+          RelationshipSpacePreview(
+            otherName: 'Alice',
+            events: [
+              RelationshipSpaceEvent(
+                id: '1',
+                sourceType: 'message',
+                sourceId: '101',
+                eventType: 'message.sent',
+                conversationId: 'c1',
+                actorId: 'user1',
+                occurredAt: now,
+              ),
+            ],
+          ),
+        ),
+      );
+
+      expect(
+        find.byKey(const Key('relationship-space-preview')),
+        findsOneWidget,
+      );
+      expect(find.text('共同空间'), findsOneWidget);
+      expect(find.text('可以留言'), findsOneWidget);
+      expect(find.text('发送了留言'), findsOneWidget);
+      expect(find.text('Alice'), findsOneWidget);
+      expect(find.text('我'), findsWidgets);
+      expect(find.text('在线'), findsNothing);
+      expect(find.text('已读'), findsNothing);
+      expect(find.text('正在输入'), findsNothing);
+    },
+  );
+
+  testWidgets('shows actionable empty state guidance when no events exist', (
+    tester,
+  ) async {
     await tester.pumpWidget(
-      _host(
-        const RelationshipSpacePreview(otherName: 'Alice', latestEvent: '图书馆见'),
-      ),
+      _host(const RelationshipSpacePreview(otherName: 'Alice')),
     );
 
-    expect(find.byKey(const Key('relationship-space-preview')), findsOneWidget);
-    expect(find.text('共同空间'), findsOneWidget);
-    expect(find.text('可以留言'), findsOneWidget);
-    expect(find.text('图书馆见'), findsOneWidget);
-    expect(find.text('Alice'), findsOneWidget);
-    expect(find.text('我'), findsWidgets);
+    expect(find.text('长按一条留言固定，或分享商品与文件，它们会留在这里'), findsOneWidget);
     expect(find.text('在线'), findsNothing);
-    expect(find.text('已读'), findsNothing);
     expect(find.text('正在输入'), findsNothing);
+    expect(find.text('已读'), findsNothing);
   });
 
   testWidgets('connected state is explicit and localized', (tester) async {
     await tester.pumpWidget(
       _host(
         const RelationshipSpacePreview(otherName: 'Alice', isConnected: true),
-        locale: Locale('en'),
+        locale: const Locale('en'),
       ),
     );
 
@@ -48,22 +81,283 @@ void main() {
     expect(find.text('Leave a message'), findsNothing);
   });
 
-  testWidgets('shows deterministic memory rail counts', (tester) async {
+  testWidgets(
+    'shows deterministic memory rail counts with natural copy in collapsed and expanded modes',
+    (tester) async {
+      final now = DateTime.utc(2026, 8, 13, 10, 0);
+      await tester.pumpWidget(
+        _host(
+          RelationshipSpacePreview(
+            otherName: 'Alice',
+            pinCount: 2,
+            sharedObjectCount: 1,
+            hasRecentConnection: true,
+            recentConnection: RelationshipSpaceConnection(
+              conversationId: 'c1',
+              startedAt: now.subtract(const Duration(hours: 1)),
+              endedAt: now.subtract(const Duration(minutes: 10)),
+            ),
+          ),
+        ),
+      );
+
+      // Collapsed mode: shows explicit "上次连接" instead of vague "时间轨迹"
+      expect(find.text('已固定留言'), findsOneWidget);
+      expect(find.text('2 条已固定'), findsOneWidget);
+      expect(find.text('1 项共享内容'), findsOneWidget);
+      expect(find.text('上次连接'), findsOneWidget);
+      expect(find.text('最近记录'), findsOneWidget);
+      expect(find.text('时间轨迹'), findsNothing);
+
+      // Expand
+      final toggle = find.byKey(const Key('relationship-space-expand-toggle'));
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+
+      // Expanded mode: shows detailed recovery point with timestamp
+      expect(find.textContaining('上次连接记录'), findsOneWidget);
+    },
+  );
+
+  testWidgets('localizes last connection chip in English', (tester) async {
     await tester.pumpWidget(
       _host(
         const RelationshipSpacePreview(
           otherName: 'Alice',
-          pinCount: 2,
-          sharedObjectCount: 1,
           hasRecentConnection: true,
+        ),
+        locale: const Locale('en'),
+      ),
+    );
+
+    expect(find.text('Last connection'), findsOneWidget);
+    expect(find.text('Timeline'), findsNothing);
+  });
+
+  testWidgets(
+    'does not leave recent records blank when memory exists without events',
+    (tester) async {
+      await tester.pumpWidget(
+        _host(const RelationshipSpacePreview(otherName: 'Alice', pinCount: 1)),
+      );
+
+      expect(find.text('最近记录'), findsOneWidget);
+      expect(find.text('这里暂时没有可回看的时间记录'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'expand/collapse button has at least 48x48 minimum touch target',
+    (tester) async {
+      await tester.pumpWidget(
+        _host(const RelationshipSpacePreview(otherName: 'Alice')),
+      );
+
+      final toggle = find.byKey(const Key('relationship-space-expand-toggle'));
+      final size = tester.getSize(toggle);
+      expect(size.width, greaterThanOrEqualTo(48.0));
+      expect(size.height, greaterThanOrEqualTo(48.0));
+    },
+  );
+
+  testWidgets('local expand and collapse shows top 3 verifiable events', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 8, 13, 10, 0);
+    final events = [
+      RelationshipSpaceEvent(
+        id: '1',
+        sourceType: 'message',
+        sourceId: '101',
+        eventType: 'message.sent',
+        conversationId: 'c1',
+        actorId: 'user1',
+        occurredAt: now,
+      ),
+      RelationshipSpaceEvent(
+        id: '2',
+        sourceType: 'conversation_event',
+        sourceId: '102',
+        eventType: 'connection.started',
+        conversationId: 'c1',
+        actorId: 'user1',
+        occurredAt: now.subtract(const Duration(minutes: 10)),
+      ),
+      RelationshipSpaceEvent(
+        id: '3',
+        sourceType: 'conversation_event',
+        sourceId: '103',
+        eventType: 'shared_object.changed',
+        conversationId: 'c1',
+        actorId: 'user2',
+        occurredAt: now.subtract(const Duration(minutes: 20)),
+      ),
+      RelationshipSpaceEvent(
+        id: '4',
+        sourceType: 'message',
+        sourceId: '104',
+        eventType: 'message.sent',
+        conversationId: 'c1',
+        actorId: 'user1',
+        occurredAt: now.subtract(const Duration(minutes: 30)),
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _host(
+        RelationshipSpacePreview(
+          otherName: 'Alice',
+          events: events,
+          pinCount: 3,
+          recentConnection: RelationshipSpaceConnection(
+            conversationId: 'c1',
+            startedAt: now.subtract(const Duration(hours: 1)),
+            endedAt: now.subtract(const Duration(minutes: 10)),
+          ),
         ),
       ),
     );
 
-    expect(find.text('2 个 Pin'), findsOneWidget);
-    expect(find.text('1 个共享对象'), findsOneWidget);
-    expect(find.text('时间轨迹'), findsWidgets);
+    // In collapsed mode: shows latest event
+    expect(find.text('发送了留言'), findsOneWidget);
+    expect(find.text('3 条已固定'), findsOneWidget);
+    expect(find.text('开始了一次连接'), findsNothing);
+
+    // Tap expand toggle
+    final toggle = find.byKey(const Key('relationship-space-expand-toggle'));
+    expect(toggle, findsOneWidget);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+
+    // In expanded mode: shows up to top 3 events
+    expect(find.text('发送了留言'), findsOneWidget);
+    expect(find.text('开始了一次连接'), findsOneWidget);
+    expect(find.text('共享内容有变化'), findsOneWidget);
+    expect(find.textContaining('上次连接记录'), findsOneWidget);
+
+    // Collapse again
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+
+    expect(find.text('开始了一次连接'), findsNothing);
   });
+
+  testWidgets('merges opening and creation records with the sent message', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 8, 13, 10, 0);
+    await tester.pumpWidget(
+      _host(
+        RelationshipSpacePreview(
+          otherName: 'Alice',
+          events: [
+            RelationshipSpaceEvent(
+              id: 'created',
+              sourceType: 'conversation',
+              sourceId: 'c1',
+              eventType: 'conversation.created',
+              conversationId: 'c1',
+              actorId: 'user1',
+              occurredAt: now,
+            ),
+            RelationshipSpaceEvent(
+              id: 'opening',
+              sourceType: 'message',
+              sourceId: 'm1',
+              eventType: 'message.opening',
+              conversationId: 'c1',
+              actorId: 'user1',
+              occurredAt: now,
+            ),
+            RelationshipSpaceEvent(
+              id: 'sent',
+              sourceType: 'message',
+              sourceId: 'm1',
+              eventType: 'message.sent',
+              conversationId: 'c1',
+              actorId: 'user1',
+              occurredAt: now,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    expect(find.text('发送了留言'), findsOneWidget);
+    expect(find.text('发送了首条留言'), findsNothing);
+    expect(find.text('发起了沟通'), findsNothing);
+  });
+
+  testWidgets('only merges technical records inside the same conversation', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 8, 13, 10, 0);
+    await tester.pumpWidget(
+      _host(
+        RelationshipSpacePreview(
+          otherName: 'Alice',
+          initiallyExpanded: true,
+          events: [
+            RelationshipSpaceEvent(
+              id: 'created-1',
+              sourceType: 'conversation',
+              sourceId: 'c1',
+              eventType: 'conversation.created',
+              conversationId: 'c1',
+              actorId: 'user1',
+              occurredAt: now,
+            ),
+            RelationshipSpaceEvent(
+              id: 'sent-1',
+              sourceType: 'message',
+              sourceId: 'm1',
+              eventType: 'message.sent',
+              conversationId: 'c1',
+              actorId: 'user1',
+              occurredAt: now,
+            ),
+            RelationshipSpaceEvent(
+              id: 'created-2',
+              sourceType: 'conversation',
+              sourceId: 'c2',
+              eventType: 'conversation.created',
+              conversationId: 'c2',
+              actorId: 'user1',
+              occurredAt: now.subtract(const Duration(days: 1)),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    expect(find.text('发送了留言'), findsOneWidget);
+    expect(find.text('发起了沟通'), findsOneWidget);
+  });
+
+  testWidgets(
+    'formats unknown and known event types neutrally without leaking raw names',
+    (tester) async {
+      final now = DateTime.utc(2026, 8, 13, 12, 0);
+      final events = [
+        RelationshipSpaceEvent(
+          id: '1',
+          sourceType: 'custom',
+          sourceId: '1',
+          eventType: 'arbitrary_internal_telemetry_type_xyz',
+          conversationId: 'c1',
+          actorId: 'user1',
+          occurredAt: now,
+        ),
+      ];
+
+      await tester.pumpWidget(
+        _host(RelationshipSpacePreview(otherName: 'Bob', events: events)),
+      );
+
+      expect(find.text('留下了新记录'), findsOneWidget);
+      expect(find.text('arbitrary_internal_telemetry_type_xyz'), findsNothing);
+    },
+  );
 
   testWidgets('uses static role tokens for both sides of a full space', (
     tester,
@@ -127,53 +421,68 @@ void main() {
       ),
     );
 
-    // Once the users explicitly connect, the role presentation leaves the
-    // stage. The relationship state remains visible without implying that a
-    // platform character is participating in the conversation.
     expect(find.byType(SocialPersonaAvatar), findsNothing);
     expect(find.text('已连接'), findsOneWidget);
   });
 
-  testWidgets('full role space fits a 390x844 viewport at 200% text', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(390, 844));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    const persona = SocialPersona(
-      representationMode: 'role_character',
-      styleVersion: 'v1',
-      appearance: SocialPersonaAppearance(
-        palette: 'plum',
-        silhouette: 'round',
-        accessory: 'leaf',
-        outfit: 'campus',
-      ),
-      selfDescriptions: ['slow_to_warm', 'meetup_friendly'],
-      contactPosture: 'leave_message',
-      status: 'published',
-    );
-    await tester.pumpWidget(
-      _host(
-        MediaQuery(
-          data: const MediaQueryData(
-            textScaler: TextScaler.linear(2),
-            disableAnimations: true,
-          ),
-          child: const RelationshipSpacePreview(
-            otherName: 'Alice',
-            otherPersona: persona,
-            selfPersona: persona,
-            latestEvent: '图书馆见',
+  testWidgets(
+    'full role space fits a 390x844 viewport at 200% text without overflow',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final now = DateTime.utc(2026, 8, 13, 10, 0);
+      const persona = SocialPersona(
+        representationMode: 'role_character',
+        styleVersion: 'v1',
+        appearance: SocialPersonaAppearance(
+          palette: 'plum',
+          silhouette: 'round',
+          accessory: 'leaf',
+          outfit: 'campus',
+        ),
+        selfDescriptions: ['slow_to_warm', 'meetup_friendly'],
+        contactPosture: 'leave_message',
+        status: 'published',
+      );
+      await tester.pumpWidget(
+        _host(
+          MediaQuery(
+            data: const MediaQueryData(
+              textScaler: TextScaler.linear(2),
+              disableAnimations: true,
+            ),
+            child: RelationshipSpacePreview(
+              otherName: 'Alice',
+              otherPersona: persona,
+              selfPersona: persona,
+              events: [
+                RelationshipSpaceEvent(
+                  id: '1',
+                  sourceType: 'message',
+                  sourceId: '101',
+                  eventType: 'message.sent',
+                  conversationId: 'c1',
+                  actorId: 'user1',
+                  occurredAt: now,
+                ),
+              ],
+              hasRecentConnection: true,
+              pinCount: 2,
+              sharedObjectCount: 1,
+            ),
           ),
         ),
-      ),
-    );
+      );
 
-    expect(find.byKey(const Key('relationship-space-preview')), findsOneWidget);
-    expect(find.text('图书馆见'), findsOneWidget);
-    expect(find.byType(SocialPersonaAvatar), findsNWidgets(2));
-    expect(tester.takeException(), isNull);
-  });
+      expect(
+        find.byKey(const Key('relationship-space-preview')),
+        findsOneWidget,
+      );
+      expect(find.text('发送了留言'), findsOneWidget);
+      expect(find.byType(SocialPersonaAvatar), findsNWidgets(2));
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'shows shared object references without loading their resources',
@@ -208,10 +517,10 @@ void main() {
         ),
       );
 
-      expect(find.text('共享对象'), findsOneWidget);
+      expect(find.text('共享内容'), findsOneWidget);
       expect(find.textContaining('商品 · 数据库教材'), findsOneWidget);
       expect(find.textContaining('链接 · 交接地点'), findsOneWidget);
-      expect(find.textContaining('只读引用'), findsOneWidget);
+      expect(find.textContaining('从原处分享，只在这里查看'), findsOneWidget);
       expect(find.byType(Image), findsNothing);
     },
   );

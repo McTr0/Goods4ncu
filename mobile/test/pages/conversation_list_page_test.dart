@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:goods4ncu_mobile/components/social_persona_card.dart';
+import 'package:goods4ncu_mobile/components/user_avatar.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/pages/conversation_list_page.dart';
@@ -9,11 +13,15 @@ import 'package:goods4ncu_mobile/services/user_service.dart';
 import 'package:goods4ncu_mobile/theme/app_theme.dart';
 
 class _FakeChatService extends ChatService {
-  _FakeChatService({this.failConversations = false, List<ChatThread>? threads})
-    : threads = threads ?? const [];
+  _FakeChatService({
+    this.failConversations = false,
+    List<ChatThread>? threads,
+    this.conversations = const [],
+  }) : threads = threads ?? const [];
 
   final bool failConversations;
   final List<ChatThread> threads;
+  final List<Conversation> conversations;
   final List<Map<String, dynamic>> spaces = [];
 
   void seedSpace({
@@ -54,7 +62,7 @@ class _FakeChatService extends ChatService {
     ConversationMode? mode,
   }) async {
     final thread = threads.firstWhere((item) => item.peerUserId == peerUserId);
-    return ChatThreadDetail(thread: thread, conversations: const []);
+    return ChatThreadDetail(thread: thread, conversations: conversations);
   }
 
   @override
@@ -143,6 +151,7 @@ Widget _buildPage(
   ChatService service, {
   Locale locale = const Locale('zh'),
   ThemeMode themeMode = ThemeMode.light,
+  double textScale = 1,
 }) {
   return MaterialApp(
     theme: AppTheme.light,
@@ -151,6 +160,12 @@ Widget _buildPage(
     locale: locale,
     localizationsDelegates: AppLocalizations.localizationsDelegates,
     supportedLocales: AppLocalizations.supportedLocales,
+    builder: (context, child) => MediaQuery(
+      data: MediaQuery.of(
+        context,
+      ).copyWith(textScaler: TextScaler.linear(textScale)),
+      child: child!,
+    ),
     home: ConversationListPage(
       chatService: service,
       userService: _FakeUserService(),
@@ -159,22 +174,23 @@ Widget _buildPage(
 }
 
 void main() {
-  testWidgets('assistant is pinned in all and hidden by realtime filter', (
-    tester,
-  ) async {
+  testWidgets('assistant is a tool action, not a peer thread', (tester) async {
     await tester.pumpWidget(_buildPage(_FakeChatService()));
     await tester.pumpAndSettle();
 
-    expect(find.text('小帮'), findsOneWidget);
-    expect(find.text('上次我们聊到高数教材。'), findsOneWidget);
+    expect(find.text('小昌'), findsNothing);
+    expect(find.text('AI 助手'), findsOneWidget);
+    expect(find.text('上次我们聊到高数教材。'), findsNothing);
+    expect(find.byTooltip('问小昌（AI 助手）'), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(ChoiceChip, '实时'));
+    await tester.tap(find.widgetWithText(ChoiceChip, '连接'));
     await tester.pumpAndSettle();
 
-    expect(find.text('小帮'), findsNothing);
+    expect(find.text('小昌'), findsNothing);
+    expect(find.byTooltip('问小昌（AI 助手）'), findsOneWidget);
   });
 
-  testWidgets('assistant remains available when direct inbox fails', (
+  testWidgets('assistant tool remains available when direct inbox fails', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -182,7 +198,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('小帮'), findsOneWidget);
+    expect(find.text('小昌'), findsNothing);
+    expect(find.byTooltip('问小昌（AI 助手）'), findsOneWidget);
     expect(find.text('消息暂时没有加载出来'), findsOneWidget);
   });
 
@@ -194,8 +211,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Xiaobang'), findsOneWidget);
-    expect(find.widgetWithText(ChoiceChip, 'Realtime'), findsOneWidget);
+    expect(find.text('Xiaochang'), findsNothing);
+    expect(find.byTooltip('Ask Xiaochang (AI assistant)'), findsOneWidget);
+    expect(find.widgetWithText(ChoiceChip, 'Connections'), findsOneWidget);
     expect(find.text('No conversations yet'), findsOneWidget);
     expect(find.text('找同学'), findsNothing);
   });
@@ -226,16 +244,189 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('seller2'), findsOneWidget);
-    expect(find.text('实时 2'), findsOneWidget);
+    expect(find.text('连接 2'), findsOneWidget);
     expect(find.text('留言 2'), findsOneWidget);
     expect(find.text('共 4 段'), findsOneWidget);
     expect(find.text('待回应 1'), findsOneWidget);
     expect(find.byType(SocialPersonaAvatar), findsOneWidget);
     expect(
       tester.getSize(find.byType(SocialPersonaAvatar)),
-      const Size(24, 24),
+      const Size(48, 48),
     );
   });
+
+  testWidgets(
+    'single-contact inbox explains next steps and fits 390px at 200% text',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final service = _FakeChatService(
+        threads: [
+          ChatThread(
+            peerUserId: 'seller-2',
+            peerUsername: 'seller2',
+            latestActivityAt: DateTime(2026, 7, 6, 12),
+            latestPreview: '教材还在',
+            conversationCount: 1,
+            mailCount: 1,
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(_buildPage(service, textScale: 2));
+      await tester.pumpAndSettle();
+
+      expect(find.text('接下来可以'), findsOneWidget);
+      expect(find.text('找同学'), findsOneWidget);
+      expect(find.text('发布出 / 收'), findsOneWidget);
+      expect(find.text('问小昌（AI 助手）'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'conversation segment opens from its content without a heavy button',
+    (tester) async {
+      final thread = ChatThread(
+        peerUserId: 'seller-2',
+        peerUsername: 'seller2',
+        latestActivityAt: DateTime(2026, 7, 6, 12),
+        latestPreview: '我有一台 23.8 寸的',
+        conversationCount: 1,
+        mailCount: 1,
+      );
+      final service = _FakeChatService(
+        threads: [thread],
+        conversations: [
+          Conversation(
+            id: 'conversation-1',
+            otherUserId: 'seller-2',
+            otherUsername: 'seller2',
+            mode: ConversationMode.mail,
+            state: ConversationState.open,
+            subject: '显示器',
+            lastMessage: '我有一台 23.8 寸的',
+          ),
+        ],
+      );
+      final router = GoRouter(
+        initialLocation: '/thread',
+        routes: [
+          GoRoute(
+            path: '/thread',
+            builder: (context, state) => ChatThreadPage(
+              peerUserId: thread.peerUserId,
+              initialThread: thread,
+              chatService: service,
+              userService: _FakeUserService(),
+            ),
+          ),
+          GoRoute(
+            name: 'user-chat',
+            path: '/user-chat/:conversationId',
+            builder: (context, state) => Scaffold(
+              body: Text('opened ${state.pathParameters['conversationId']}'),
+            ),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: AppTheme.light,
+          locale: const Locale('zh'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          routerConfig: router,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(FilledButton, '打开这段沟通'), findsNothing);
+      expect(
+        tester.getTopLeft(find.text('我有一台 23.8 寸的').last).dy,
+        lessThan(tester.getTopLeft(find.text('已发送')).dy),
+      );
+      await tester.tap(find.text('我有一台 23.8 寸的').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('opened conversation-1'), findsOneWidget);
+    },
+  );
+
+  testWidgets('conversation segment exposes an open action to assistive tech', (
+    tester,
+  ) async {
+    final thread = ChatThread(
+      peerUserId: 'seller-2',
+      peerUsername: 'seller2',
+      latestActivityAt: DateTime(2026, 7, 6, 12),
+      latestPreview: '教材还在',
+      conversationCount: 1,
+      mailCount: 1,
+    );
+    final service = _FakeChatService(
+      threads: [thread],
+      conversations: [
+        Conversation(
+          id: 'conversation-1',
+          otherUserId: 'seller-2',
+          otherUsername: 'seller2',
+          mode: ConversationMode.mail,
+          state: ConversationState.open,
+          subject: '教材',
+          lastMessage: '教材还在',
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        locale: const Locale('zh'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: ChatThreadPage(
+          peerUserId: thread.peerUserId,
+          initialThread: thread,
+          chatService: service,
+          userService: _FakeUserService(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.bySemanticsLabel('打开这段沟通：seller2'), findsOneWidget);
+  });
+
+  testWidgets(
+    'peer thread with no persona falls back to system recognizable avatar',
+    (tester) async {
+      final service = _FakeChatService(
+        threads: [
+          ChatThread(
+            peerUserId: 'seller-3',
+            peerUsername: 'seller3',
+            latestActivityAt: DateTime(2026, 7, 6, 12),
+            latestPreview: '教材还在',
+            unreadCount: 0,
+            conversationCount: 1,
+            peerPersona: null,
+            peerAvatarUrl: null,
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(_buildPage(service));
+      await tester.pumpAndSettle();
+
+      expect(find.text('seller3'), findsOneWidget);
+      // Should render system-drawn avatar in UserAvatar, not SocialPersonaAvatar
+      expect(find.byType(SocialPersonaAvatar), findsNothing);
+      expect(find.byType(UserAvatar), findsOneWidget);
+      expect(tester.getSize(find.byType(UserAvatar)), const Size(48, 48));
+    },
+  );
 
   testWidgets('thread detail anchors both published roles before connection', (
     tester,
@@ -311,4 +502,155 @@ void main() {
     expect(find.text('校园群组与频道'), findsOneWidget);
     expect(find.text('社团教材交换'), findsOneWidget);
   });
+
+  testWidgets(
+    'switching contact threads guards against stale thread and relationship space responses',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1200, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final threadA = ChatThread(
+        peerUserId: 'peer-a',
+        peerUsername: 'PeerA',
+        latestActivityAt: DateTime.utc(2026, 8, 12, 10),
+      );
+      final threadB = ChatThread(
+        peerUserId: 'peer-b',
+        peerUsername: 'PeerB',
+        latestActivityAt: DateTime.utc(2026, 8, 12, 11),
+      );
+
+      final service = _StaleControlledChatService();
+
+      // Mount for peer-a
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light,
+          locale: const Locale('zh'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              return ChatThreadPage(
+                peerUserId: 'peer-a',
+                initialThread: null,
+                chatService: service,
+                userService: _FakeUserService(),
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Re-mount for peer-b
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light,
+          locale: const Locale('zh'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              return ChatThreadPage(
+                peerUserId: 'peer-b',
+                initialThread: null,
+                chatService: service,
+                userService: _FakeUserService(),
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Resolve stale peer-a requests
+      service.threadCompleters['peer-a']?.complete(
+        ChatThreadDetail(thread: threadA, conversations: const []),
+      );
+      service.spaceCompleters['peer-a']?.complete(
+        RelationshipSpace(
+          relationshipKey: 'space-a',
+          events: [
+            RelationshipSpaceEvent(
+              id: 'event-a',
+              sourceType: 'message',
+              sourceId: '1',
+              eventType: 'message.sent',
+              conversationId: 'c1',
+              actorId: 'peer-a',
+              occurredAt: DateTime.utc(2026, 8, 12, 10),
+            ),
+          ],
+          pins: const [],
+          sharedObjects: const [],
+        ),
+      );
+      await tester.pump();
+
+      // Assert stale peer-a does NOT show up
+      expect(find.text('PeerA'), findsNothing);
+
+      // Now resolve peer-b requests
+      service.threadCompleters['peer-b']?.complete(
+        ChatThreadDetail(thread: threadB, conversations: const []),
+      );
+      service.spaceCompleters['peer-b']?.complete(
+        RelationshipSpace(
+          relationshipKey: 'space-b',
+          events: [
+            RelationshipSpaceEvent(
+              id: 'event-b',
+              sourceType: 'message',
+              sourceId: '2',
+              eventType: 'connection.started',
+              conversationId: 'c2',
+              actorId: 'peer-b',
+              occurredAt: DateTime.utc(2026, 8, 12, 11),
+            ),
+          ],
+          pins: const [],
+          sharedObjects: const [],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Active peer-b shows up correctly
+      expect(find.text('PeerB'), findsWidgets);
+      expect(find.text('PeerA'), findsNothing);
+      expect(find.text('开始了一次连接'), findsOneWidget);
+    },
+  );
+}
+
+class _StaleControlledChatService extends ChatService {
+  final Map<String, dynamic> threadCompleters = {};
+  final Map<String, dynamic> spaceCompleters = {};
+
+  @override
+  Future<List<ChatThread>> getThreads({
+    ConversationMode? mode,
+    int limit = 50,
+  }) async => const [];
+
+  @override
+  Future<ChatThreadDetail> getThread(
+    String peerUserId, {
+    ConversationMode? mode,
+  }) {
+    final completer = Completer<ChatThreadDetail>();
+    threadCompleters[peerUserId] = completer;
+    return completer.future;
+  }
+
+  @override
+  Future<RelationshipSpace> getRelationshipSpace(
+    String peerUserId, {
+    String? cursor,
+    int limit = 50,
+  }) {
+    final completer = Completer<RelationshipSpace>();
+    spaceCompleters[peerUserId] = completer;
+    return completer.future;
+  }
 }

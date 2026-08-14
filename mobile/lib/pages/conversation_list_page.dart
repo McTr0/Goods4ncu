@@ -6,7 +6,8 @@ import 'package:provider/provider.dart';
 
 import '../components/contact_conversation_sheet.dart';
 import '../components/relationship_space_preview.dart';
-import '../components/social_persona_card.dart';
+import '../components/user_avatar.dart';
+import '../components/xiaochang_avatar.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
@@ -15,7 +16,6 @@ import '../services/user_service.dart';
 import '../services/ws_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/category_utils.dart';
-import 'chat_page.dart';
 import 'user_chat_page.dart';
 
 class ConversationListPage extends StatefulWidget {
@@ -41,11 +41,9 @@ class _ConversationListPageState extends State<ConversationListPage> {
   StreamSubscription<WsNotification>? _wsSubscription;
   List<ChatThread> _threads = const [];
   List<_ChatSpace> _spaces = const [];
-  AssistantConversationHistory? _assistantHistory;
   ConversationMode? _filter;
   ChatThread? _selectedThread;
   _ChatSpace? _selectedSpace;
-  bool _assistantSelected = true;
   bool _loading = true;
   String? _error;
 
@@ -57,7 +55,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
     _localSeenStorage =
         widget.localSeenStorage ?? SharedPreferencesChatLocalSeenStorage();
     _load();
-    _loadAssistantPreview();
     _wsSubscription = WsService.instance.stream.listen((notification) {
       if (!mounted) return;
       if ({
@@ -147,16 +144,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
     }
   }
 
-  Future<void> _loadAssistantPreview() async {
-    try {
-      final history = await _chatService.getAssistantHistory(limit: 1);
-      if (!mounted) return;
-      setState(() => _assistantHistory = history);
-    } catch (_) {
-      // The system conversation remains available with its static subtitle.
-    }
-  }
-
   void _openConversation(Conversation conversation) {
     final thread = ChatThread(
       peerUserId: conversation.otherUserId,
@@ -179,7 +166,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
       setState(() {
         _selectedThread = thread;
         _selectedSpace = null;
-        _assistantSelected = false;
       });
       return;
     }
@@ -190,24 +176,11 @@ class _ConversationListPageState extends State<ConversationListPage> {
     );
   }
 
-  void _openAssistant() {
-    if (MediaQuery.sizeOf(context).width >= 1000) {
-      setState(() {
-        _assistantSelected = true;
-        _selectedThread = null;
-        _selectedSpace = null;
-      });
-      return;
-    }
-    context.push('/chat');
-  }
-
   void _openSpace(_ChatSpace space) {
     if (MediaQuery.sizeOf(context).width >= 1000) {
       setState(() {
         _selectedSpace = space;
         _selectedThread = null;
-        _assistantSelected = false;
       });
       return;
     }
@@ -250,7 +223,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
         _spaces = [space, ..._spaces.where((item) => item.id != space.id)];
         _selectedSpace = space;
         _selectedThread = null;
-        _assistantSelected = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -289,6 +261,17 @@ class _ConversationListPageState extends State<ConversationListPage> {
       appBar: AppBar(
         title: Text(l.messagesTab),
         actions: [
+          Tooltip(
+            message: l.conversationEmptyAskAssistant,
+            child: TextButton.icon(
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
+              onPressed: () => context.push('/chat'),
+              icon: const XiaochangAvatar(size: 24),
+              label: Text(l.assistantSystemBadge),
+            ),
+          ),
           PopupMenuButton<String>(
             tooltip: l.createAction,
             icon: const Icon(Icons.add_rounded),
@@ -340,15 +323,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
                 SizedBox(width: 360, child: inbox),
                 VerticalDivider(width: 1, color: scheme.outlineVariant),
                 Expanded(
-                  child: _assistantSelected
-                      ? ChatPage(
-                          key: const ValueKey('assistant-conversation'),
-                          chatService: _chatService,
-                          embedded: true,
-                          onConversationUpdated: _loadAssistantPreview,
-                          onExit: _closeAssistant,
-                        )
-                      : _selectedSpace != null
+                  child: _selectedSpace != null
                       ? _SpaceDetailPane(
                           key: ValueKey(_selectedSpace!.id),
                           chatService: _chatService,
@@ -411,18 +386,8 @@ class _ConversationListPageState extends State<ConversationListPage> {
 
   void _setFilter(ConversationMode? filter) {
     if (_filter == filter) return;
-    setState(() {
-      _filter = filter;
-      if (filter != null && _assistantSelected) {
-        _assistantSelected = false;
-      }
-    });
+    setState(() => _filter = filter);
     _load();
-  }
-
-  void _closeAssistant() {
-    if (!_assistantSelected) return;
-    setState(() => _assistantSelected = false);
   }
 
   Widget _buildConversationList() {
@@ -441,10 +406,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
         children: [
-          if (_filter == null && !hasInboxData) ...[
-            ..._buildToolCards(),
-            const SizedBox(height: 12),
-          ],
           if (_error != null)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
@@ -466,9 +427,27 @@ class _ConversationListPageState extends State<ConversationListPage> {
                 icon: Icons.forum_outlined,
                 title: l.conversationEmptyTitle,
                 subtitle: l.conversationEmptySubtitle,
-                action: TextButton(
-                  onPressed: () => context.push('/create'),
-                  child: Text(l.conversationEmptyAction),
+                action: Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    TextButton.icon(
+                      onPressed: _openUserLookup,
+                      icon: const Icon(Icons.person_search_rounded, size: 18),
+                      label: Text(l.findClassmate),
+                    ),
+                    TextButton.icon(
+                      onPressed: () => context.push('/create'),
+                      icon: const Icon(Icons.add_box_outlined, size: 18),
+                      label: Text(l.conversationEmptyAction),
+                    ),
+                    TextButton.icon(
+                      onPressed: () => context.push('/chat'),
+                      icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+                      label: Text(l.conversationEmptyAskAssistant),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -500,6 +479,15 @@ class _ConversationListPageState extends State<ConversationListPage> {
               onTap: () => _openThread(thread),
             ),
           ),
+          if (_filter == null && _error == null && _threads.length == 1)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 12),
+              child: _InboxNextSteps(
+                onFindClassmate: _openUserLookup,
+                onCreate: () => context.push('/create'),
+                onAskAssistant: () => context.push('/chat'),
+              ),
+            ),
           if (_threads.isNotEmpty) const SizedBox(height: 12),
           if (_spaces.isNotEmpty) ...[
             Padding(
@@ -516,41 +504,15 @@ class _ConversationListPageState extends State<ConversationListPage> {
               (space) => _SpaceCard(
                 space: space,
                 selected:
-                    !_assistantSelected &&
-                    _selectedThread == null &&
-                    _selectedSpace?.id == space.id,
+                    _selectedThread == null && _selectedSpace?.id == space.id,
                 onTap: () => _openSpace(space),
               ),
             ),
             const SizedBox(height: 12),
           ],
-          if (_filter == null && hasInboxData) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
-              child: Text(
-                l.conversationSectionTools,
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-            ..._buildToolCards(),
-          ],
         ],
       ),
     );
-  }
-
-  List<Widget> _buildToolCards() {
-    return [
-      _AssistantConversationCard(
-        selected:
-            MediaQuery.sizeOf(context).width >= 1000 && _assistantSelected,
-        latestMessage: _assistantHistory?.latest,
-        onTap: _openAssistant,
-      ),
-    ];
   }
 }
 
@@ -618,6 +580,7 @@ class _ChatThreadDetailPane extends StatefulWidget {
 class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
   ChatThread? _thread;
   SocialPersona? _selfPersona;
+  RelationshipSpace? _relationshipSpace;
   List<Conversation> _conversations = const [];
   Set<String> _expandedIds = const {};
   bool _loading = true;
@@ -629,6 +592,7 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
     _thread = widget.initialThread;
     _loadThread();
     _loadOwnPersona();
+    _loadRelationshipSpace();
   }
 
   @override
@@ -639,11 +603,26 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
       _thread = widget.initialThread;
       _conversations = const [];
       _expandedIds = const {};
+      _relationshipSpace = null;
       _loadThread();
+      _loadRelationshipSpace();
+    }
+  }
+
+  Future<void> _loadRelationshipSpace() async {
+    final peerUserId = widget.peerUserId;
+    try {
+      final space = await widget.chatService.getRelationshipSpace(peerUserId);
+      if (!mounted || widget.peerUserId != peerUserId) return;
+      setState(() => _relationshipSpace = space);
+    } catch (_) {
+      // Failure does not block thread message view
     }
   }
 
   Future<void> _loadThread({bool silent = false}) async {
+    final peerUserId = widget.peerUserId;
+    final mode = widget.mode;
     if (!silent) {
       setState(() {
         _loading = true;
@@ -651,11 +630,10 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
       });
     }
     try {
-      final detail = await widget.chatService.getThread(
-        widget.peerUserId,
-        mode: widget.mode,
-      );
-      if (!mounted) return;
+      final detail = await widget.chatService.getThread(peerUserId, mode: mode);
+      if (!mounted || widget.peerUserId != peerUserId || widget.mode != mode) {
+        return;
+      }
       setState(() {
         _thread = detail.thread;
         _conversations = detail.conversations;
@@ -664,7 +642,9 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
         _error = null;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || widget.peerUserId != peerUserId || widget.mode != mode) {
+        return;
+      }
       setState(() {
         _loading = false;
         _error = error.toString();
@@ -738,6 +718,12 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
     final l = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
     final thread = _thread;
+    final narrow = MediaQuery.sizeOf(context).width < 520;
+    final reconnectAction = TextButton.icon(
+      onPressed: thread == null ? null : _startConversation,
+      icon: const Icon(Icons.add_comment_outlined, size: 18),
+      label: Text(l.conversationReconnect),
+    );
     return Container(
       width: double.infinity,
       padding: EdgeInsets.fromLTRB(20, widget.embedded ? 18 : 8, 20, 16),
@@ -750,14 +736,13 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
         children: [
           Row(
             children: [
-              thread?.peerPersona == null
-                  ? _Avatar(name: _displayName)
-                  : SocialPersonaAvatar(
-                      persona: thread!.peerPersona!,
-                      size: 48,
-                      semanticLabel: _displayName,
-                    ),
-              const SizedBox(width: 12),
+              UserAvatar(
+                name: _displayName,
+                persona: thread?.peerPersona,
+                avatarUrl: thread?.peerAvatarUrl,
+                size: 48,
+              ),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -786,21 +771,27 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
                   ],
                 ),
               ),
-              const SizedBox(width: 12),
-              FilledButton.icon(
-                onPressed: thread == null ? null : _startConversation,
-                icon: const Icon(Icons.add_comment_outlined, size: 18),
-                label: Text(l.conversationReconnect),
-              ),
+              if (!narrow) ...[const SizedBox(width: 8), reconnectAction],
             ],
           ),
+          if (narrow) ...[
+            const SizedBox(height: 2),
+            Align(alignment: Alignment.centerLeft, child: reconnectAction),
+          ],
           if (thread != null) ...[
             const SizedBox(height: AppTheme.sp12),
             RelationshipSpacePreview(
               otherName: _displayName,
+              otherAvatarUrl: thread.peerAvatarUrl,
               otherPersona: thread.peerPersona,
               selfPersona: _selfPersona,
-              latestEvent: thread.latestPreview,
+              events: _relationshipSpace?.events ?? const [],
+              pins: _relationshipSpace?.pins ?? const [],
+              pinCount: _relationshipSpace?.pins.length ?? 0,
+              sharedObjects: _relationshipSpace?.sharedObjects ?? const [],
+              sharedObjectCount: _relationshipSpace?.sharedObjects.length ?? 0,
+              recentConnection: _relationshipSpace?.recentConnection,
+              hasRecentConnection: _relationshipSpace?.recentConnection != null,
               isConnected: thread.hasActiveRealtime,
               compact: true,
             ),
@@ -843,6 +834,11 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
             initiallyExpanded: expanded,
             embedChat: widget.embedded,
             onOpen: () => _openConversation(conversation),
+            peerName: _displayName,
+            peerPersona:
+                _thread?.peerPersona ?? widget.initialThread?.peerPersona,
+            peerAvatarUrl:
+                _thread?.peerAvatarUrl ?? widget.initialThread?.peerAvatarUrl,
             onExpansionChanged: (value) {
               setState(() {
                 final next = {..._expandedIds};
@@ -886,6 +882,9 @@ class _ConversationSegmentCard extends StatelessWidget {
     required this.embedChat,
     required this.onOpen,
     required this.onExpansionChanged,
+    this.peerName,
+    this.peerPersona,
+    this.peerAvatarUrl,
   });
 
   final Conversation conversation;
@@ -893,6 +892,9 @@ class _ConversationSegmentCard extends StatelessWidget {
   final bool embedChat;
   final VoidCallback onOpen;
   final ValueChanged<bool> onExpansionChanged;
+  final String? peerName;
+  final SocialPersona? peerPersona;
+  final String? peerAvatarUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -904,6 +906,12 @@ class _ConversationSegmentCard extends StatelessWidget {
         (conversation.mode == ConversationMode.mail
             ? l.conversationMailThreadTitle
             : l.conversationRealtimeThreadTitle);
+    final displayName = (peerName != null && peerName!.isNotEmpty)
+        ? peerName!
+        : (conversation.otherUsername.isNotEmpty
+              ? conversation.otherUsername
+              : l.conversationPeerFallback);
+    final openLabel = '${l.conversationOpenSegment}：$displayName';
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       clipBehavior: Clip.antiAlias,
@@ -911,40 +919,73 @@ class _ConversationSegmentCard extends StatelessWidget {
         key: PageStorageKey('conversation-segment-${conversation.id}'),
         initiallyExpanded: initiallyExpanded,
         onExpansionChanged: onExpansionChanged,
-        leading: _ModeBadge(mode: conversation.mode),
-        title: Text(
-          title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.w900),
+        leading: InkWell(
+          onTap: onOpen,
+          excludeFromSemantics: true,
+          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+          child: UserAvatar(
+            name: displayName,
+            persona: peerPersona,
+            avatarUrl: peerAvatarUrl,
+            size: 48,
+          ),
         ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              Text(
-                _conversationStateLabel(l, conversation),
-                style: TextStyle(color: scheme.onSurfaceVariant),
-              ),
-              if (conversation.mode == ConversationMode.mail &&
-                  conversation.mailExpectation == MailExpectation.today)
-                Text(
-                  '· ${l.contactMailExpectationToday}',
-                  style: TextStyle(color: scheme.onSurfaceVariant),
+        title: Semantics(
+          button: true,
+          label: openLabel,
+          hint: title,
+          excludeSemantics: true,
+          child: InkWell(
+            onTap: onOpen,
+            borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+          ),
+        ),
+        subtitle: InkWell(
+          onTap: onOpen,
+          excludeFromSemantics: true,
+          borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+          child: Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (conversation.lastMessage != null) ...[
+                  Text(
+                    conversation.lastMessage!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: scheme.onSurface),
+                  ),
+                  const SizedBox(height: 6),
+                ],
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    _ModeBadge(mode: conversation.mode),
+                    Text(
+                      _conversationStateLabel(l, conversation),
+                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    ),
+                    if (conversation.mode == ConversationMode.mail &&
+                        conversation.mailExpectation == MailExpectation.today)
+                      Text(
+                        '· ${l.contactMailExpectationToday}',
+                        style: TextStyle(color: scheme.onSurfaceVariant),
+                      ),
+                    if (conversation.unreadCount > 0)
+                      _UnreadPill(count: conversation.unreadCount),
+                  ],
                 ),
-              if (conversation.lastMessage != null)
-                Text(
-                  '· ${conversation.lastMessage}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                ),
-              if (conversation.unreadCount > 0)
-                _UnreadPill(count: conversation.unreadCount),
-            ],
+              ],
+            ),
           ),
         ),
         children: embedChat
@@ -987,60 +1028,69 @@ class _ConversationSegmentSummary extends StatelessWidget {
     final l = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
     final isTerminal = conversation.state.isTerminal;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLowest,
-        border: Border(top: BorderSide(color: scheme.outlineVariant)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (conversation.listingTitle != null) ...[
-            Row(
-              children: [
-                Icon(
-                  Icons.sell_outlined,
-                  size: 16,
-                  color: scheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    conversation.listingTitle!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: scheme.onSurfaceVariant),
+    return InkWell(
+      onTap: onOpen,
+      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerLowest,
+          border: Border(top: BorderSide(color: scheme.outlineVariant)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (conversation.listingTitle != null) ...[
+              Row(
+                children: [
+                  Icon(
+                    Icons.sell_outlined,
+                    size: 16,
+                    color: scheme.onSurfaceVariant,
                   ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      conversation.listingTitle!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+            ],
+            Text(
+              isTerminal
+                  ? l.conversationSegmentHistoryHint
+                  : l.conversationSegmentOpenHint,
+              style: TextStyle(color: scheme.onSurfaceVariant, height: 1.35),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  isTerminal
+                      ? l.conversationViewHistory
+                      : l.conversationOpenSegment,
+                  style: TextStyle(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.arrow_forward_rounded,
+                  size: 17,
+                  color: scheme.primary,
                 ),
               ],
             ),
-            const SizedBox(height: 10),
           ],
-          Text(
-            isTerminal
-                ? l.conversationSegmentHistoryHint
-                : l.conversationSegmentOpenHint,
-            style: TextStyle(color: scheme.onSurfaceVariant, height: 1.35),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: onOpen,
-                  icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                  label: Text(
-                    isTerminal
-                        ? l.conversationViewHistory
-                        : l.conversationOpenSegment,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -2184,7 +2234,7 @@ class _LookupResultCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                _Avatar(name: match.username),
+                UserAvatar(name: match.username, size: 48),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -2237,115 +2287,64 @@ class _LookupResultCard extends StatelessWidget {
   }
 }
 
-class _AssistantConversationCard extends StatelessWidget {
-  const _AssistantConversationCard({
-    required this.selected,
-    required this.latestMessage,
-    required this.onTap,
+class _InboxNextSteps extends StatelessWidget {
+  const _InboxNextSteps({
+    required this.onFindClassmate,
+    required this.onCreate,
+    required this.onAskAssistant,
   });
 
-  final bool selected;
-  final ChatMessage? latestMessage;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Card(
-      color: selected
-          ? scheme.primaryContainer.withValues(alpha: 0.52)
-          : scheme.surface,
-      margin: EdgeInsets.zero,
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        onTap: onTap,
-        leading: Container(
-          width: 46,
-          height: 46,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF0F766E), Color(0xFF2AA897)],
-            ),
-            borderRadius: BorderRadius.circular(15),
-          ),
-          child: const Icon(Icons.auto_awesome_rounded, color: Colors.white),
-        ),
-        title: Row(
-          children: [
-            Expanded(
-              child: Text(
-                l.assistantName,
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ),
-            const _SystemBadge(),
-          ],
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 5),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  latestMessage?.content ?? l.assistantInboxSubtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                ),
-              ),
-              if (latestMessage != null) ...[
-                const SizedBox(width: 8),
-                Text(
-                  _formatTime(latestMessage!.timestamp),
-                  style: TextStyle(
-                    color: scheme.onSurfaceVariant,
-                    fontSize: 11,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _formatTime(DateTime value) {
-    final local = value.toLocal();
-    final now = DateTime.now();
-    if (local.year == now.year &&
-        local.month == now.month &&
-        local.day == now.day) {
-      return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
-    }
-    return '${local.month}/${local.day}';
-  }
-}
-
-class _SystemBadge extends StatelessWidget {
-  const _SystemBadge();
+  final VoidCallback onFindClassmate;
+  final VoidCallback onCreate;
+  final VoidCallback onAskAssistant;
 
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: scheme.primaryContainer,
-        borderRadius: BorderRadius.circular(9),
+        color: scheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border.all(color: scheme.outlineVariant),
       ),
-      child: Text(
-        l.assistantSystemBadge,
-        style: TextStyle(
-          color: scheme.onPrimaryContainer,
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            l.conversationNextStepsTitle,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            l.conversationNextStepsSubtitle,
+            style: TextStyle(color: scheme.onSurfaceVariant, height: 1.3),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 4,
+            runSpacing: 2,
+            children: [
+              TextButton.icon(
+                onPressed: onFindClassmate,
+                icon: const Icon(Icons.person_search_rounded, size: 17),
+                label: Text(l.findClassmate),
+              ),
+              TextButton.icon(
+                onPressed: onCreate,
+                icon: const Icon(Icons.add_box_outlined, size: 17),
+                label: Text(l.conversationEmptyAction),
+              ),
+              TextButton.icon(
+                onPressed: onAskAssistant,
+                icon: const Icon(Icons.auto_awesome_rounded, size: 17),
+                label: Text(l.conversationEmptyAskAssistant),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -2378,13 +2377,12 @@ class _PeerThreadCard extends StatelessWidget {
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         onTap: onTap,
-        leading: thread.peerPersona == null
-            ? _Avatar(name: thread.peerUsername)
-            : SocialPersonaAvatar(
-                persona: thread.peerPersona!,
-                size: 24,
-                semanticLabel: thread.peerUsername,
-              ),
+        leading: UserAvatar(
+          name: thread.peerUsername,
+          persona: thread.peerPersona,
+          avatarUrl: thread.peerAvatarUrl,
+          size: 48,
+        ),
         title: Row(
           children: [
             Expanded(
@@ -2652,26 +2650,6 @@ class _ModeBadge extends StatelessWidget {
           color: color,
           fontSize: 11,
           fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
-
-class _Avatar extends StatelessWidget {
-  const _Avatar({required this.name});
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return CircleAvatar(
-      backgroundColor: scheme.primaryContainer,
-      child: Text(
-        name.isEmpty ? '?' : name.characters.first.toUpperCase(),
-        style: TextStyle(
-          color: scheme.onPrimaryContainer,
-          fontWeight: FontWeight.w800,
         ),
       ),
     );

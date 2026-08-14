@@ -16,6 +16,7 @@ import '../services/ws_service.dart';
 import '../theme/app_theme.dart';
 import '../components/contact_conversation_sheet.dart';
 import '../components/relationship_space_preview.dart';
+import '../components/user_avatar.dart';
 import '../l10n/app_localizations.dart';
 import 'user_chat_composer_controller.dart';
 import 'user_chat_components.dart';
@@ -79,7 +80,12 @@ class _UserChatPageState extends State<UserChatPage> {
   late final void Function() _removeChatListener;
   final ImagePicker _imagePicker = ImagePicker();
   final ScrollController _scrollController = ScrollController();
+  final ScrollController _relationshipContextScrollController =
+      ScrollController();
   ChatViewState _chatState = const ChatViewInitial();
+  bool _relationshipContextCanScroll = false;
+  bool _relationshipContextAtEnd = false;
+  bool _relationshipContextMeasureScheduled = false;
 
   ChatViewData? get _chatData =>
       _chatState is ChatViewData ? _chatState as ChatViewData : null;
@@ -96,6 +102,7 @@ class _UserChatPageState extends State<UserChatPage> {
   RelationshipSpace? _relationshipSpace;
   SocialPersona? _otherPersona;
   SocialPersona? _selfPersona;
+  String? _otherAvatarUrl;
   bool _awaitingHandoff = false;
   late final AgreementService _agreementService;
   late final ReputationService _reputationService;
@@ -163,6 +170,9 @@ class _UserChatPageState extends State<UserChatPage> {
     _sessionController.addListener(_handleSessionStateChange);
     _chatNotifier.hydrateConnectionStatus();
     _sessionController.connectWs(_handleWsNotification);
+    _relationshipContextScrollController.addListener(
+      _handleRelationshipContextScroll,
+    );
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _conversation?.expiresAt != null) setState(() {});
     });
@@ -170,6 +180,7 @@ class _UserChatPageState extends State<UserChatPage> {
       _loadArrangement();
       _loadRelationshipSpace();
       _loadPersonas();
+      _loadOtherAvatar();
     });
   }
 
@@ -187,6 +198,7 @@ class _UserChatPageState extends State<UserChatPage> {
       _chatNotifier.dispose();
     }
     _scrollController.dispose();
+    _relationshipContextScrollController.dispose();
     _countdownTimer?.cancel();
     super.dispose();
   }
@@ -206,6 +218,30 @@ class _UserChatPageState extends State<UserChatPage> {
   void _handleSessionStateChange() {
     if (!mounted) return;
     setState(() {});
+  }
+
+  void _handleRelationshipContextScroll() {
+    if (!mounted || !_relationshipContextScrollController.hasClients) return;
+    final position = _relationshipContextScrollController.position;
+    final canScroll = position.maxScrollExtent > 1;
+    final atEnd = !canScroll || position.pixels >= position.maxScrollExtent - 1;
+    if (canScroll == _relationshipContextCanScroll &&
+        atEnd == _relationshipContextAtEnd) {
+      return;
+    }
+    setState(() {
+      _relationshipContextCanScroll = canScroll;
+      _relationshipContextAtEnd = atEnd;
+    });
+  }
+
+  void _scheduleRelationshipContextMeasure() {
+    if (_relationshipContextMeasureScheduled) return;
+    _relationshipContextMeasureScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _relationshipContextMeasureScheduled = false;
+      _handleRelationshipContextScroll();
+    });
   }
 
   void _handleWsNotification(WsNotification notif) {
@@ -712,17 +748,27 @@ class _UserChatPageState extends State<UserChatPage> {
     // case initState does not run again. Without this the card from the
     // previous conversation stays on screen — showing one person's arrangement
     // inside another person's thread.
-    if (oldWidget.conversationId != widget.conversationId) {
+    if (oldWidget.conversationId != widget.conversationId ||
+        oldWidget.otherUserId != widget.otherUserId) {
       setState(() {
         _agreement = null;
         _relationshipSpace = null;
         _otherPersona = null;
         _selfPersona = null;
+        _otherAvatarUrl = null;
         _awaitingHandoff = false;
+        _relationshipContextCanScroll = false;
+        _relationshipContextAtEnd = false;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_relationshipContextScrollController.hasClients) {
+          _relationshipContextScrollController.jumpTo(0);
+        }
       });
       _loadArrangement();
       _loadRelationshipSpace();
       _loadPersonas();
+      _loadOtherAvatar();
     }
   }
 
@@ -801,6 +847,27 @@ class _UserChatPageState extends State<UserChatPage> {
     }
   }
 
+  Future<void> _loadOtherAvatar() async {
+    final conversationId = widget.conversationId;
+    final otherUserId = widget.otherUserId;
+    try {
+      final profile = await _userService.getPublicUserProfile(otherUserId);
+      if (!mounted ||
+          widget.conversationId != conversationId ||
+          widget.otherUserId != otherUserId) {
+        return;
+      }
+      final avatarUrl = profile['avatar_url']?.toString();
+      if (avatarUrl != null && avatarUrl.isNotEmpty) {
+        setState(() {
+          _otherAvatarUrl = avatarUrl;
+        });
+      }
+    } catch (_) {
+      // Safe fallback, failure does not block messaging
+    }
+  }
+
   bool _isMessagePinnedByMe(ConversationMessage message) {
     final currentUserId = _currentUserId;
     final messageId = int.tryParse(message.id);
@@ -830,48 +897,130 @@ class _UserChatPageState extends State<UserChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    final relationshipContext = <Widget>[
+      if (!widget.embedded)
+        RelationshipSpacePreview(
+          otherName: _displayName,
+          otherAvatarUrl: _otherAvatarUrl,
+          otherPersona: _otherPersona,
+          selfPersona: _selfPersona,
+          events: _relationshipSpace?.events ?? const [],
+          pins: _relationshipSpace?.pins ?? const [],
+          pinCount: _relationshipSpace?.pins.length ?? 0,
+          sharedObjects: _relationshipSpace?.sharedObjects ?? const [],
+          sharedObjectCount: _relationshipSpace?.sharedObjects.length ?? 0,
+          recentConnection: _relationshipSpace?.recentConnection,
+          hasRecentConnection: _relationshipSpace?.recentConnection != null,
+          isConnected: _conversation?.state == ConversationState.active,
+          compact: true,
+        ),
+      // Pinned above the messages: the whole point is that "how much, when,
+      // where" stops living in the scrollback.
+      if (_agreement != null)
+        AgreementCard(
+          agreement: _agreement!,
+          service: _agreementService,
+          currentUserId: _currentUserId ?? '',
+          onChanged: (updated) => setState(() {
+            _agreement = updated;
+            if (updated.isSettled) _awaitingHandoff = true;
+          }),
+        ),
+      // Asked only after the arrangement was settled, and only once.
+      if (_awaitingHandoff && _agreement != null)
+        HandoffPrompt(
+          agreementId: _agreement!.id,
+          service: _reputationService,
+          onAnswered: () => setState(() => _awaitingHandoff = false),
+        ),
+      if (_conversation != null)
+        _ConversationProtocolBanner(
+          conversation: _conversation!,
+          onAccept: () => _acceptConnection(widget.conversationId),
+          onDecline: () => _rejectConnection(widget.conversationId),
+          onClose: _closeConversation,
+          onRestart: _restartConversation,
+        ),
+    ];
+    final relationshipContextMaxHeight =
+        MediaQuery.sizeOf(context).height * (widget.embedded ? 0.5 : 0.44);
+    if (relationshipContext.isNotEmpty) {
+      _scheduleRelationshipContextMeasure();
+    }
+    final contextScheme = Theme.of(context).colorScheme;
+    final pageBackground = Theme.of(context).scaffoldBackgroundColor;
     final body = Column(
       children: [
         if (widget.embedded) _buildEmbeddedHeader(),
-        if (!widget.embedded)
-          RelationshipSpacePreview(
-            otherName: _displayName,
-            otherPersona: _otherPersona,
-            selfPersona: _selfPersona,
-            latestEvent: _messages.isEmpty ? null : _messages.last.content,
-            isConnected: _conversation?.state == ConversationState.active,
-            pinCount: _relationshipSpace?.pins.length ?? 0,
-            sharedObjectCount: _relationshipSpace?.sharedObjects.length ?? 0,
-            sharedObjects: _relationshipSpace?.sharedObjects ?? const [],
-            hasRecentConnection: _relationshipSpace?.recentConnection != null,
-            compact: true,
-          ),
-        // Pinned above the messages: the whole point is that "how much, when,
-        // where" stops living in the scrollback.
-        if (_agreement != null)
-          AgreementCard(
-            agreement: _agreement!,
-            service: _agreementService,
-            currentUserId: _currentUserId ?? '',
-            onChanged: (updated) => setState(() {
-              _agreement = updated;
-              if (updated.isSettled) _awaitingHandoff = true;
-            }),
-          ),
-        // Asked only after the arrangement was settled, and only once.
-        if (_awaitingHandoff && _agreement != null)
-          HandoffPrompt(
-            agreementId: _agreement!.id,
-            service: _reputationService,
-            onAnswered: () => setState(() => _awaitingHandoff = false),
-          ),
-        if (_conversation != null)
-          _ConversationProtocolBanner(
-            conversation: _conversation!,
-            onAccept: () => _acceptConnection(widget.conversationId),
-            onDecline: () => _rejectConnection(widget.conversationId),
-            onClose: _closeConversation,
-            onRestart: _restartConversation,
+        if (relationshipContext.isNotEmpty)
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: relationshipContextMaxHeight,
+            ),
+            child: Stack(
+              children: [
+                SingleChildScrollView(
+                  controller: _relationshipContextScrollController,
+                  key: const Key('relationship-context-scroll'),
+                  child: Column(children: relationshipContext),
+                ),
+                if (_relationshipContextCanScroll && !_relationshipContextAtEnd)
+                  Positioned(
+                    key: const Key('relationship-context-scroll-hint'),
+                    left: 0,
+                    right: 0,
+                    bottom: 6,
+                    child: IgnorePointer(
+                      child: Semantics(
+                        label: AppLocalizations.of(
+                          context,
+                        )!.relationshipContextScrollHint,
+                        excludeSemantics: true,
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: contextScheme.surfaceContainerHighest
+                                  .withValues(alpha: 0.96),
+                              border: Border.all(
+                                color: contextScheme.outlineVariant,
+                              ),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 5,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.swipe_up_alt_rounded,
+                                    size: 16,
+                                    color: contextScheme.onSurfaceVariant,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    AppLocalizations.of(
+                                      context,
+                                    )!.relationshipContextScrollHint,
+                                    style: TextStyle(
+                                      color: contextScheme.onSurfaceVariant,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         Expanded(
           child: UserChatMessageList(
@@ -921,10 +1070,10 @@ class _UserChatPageState extends State<UserChatPage> {
       ],
     );
     if (widget.embedded) {
-      return ColoredBox(color: const Color(0xFFFFFCF7), child: body);
+      return ColoredBox(color: pageBackground, child: body);
     }
     return Scaffold(
-      backgroundColor: const Color(0xFFFFFCF7),
+      backgroundColor: pageBackground,
       appBar: AppBar(
         title: Text(_displayName),
         actions: [_buildConversationMenu()],
@@ -974,29 +1123,35 @@ class _UserChatPageState extends State<UserChatPage> {
   }
 
   Widget _buildEmbeddedHeader() {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final isActive = _conversation?.state == ConversationState.active;
     return Container(
-      height: 64,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFE8E1D7))),
+      constraints: const BoxConstraints(minHeight: 64),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      decoration: BoxDecoration(
+        color:
+            theme.cardTheme.color ??
+            (isDark ? AppTheme.surfaceDark : Colors.white),
+        border: Border(
+          bottom: BorderSide(color: theme.dividerColor.withValues(alpha: 0.5)),
+        ),
       ),
       child: Row(
         children: [
-          CircleAvatar(
-            backgroundColor: AppTheme.primary.withValues(alpha: 0.12),
-            child: Text(
-              _displayName.characters.first.toUpperCase(),
-              style: const TextStyle(
-                color: AppTheme.primary,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
+          UserAvatar(
+            name: _displayName,
+            persona: _otherPersona,
+            avatarUrl: _otherAvatarUrl,
+            size: 48,
+            showPersona: !isActive,
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
               _displayName,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
             ),
           ),

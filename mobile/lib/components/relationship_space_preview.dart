@@ -1,32 +1,32 @@
 import 'package:flutter/material.dart';
 
-import 'social_persona_card.dart';
+import 'user_avatar.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
 
-/// A small, deterministic projection of a one-to-one relationship.
+/// A deterministic local projection of a one-to-one relationship space.
 ///
-/// This widget deliberately has no animation or presence subscription. The
-/// only live fact it accepts is whether the current conversation is explicitly
-/// connected; everything else is a user-facing projection of existing thread
-/// history. When connected, role tokens withdraw so the platform does not
-/// visually insert itself into the conversation. It is therefore safe to use
-/// while the Relationship Space backend is still being introduced behind the
-/// existing Thread/Conversation model.
-class RelationshipSpacePreview extends StatelessWidget {
+/// This widget deliberately has no presence subscriptions or background network calls.
+/// Expand and collapse are purely local UI states. All shown facts derive
+/// deterministically from [RelationshipSpace.events], [RelationshipSpace.pins],
+/// [RelationshipSpace.sharedObjects], and [RelationshipSpace.recentConnection].
+class RelationshipSpacePreview extends StatefulWidget {
   const RelationshipSpacePreview({
     super.key,
     required this.otherName,
     this.otherAvatarUrl,
     this.otherPersona,
     this.selfPersona,
-    this.latestEvent,
-    this.isConnected = false,
+    this.events = const [],
+    this.pins = const [],
     this.pinCount = 0,
-    this.sharedObjectCount = 0,
     this.sharedObjects = const [],
+    this.sharedObjectCount = 0,
+    this.recentConnection,
     this.hasRecentConnection = false,
+    this.isConnected = false,
+    this.initiallyExpanded = false,
     this.compact = false,
   });
 
@@ -34,22 +34,165 @@ class RelationshipSpacePreview extends StatelessWidget {
   final String? otherAvatarUrl;
   final SocialPersona? otherPersona;
   final SocialPersona? selfPersona;
-  final String? latestEvent;
-  final bool isConnected;
+  final List<RelationshipSpaceEvent> events;
+  final List<RelationshipSpacePin> pins;
   final int pinCount;
-  final int sharedObjectCount;
   final List<RelationshipSpaceSharedObject> sharedObjects;
+  final int sharedObjectCount;
+  final RelationshipSpaceConnection? recentConnection;
   final bool hasRecentConnection;
+  final bool isConnected;
+  final bool initiallyExpanded;
   final bool compact;
+
+  @override
+  State<RelationshipSpacePreview> createState() =>
+      _RelationshipSpacePreviewState();
+}
+
+class _RelationshipSpacePreviewState extends State<RelationshipSpacePreview> {
+  late bool _expanded;
+
+  @override
+  void initState() {
+    super.initState();
+    _expanded = widget.initiallyExpanded;
+  }
+
+  void _toggleExpanded() {
+    setState(() {
+      _expanded = !_expanded;
+    });
+  }
+
+  static String _formatTimestamp(DateTime dt, {required bool chinese}) {
+    final local = dt.toLocal();
+    final m = local.month.toString().padLeft(2, '0');
+    final d = local.day.toString().padLeft(2, '0');
+    final h = local.hour.toString().padLeft(2, '0');
+    final min = local.minute.toString().padLeft(2, '0');
+    return chinese ? '$m月$d日 $h:$min' : '$m-$d $h:$min';
+  }
+
+  static String formatEventText(
+    RelationshipSpaceEvent event,
+    AppLocalizations l,
+  ) {
+    final eventType = event.eventType.toLowerCase().trim();
+    if (eventType == 'message.sent' || eventType == 'message_sent') {
+      return l.relationshipSpaceEventSentMessage;
+    }
+    if (eventType == 'message.opening' || eventType == 'message_opening') {
+      return l.relationshipSpaceEventOpeningMessage;
+    }
+    if (eventType == 'connection.started' ||
+        eventType == 'conversation_acknowledged' ||
+        eventType == 'conversation_acknowledged_by_message' ||
+        eventType == 'mutual_open') {
+      return l.relationshipSpaceEventConnectionStarted;
+    }
+    if (eventType == 'connection.ended' ||
+        eventType == 'conversation_closed' ||
+        eventType == 'conversation_expired') {
+      return l.relationshipSpaceEventConnectionEnded;
+    }
+    if (eventType == 'connection.accepted' ||
+        eventType == 'conversation_accepted') {
+      return l.relationshipSpaceEventConnectionAccepted;
+    }
+    if (eventType == 'connection.declined' ||
+        eventType == 'conversation_declined') {
+      return l.relationshipSpaceEventConnectionDeclined;
+    }
+    if (eventType == 'conversation.created' ||
+        eventType == 'conversation_created') {
+      return l.relationshipSpaceEventConversationCreated;
+    }
+    if (eventType.contains('pin') ||
+        eventType.startsWith('memory.pinned') ||
+        eventType.startsWith('relationship.pinned')) {
+      return l.relationshipSpaceEventPinChanged;
+    }
+    if (eventType.startsWith('acknowledgement')) {
+      return l.relationshipSpaceEventAcknowledgementChanged;
+    }
+    if (eventType.startsWith('shared_object') ||
+        eventType.startsWith('sharedobject') ||
+        eventType == 'shared_object_changed') {
+      return l.relationshipSpaceEventSharedObjectChanged;
+    }
+    return l.relationshipSpaceEventDefault;
+  }
+
+  static IconData _eventIcon(RelationshipSpaceEvent event) {
+    final eventType = event.eventType.toLowerCase().trim();
+    if (eventType.startsWith('connection')) {
+      if (eventType.contains('ended') || eventType.contains('declined')) {
+        return Icons.call_end_outlined;
+      }
+      return Icons.compare_arrows_rounded;
+    }
+    if (eventType.contains('pin') ||
+        eventType.startsWith('memory.pinned') ||
+        eventType.startsWith('relationship.pinned')) {
+      return Icons.push_pin_outlined;
+    }
+    if (eventType.startsWith('shared_object') ||
+        eventType.startsWith('sharedobject') ||
+        eventType == 'shared_object_changed') {
+      return Icons.link_rounded;
+    }
+    if (eventType.startsWith('acknowledgement')) {
+      return Icons.done_all_rounded;
+    }
+    return Icons.mail_outline_rounded;
+  }
+
+  /// Collapse technical projections that describe one user action into one
+  /// recent record. The underlying deterministic events remain untouched.
+  List<RelationshipSpaceEvent> _visibleEvents() {
+    final conversationsWithMessages = widget.events
+        .where((event) {
+          final type = event.eventType.toLowerCase().trim();
+          return type == 'message.sent' || type == 'message_sent';
+        })
+        .map((event) => event.conversationId)
+        .toSet();
+    return widget.events
+        .where((event) {
+          final type = event.eventType.toLowerCase().trim();
+          final conversationHasMessage = conversationsWithMessages.contains(
+            event.conversationId,
+          );
+          if (conversationHasMessage &&
+              (type == 'message.opening' || type == 'message_opening')) {
+            return false;
+          }
+          if (type == 'conversation.created' ||
+              type == 'conversation_created') {
+            return !conversationHasMessage;
+          }
+          return true;
+        })
+        .toList(growable: false);
+  }
 
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
-    final event = latestEvent?.trim();
-    final stateLabel = isConnected
+    final stateLabel = widget.isConnected
         ? l.relationshipSpaceConnected
         : l.relationshipSpaceAsync;
+
+    final effectivePinCount = widget.pins.isNotEmpty
+        ? widget.pins.length
+        : widget.pinCount;
+    final effectiveSharedObjectCount = widget.sharedObjects.isNotEmpty
+        ? widget.sharedObjects.length
+        : widget.sharedObjectCount;
+    final effectiveHasRecentConnection =
+        widget.recentConnection != null || widget.hasRecentConnection;
 
     return Semantics(
       container: true,
@@ -57,7 +200,7 @@ class RelationshipSpacePreview extends StatelessWidget {
       child: Container(
         key: const Key('relationship-space-preview'),
         width: double.infinity,
-        padding: EdgeInsets.all(compact ? AppTheme.sp8 : AppTheme.sp16),
+        padding: EdgeInsets.all(widget.compact ? AppTheme.sp8 : AppTheme.sp16),
         decoration: BoxDecoration(
           color: scheme.surfaceContainerLowest,
           borderRadius: BorderRadius.circular(AppTheme.radiusLg),
@@ -70,7 +213,7 @@ class RelationshipSpacePreview extends StatelessWidget {
               children: [
                 Icon(
                   Icons.hub_outlined,
-                  size: compact ? 18 : 20,
+                  size: widget.compact ? 18 : 20,
                   color: AppTheme.primary,
                 ),
                 const SizedBox(width: AppTheme.sp8),
@@ -78,38 +221,58 @@ class RelationshipSpacePreview extends StatelessWidget {
                   child: Text(
                     l.relationshipSpaceTitle,
                     style: TextStyle(
-                      fontSize: compact ? 14 : 16,
+                      fontSize: widget.compact ? 14 : 16,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
                 ),
-                _StatePill(label: stateLabel, isConnected: isConnected),
+                _StatePill(label: stateLabel, isConnected: widget.isConnected),
+                const SizedBox(width: AppTheme.sp4),
+                IconButton(
+                  key: const Key('relationship-space-expand-toggle'),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 48,
+                    minHeight: 48,
+                  ),
+                  iconSize: 20,
+                  icon: Icon(
+                    _expanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                  tooltip: _expanded
+                      ? l.relationshipSpaceCollapseAction
+                      : l.relationshipSpaceExpandAction,
+                  onPressed: _toggleExpanded,
+                ),
               ],
             ),
-            SizedBox(height: compact ? AppTheme.sp8 : AppTheme.sp16),
+            SizedBox(height: widget.compact ? AppTheme.sp8 : AppTheme.sp16),
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Expanded(
                   child: _PersonaAnchor(
-                    name: otherName,
-                    imageUrl: otherAvatarUrl,
-                    persona: otherPersona,
-                    showPersona: !isConnected,
+                    name: widget.otherName,
+                    imageUrl: widget.otherAvatarUrl,
+                    persona: widget.otherPersona,
+                    showPersona: !widget.isConnected,
                     alignment: CrossAxisAlignment.start,
-                    compact: compact,
+                    compact: widget.compact,
                   ),
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: AppTheme.sp8),
                   child: Icon(
-                    isConnected
+                    widget.isConnected
                         ? Icons.compare_arrows_rounded
-                        : Icons.more_horiz_rounded,
-                    semanticLabel: isConnected
+                        : Icons.hub_outlined,
+                    semanticLabel: widget.isConnected
                         ? l.relationshipSpaceConnected
-                        : l.relationshipSpaceTimeline,
-                    color: isConnected
+                        : l.relationshipSpaceTitle,
+                    color: widget.isConnected
                         ? AppTheme.success
                         : scheme.onSurfaceVariant,
                   ),
@@ -117,104 +280,272 @@ class RelationshipSpacePreview extends StatelessWidget {
                 Expanded(
                   child: _PersonaAnchor(
                     name: l.relationshipSpaceMe,
-                    persona: selfPersona,
-                    showPersona: !isConnected,
+                    persona: widget.selfPersona,
+                    showPersona: !widget.isConnected,
                     alignment: CrossAxisAlignment.end,
-                    compact: compact,
+                    compact: widget.compact,
                   ),
                 ),
               ],
             ),
-            if (!compact) ...[
-              const SizedBox(height: AppTheme.sp12),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.timeline_outlined,
-                    size: 17,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: AppTheme.sp8),
-                  Expanded(
-                    child: Text(
-                      event == null || event.isEmpty
-                          ? l.relationshipSpaceNoEvent
-                          : event,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: scheme.onSurfaceVariant,
-                        fontSize: 13,
-                        height: 1.3,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              if (pinCount > 0 ||
-                  sharedObjectCount > 0 ||
-                  hasRecentConnection) ...[
-                const SizedBox(height: AppTheme.sp8),
-                Wrap(
-                  spacing: AppTheme.sp6,
-                  runSpacing: AppTheme.sp6,
-                  children: [
-                    if (pinCount > 0)
-                      _RailChip(
-                        icon: Icons.push_pin_outlined,
-                        label: l.relationshipSpacePinsCount(pinCount),
-                      ),
-                    if (sharedObjectCount > 0)
-                      _RailChip(
-                        icon: Icons.link_rounded,
-                        label: l.relationshipSpaceObjectsCount(
-                          sharedObjectCount,
-                        ),
-                      ),
-                    if (hasRecentConnection)
-                      _RailChip(
-                        icon: Icons.history_rounded,
-                        label: l.relationshipSpaceTimeline,
-                      ),
-                  ],
-                ),
-              ],
-            ],
-            if (compact &&
-                (pinCount > 0 ||
-                    sharedObjectCount > 0 ||
-                    hasRecentConnection)) ...[
-              const SizedBox(height: AppTheme.sp6),
-              Wrap(
-                spacing: AppTheme.sp4,
-                runSpacing: AppTheme.sp4,
-                children: [
-                  if (pinCount > 0)
-                    _RailChip(
-                      icon: Icons.push_pin_outlined,
-                      label: l.relationshipSpacePinsCount(pinCount),
-                    ),
-                  if (sharedObjectCount > 0)
-                    _RailChip(
-                      icon: Icons.link_rounded,
-                      label: l.relationshipSpaceObjectsCount(sharedObjectCount),
-                    ),
-                  if (hasRecentConnection)
-                    _RailChip(
-                      icon: Icons.history_rounded,
-                      label: l.relationshipSpaceTimeline,
-                    ),
-                ],
-              ),
-            ],
-            if (sharedObjects.isNotEmpty) ...[
-              const SizedBox(height: AppTheme.sp8),
-              _SharedObjectRail(objects: sharedObjects),
-            ],
+            const SizedBox(height: AppTheme.sp12),
+            _buildPriorityRail(
+              context,
+              l,
+              scheme,
+              effectivePinCount,
+              effectiveSharedObjectCount,
+              effectiveHasRecentConnection,
+            ),
+            const SizedBox(height: AppTheme.sp12),
+            _buildRecentRecords(context, l, scheme),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildPriorityRail(
+    BuildContext context,
+    AppLocalizations l,
+    ColorScheme scheme,
+    int pinCount,
+    int sharedObjectCount,
+    bool hasRecentConnection,
+  ) {
+    if (pinCount == 0 && sharedObjectCount == 0 && !hasRecentConnection) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppTheme.sp8),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest.withValues(alpha: .35),
+          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        ),
+        child: Text(
+          l.relationshipSpaceNoEvent,
+          style: TextStyle(color: scheme.onSurfaceVariant, height: 1.3),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (pinCount > 0) ...[
+          Text(
+            l.relationshipSpacePinsTitle,
+            style: TextStyle(
+              color: scheme.onSurfaceVariant,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: AppTheme.sp4),
+          _RailChip(
+            icon: Icons.push_pin_outlined,
+            label: l.relationshipSpacePinsCount(pinCount),
+          ),
+        ],
+        if (sharedObjectCount > 0) ...[
+          if (pinCount > 0) const SizedBox(height: AppTheme.sp6),
+          if (widget.sharedObjects.isNotEmpty)
+            _SharedObjectRail(objects: widget.sharedObjects)
+          else
+            _RailChip(
+              icon: Icons.link_rounded,
+              label: l.relationshipSpaceObjectsCount(sharedObjectCount),
+            ),
+        ],
+        if (hasRecentConnection) ...[
+          const SizedBox(height: AppTheme.sp6),
+          _RailChip(
+            icon: Icons.history_rounded,
+            label: widget.recentConnection == null || !_expanded
+                ? l.relationshipSpaceLastConnection
+                : '${l.relationshipSpaceRecentRecovery} · ${_formatTimestamp(widget.recentConnection!.endedAt ?? widget.recentConnection!.startedAt, chinese: Localizations.localeOf(context).languageCode == 'zh')}',
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildRecentRecords(
+    BuildContext context,
+    AppLocalizations l,
+    ColorScheme scheme,
+  ) {
+    final events = _visibleEvents();
+    final hasMemory =
+        widget.pins.isNotEmpty ||
+        widget.pinCount > 0 ||
+        widget.sharedObjects.isNotEmpty ||
+        widget.sharedObjectCount > 0 ||
+        widget.recentConnection != null ||
+        widget.hasRecentConnection;
+    // Avoid a blank section when the relationship has no history at all. The
+    // priority rail already provides the actionable empty state in that case.
+    if (events.isEmpty && !hasMemory) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          l.relationshipSpaceRecentRecords,
+          style: TextStyle(
+            color: scheme.onSurfaceVariant,
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: AppTheme.sp6),
+        if (events.isNotEmpty)
+          _expanded
+              ? _buildExpandedEvents(context, l, scheme, events)
+              : _buildCompactEventRow(context, l, scheme, events)
+        else
+          Text(
+            l.relationshipSpaceNoRecentRecords,
+            style: TextStyle(color: scheme.onSurfaceVariant, height: 1.3),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildCompactEventRow(
+    BuildContext context,
+    AppLocalizations l,
+    ColorScheme scheme,
+    List<RelationshipSpaceEvent> events,
+  ) {
+    if (events.isNotEmpty) {
+      final latest = events.first;
+      final text = formatEventText(latest, l);
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(_eventIcon(latest), size: 16, color: scheme.onSurfaceVariant),
+          const SizedBox(width: AppTheme.sp8),
+          Expanded(
+            child: Text(
+              text,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: scheme.onSurfaceVariant,
+                fontSize: 13,
+                height: 1.3,
+              ),
+            ),
+          ),
+          const SizedBox(width: AppTheme.sp4),
+          Text(
+            _formatTimestamp(
+              latest.occurredAt,
+              chinese: Localizations.localeOf(context).languageCode == 'zh',
+            ),
+            style: TextStyle(
+              color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+              fontSize: 11,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          Icons.lightbulb_outline_rounded,
+          size: 16,
+          color: scheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: AppTheme.sp8),
+        Expanded(
+          child: Text(
+            l.relationshipSpaceNoEvent,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: scheme.onSurfaceVariant,
+              fontSize: 13,
+              height: 1.3,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildExpandedEvents(
+    BuildContext context,
+    AppLocalizations l,
+    ColorScheme scheme,
+    List<RelationshipSpaceEvent> events,
+  ) {
+    if (events.isNotEmpty) {
+      final topEvents = events.take(3).toList(growable: false);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = 0; i < topEvents.length; i++) ...[
+            if (i > 0) const SizedBox(height: AppTheme.sp6),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  _eventIcon(topEvents[i]),
+                  size: 15,
+                  color: scheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: AppTheme.sp8),
+                Expanded(
+                  child: Text(
+                    formatEventText(topEvents[i], l),
+                    style: TextStyle(
+                      color: scheme.onSurface,
+                      fontSize: 13,
+                      fontWeight: i == 0 ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: AppTheme.sp4),
+                Text(
+                  _formatTimestamp(
+                    topEvents[i].occurredAt,
+                    chinese:
+                        Localizations.localeOf(context).languageCode == 'zh',
+                  ),
+                  style: TextStyle(
+                    color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          Icons.lightbulb_outline_rounded,
+          size: 16,
+          color: scheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: AppTheme.sp8),
+        Expanded(
+          child: Text(
+            l.relationshipSpaceNoEvent,
+            style: TextStyle(
+              color: scheme.onSurfaceVariant,
+              fontSize: 13,
+              height: 1.3,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -421,45 +752,18 @@ class _PersonaAnchor extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final trimmedName = name.trim();
-    final fallback = trimmedName.isEmpty ? '?' : trimmedName.characters.first;
-    final hasImage = imageUrl != null && imageUrl!.trim().isNotEmpty;
-    final roleAvatar = !showPersona || persona == null
-        ? null
-        : SocialPersonaAvatar(
-            persona: persona!,
-            size: compact ? 24 : 160,
-            semanticLabel: trimmedName.isEmpty ? null : trimmedName,
-          );
+    final effectiveSize = compact ? 24.0 : (showPersona ? 160.0 : 48.0);
     return Column(
       crossAxisAlignment: alignment,
       children: [
-        roleAvatar ??
-            Container(
-              width: compact ? 36 : 48,
-              height: compact ? 36 : 48,
-              decoration: BoxDecoration(
-                color: AppTheme.mint,
-                borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-                border: Border.all(
-                  color: AppTheme.primary.withValues(alpha: .18),
-                ),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: hasImage
-                  ? Image.network(
-                      imageUrl!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) =>
-                          _FallbackFace(
-                            label: fallback,
-                            foreground: AppTheme.primary,
-                          ),
-                    )
-                  : _FallbackFace(
-                      label: fallback,
-                      foreground: AppTheme.primary,
-                    ),
-            ),
+        UserAvatar(
+          name: trimmedName,
+          persona: persona,
+          avatarUrl: imageUrl,
+          size: effectiveSize,
+          showPersona: showPersona,
+          semanticLabel: trimmedName.isEmpty ? null : trimmedName,
+        ),
         SizedBox(height: compact ? AppTheme.sp2 : AppTheme.sp4),
         Text(
           trimmedName.isEmpty ? '?' : trimmedName,
@@ -475,28 +779,6 @@ class _PersonaAnchor extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _FallbackFace extends StatelessWidget {
-  const _FallbackFace({required this.label, required this.foreground});
-
-  final String label;
-  final Color foreground;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Text(
-        label,
-        semanticsLabel: label,
-        style: TextStyle(
-          color: foreground,
-          fontSize: 22,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
     );
   }
 }
