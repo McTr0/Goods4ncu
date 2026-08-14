@@ -14,7 +14,7 @@
 ```text
 Flutter Web / Mobile
   -> HTTP JSON：认证、出收、用户、成交、管理、普通聊天操作
-  -> SSE：小帮流式回复
+  -> SSE：小昌流式回复
   -> WebSocket：消息、通知、主动 acknowledgement、会话和通话信令事件
   -> Rust Axum Router
   -> middleware：CORS、body limit、rate limit、token denylist、metrics、安全响应头

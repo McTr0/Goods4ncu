@@ -184,7 +184,7 @@ Content-Type: application/json
 
 [已实现] 需要登录。提交 `{ "code": "123456" }`；最多允许 5 次错误尝试。成功后 membership 变为 `verified`，`verification_method` 为 `campus_email_otp`。服务端只保存验证码 HMAC，不保存明文。更换资料邮箱会把已认证 membership 重置为 `pending`，需要重新验证。
 
-发布 offer/wanted、响应 wanted、创建联系人会话、创建/加入群组或频道、创建 Secret Chat 和创建成交意向均要求 verified membership；小帮发布、购买意向和议价工具执行同一门禁。未认证调用返回 HTTP 403 和稳定错误码 `campus_verification_required`。浏览、收藏、读取历史等低风险能力不受影响。
+发布 offer/wanted、响应 wanted、创建联系人会话、创建/加入群组或频道、创建 Secret Chat 和创建成交意向均要求 verified membership；小昌发布、购买意向和议价工具执行同一门禁。未认证调用返回 HTTP 403 和稳定错误码 `campus_verification_required`。浏览、收藏、读取历史等低风险能力不受影响。
 
 [已实现] 涉及另一用户或 listing 的写操作还必须处于同一校园，否则返回 HTTP 403 和 `campus_scope_mismatch`。客户端不能在业务请求体覆盖 `campus_id`：发布、成交、直聊、空间、Secret Chat、用户发现和 Agent 工具都从 access token 的活动校园派生并复核 membership。登录用户的商品列表、详情、wanted 匹配、空间、推荐、公开用户页面和通知按活动校园读取；游客仍使用首校园 NCU。后台与审核使用下文单独描述的管理作用域。
 
@@ -474,7 +474,7 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 需要登录。只有当当前用户是该旧会话至少一条消息的 sender/receiver 时才可读取，避免 IDOR。返回 sender、sender_username、content、is_agent 和 timestamp 等旧字段。
 
-新直聊使用 `/api/chat/threads` 与 `/api/chat/conversations/*`，小帮使用 `/api/chat/assistant`。新增客户端不应依赖这两个旧接口。
+新直聊使用 `/api/chat/threads` 与 `/api/chat/conversations/*`，小昌使用 `/api/chat/assistant`。新增客户端不应依赖这两个旧接口。
 
 ## User Chat
 
@@ -817,7 +817,7 @@ Flutter 在 wanted 详情按当前用户身份展示“收到的推荐”或“�
 
 ## Agent ActionPlan
 
-[已实现] 小帮的商品发布是可恢复的低风险动作：通过校验后立即发布，并在小帮页提供撤销窗口。修改、下架使用 L2 ActionPlan；成交意向和还价使用 L3 ActionPlan。confirmation token 只通过以下认证接口返回，不出现在聊天文本中；带 token 的响应使用 `Cache-Control: no-store`。
+[已实现] 小昌的商品发布是可恢复的低风险动作：通过校验后立即发布，并在小昌页提供撤销窗口。修改、下架使用 L2 ActionPlan；成交意向和还价使用 L3 ActionPlan。confirmation token 只通过以下认证接口返回，不出现在聊天文本中；带 token 的响应使用 `Cache-Control: no-store`。
 
 - `GET /api/agent/plans` — 只列出当前用户在当前活动校园内、未过期的 `pending` 或 `confirmed_once` 计划，返回 `status`、当前步骤的 `confirmation_token`、`risk_level`、`summary`、`expires_at` 和（如已有）稳定的 `result_code`。
 - `POST /api/agent/plans/{id}/confirm` — body `{ "confirmation_token": "..." }`。L2 计划一次确认后执行。L3 第一次必须提交 primary token，响应为 `{ "status": "needs_second_confirmation", "outcome_code": "needs_second_confirmation", "confirmation_token": "<独立的第二步 token>" }`；只有返回的第二步 token 可以执行。primary 请求的传输重试只会重放同一挑战，不会被计为第二次确认。终态重试返回同一执行结果并带 `outcome_code: already_executed`。过期、执行失败或不可确认分别使用稳定错误 code `agent_plan_expired`、`agent_plan_execution_failed`、`agent_plan_not_confirmable`；错误 token、其他用户、其他校园或不存在统一 `404`（不泄露归属）。
@@ -829,11 +829,11 @@ Flutter 在 wanted 详情按当前用户身份展示“收到的推荐”或“�
 
 ## AI Chat
 
-移动端把“小帮”作为收件箱中的虚拟系统会话，但它不属于 `chat_conversations` 的 `realtime` 或 `mail` 状态机。客户端使用公共会话标识 `__agent__`；后端根据 JWT 将它映射到当前用户专属的内部会话，因此不同账号不会共享历史。
+移动端把“小昌”作为收件箱中的虚拟系统会话，但它不属于 `chat_conversations` 的 `realtime` 或 `mail` 状态机。客户端使用公共会话标识 `__agent__`；后端根据 JWT 将它映射到当前用户专属的内部会话，因此不同账号不会共享历史。
 
 ### GET `/api/chat/assistant`
 
-需要登录。读取当前用户最近的小帮消息。支持 `limit`（1–100，默认 50）和 `offset`。返回 `conversation_id: "__agent__"`、`messages` 和 `total`；每条消息包含 `id`、`role`（`user` 或 `assistant`）、`content`、可选媒体 URL 和 `timestamp`。
+需要登录。读取当前用户最近的小昌消息。支持 `limit`（1–100，默认 50）和 `offset`。返回 `conversation_id: "__agent__"`、`messages` 和 `total`；每条消息包含 `id`、`role`（`user` 或 `assistant`）、`content`、可选媒体 URL 和 `timestamp`。
 
 ### POST `/api/chat`
 
@@ -845,7 +845,7 @@ SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单
 
 ### POST `/api/chat/stream`
 
-推荐的 SSE 路径，使用 JSON body，适合认证上下文和移动端流式显示。小帮请求必须携带 `conversation_id: "__agent__"`。服务端先读取该用户此前的最近历史，再保存当前用户消息；流式响应正常结束后保存完整 AI 回复。中断或 provider 失败时不保存不完整的 AI 回复，但已经提交的用户消息仍会保留。重试可能产生写计划时应复用同一个 `Idempotency-Key`；服务端按用户/校园和动作参数哈希复用计划，不能用同 key 改写另一项操作。
+推荐的 SSE 路径，使用 JSON body，适合认证上下文和移动端流式显示。小昌请求必须携带 `conversation_id: "__agent__"`。服务端先读取该用户此前的最近历史，再保存当前用户消息；流式响应正常结束后保存完整 AI 回复。中断或 provider 失败时不保存不完整的 AI 回复，但已经提交的用户消息仍会保留。重试可能产生写计划时应复用同一个 `Idempotency-Key`；服务端按用户/校园和动作参数哈希复用计划，不能用同 key 改写另一项操作。
 
 ## WebSocket
 

@@ -148,7 +148,7 @@ GOOD4NCU_API_BASE=http://127.0.0.1:3000 \
 | 主动确认 | `seller1` 对消息选择“收到 / 我会看 / 已处理” | `buyer1` 观察消息 | 只有显式动作产生对应 acknowledgement 和 `message_acknowledgement_changed`，可替换或撤销；打开消息不自动确认。 |
 | 跨校园确认隔离 | 同一账号的设备分别停在两个校园 | A 校园接收 acknowledgement | 只有 A 校园 socket 收到事件；B 校园只能通过自己的 HTTP 会话看到自己的会话，不能收到 A 的消息或确认。 |
 | 连接不是在线 | `buyer1` 发起连接，`seller1` 接受并结束 | 双方观察状态 | `syn_sent/syn_ack` 在线程摘要和会话卡片中都只显示等待/确认，只有 `active` 才显示 `请求连接 -> 已连接 -> 已结束`；不额外显示 online、last seen 或 typing。 |
-| Agent 提案重试幂等 | 同一条小帮请求携带相同 `Idempotency-Key` 并重复触发待确认写动作 | Rust ActionPlan 集成回归 | 同一用户/校园和相同动作参数只保留一个计划并复用其编号；同 key 改变动作、风险等级或参数哈希安全拒绝，不执行或追加第二个计划；key 不进入模型上下文。 |
+| Agent 提案重试幂等 | 同一条小昌请求携带相同 `Idempotency-Key` 并重复触发待确认写动作 | Rust ActionPlan 集成回归 | 同一用户/校园和相同动作参数只保留一个计划并复用其编号；同 key 改变动作、风险等级或参数哈希安全拒绝，不执行或追加第二个计划；key 不进入模型上下文。 |
 | 共同空间投影（R0） | 打开联系人线程，再打开一段留言或连接 | 双方观察页面 | 留言阶段显示双方角色锚点、时间轨迹和明确的“可以留言”；活动校园 Thread 只投影已发布 persona，列表/线程头/完整空间分别使用 24/48/160 静态 token；进入明确连接后角色 token 退到背景，只保留双方名称与“已连接”状态；草稿/归档回退普通头像。页面打开、滚动和角色缩放不产生对方可见事件。390×844、200% 文字缩放与桌面分栏都不得遮挡正文。 |
 | 共同空间事件轨迹（R2） | API driver 按 `relationship_key` 首页读取，再用 `next_cursor` 翻页 | 对方尝试跨校园或访问未参与的 peer | 只返回当前用户可见的会话事件与消息来源；cursor 不改变 `LOCALLY_SEEN`，跨校园/越权返回 404，不产生 read/typing/online 事实。 |
 | 共同空间 Pin 与共享对象（R2） | `r2-chat` 驱动与 Rust 回归共同覆盖双方 Pin、创建 file/link 权威对象、消息引用、撤销后读取 `space-events`；2026-08-12 生产 OSS rehearsal 已调用 `/complete` 并验证 signed DELETE 清理 | 重复 Pin、撤销不存在的 Pin、伪造外部文件 URL、未完成上传就引用、隐藏源消息、跨校园读取、非创建者撤销、远端删除失败重试 | Pin 幂等且可撤销；`actor_id` 保留主动者；file 创建后为 `pending_upload`，只有服务端 Range probe 成功、尺寸/类型匹配后才进入 `active` 或 `pending_review`；file/link 只能引用活动 `chat_shared_objects`，链接片段被规范化且不抓取；撤销后原消息保留但 quote、媒体入口和共享对象投影失效，双方收到 `shared_object_revoked`；后台 worker 对 revoked/deleted file 执行可重试、幂等的远端 DELETE 并保留错误审计；Flutter rail 只读且不自动加载资源，不产生 read/typing/online 事实。 |
@@ -255,7 +255,7 @@ node scripts/codex_browser_api_driver.mjs call-secret
 | 频道权限 | 非 owner/admin 发言被拒绝，UI 不应误导用户。 |
 | 一对一通话 | active realtime 会话显示通话按钮，mail 不显示。 |
 | 权限失败 | 无麦克风/摄像头权限时有可恢复提示。 |
-| Secret Chat [待弃用] | 生产配置不展示新建入口；兼容环境只验证既有历史和不进入小帮/搜索，不继续扩大能力。 |
+| Secret Chat [待弃用] | 生产配置不展示新建入口；兼容环境只验证既有历史和不进入小昌/搜索，不继续扩大能力。 |
 
 ## 故障注入测试
 
@@ -317,7 +317,7 @@ node scripts/codex_browser_api_driver.mjs call-secret
 | --- | --- | --- |
 | L0 解释 | “平台负责退款吗” | 明确不托管资金，不调用写工具。 |
 | L1 草拟 | “帮我写一条收平板需求” | 返回草稿，不直接发布。 |
-| 可恢复发布 | 用户让小帮发布 | 校验后只创建一次 wanted，并显示撤销窗口；撤销只在状态未变化时生效。 |
+| 可恢复发布 | 用户让小昌发布 | 校验后只创建一次 wanted，并显示撤销窗口；撤销只在状态未变化时生效。 |
 | L2 更新/下架 | 用户确认 ActionPlan | 只执行一次；重复 confirm 返回相同终态结果。 |
 | 资源版本快照 | Agent 提案后先修改目标 listing，再确认；HTTP 带旧 `expected_content_revision`/`If-Match` | 返回 `listing_version_conflict`，不覆盖新内容、不删除 listing、不创建成交/议价事实；旧计划仍可安全终态失败。 |
 | L2 联系 | 计划过期后确认 | 安全失败，要求重新生成，不发送消息。 |

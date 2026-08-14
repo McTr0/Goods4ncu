@@ -84,7 +84,7 @@
 
 ## 五、已知限制
 
-- **小帮（AI 助手）无回复**：演示环境 `GEMINI_API_KEY` 是占位值。需要真实 key 重启后端才能对话；其余功能不受影响。
+- **小昌（AI 助手）无回复**：演示环境 `GEMINI_API_KEY` 是占位值。需要真实 key 重启后端才能对话；其余功能不受影响。
 - **上传媒体**：bucket 为私有，审核通过后由服务端签发短期 presigned URL。演示环境未接图片审核服务，`MODERATION_IMAGE_ENABLED` 关闭时新媒体直接标记为 review-exempt。
 - **邮箱验证码**：投递 webhook 是本地 stub（`scripts/deploy_local.sh` 内的 python 服务），部署脚本直接把成员 membership 置为 verified 而不走 OTP 往返。完整 OTP 流程见 `tests/admin_auth_regression.rs::second_campus_onboarding_journey_end_to_end`。
 

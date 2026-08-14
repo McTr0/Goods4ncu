@@ -4,7 +4,7 @@
 | --- | --- |
 | 适用读者 | AI/后端工程师、产品经理、安全工程师、测试工程师和 Agent 工具维护者 |
 | 当前状态 | 已有意图路由、耐久 RAG 投影、多个 LLM provider 和市场工具；ActionPlan、提案幂等、ListingCommandService、listing 资源版本快照、typed terminal outcome、隐私安全行动审计和首版租户级 AgentRun envelope 已落地 |
-| 事实来源 | `src/agents/`、`src/llm/`、聊天 API、工具测试、LLM metrics 和 Flutter 小帮入口 |
+| 事实来源 | `src/agents/`、`src/llm/`、聊天 API、工具测试、LLM metrics 和 Flutter 小昌入口 |
 | 最后核对范围 | 搜索、发布、更新、删除、成交意向、议价、回复建议和流式回复 |
 
 Agent 的价值是把用户意图翻译为可理解、可检查、可撤销的系统动作。它不是新的权限主体，也不是绕过产品流程的快捷通道。
@@ -23,7 +23,7 @@ Agent 的价值是把用户意图翻译为可理解、可检查、可撤销的�
 
 [已实现] 商品事务推进 `content_revision` 并合并 `embedding_jobs`；worker 在事务外调用 provider，以 revision CAS 重建或删除 `documents` 投影。provider 故障不回滚发布，pgvector 缺失时由关键词/规则路径降级。回复助手使用独立的受限 agent，不挂载搜索、下单或议价工具。
 
-[已实现] 小帮历史按认证用户隔离，客户端公共标识 `__agent__` 在服务端映射到用户专属会话。SSE 正常完成后才保存完整助手回复。
+[已实现] 小昌历史按认证用户隔离，客户端公共标识 `__agent__` 在服务端映射到用户专属会话。SSE 正常完成后才保存完整助手回复。
 
 [已实现] 可恢复的发布会立即执行并提供撤销窗口；更新/删除生成 L2 ActionPlan，成交意向/议价生成使用独立两步 token 的 L3 ActionPlan。确认锁、业务事实、适用时的通知/outbox 和计划终态原子提交，commit 前中断可安全重试。
 

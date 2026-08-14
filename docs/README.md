@@ -39,7 +39,8 @@
 2. [当前架构与分层](architecture.md)：确认 Flutter、Axum、service、repository、worker 和 LLM 的边界。
 3. [业务流程](domain-flows.md)：找到对应状态机和失败路径。
 4. [API 参考](api-reference.md)：核对当前路由、字段和目标接口。
-5. [开发指南](development.md)与[贡献指南](contributing.md)：实现、测试和提交。
+5. [前端与产品设计对齐清单](frontend-alignment.md)：修改 Flutter 页面前核对页面职责和验收边界。
+6. [开发指南](development.md)与[贡献指南](contributing.md)：实现、测试和提交。
 
 ### 部署、排错或规划生产化
 
@@ -61,6 +62,7 @@
 | [新人导览](onboarding.md) | 面向新人的教材式项目入口和术语解释 |
 | [当前架构与分层](architecture.md) | 只描述当前代码结构、运行链路和已知风险 |
 | [业务流程](domain-flows.md) | 当前与目标业务状态流及失败路径 |
+| [前端与产品设计对齐清单](frontend-alignment.md) | 把产品原则落实为逐页职责、禁区、优先级和验收条件 |
 | [API 参考](api-reference.md) | 当前公共接口和明确标记的目标契约 |
 | [开发指南](development.md) | 本地开发、命令、测试选择和常见任务 |
 | [运行、配置与排错](operations.md) | 配置、数据库、迁移、日志、指标、runbook 和事故处理 |

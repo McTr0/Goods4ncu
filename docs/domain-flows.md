@@ -49,7 +49,7 @@ registered
 
 验证码明文不会进入数据库；服务端保存基于 JWT secret 和 challenge ID 的 HMAC，单次 challenge 最多尝试 5 次。重发冷却为 60 秒，每小时最多请求 5 次。开发环境可把验证码写入本地后端日志，生产环境必须配置受 bearer token 保护的投递 webhook。
 
-[已实现] 发布 offer/wanted、响应 wanted、创建联系人会话、创建或加入群组/频道、创建 Secret Chat、创建成交意向，以及小帮的发布/购买意向/议价工具，都在后端 service/handler 边界检查 verified membership。浏览、收藏和读取历史保持可用。用户更换邮箱后，已认证资格会重置为 `pending`。
+[已实现] 发布 offer/wanted、响应 wanted、创建联系人会话、创建或加入群组/频道、创建 Secret Chat、创建成交意向，以及小昌的发布/购买意向/议价工具，都在后端 service/handler 边界检查 verified membership。浏览、收藏和读取历史保持可用。用户更换邮箱后，已认证资格会重置为 `pending`。
 
 [已实现] `inventory`、`orders`、`hitl_requests`、`wanted_responses`、`chat_conversations`、`chat_spaces`、`chat_secret_sessions` 和 `notifications` 已写入不可空 `campus_id`。游客的公开商品、推荐和用户页面限制在 NCU；登录用户的这些读取跟随设备活动校园。联系、空间成员、Secret Chat、wanted response、成交与 Agent 写工具要求双方拥有同一 Campus 的 verified membership。订单、议价、wanted response 和商品上下文聊天还通过复合外键阻止跨校园资源拼接。
 
@@ -84,7 +84,7 @@ Embedding provider 调用发生在 listing 提交之后。provider 超时、限�
 
 `wanted`：价格是预算上限，成色是最低可接受成色，owner 是需求方。没有品牌偏好时当前客户端可提交“不限”，生产目标应改为显式可选字段而不是把展示词当真实品牌。
 
-Agent 发布当前是低风险即时动作，并在小帮页提供撤销窗口；它仍必须经过与表单相同的审核和校验。Agent、HTTP 和撤销路径已统一经过 `ListingCommandService`。更新、下架、成交意向和议价的 ActionPlan 在提案时保存 `inventory.content_revision`，确认时在锁定资源后比较；HTTP 更新支持 body 的 `expected_content_revision` 或 `If-Match`，冲突不会覆盖新事实。旧客户端省略版本时保留兼容行为。
+Agent 发布当前是低风险即时动作，并在小昌页提供撤销窗口；它仍必须经过与表单相同的审核和校验。Agent、HTTP 和撤销路径已统一经过 `ListingCommandService`。更新、下架、成交意向和议价的 ActionPlan 在提案时保存 `inventory.content_revision`，确认时在锁定资源后比较；HTTP 更新支持 body 的 `expected_content_revision` 或 `If-Match`，冲突不会覆盖新事实。旧客户端省略版本时保留兼容行为。
 
 ### 状态
 
@@ -295,7 +295,7 @@ realtime 的 `active` 只表示这一段会话已经接通，不是全局在线�
 
 ## Agent 请求与确认
 
-当前小帮支持普通 JSON 和 SSE。请求先经过审核和意图路由，需要工具时进入 LLM provider/Agent。
+当前小昌支持普通 JSON 和 SSE。请求先经过审核和意图路由，需要工具时进入 LLM provider/Agent。
 
 [已实现] 当前市场 Agent 动作流：
 
