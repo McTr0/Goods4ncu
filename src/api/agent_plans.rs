@@ -94,7 +94,7 @@ pub async fn confirm_plan(
         }),
         ConfirmOutcome::Expired => Err(ApiError::CodedConflict {
             code: "agent_plan_expired",
-            message: "该操作已过期，请重新向小帮发起".to_string(),
+            message: "该操作已过期，请重新向小昌发起".to_string(),
         }),
         ConfirmOutcome::NotConfirmable(status) => Err(ApiError::CodedConflict {
             code: "agent_plan_not_confirmable",
