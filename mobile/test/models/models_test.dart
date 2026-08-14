@@ -26,28 +26,42 @@ void main() {
       expect(thread.relationshipKey, isNull);
     });
 
-    test('parses only the published peer role token when supplied by a campus thread', () {
-      final thread = ChatThread.fromJson({
-        'peer_user_id': 'user-b',
-        'peer_username': 'Bob',
-        'latest_activity_at': '2026-08-12T10:00:00Z',
-        'persona': {
-          'representation_mode': 'role_character',
-          'style_version': 'v1',
-          'appearance_config': {
-            'palette': 'plum',
-            'silhouette': 'round',
-            'accessory': 'leaf',
-            'outfit': 'campus',
+    test(
+      'parses only the published peer role token when supplied by a campus thread',
+      () {
+        final thread = ChatThread.fromJson({
+          'peer_user_id': 'user-b',
+          'peer_username': 'Bob',
+          'latest_activity_at': '2026-08-12T10:00:00Z',
+          'persona': {
+            'representation_mode': 'role_character',
+            'style_version': 'v1',
+            'appearance_config': {
+              'palette': 'plum',
+              'silhouette': 'round',
+              'accessory': 'leaf',
+              'outfit': 'campus',
+            },
+            'self_descriptions': ['slow_to_warm'],
+            'contact_posture': 'leave_message',
+            'published_at': '2026-08-12T10:00:00Z',
           },
-          'self_descriptions': ['slow_to_warm'],
-          'contact_posture': 'leave_message',
-          'published_at': '2026-08-12T10:00:00Z',
-        },
+        });
+
+        expect(thread.peerPersona?.isPublished, isTrue);
+        expect(thread.peerPersona?.appearance.palette, 'plum');
+      },
+    );
+
+    test('parses approved peer avatar url safely', () {
+      final thread = ChatThread.fromJson({
+        'peer_user_id': 'user-c',
+        'peer_username': 'Charlie',
+        'peer_avatar_url': 'https://media.example.test/avatar.jpg',
+        'latest_activity_at': '2026-08-12T10:00:00Z',
       });
 
-      expect(thread.peerPersona?.isPublished, isTrue);
-      expect(thread.peerPersona?.appearance.palette, 'plum');
+      expect(thread.peerAvatarUrl, 'https://media.example.test/avatar.jpg');
     });
   });
 
@@ -946,21 +960,24 @@ void main() {
       expect(conversation.unreadCount, 0);
     });
 
-    test('parses sender-declared mail expectation without attention fields', () {
-      final conversation = Conversation.fromJson({
-        'id': 'conv-mail',
-        'mode': 'mail',
-        'state': 'open',
-        'initiator_id': 'user-001',
-        'recipient_id': 'user-002',
-        'other_user_id': 'user-001',
-        'other_username': 'alice',
-        'mail_expectation': 'today',
-      });
+    test(
+      'parses sender-declared mail expectation without attention fields',
+      () {
+        final conversation = Conversation.fromJson({
+          'id': 'conv-mail',
+          'mode': 'mail',
+          'state': 'open',
+          'initiator_id': 'user-001',
+          'recipient_id': 'user-002',
+          'other_user_id': 'user-001',
+          'other_username': 'alice',
+          'mail_expectation': 'today',
+        });
 
-      expect(conversation.mailExpectation, MailExpectation.today);
-      expect(conversation.unreadCount, 0);
-    });
+        expect(conversation.mailExpectation, MailExpectation.today);
+        expect(conversation.unreadCount, 0);
+      },
+    );
 
     test(
       'parses connection privacy controls without online presence fields',

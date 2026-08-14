@@ -279,6 +279,115 @@ async fn threads_group_multiple_conversations_by_peer_without_merging_history() 
 }
 
 #[tokio::test]
+async fn threads_project_only_moderation_approved_peer_avatar_url() {
+    with_test_pool(|pool| async move {
+        insert_user(&pool, "user-avatar-a", "alice_avatar").await;
+        insert_user(&pool, "user-avatar-b", "bob_avatar").await;
+        insert_user(&pool, "user-avatar-c", "charlie_avatar").await;
+
+        let campus_a = Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap();
+        let other_campus = Uuid::parse_str("c0000000-0000-0000-0000-000000000099").unwrap();
+
+        // 1. Approved avatar on Alice
+        sqlx::query(
+            "UPDATE users
+             SET avatar_url = 'https://media.example/alice.jpg',
+                 avatar_moderation_status = 'approved'
+             WHERE id = 'user-avatar-a'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // 2. Pending avatar on Bob (unmoderated)
+        sqlx::query(
+            "UPDATE users
+             SET avatar_url = 'https://media.example/bob_unreviewed.jpg',
+                 avatar_moderation_status = 'pending'
+             WHERE id = 'user-avatar-b'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // 3. Rejected avatar on Charlie
+        sqlx::query(
+            "UPDATE users
+             SET avatar_url = 'https://media.example/charlie_rejected.jpg',
+                 avatar_moderation_status = 'rejected'
+             WHERE id = 'user-avatar-c'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let service = ChatConversationService::new(pool.clone());
+        // Conversation between A and B on campus_a
+        let mut conv_ab = mail_input(
+            "user-avatar-a",
+            "user-avatar-b",
+            "交接教材",
+            "请问高数教材还在吗",
+        );
+        conv_ab.campus_id = campus_a;
+        service.create_conversation(conv_ab).await.unwrap();
+
+        // Conversation between A and C on campus_a
+        let mut conv_ac = mail_input(
+            "user-avatar-a",
+            "user-avatar-c",
+            "求购折叠桌",
+            "请问桌子还在吗",
+        );
+        conv_ac.campus_id = campus_a;
+        service.create_conversation(conv_ac).await.unwrap();
+
+        // Bob sees Alice's thread with approved avatar in both scoped and unscoped queries
+        let bob_threads = service
+            .list_threads("user-avatar-b", None, 20)
+            .await
+            .unwrap();
+        assert_eq!(bob_threads.len(), 1);
+        assert_eq!(
+            bob_threads[0].peer_avatar_url.as_deref(),
+            Some("https://media.example/alice.jpg")
+        );
+
+        let bob_campus_threads = service
+            .list_threads_for_campus("user-avatar-b", campus_a, None, 20)
+            .await
+            .unwrap();
+        assert_eq!(bob_campus_threads.len(), 1);
+        assert_eq!(
+            bob_campus_threads[0].peer_avatar_url.as_deref(),
+            Some("https://media.example/alice.jpg")
+        );
+
+        // Querying for other_campus returns 0 threads
+        let bob_other_campus_threads = service
+            .list_threads_for_campus("user-avatar-b", other_campus, None, 20)
+            .await
+            .unwrap();
+        assert!(bob_other_campus_threads.is_empty());
+
+        // Alice sees Bob's thread with None avatar because Bob's avatar is pending
+        // Alice sees Charlie's thread with None avatar because Charlie's avatar is rejected
+        let alice_threads = service
+            .list_threads("user-avatar-a", None, 20)
+            .await
+            .unwrap();
+        assert_eq!(alice_threads.len(), 2);
+        for thread in alice_threads {
+            assert_eq!(
+                thread.peer_avatar_url, None,
+                "peer with pending or rejected avatar must not project avatar_url"
+            );
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn message_reply_reaction_hide_and_report_are_member_scoped() {
     with_test_pool(|pool| async move {
         insert_user(&pool, "user-a", "alice").await;

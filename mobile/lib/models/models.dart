@@ -1094,6 +1094,7 @@ class ChatThread {
     required this.peerUserId,
     required this.peerUsername,
     required this.latestActivityAt,
+    this.peerAvatarUrl,
     this.relationshipKey,
     this.latestPreview,
     this.unreadCount = 0,
@@ -1108,6 +1109,7 @@ class ChatThread {
 
   final String peerUserId;
   final String peerUsername;
+  final String? peerAvatarUrl;
   final DateTime latestActivityAt;
 
   /// Server-provided campus-scoped relationship key. Legacy servers may omit
@@ -1127,6 +1129,7 @@ class ChatThread {
   ChatThread copyWith({int? unreadCount}) => ChatThread(
     peerUserId: peerUserId,
     peerUsername: peerUsername,
+    peerAvatarUrl: peerAvatarUrl,
     latestActivityAt: latestActivityAt,
     relationshipKey: relationshipKey,
     latestPreview: latestPreview,
@@ -1144,6 +1147,7 @@ class ChatThread {
     return ChatThread(
       peerUserId: json['peer_user_id']?.toString() ?? '',
       peerUsername: json['peer_username']?.toString() ?? '',
+      peerAvatarUrl: json['peer_avatar_url']?.toString(),
       latestActivityAt:
           DateTime.tryParse(json['latest_activity_at']?.toString() ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0),
