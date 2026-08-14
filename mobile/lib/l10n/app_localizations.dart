@@ -131,7 +131,7 @@ abstract class AppLocalizations {
   /// No description provided for @appTitle.
   ///
   /// In en, this message translates to:
-  /// **'Campus Marketplace'**
+  /// **'Goods4ncu'**
   String get appTitle;
 
   /// No description provided for @brand.
@@ -989,37 +989,37 @@ abstract class AppLocalizations {
   /// No description provided for @homeColdStartTitle.
   ///
   /// In en, this message translates to:
-  /// **'This place is just starting'**
+  /// **'No listings or requests yet'**
   String get homeColdStartTitle;
 
   /// No description provided for @homeColdStartBody.
   ///
   /// In en, this message translates to:
-  /// **'Nobody has posted yet. Say what you\'re selling or looking for and others will see it — the first person to speak matters most.'**
+  /// **'No items have been posted yet in this campus. You can post an offer or a request.'**
   String get homeColdStartBody;
 
   /// No description provided for @homeColdStartAction.
   ///
   /// In en, this message translates to:
-  /// **'I\'ll go first'**
+  /// **'Post'**
   String get homeColdStartAction;
 
   /// No description provided for @homeVoicesTitle.
   ///
   /// In en, this message translates to:
-  /// **'What people are after'**
+  /// **'Campus Requests'**
   String get homeVoicesTitle;
 
   /// No description provided for @homeVoicesBody.
   ///
   /// In en, this message translates to:
-  /// **'Nothing in the grid yet, but these are what people here are saying. A reply is all it takes to start.'**
+  /// **'Items classmates are looking for.'**
   String get homeVoicesBody;
 
   /// No description provided for @homeFilterEmpty.
   ///
   /// In en, this message translates to:
-  /// **'Nothing matches this filter. Try another, or just say what you want.'**
+  /// **'No items match this filter. Try adjusting or posting a new listing.'**
   String get homeFilterEmpty;
 
   /// No description provided for @notFound.
@@ -1775,19 +1775,19 @@ abstract class AppLocalizations {
   /// No description provided for @intentPageTitle.
   ///
   /// In en, this message translates to:
-  /// **'What I want'**
+  /// **'Offer / Wanted'**
   String get intentPageTitle;
 
   /// No description provided for @intentComposerPrompt.
   ///
   /// In en, this message translates to:
-  /// **'Say it however you like — no form. Selling, looking for something, looking for someone, asking a favour, or planning something.'**
+  /// **'Describe what you are offering or looking for in one sentence; open the full listing form when you need precise fields.'**
   String get intentComposerPrompt;
 
   /// No description provided for @intentComposerHint.
   ///
   /// In en, this message translates to:
-  /// **'e.g. Clearing out my dorm, will take whatever for the mini fridge / Looking for someone to play badminton with'**
+  /// **'e.g. Clearing out my dorm, will take whatever for the mini fridge / Looking for a calculus textbook under ¥30'**
   String get intentComposerHint;
 
   /// No description provided for @intentKindGoodsOffer.
@@ -1949,13 +1949,13 @@ abstract class AppLocalizations {
   /// No description provided for @intentFeedHeader.
   ///
   /// In en, this message translates to:
-  /// **'What people are looking for'**
+  /// **'Offers and wants on campus'**
   String get intentFeedHeader;
 
   /// No description provided for @intentFeedEmpty.
   ///
   /// In en, this message translates to:
-  /// **'Nobody is looking for anything yet. Say something first so others can see it.'**
+  /// **'There are no new offers or wanted posts yet. You can publish the first one.'**
   String get intentFeedEmpty;
 
   /// No description provided for @intentRespondAction.
@@ -2780,101 +2780,59 @@ abstract class AppLocalizations {
   /// **'Not set'**
   String get notSet;
 
-  /// No description provided for @homeHeroEyebrow.
-  ///
-  /// In en, this message translates to:
-  /// **'Goods4ncu Campus Market'**
-  String get homeHeroEyebrow;
-
-  /// No description provided for @homeHeroTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'What are you looking for today?'**
-  String get homeHeroTitle;
-
-  /// No description provided for @homeHeroSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Tell Xiaobang what you need, your budget, or how you plan to use it. You can also keep scrolling through what classmates just listed.'**
-  String get homeHeroSubtitle;
-
   /// No description provided for @homePromptHint.
   ///
   /// In en, this message translates to:
-  /// **'Find textbooks, lightweight laptops, or ask Xiaobang to help sell an item...'**
+  /// **'Search items or requests, or ask Xiaochang'**
   String get homePromptHint;
 
   /// No description provided for @homePromptSubmitTooltip.
   ///
   /// In en, this message translates to:
-  /// **'Ask Xiaobang'**
+  /// **'Ask Xiaochang'**
   String get homePromptSubmitTooltip;
 
-  /// No description provided for @homeSuggestionTitle.
+  /// No description provided for @homeActionFind.
   ///
   /// In en, this message translates to:
-  /// **'Try starting with'**
-  String get homeSuggestionTitle;
+  /// **'Find'**
+  String get homeActionFind;
 
-  /// No description provided for @homeThoughtLaptopLabel.
+  /// No description provided for @homeActionOffer.
   ///
   /// In en, this message translates to:
-  /// **'Find a laptop'**
-  String get homeThoughtLaptopLabel;
+  /// **'Post Offer'**
+  String get homeActionOffer;
 
-  /// No description provided for @homeThoughtLaptopPrompt.
+  /// No description provided for @homeActionWanted.
   ///
   /// In en, this message translates to:
-  /// **'My budget is 3000 yuan. Help me find a lightweight laptop for coding and carrying to class.'**
-  String get homeThoughtLaptopPrompt;
+  /// **'Post Request'**
+  String get homeActionWanted;
 
-  /// No description provided for @homeThoughtPriceLabel.
+  /// No description provided for @homeSectionTitle.
   ///
   /// In en, this message translates to:
-  /// **'Price my item'**
-  String get homeThoughtPriceLabel;
+  /// **'Classmates Buying & Selling'**
+  String get homeSectionTitle;
 
-  /// No description provided for @homeThoughtPricePrompt.
+  /// No description provided for @homeSectionSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'I have an unused item to sell. Ask me a few questions first, then estimate a fair price.'**
-  String get homeThoughtPricePrompt;
+  /// **'Listings and requests from your campus'**
+  String get homeSectionSubtitle;
 
-  /// No description provided for @homeThoughtCopyLabel.
+  /// No description provided for @homeLoadFailed.
   ///
   /// In en, this message translates to:
-  /// **'Write listing copy'**
-  String get homeThoughtCopyLabel;
+  /// **'Could not load right now'**
+  String get homeLoadFailed;
 
-  /// No description provided for @homeThoughtCopyPrompt.
+  /// No description provided for @homeLoadFailedRetry.
   ///
   /// In en, this message translates to:
-  /// **'Help me organize the item details step by step and write an honest, trustworthy listing.'**
-  String get homeThoughtCopyPrompt;
-
-  /// No description provided for @homeThoughtNegotiateLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Negotiate politely'**
-  String get homeThoughtNegotiateLabel;
-
-  /// No description provided for @homeThoughtNegotiatePrompt.
-  ///
-  /// In en, this message translates to:
-  /// **'Help me find worthwhile digital items and start a polite negotiation when the price makes sense.'**
-  String get homeThoughtNegotiatePrompt;
-
-  /// No description provided for @homeRecentTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Recently Listed'**
-  String get homeRecentTitle;
-
-  /// No description provided for @homeRecentSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'See what classmates are selling right now.'**
-  String get homeRecentSubtitle;
+  /// **'Reload'**
+  String get homeLoadFailedRetry;
 
   /// No description provided for @conversationLoadFailedTitle.
   ///
@@ -2897,8 +2855,26 @@ abstract class AppLocalizations {
   /// No description provided for @conversationEmptyAction.
   ///
   /// In en, this message translates to:
-  /// **'See what people are looking for'**
+  /// **'Post offer / wanted'**
   String get conversationEmptyAction;
+
+  /// No description provided for @conversationEmptyAskAssistant.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask Xiaochang (AI assistant)'**
+  String get conversationEmptyAskAssistant;
+
+  /// No description provided for @conversationNextStepsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'What you can do next'**
+  String get conversationNextStepsTitle;
+
+  /// No description provided for @conversationNextStepsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Find another classmate, post an offer or wanted request, or ask Xiaochang where to start.'**
+  String get conversationNextStepsSubtitle;
 
   /// No description provided for @findClassmate.
   ///
@@ -2921,7 +2897,7 @@ abstract class AppLocalizations {
   /// No description provided for @conversationFilterRealtime.
   ///
   /// In en, this message translates to:
-  /// **'Realtime'**
+  /// **'Connections'**
   String get conversationFilterRealtime;
 
   /// No description provided for @conversationFilterMail.
@@ -3069,7 +3045,7 @@ abstract class AppLocalizations {
   /// No description provided for @assistantName.
   ///
   /// In en, this message translates to:
-  /// **'Xiaobang'**
+  /// **'Xiaochang'**
   String get assistantName;
 
   /// No description provided for @assistantSystemBadge.
@@ -3093,7 +3069,7 @@ abstract class AppLocalizations {
   /// No description provided for @assistantHistoryLoadFailed.
   ///
   /// In en, this message translates to:
-  /// **'History could not load. You can still keep asking Xiaobang.'**
+  /// **'History could not load. You can still keep asking Xiaochang.'**
   String get assistantHistoryLoadFailed;
 
   /// No description provided for @assistantTyping.
@@ -3663,7 +3639,7 @@ abstract class AppLocalizations {
   /// No description provided for @conversationSectionTools.
   ///
   /// In en, this message translates to:
-  /// **'Xiaobang'**
+  /// **'Xiaochang'**
   String get conversationSectionTools;
 
   /// No description provided for @conversationCreateGroupSuccess.
@@ -3693,19 +3669,19 @@ abstract class AppLocalizations {
   /// No description provided for @conversationThreadLoading.
   ///
   /// In en, this message translates to:
-  /// **'Loading thread'**
+  /// **'Opening'**
   String get conversationThreadLoading;
 
   /// No description provided for @conversationThreadStats.
   ///
   /// In en, this message translates to:
-  /// **'Realtime {realtime} · Mail {mail} · {count} segments'**
+  /// **'Connections {realtime} · Mail {mail} · {count} segments'**
   String conversationThreadStats(int realtime, int mail, int count);
 
   /// No description provided for @conversationReconnect.
   ///
   /// In en, this message translates to:
-  /// **'Reconnect'**
+  /// **'Contact again'**
   String get conversationReconnect;
 
   /// No description provided for @conversationThreadLoadFailedTitle.
@@ -3747,7 +3723,7 @@ abstract class AppLocalizations {
   /// No description provided for @conversationSegmentOpenHint.
   ///
   /// In en, this message translates to:
-  /// **'Open this segment to view messages, reply, quote context, or handle connection state.'**
+  /// **'After opening, you can reply, quote, or handle the connection.'**
   String get conversationSegmentOpenHint;
 
   /// No description provided for @conversationViewHistory.
@@ -3810,10 +3786,16 @@ abstract class AppLocalizations {
   /// **'Timeline'**
   String get relationshipSpaceTimeline;
 
+  /// No description provided for @relationshipSpaceLastConnection.
+  ///
+  /// In en, this message translates to:
+  /// **'Last connection'**
+  String get relationshipSpaceLastConnection;
+
   /// No description provided for @relationshipSpaceNoEvent.
   ///
   /// In en, this message translates to:
-  /// **'No shared events yet'**
+  /// **'Long press a message to pin, or share items and files to keep them here'**
   String get relationshipSpaceNoEvent;
 
   /// No description provided for @relationshipSpacePin.
@@ -3825,31 +3807,31 @@ abstract class AppLocalizations {
   /// No description provided for @relationshipSpaceUnpin.
   ///
   /// In en, this message translates to:
-  /// **'Remove from shared space'**
+  /// **'Unpin'**
   String get relationshipSpaceUnpin;
 
   /// No description provided for @relationshipSpacePinsCount.
   ///
   /// In en, this message translates to:
-  /// **'{count} pins'**
+  /// **'{count} pinned'**
   String relationshipSpacePinsCount(int count);
 
   /// No description provided for @relationshipSpaceObjectsCount.
   ///
   /// In en, this message translates to:
-  /// **'{count} shared objects'**
+  /// **'{count} shared items'**
   String relationshipSpaceObjectsCount(int count);
 
   /// No description provided for @relationshipSpaceSharedObjectsTitle.
   ///
   /// In en, this message translates to:
-  /// **'Shared objects'**
+  /// **'Shared content'**
   String get relationshipSpaceSharedObjectsTitle;
 
   /// No description provided for @relationshipSpaceSharedObjectsReadOnly.
   ///
   /// In en, this message translates to:
-  /// **'Read-only references; original facts stay authoritative'**
+  /// **'Shared from the original; view it here'**
   String get relationshipSpaceSharedObjectsReadOnly;
 
   /// No description provided for @relationshipSpaceObjectFile.
@@ -3870,10 +3852,112 @@ abstract class AppLocalizations {
   /// **'Reference'**
   String get relationshipSpaceObjectReference;
 
+  /// No description provided for @relationshipSpacePinsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Pinned messages'**
+  String get relationshipSpacePinsTitle;
+
+  /// No description provided for @relationshipSpaceRecentRecords.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent records'**
+  String get relationshipSpaceRecentRecords;
+
+  /// No description provided for @relationshipSpaceNoRecentRecords.
+  ///
+  /// In en, this message translates to:
+  /// **'No time records to revisit yet'**
+  String get relationshipSpaceNoRecentRecords;
+
+  /// No description provided for @relationshipSpaceRecentRecovery.
+  ///
+  /// In en, this message translates to:
+  /// **'Last connection record'**
+  String get relationshipSpaceRecentRecovery;
+
+  /// No description provided for @relationshipSpaceExpandAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Expand shared space'**
+  String get relationshipSpaceExpandAction;
+
+  /// No description provided for @relationshipSpaceCollapseAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Collapse shared space'**
+  String get relationshipSpaceCollapseAction;
+
+  /// No description provided for @relationshipSpaceEventSentMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Sent a message'**
+  String get relationshipSpaceEventSentMessage;
+
+  /// No description provided for @relationshipSpaceEventOpeningMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Sent opening message'**
+  String get relationshipSpaceEventOpeningMessage;
+
+  /// No description provided for @relationshipSpaceEventConnectionStarted.
+  ///
+  /// In en, this message translates to:
+  /// **'Started a connection'**
+  String get relationshipSpaceEventConnectionStarted;
+
+  /// No description provided for @relationshipSpaceEventConnectionEnded.
+  ///
+  /// In en, this message translates to:
+  /// **'Ended a connection'**
+  String get relationshipSpaceEventConnectionEnded;
+
+  /// No description provided for @relationshipSpaceEventConnectionAccepted.
+  ///
+  /// In en, this message translates to:
+  /// **'Accepted connection'**
+  String get relationshipSpaceEventConnectionAccepted;
+
+  /// No description provided for @relationshipSpaceEventConnectionDeclined.
+  ///
+  /// In en, this message translates to:
+  /// **'Declined connection'**
+  String get relationshipSpaceEventConnectionDeclined;
+
+  /// No description provided for @relationshipSpaceEventConversationCreated.
+  ///
+  /// In en, this message translates to:
+  /// **'Conversation started'**
+  String get relationshipSpaceEventConversationCreated;
+
+  /// No description provided for @relationshipSpaceEventPinChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'Pinned messages changed'**
+  String get relationshipSpaceEventPinChanged;
+
+  /// No description provided for @relationshipSpaceEventAcknowledgementChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'Responded to a message'**
+  String get relationshipSpaceEventAcknowledgementChanged;
+
+  /// No description provided for @relationshipSpaceEventSharedObjectChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'Shared content changed'**
+  String get relationshipSpaceEventSharedObjectChanged;
+
+  /// No description provided for @relationshipSpaceEventDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Added a new record'**
+  String get relationshipSpaceEventDefault;
+
   /// No description provided for @conversationRealtimeCount.
   ///
   /// In en, this message translates to:
-  /// **'Realtime {count}'**
+  /// **'Connections {count}'**
   String conversationRealtimeCount(int count);
 
   /// No description provided for @conversationMailCount.
@@ -4281,7 +4365,7 @@ abstract class AppLocalizations {
   /// No description provided for @replyAssistantUnavailable.
   ///
   /// In en, this message translates to:
-  /// **'Xiaobang is not ready yet. You can still type directly.'**
+  /// **'Xiaochang is not ready yet. You can still type directly.'**
   String get replyAssistantUnavailable;
 
   /// No description provided for @closeConversationFailed.
@@ -4365,7 +4449,7 @@ abstract class AppLocalizations {
   /// No description provided for @conversationLoadingState.
   ///
   /// In en, this message translates to:
-  /// **'Loading conversation state'**
+  /// **'Preparing this conversation'**
   String get conversationLoadingState;
 
   /// No description provided for @conversationUnavailable.
@@ -4473,7 +4557,7 @@ abstract class AppLocalizations {
   /// No description provided for @replyAssistantButton.
   ///
   /// In en, this message translates to:
-  /// **'Ask Xiaobang'**
+  /// **'Ask Xiaochang'**
   String get replyAssistantButton;
 
   /// No description provided for @mailFallbackTitle.
@@ -4595,6 +4679,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'History is kept. Reconnecting starts a new conversation.'**
   String get conversationTerminalSubtitle;
+
+  /// No description provided for @relationshipContextScrollHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Swipe up to see more'**
+  String get relationshipContextScrollHint;
 
   /// No description provided for @conversationNaturallyEndedTitle.
   ///

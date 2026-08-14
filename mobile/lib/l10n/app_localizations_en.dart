@@ -25,7 +25,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get allCategories => 'All';
 
   @override
-  String get appTitle => 'Campus Marketplace';
+  String get appTitle => 'Goods4ncu';
 
   @override
   String get brand => 'Brand';
@@ -480,25 +480,24 @@ class AppLocalizationsEn extends AppLocalizations {
   String get noProducts => 'No products available';
 
   @override
-  String get homeColdStartTitle => 'This place is just starting';
+  String get homeColdStartTitle => 'No listings or requests yet';
 
   @override
   String get homeColdStartBody =>
-      'Nobody has posted yet. Say what you\'re selling or looking for and others will see it — the first person to speak matters most.';
+      'No items have been posted yet in this campus. You can post an offer or a request.';
 
   @override
-  String get homeColdStartAction => 'I\'ll go first';
+  String get homeColdStartAction => 'Post';
 
   @override
-  String get homeVoicesTitle => 'What people are after';
+  String get homeVoicesTitle => 'Campus Requests';
 
   @override
-  String get homeVoicesBody =>
-      'Nothing in the grid yet, but these are what people here are saying. A reply is all it takes to start.';
+  String get homeVoicesBody => 'Items classmates are looking for.';
 
   @override
   String get homeFilterEmpty =>
-      'Nothing matches this filter. Try another, or just say what you want.';
+      'No items match this filter. Try adjusting or posting a new listing.';
 
   @override
   String get notFound => 'Not found';
@@ -900,15 +899,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get undoFailed => 'Undo failed, please try again';
 
   @override
-  String get intentPageTitle => 'What I want';
+  String get intentPageTitle => 'Offer / Wanted';
 
   @override
   String get intentComposerPrompt =>
-      'Say it however you like — no form. Selling, looking for something, looking for someone, asking a favour, or planning something.';
+      'Describe what you are offering or looking for in one sentence; open the full listing form when you need precise fields.';
 
   @override
   String get intentComposerHint =>
-      'e.g. Clearing out my dorm, will take whatever for the mini fridge / Looking for someone to play badminton with';
+      'e.g. Clearing out my dorm, will take whatever for the mini fridge / Looking for a calculus textbook under ¥30';
 
   @override
   String get intentKindGoodsOffer => 'Selling';
@@ -990,11 +989,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get intentWithdrawn => 'Withdrawn';
 
   @override
-  String get intentFeedHeader => 'What people are looking for';
+  String get intentFeedHeader => 'Offers and wants on campus';
 
   @override
   String get intentFeedEmpty =>
-      'Nobody is looking for anything yet. Say something first so others can see it.';
+      'There are no new offers or wanted posts yet. You can publish the first one.';
 
   @override
   String get intentRespondAction => 'I can help';
@@ -1449,58 +1448,31 @@ class AppLocalizationsEn extends AppLocalizations {
   String get notSet => 'Not set';
 
   @override
-  String get homeHeroEyebrow => 'Goods4ncu Campus Market';
+  String get homePromptHint => 'Search items or requests, or ask Xiaochang';
 
   @override
-  String get homeHeroTitle => 'What are you looking for today?';
+  String get homePromptSubmitTooltip => 'Ask Xiaochang';
 
   @override
-  String get homeHeroSubtitle =>
-      'Tell Xiaobang what you need, your budget, or how you plan to use it. You can also keep scrolling through what classmates just listed.';
+  String get homeActionFind => 'Find';
 
   @override
-  String get homePromptHint =>
-      'Find textbooks, lightweight laptops, or ask Xiaobang to help sell an item...';
+  String get homeActionOffer => 'Post Offer';
 
   @override
-  String get homePromptSubmitTooltip => 'Ask Xiaobang';
+  String get homeActionWanted => 'Post Request';
 
   @override
-  String get homeSuggestionTitle => 'Try starting with';
+  String get homeSectionTitle => 'Classmates Buying & Selling';
 
   @override
-  String get homeThoughtLaptopLabel => 'Find a laptop';
+  String get homeSectionSubtitle => 'Listings and requests from your campus';
 
   @override
-  String get homeThoughtLaptopPrompt =>
-      'My budget is 3000 yuan. Help me find a lightweight laptop for coding and carrying to class.';
+  String get homeLoadFailed => 'Could not load right now';
 
   @override
-  String get homeThoughtPriceLabel => 'Price my item';
-
-  @override
-  String get homeThoughtPricePrompt =>
-      'I have an unused item to sell. Ask me a few questions first, then estimate a fair price.';
-
-  @override
-  String get homeThoughtCopyLabel => 'Write listing copy';
-
-  @override
-  String get homeThoughtCopyPrompt =>
-      'Help me organize the item details step by step and write an honest, trustworthy listing.';
-
-  @override
-  String get homeThoughtNegotiateLabel => 'Negotiate politely';
-
-  @override
-  String get homeThoughtNegotiatePrompt =>
-      'Help me find worthwhile digital items and start a polite negotiation when the price makes sense.';
-
-  @override
-  String get homeRecentTitle => 'Recently Listed';
-
-  @override
-  String get homeRecentSubtitle => 'See what classmates are selling right now.';
+  String get homeLoadFailedRetry => 'Reload';
 
   @override
   String get conversationLoadFailedTitle => 'Messages could not load';
@@ -1513,7 +1485,17 @@ class AppLocalizationsEn extends AppLocalizations {
       'Answer someone in \"what people are looking for\" and you\'ll have your first conversation.';
 
   @override
-  String get conversationEmptyAction => 'See what people are looking for';
+  String get conversationEmptyAction => 'Post offer / wanted';
+
+  @override
+  String get conversationEmptyAskAssistant => 'Ask Xiaochang (AI assistant)';
+
+  @override
+  String get conversationNextStepsTitle => 'What you can do next';
+
+  @override
+  String get conversationNextStepsSubtitle =>
+      'Find another classmate, post an offer or wanted request, or ask Xiaochang where to start.';
 
   @override
   String get findClassmate => 'Find classmate';
@@ -1527,7 +1509,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get conversationFilterAll => 'All';
 
   @override
-  String get conversationFilterRealtime => 'Realtime';
+  String get conversationFilterRealtime => 'Connections';
 
   @override
   String get conversationFilterMail => 'Mail';
@@ -1616,7 +1598,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get assistantName => 'Xiaobang';
+  String get assistantName => 'Xiaochang';
 
   @override
   String get assistantSystemBadge => 'AI Assistant';
@@ -1631,7 +1613,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get assistantHistoryLoadFailed =>
-      'History could not load. You can still keep asking Xiaobang.';
+      'History could not load. You can still keep asking Xiaochang.';
 
   @override
   String get assistantTyping => 'AI is typing...';
@@ -1947,7 +1929,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get conversationSectionSpaces => 'Campus groups and channels';
 
   @override
-  String get conversationSectionTools => 'Xiaobang';
+  String get conversationSectionTools => 'Xiaochang';
 
   @override
   String get conversationCreateGroupSuccess =>
@@ -1966,15 +1948,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get conversationPeerFallback => 'Classmate';
 
   @override
-  String get conversationThreadLoading => 'Loading thread';
+  String get conversationThreadLoading => 'Opening';
 
   @override
   String conversationThreadStats(int realtime, int mail, int count) {
-    return 'Realtime $realtime · Mail $mail · $count segments';
+    return 'Connections $realtime · Mail $mail · $count segments';
   }
 
   @override
-  String get conversationReconnect => 'Reconnect';
+  String get conversationReconnect => 'Contact again';
 
   @override
   String get conversationThreadLoadFailedTitle =>
@@ -2000,7 +1982,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get conversationSegmentOpenHint =>
-      'Open this segment to view messages, reply, quote context, or handle connection state.';
+      'After opening, you can reply, quote, or handle the connection.';
 
   @override
   String get conversationViewHistory => 'View history';
@@ -2036,30 +2018,34 @@ class AppLocalizationsEn extends AppLocalizations {
   String get relationshipSpaceTimeline => 'Timeline';
 
   @override
-  String get relationshipSpaceNoEvent => 'No shared events yet';
+  String get relationshipSpaceLastConnection => 'Last connection';
+
+  @override
+  String get relationshipSpaceNoEvent =>
+      'Long press a message to pin, or share items and files to keep them here';
 
   @override
   String get relationshipSpacePin => 'Pin to shared space';
 
   @override
-  String get relationshipSpaceUnpin => 'Remove from shared space';
+  String get relationshipSpaceUnpin => 'Unpin';
 
   @override
   String relationshipSpacePinsCount(int count) {
-    return '$count pins';
+    return '$count pinned';
   }
 
   @override
   String relationshipSpaceObjectsCount(int count) {
-    return '$count shared objects';
+    return '$count shared items';
   }
 
   @override
-  String get relationshipSpaceSharedObjectsTitle => 'Shared objects';
+  String get relationshipSpaceSharedObjectsTitle => 'Shared content';
 
   @override
   String get relationshipSpaceSharedObjectsReadOnly =>
-      'Read-only references; original facts stay authoritative';
+      'Shared from the original; view it here';
 
   @override
   String get relationshipSpaceObjectFile => 'File';
@@ -2071,8 +2057,63 @@ class AppLocalizationsEn extends AppLocalizations {
   String get relationshipSpaceObjectReference => 'Reference';
 
   @override
+  String get relationshipSpacePinsTitle => 'Pinned messages';
+
+  @override
+  String get relationshipSpaceRecentRecords => 'Recent records';
+
+  @override
+  String get relationshipSpaceNoRecentRecords =>
+      'No time records to revisit yet';
+
+  @override
+  String get relationshipSpaceRecentRecovery => 'Last connection record';
+
+  @override
+  String get relationshipSpaceExpandAction => 'Expand shared space';
+
+  @override
+  String get relationshipSpaceCollapseAction => 'Collapse shared space';
+
+  @override
+  String get relationshipSpaceEventSentMessage => 'Sent a message';
+
+  @override
+  String get relationshipSpaceEventOpeningMessage => 'Sent opening message';
+
+  @override
+  String get relationshipSpaceEventConnectionStarted => 'Started a connection';
+
+  @override
+  String get relationshipSpaceEventConnectionEnded => 'Ended a connection';
+
+  @override
+  String get relationshipSpaceEventConnectionAccepted => 'Accepted connection';
+
+  @override
+  String get relationshipSpaceEventConnectionDeclined => 'Declined connection';
+
+  @override
+  String get relationshipSpaceEventConversationCreated =>
+      'Conversation started';
+
+  @override
+  String get relationshipSpaceEventPinChanged => 'Pinned messages changed';
+
+  @override
+  String get relationshipSpaceEventAcknowledgementChanged =>
+      'Responded to a message';
+
+  @override
+  String get relationshipSpaceEventSharedObjectChanged =>
+      'Shared content changed';
+
+  @override
+  String get relationshipSpaceEventDefault => 'Added a new record';
+
+  @override
   String conversationRealtimeCount(int count) {
-    return 'Realtime $count';
+    return 'Connections $count';
   }
 
   @override
@@ -2311,7 +2352,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get replyAssistantUnavailable =>
-      'Xiaobang is not ready yet. You can still type directly.';
+      'Xiaochang is not ready yet. You can still type directly.';
 
   @override
   String closeConversationFailed(String error) {
@@ -2366,7 +2407,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get conversationFallbackTitle => 'Conversation';
 
   @override
-  String get conversationLoadingState => 'Loading conversation state';
+  String get conversationLoadingState => 'Preparing this conversation';
 
   @override
   String get conversationUnavailable =>
@@ -2424,7 +2465,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get closeConversationAction => 'End this conversation';
 
   @override
-  String get replyAssistantButton => 'Ask Xiaobang';
+  String get replyAssistantButton => 'Ask Xiaochang';
 
   @override
   String get mailFallbackTitle => 'Mail';
@@ -2497,6 +2538,9 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get conversationTerminalSubtitle =>
       'History is kept. Reconnecting starts a new conversation.';
+
+  @override
+  String get relationshipContextScrollHint => 'Swipe up to see more';
 
   @override
   String get conversationNaturallyEndedTitle =>

@@ -21,6 +21,7 @@ class ListingService extends BaseService {
     double? maxPriceCny,
     String sort = 'newest',
     String direction = 'offer',
+    bool allowAnonymousFallback = true,
   }) async {
     final headers = await authHeaders();
     final queryParams = <String, String>{
@@ -45,7 +46,9 @@ class ListingService extends BaseService {
       '$baseUrl/api/listings',
     ).replace(queryParameters: queryParams);
     var response = await get(uri, headers);
-    if (response.statusCode == 401 && headers.containsKey('Authorization')) {
+    if (allowAnonymousFallback &&
+        response.statusCode == 401 &&
+        headers.containsKey('Authorization')) {
       response = await get(uri, const {'Accept': 'application/json'});
     }
     return handleResponse(response, (data) => ListingsResponse.fromJson(data));

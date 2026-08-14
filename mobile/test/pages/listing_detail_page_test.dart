@@ -404,7 +404,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('联系卖家'), findsNothing);
-      expect(find.text('让小帮定价'), findsNothing);
+      expect(find.text('让小昌定价'), findsNothing);
       expect(find.text('发起成交意向'), findsNothing);
     },
   );

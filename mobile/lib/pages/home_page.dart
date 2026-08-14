@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../services/intent_service.dart';
+import '../services/listing_service.dart';
 import '../services/recommendation_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
@@ -14,12 +15,14 @@ import '../services/feed_feedback_service.dart';
 
 class HomePage extends StatefulWidget {
   final RecommendationService? recommendationService;
+  final ListingService? listingService;
   final IntentService? intentService;
   final FeedFeedbackService? feedbackService;
 
   const HomePage({
     super.key,
     this.recommendationService,
+    this.listingService,
     this.intentService,
     this.feedbackService,
   });
@@ -30,10 +33,11 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   late final RecommendationService _recommendationService;
+  ListingService? _listingService;
   late final IntentService _intentService;
   late final FeedFeedbackService _feedbackService;
-  final _agentPromptController = TextEditingController();
-  final _agentPromptFocus = FocusNode();
+  final _promptController = TextEditingController();
+  final _promptFocus = FocusNode();
 
   // Recommendation state
   List<Listing> _recommendedListings = [];
@@ -41,6 +45,7 @@ class _HomePageState extends State<HomePage> {
   bool _feedHasMore = true;
   bool _feedLoading = false;
   String _directionFilter = 'all';
+  String? _loadError;
 
   /// What people have actually said, loaded only when the grid comes back
   /// empty. The publish tab opens the intent composer, so most of what gets
@@ -52,23 +57,47 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _recommendationService =
         widget.recommendationService ?? context.read<RecommendationService>();
+    _listingService = _resolveListingService();
     _intentService = widget.intentService ?? context.read<IntentService>();
     _feedbackService =
         widget.feedbackService ?? context.read<FeedFeedbackService>();
     _loadRecommendations();
   }
 
+  ListingService? _resolveListingService() {
+    if (widget.listingService != null) return widget.listingService;
+    try {
+      return context.read<ListingService>();
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _loadRecommendations({bool reset = true}) async {
     if (reset) {
-      setState(() => _recommendationLoading = true);
+      setState(() {
+        _recommendationLoading = true;
+        _loadError = null;
+      });
     }
     try {
-      final recommendations = await _recommendationService
-          .getRecommendationFeed(
-            limit: 20,
-            offset: reset ? 0 : _recommendedListings.length,
-            direction: _directionFilter,
-          );
+      var recommendations = await _recommendationService.getRecommendationFeed(
+        limit: 20,
+        offset: reset ? 0 : _recommendedListings.length,
+        direction: _directionFilter,
+      );
+
+      // Deterministic campus fallback if recommendation feed is empty
+      if (recommendations.isEmpty && reset && _listingService != null) {
+        final fallbackResponse = await _listingService!.getListings(
+          limit: 20,
+          offset: 0,
+          direction: _directionFilter,
+          allowAnonymousFallback: false,
+        );
+        recommendations = fallbackResponse.items;
+      }
+
       if (mounted) {
         setState(() {
           if (reset) {
@@ -79,6 +108,7 @@ class _HomePageState extends State<HomePage> {
           _feedHasMore = recommendations.length == 20;
           _recommendationLoading = false;
           _feedLoading = false;
+          _loadError = null;
         });
       }
       if (_recommendedListings.isEmpty) await _loadVoices();
@@ -87,20 +117,28 @@ class _HomePageState extends State<HomePage> {
       debugPrintStack(stackTrace: stackTrace);
       if (mounted) {
         setState(() {
-          _recommendedListings = [];
           _recommendationLoading = false;
           _feedLoading = false;
+          _loadError = error.toString();
         });
       }
     }
   }
 
-  /// A failure here costs the section, not the screen: the cold-start card is
-  /// still a reasonable thing to land on.
   Future<void> _loadVoices() async {
     try {
       final voices = await _intentService.campusFeed(limit: 8);
-      if (mounted) setState(() => _voices = voices);
+      if (mounted) {
+        setState(
+          () => _voices = voices
+              .where(
+                (intent) =>
+                    intent.kind == IntentKind.goodsOffer ||
+                    intent.kind == IntentKind.goodsSeek,
+              )
+              .toList(),
+        );
+      }
     } catch (_) {}
   }
 
@@ -125,19 +163,46 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
-    _agentPromptController.dispose();
-    _agentPromptFocus.dispose();
+    _promptController.dispose();
+    _promptFocus.dispose();
     super.dispose();
   }
 
   void _openAgent([String? suggestedPrompt]) {
-    final prompt = (suggestedPrompt ?? _agentPromptController.text).trim();
+    final prompt = (suggestedPrompt ?? _promptController.text).trim();
     if (prompt.isEmpty) {
-      _agentPromptFocus.requestFocus();
+      _promptFocus.requestFocus();
       return;
     }
     context.go(
       Uri(path: '/chat', queryParameters: {'prompt': prompt}).toString(),
+    );
+  }
+
+  Widget _buildDirectionSection() {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
+            ? AppTheme.sp24
+            : AppTheme.sp16,
+        AppTheme.sp14,
+        MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
+            ? AppTheme.sp24
+            : AppTheme.sp16,
+        AppTheme.sp8,
+      ),
+      child: _SectionTitle(
+        selectedDirection: _directionFilter,
+        onDirectionChanged: (direction) {
+          if (_directionFilter == direction) return;
+          setState(() {
+            _directionFilter = direction;
+            _recommendedListings = [];
+            _feedHasMore = true;
+          });
+          _loadRecommendations(reset: true);
+        },
+      ),
     );
   }
 
@@ -166,7 +231,7 @@ class _HomePageState extends State<HomePage> {
                     AppTheme.surfaceDark,
                   ]
                 : [AppTheme.surface, const Color(0xFFF4FBF7), scheme.surface],
-            stops: [0, 0.42, 1],
+            stops: const [0, 0.42, 1],
           ),
         ),
         child: ResponsiveContent(maxWidth: 1320, child: _buildContent(l)),
@@ -179,10 +244,13 @@ class _HomePageState extends State<HomePage> {
       return CustomScrollView(
         slivers: [
           SliverToBoxAdapter(
-            child: _HomeHero(
-              promptController: _agentPromptController,
-              promptFocus: _agentPromptFocus,
+            child: _HomeTaskHeader(
+              promptController: _promptController,
+              promptFocus: _promptFocus,
               onSubmit: _openAgent,
+              onFind: () => _promptFocus.requestFocus(),
+              onOffer: () => context.push('/create?kind=offer'),
+              onWanted: () => context.push('/create?kind=wanted'),
             ),
           ),
           const SliverFillRemaining(
@@ -193,25 +261,48 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    if (_recommendedListings.isEmpty) {
+    if (_loadError != null && _recommendedListings.isEmpty) {
       return RefreshIndicator(
-        onRefresh: () async {
-          await _loadRecommendations(reset: true);
-        },
+        onRefresh: () async => _loadRecommendations(reset: true),
         child: CustomScrollView(
           slivers: [
             SliverToBoxAdapter(
-              child: _HomeHero(
-                promptController: _agentPromptController,
-                promptFocus: _agentPromptFocus,
+              child: _HomeTaskHeader(
+                promptController: _promptController,
+                promptFocus: _promptFocus,
                 onSubmit: _openAgent,
+                onFind: () => _promptFocus.requestFocus(),
+                onOffer: () => context.push('/create?kind=offer'),
+                onWanted: () => context.push('/create?kind=wanted'),
               ),
             ),
-            // An empty grid with people talking is not an empty campus, and
-            // saying "还没有人发东西" to a community that has been posting all
-            // week is the most discouraging thing this screen could do. Most
-            // of what gets said never becomes a listing, because the publish
-            // tab is the intent composer.
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: _HomeErrorState(
+                onRetry: () => _loadRecommendations(reset: true),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_recommendedListings.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: () async => _loadRecommendations(reset: true),
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: _HomeTaskHeader(
+                promptController: _promptController,
+                promptFocus: _promptFocus,
+                onSubmit: _openAgent,
+                onFind: () => _promptFocus.requestFocus(),
+                onOffer: () => context.push('/create?kind=offer'),
+                onWanted: () => context.push('/create?kind=wanted'),
+              ),
+            ),
+            SliverToBoxAdapter(child: _buildDirectionSection()),
             if (_voices.isNotEmpty && _directionFilter == 'all')
               SliverToBoxAdapter(
                 child: _WhatPeopleWant(
@@ -224,13 +315,10 @@ class _HomePageState extends State<HomePage> {
             else
               SliverFillRemaining(
                 hasScrollBody: false,
-                // Two different situations that used to share one dead-end
-                // message. On day one the place really is empty, and that is
-                // normal rather than a failure — saying "暂无商品" to the first
-                // thirty students frames a new community as a broken shop.
                 child: _HomeEmptyState(
                   isColdStart: _directionFilter == 'all',
-                  onSaySomething: () => context.push('/create'),
+                  onOffer: () => context.push('/create?kind=offer'),
+                  onWanted: () => context.push('/create?kind=wanted'),
                 ),
               ),
           ],
@@ -239,9 +327,7 @@ class _HomePageState extends State<HomePage> {
     }
 
     return RefreshIndicator(
-      onRefresh: () async {
-        await _loadRecommendations(reset: true);
-      },
+      onRefresh: () async => _loadRecommendations(reset: true),
       child: NotificationListener<ScrollNotification>(
         onNotification: (notification) {
           if (notification is ScrollEndNotification &&
@@ -256,38 +342,16 @@ class _HomePageState extends State<HomePage> {
         child: CustomScrollView(
           slivers: [
             SliverToBoxAdapter(
-              child: _HomeHero(
-                promptController: _agentPromptController,
-                promptFocus: _agentPromptFocus,
+              child: _HomeTaskHeader(
+                promptController: _promptController,
+                promptFocus: _promptFocus,
                 onSubmit: _openAgent,
+                onFind: () => _promptFocus.requestFocus(),
+                onOffer: () => context.push('/create?kind=offer'),
+                onWanted: () => context.push('/create?kind=wanted'),
               ),
             ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
-                      ? AppTheme.sp24
-                      : AppTheme.sp16,
-                  AppTheme.sp20,
-                  MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
-                      ? AppTheme.sp24
-                      : AppTheme.sp16,
-                  AppTheme.sp8,
-                ),
-                child: _SectionTitle(
-                  selectedDirection: _directionFilter,
-                  onDirectionChanged: (direction) {
-                    if (_directionFilter == direction) return;
-                    setState(() {
-                      _directionFilter = direction;
-                      _recommendedListings = [];
-                      _feedHasMore = true;
-                    });
-                    _loadRecommendations(reset: true);
-                  },
-                ),
-              ),
-            ),
+            SliverToBoxAdapter(child: _buildDirectionSection()),
             SliverPadding(
               padding: EdgeInsets.fromLTRB(
                 MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
@@ -305,15 +369,12 @@ class _HomePageState extends State<HomePage> {
                   final textScale = MediaQuery.textScalerOf(
                     context,
                   ).scale(1).clamp(1.0, 2.0);
-                  final baseAspectRatio = desktop ? 0.76 : 0.66;
+                  final baseAspectRatio = desktop ? 0.76 : 0.60;
                   return SliverGrid(
                     gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
                       maxCrossAxisExtent: desktop ? 300 : 320,
-                      // Let accessibility text grow the card as well as the
-                      // glyphs. Otherwise the controls are separated correctly
-                      // but the title/price body becomes clipped at 200%.
                       childAspectRatio:
-                          baseAspectRatio / (1 + (textScale - 1) * 0.35),
+                          baseAspectRatio / (1 + (textScale - 1) * 0.75),
                       crossAxisSpacing: desktop ? 18 : 14,
                       mainAxisSpacing: desktop ? 18 : 14,
                     ),
@@ -353,23 +414,34 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-class _HomeHero extends StatelessWidget {
+/// Compact, task-first header containing:
+/// 1. Compact search bar & optional Xiaobang assistant entry
+/// 2. Consistent action button group (找东西 / 发布闲置 / 发布求购)
+class _HomeTaskHeader extends StatelessWidget {
   final TextEditingController promptController;
   final FocusNode promptFocus;
   final ValueChanged<String> onSubmit;
+  final VoidCallback onFind;
+  final VoidCallback onOffer;
+  final VoidCallback onWanted;
 
-  const _HomeHero({
+  const _HomeTaskHeader({
     required this.promptController,
     required this.promptFocus,
     required this.onSubmit,
+    required this.onFind,
+    required this.onOffer,
+    required this.onWanted,
   });
 
   @override
   Widget build(BuildContext context) {
-    final desktop = MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop;
+    final l = AppLocalizations.of(context)!;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final dark = theme.brightness == Brightness.dark;
+    final desktop = MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop;
+
     return Padding(
       padding: EdgeInsets.fromLTRB(
         desktop ? AppTheme.sp24 : AppTheme.sp16,
@@ -377,344 +449,194 @@ class _HomeHero extends StatelessWidget {
         desktop ? AppTheme.sp24 : AppTheme.sp16,
         AppTheme.sp4,
       ),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppTheme.radius2xl),
-          color: scheme.surface.withValues(alpha: dark ? 0.88 : 0.92),
-          border: Border.all(
-            color: scheme.outlineVariant.withValues(alpha: dark ? 0.64 : 0.78),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: dark
-                  ? Colors.black.withValues(alpha: 0.26)
-                  : const Color(0x0A0F172A),
-              blurRadius: 32,
-              offset: Offset(0, 16),
-            ),
-          ],
-        ),
-        child: Padding(
-          padding: EdgeInsets.all(desktop ? AppTheme.sp24 : AppTheme.sp20),
-          child: _AgentIntro(
-            promptController: promptController,
-            promptFocus: promptFocus,
-            onSubmit: onSubmit,
-            desktop: desktop,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AgentIntro extends StatelessWidget {
-  final TextEditingController promptController;
-  final FocusNode promptFocus;
-  final ValueChanged<String> onSubmit;
-  final bool desktop;
-
-  const _AgentIntro({
-    required this.promptController,
-    required this.promptFocus,
-    required this.onSubmit,
-    this.desktop = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-            color: scheme.primaryContainer.withValues(alpha: 0.55),
-            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-            border: Border.all(color: scheme.primary.withValues(alpha: 0.18)),
-          ),
-          child: Text(
-            l.homeHeroEyebrow,
-            style: TextStyle(
-              color: scheme.onPrimaryContainer,
-              fontSize: 11,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 0.8,
-            ),
-          ),
-        ),
-        const SizedBox(height: AppTheme.sp14),
-        Text(
-          l.homeHeroTitle,
-          style: TextStyle(
-            color: scheme.onSurface,
-            fontSize: desktop ? 36 : 32,
-            height: 1.05,
-            fontWeight: FontWeight.w900,
-            letterSpacing: desktop ? -1.1 : -0.9,
-          ),
-        ),
-        const SizedBox(height: 10),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 620),
-          child: Text(
-            l.homeHeroSubtitle,
-            style: TextStyle(
-              color: scheme.onSurfaceVariant,
-              fontSize: 15,
-              height: 1.55,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        const SizedBox(height: AppTheme.sp20),
-        _AgentPromptBox(
-          controller: promptController,
-          focusNode: promptFocus,
-          desktop: desktop,
-          onSubmit: onSubmit,
-        ),
-        const SizedBox(height: AppTheme.sp12),
-        _SuggestionRail(onSubmit: onSubmit, desktop: desktop),
-      ],
-    );
-  }
-}
-
-class _AgentPromptBox extends StatelessWidget {
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final bool desktop;
-  final ValueChanged<String> onSubmit;
-
-  const _AgentPromptBox({
-    required this.controller,
-    required this.focusNode,
-    required this.desktop,
-    required this.onSubmit,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final dark = theme.brightness == Brightness.dark;
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 620),
-      padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(
-          alpha: dark ? 0.6 : 0.75,
-        ),
-        borderRadius: BorderRadius.circular(AppTheme.radiusXl),
-        border: Border.all(color: scheme.outlineVariant),
-        boxShadow: [
-          BoxShadow(
-            color: dark
-                ? Colors.black.withValues(alpha: 0.18)
-                : const Color(0x080F172A),
-            blurRadius: 18,
-            offset: Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 1. Compact Search & Assistant Input Bar
           Container(
-            width: 46,
-            height: 46,
+            constraints: const BoxConstraints(minHeight: 48),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
             decoration: BoxDecoration(
-              color: scheme.primaryContainer,
-              borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-            ),
-            child: Icon(Icons.search_rounded, color: scheme.onPrimaryContainer),
-          ),
-          const SizedBox(width: AppTheme.sp12),
-          Expanded(
-            child: TextField(
-              key: const ValueKey('home-agent-prompt'),
-              controller: controller,
-              focusNode: focusNode,
-              minLines: 1,
-              maxLines: desktop ? 1 : 2,
-              textInputAction: TextInputAction.send,
-              onSubmitted: onSubmit,
-              style: TextStyle(
-                color: scheme.onSurface,
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
+              color: scheme.surfaceContainerHighest.withValues(
+                alpha: dark ? 0.6 : 0.8,
               ),
-              decoration: InputDecoration(
-                hintText: l.homePromptHint,
-                hintStyle: TextStyle(
-                  color: scheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w500,
-                ),
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                filled: false,
-                contentPadding: EdgeInsets.symmetric(vertical: 12),
-              ),
+              borderRadius: BorderRadius.circular(AppTheme.radiusXl),
+              border: Border.all(color: scheme.outlineVariant),
             ),
-          ),
-          const SizedBox(width: AppTheme.sp8),
-          IconButton.filled(
-            tooltip: l.homePromptSubmitTooltip,
-            onPressed: () => onSubmit(controller.text),
-            icon: const Icon(Icons.arrow_forward_rounded),
-            style: IconButton.styleFrom(
-              backgroundColor: scheme.primary,
-              foregroundColor: scheme.onPrimary,
-              minimumSize: const Size(46, 46),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SuggestionRail extends StatelessWidget {
-  final ValueChanged<String> onSubmit;
-  final bool desktop;
-
-  const _SuggestionRail({required this.onSubmit, required this.desktop});
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
-    final scheme = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          l.homeSuggestionTitle,
-          style: TextStyle(
-            color: scheme.onSurfaceVariant.withValues(alpha: 0.84),
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: AppTheme.sp8),
-        Wrap(
-          spacing: AppTheme.sp8,
-          runSpacing: AppTheme.sp8,
-          children: _agentThoughts(l)
-              .map(
-                (thought) => _ThoughtBubble(
-                  thought: thought,
-                  compact: !desktop,
-                  onTap: () => onSubmit(thought.prompt),
-                ),
-              )
-              .toList(),
-        ),
-      ],
-    );
-  }
-}
-
-class _AgentThought {
-  final IconData icon;
-  final String label;
-  final String prompt;
-
-  const _AgentThought({
-    required this.icon,
-    required this.label,
-    required this.prompt,
-  });
-}
-
-List<_AgentThought> _agentThoughts(AppLocalizations l) => [
-  _AgentThought(
-    icon: Icons.laptop_mac_rounded,
-    label: l.homeThoughtLaptopLabel,
-    prompt: l.homeThoughtLaptopPrompt,
-  ),
-  _AgentThought(
-    icon: Icons.auto_graph_rounded,
-    label: l.homeThoughtPriceLabel,
-    prompt: l.homeThoughtPricePrompt,
-  ),
-  _AgentThought(
-    icon: Icons.edit_note_rounded,
-    label: l.homeThoughtCopyLabel,
-    prompt: l.homeThoughtCopyPrompt,
-  ),
-  _AgentThought(
-    icon: Icons.handshake_outlined,
-    label: l.homeThoughtNegotiateLabel,
-    prompt: l.homeThoughtNegotiatePrompt,
-  ),
-];
-
-class _ThoughtBubble extends StatelessWidget {
-  final _AgentThought thought;
-  final VoidCallback onTap;
-  final bool compact;
-
-  const _ThoughtBubble({
-    required this.thought,
-    required this.onTap,
-    this.compact = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final dark = theme.brightness == Brightness.dark;
-    return Material(
-      color: compact
-          ? scheme.surfaceContainerHighest.withValues(alpha: dark ? 0.55 : 0.7)
-          : scheme.secondaryContainer.withValues(alpha: dark ? 0.32 : 0.5),
-      borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-      child: InkWell(
-        onTap: onTap,
-        mouseCursor: SystemMouseCursors.click,
-        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        child: Container(
-          padding: EdgeInsets.symmetric(
-            horizontal: compact ? AppTheme.sp12 : AppTheme.sp14,
-            vertical: compact ? AppTheme.sp8 : AppTheme.sp12,
-          ),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-            border: Border.all(
-              color: scheme.outlineVariant.withValues(alpha: 0.88),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                thought.icon,
-                size: compact ? 16 : 18,
-                color: scheme.primary,
-              ),
-              const SizedBox(width: AppTheme.sp8),
-              Flexible(
-                child: Text(
-                  thought.label,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: scheme.onSurface,
-                    fontSize: compact ? 12 : 13,
-                    height: 1.3,
-                    fontWeight: FontWeight.w800,
+            child: Row(
+              children: [
+                const SizedBox(width: AppTheme.sp8),
+                Icon(Icons.search_rounded, color: scheme.primary, size: 20),
+                const SizedBox(width: AppTheme.sp8),
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey('home-agent-prompt'),
+                    controller: promptController,
+                    focusNode: promptFocus,
+                    maxLines: 1,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: onSubmit,
+                    style: TextStyle(
+                      color: scheme.onSurface,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: l.homePromptHint,
+                      hintStyle: TextStyle(
+                        color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                        fontWeight: FontWeight.w500,
+                        fontSize: 13,
+                      ),
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      isDense: true,
+                      filled: false,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(width: AppTheme.sp4),
+                IconButton.filled(
+                  tooltip: l.homePromptSubmitTooltip,
+                  onPressed: () => onSubmit(promptController.text),
+                  icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+                  style: IconButton.styleFrom(
+                    backgroundColor: scheme.primary,
+                    foregroundColor: scheme.onPrimary,
+                    minimumSize: const Size(36, 36),
+                    padding: EdgeInsets.zero,
+                  ),
+                ),
+              ],
+            ),
           ),
+          const SizedBox(height: 10),
+
+          // 2. Action Buttons Group: Exactly equal widths & heights across all 3 actions
+          () {
+            final textScale = MediaQuery.textScalerOf(context).scale(1.0);
+            final clampedScale = textScale.clamp(1.0, 2.0);
+            final actionWidth = (112.0 + (clampedScale - 1.0) * 60.0)
+                .roundToDouble();
+            final actionHeight = (44.0 + (clampedScale - 1.0) * 16.0)
+                .roundToDouble();
+
+            return Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                _HomeActionButton(
+                  key: const ValueKey('home-action-find'),
+                  label: l.homeActionFind,
+                  icon: Icons.search_rounded,
+                  onPressed: onFind,
+                  width: actionWidth,
+                  height: actionHeight,
+                ),
+                _HomeActionButton(
+                  key: const ValueKey('home-action-offer'),
+                  label: l.homeActionOffer,
+                  icon: Icons.north_east_rounded,
+                  onPressed: onOffer,
+                  isPrimary: true,
+                  width: actionWidth,
+                  height: actionHeight,
+                ),
+                _HomeActionButton(
+                  key: const ValueKey('home-action-wanted'),
+                  label: l.homeActionWanted,
+                  icon: Icons.south_west_rounded,
+                  onPressed: onWanted,
+                  width: actionWidth,
+                  height: actionHeight,
+                ),
+              ],
+            );
+          }(),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeActionButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+  final bool isPrimary;
+  final double width;
+  final double height;
+
+  const _HomeActionButton({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.isPrimary = false,
+    required this.width,
+    required this.height,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final size = Size(width, height);
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+    );
+    const textStyle = TextStyle(fontSize: 13, fontWeight: FontWeight.w700);
+
+    if (isPrimary) {
+      return SizedBox(
+        width: width,
+        height: height,
+        child: FilledButton.icon(
+          style: ButtonStyle(
+            fixedSize: WidgetStatePropertyAll(size),
+            minimumSize: WidgetStatePropertyAll(size),
+            maximumSize: WidgetStatePropertyAll(size),
+            padding: const WidgetStatePropertyAll(
+              EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+            ),
+            visualDensity: VisualDensity.compact,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: WidgetStatePropertyAll(shape),
+            textStyle: const WidgetStatePropertyAll(textStyle),
+            backgroundColor: WidgetStatePropertyAll(scheme.primary),
+            foregroundColor: WidgetStatePropertyAll(scheme.onPrimary),
+          ),
+          onPressed: onPressed,
+          icon: Icon(icon, size: 16),
+          label: Text(label, maxLines: 1),
         ),
+      );
+    }
+
+    return SizedBox(
+      width: width,
+      height: height,
+      child: OutlinedButton.icon(
+        style: ButtonStyle(
+          fixedSize: WidgetStatePropertyAll(size),
+          minimumSize: WidgetStatePropertyAll(size),
+          maximumSize: WidgetStatePropertyAll(size),
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+          ),
+          visualDensity: VisualDensity.compact,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape: WidgetStatePropertyAll(shape),
+          textStyle: const WidgetStatePropertyAll(textStyle),
+          foregroundColor: WidgetStatePropertyAll(scheme.primary),
+          side: WidgetStatePropertyAll(BorderSide(color: scheme.outline)),
+        ),
+        onPressed: onPressed,
+        icon: Icon(icon, size: 16),
+        label: Text(label, maxLines: 1),
       ),
     );
   }
@@ -748,22 +670,22 @@ class _SectionTitle extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                l.homeRecentTitle,
+                l.homeSectionTitle,
                 style: TextStyle(
                   color: scheme.onSurface,
-                  fontSize: 19,
+                  fontSize: 18,
                   fontWeight: FontWeight.w900,
-                  letterSpacing: -0.35,
+                  letterSpacing: -0.3,
                 ),
               ),
-              const SizedBox(height: AppTheme.sp4),
+              const SizedBox(height: AppTheme.sp2),
               Text(
-                l.homeRecentSubtitle,
+                l.homeSectionSubtitle,
                 style: TextStyle(
                   color: scheme.onSurfaceVariant,
                   fontSize: 12,
-                  height: 1.35,
-                  fontWeight: FontWeight.w600,
+                  height: 1.3,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
@@ -789,12 +711,12 @@ class _SectionTitle extends StatelessWidget {
           onSelectionChanged: (values) => onDirectionChanged(values.first),
           style: ButtonStyle(
             padding: WidgetStateProperty.all(
-              const EdgeInsets.symmetric(horizontal: AppTheme.sp12),
+              const EdgeInsets.symmetric(horizontal: AppTheme.sp14),
             ),
-            visualDensity: VisualDensity.compact,
+            visualDensity: VisualDensity.standard,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             textStyle: WidgetStateProperty.all(
-              const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+              const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
             ),
           ),
         ),
@@ -810,34 +732,94 @@ class _HomeLoadingState extends StatelessWidget {
   Widget build(BuildContext context) {
     return const Center(
       child: SizedBox(
-        width: 42,
-        height: 42,
-        child: CircularProgressIndicator(strokeWidth: 3),
+        width: 36,
+        height: 36,
+        child: CircularProgressIndicator(strokeWidth: 2.5),
       ),
     );
   }
 }
 
-/// What a student sees when there is nothing to show.
-///
-/// This is the most important screen a cold-start community has, and it used to
-/// say "暂无商品" — announcing that the place is empty, offering nothing to do,
-/// and framing the product as a shop that has run out of stock. The first
-/// thirty students decide from this screen whether to come back.
-///
-/// Two situations, deliberately distinguished. On day one the grid is empty
-/// because nobody has posted, which is not a fault and has exactly one useful
-/// response: be the first to say something. A filter that matched nothing is a
-/// different problem and gets a different answer.
+class _HomeErrorState extends StatelessWidget {
+  final VoidCallback onRetry;
+
+  const _HomeErrorState({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppTheme.sp24),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 480),
+          padding: const EdgeInsets.all(AppTheme.sp24),
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            borderRadius: BorderRadius.circular(AppTheme.radius2xl),
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: scheme.errorContainer.withValues(alpha: 0.3),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.cloud_off_rounded,
+                  size: 28,
+                  color: scheme.error,
+                ),
+              ),
+              const SizedBox(height: AppTheme.sp16),
+              Text(
+                l.homeLoadFailed,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: AppTheme.sp16),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(140, 42),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: Text(l.homeLoadFailedRetry),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _HomeEmptyState extends StatelessWidget {
-  /// True when nothing is being filtered, so the emptiness is the community's
-  /// rather than the query's.
   final bool isColdStart;
-  final VoidCallback onSaySomething;
+  final VoidCallback onOffer;
+  final VoidCallback onWanted;
 
   const _HomeEmptyState({
     required this.isColdStart,
-    required this.onSaySomething,
+    required this.onOffer,
+    required this.onWanted,
   });
 
   @override
@@ -845,10 +827,13 @@ class _HomeEmptyState extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final dark = theme.brightness == Brightness.dark;
+    final l = AppLocalizations.of(context)!;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppTheme.sp24),
         child: Container(
+          constraints: const BoxConstraints(maxWidth: 560),
           padding: const EdgeInsets.all(AppTheme.sp24),
           decoration: BoxDecoration(
             color: scheme.surface,
@@ -860,50 +845,91 @@ class _HomeEmptyState extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 76,
-                height: 76,
+                width: 56,
+                height: 56,
                 decoration: BoxDecoration(
                   color: scheme.secondaryContainer,
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
                   isColdStart
-                      ? Icons.waving_hand_outlined
+                      ? Icons.inventory_2_outlined
                       : Icons.search_off_outlined,
-                  size: 38,
+                  size: 28,
                   color: scheme.onSecondaryContainer,
                 ),
               ),
               const SizedBox(height: AppTheme.sp16),
               if (isColdStart)
                 Text(
-                  AppLocalizations.of(context)!.homeColdStartTitle,
+                  l.homeColdStartTitle,
                   textAlign: TextAlign.center,
                   style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
                   ),
                 ),
               if (isColdStart) const SizedBox(height: AppTheme.sp8),
               Text(
-                isColdStart
-                    ? AppLocalizations.of(context)!.homeColdStartBody
-                    : AppLocalizations.of(context)!.homeFilterEmpty,
+                isColdStart ? l.homeColdStartBody : l.homeFilterEmpty,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: isColdStart ? 14 : 16,
-                  fontWeight: isColdStart ? FontWeight.w400 : FontWeight.w700,
+                  fontSize: 13,
+                  fontWeight: isColdStart ? FontWeight.w400 : FontWeight.w600,
                   color: scheme.onSurfaceVariant,
+                  height: 1.4,
                 ),
               ),
-              // Telling someone the first voice matters and then giving them
-              // nowhere to speak says nothing at all.
               if (isColdStart) ...[
-                const SizedBox(height: AppTheme.sp16),
-                FilledButton(
-                  onPressed: onSaySomething,
-                  child: Text(
-                    AppLocalizations.of(context)!.homeColdStartAction,
-                  ),
+                const SizedBox(height: AppTheme.sp20),
+                Wrap(
+                  spacing: AppTheme.sp12,
+                  runSpacing: AppTheme.sp8,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(140, 42),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(
+                            AppTheme.radiusLg,
+                          ),
+                        ),
+                        textStyle: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      onPressed: onOffer,
+                      icon: const Icon(Icons.north_east_rounded, size: 18),
+                      label: Text(l.homeActionOffer),
+                    ),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(140, 42),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(
+                            AppTheme.radiusLg,
+                          ),
+                        ),
+                        textStyle: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      onPressed: onWanted,
+                      icon: const Icon(Icons.south_west_rounded, size: 18),
+                      label: Text(l.homeActionWanted),
+                    ),
+                  ],
                 ),
               ],
             ],
@@ -914,12 +940,6 @@ class _HomeEmptyState extends StatelessWidget {
   }
 }
 
-/// What people are after, shown on the screen everyone lands on.
-///
-/// The grid is listings, and listings are the minority of what gets said here:
-/// a badminton partner, a hand moving a fridge, and anything offered without a
-/// price never become one. Leaving those off the home screen meant the busiest
-/// week of a new community could still open on "还没有人发东西".
 class _WhatPeopleWant extends StatelessWidget {
   const _WhatPeopleWant({
     required this.voices,
@@ -972,9 +992,6 @@ class _WhatPeopleWant extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 14),
                 ),
-                // The reply is the point. A wall of things people want with no
-                // way to answer any of them is the same dead end as an empty
-                // grid, dressed up as content.
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [

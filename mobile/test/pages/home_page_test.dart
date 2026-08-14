@@ -6,6 +6,7 @@ import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/pages/home_page.dart';
 import 'package:goods4ncu_mobile/services/feed_feedback_service.dart';
 import 'package:goods4ncu_mobile/services/intent_service.dart';
+import 'package:goods4ncu_mobile/services/listing_service.dart';
 import 'package:goods4ncu_mobile/services/recommendation_service.dart';
 import 'package:goods4ncu_mobile/theme/app_theme.dart';
 import 'package:provider/provider.dart';
@@ -19,6 +20,17 @@ class _EmptyRecommendationService extends RecommendationService {
     int offset = 0,
     String direction = 'all',
   }) async => const [];
+}
+
+class _FailingRecommendationService extends RecommendationService {
+  @override
+  Future<List<Listing>> getRecommendationFeed({
+    int limit = 20,
+    int offset = 0,
+    String direction = 'all',
+  }) async {
+    throw Exception('network_timeout');
+  }
 }
 
 class _FakeRecommendationService extends RecommendationService {
@@ -41,6 +53,83 @@ class _FakeRecommendationService extends RecommendationService {
         source: 'intent_match',
       ),
     ];
+  }
+}
+
+class _FakeListingService extends ListingService {
+  _FakeListingService({this.listings = const []});
+
+  final List<Listing> listings;
+  String? lastQueriedDirection;
+
+  @override
+  Future<ListingsResponse> getListings({
+    int limit = 20,
+    int offset = 0,
+    String? category,
+    String? search,
+    List<String>? categories,
+    double? minPriceCny,
+    double? maxPriceCny,
+    String sort = 'newest',
+    String direction = 'offer',
+    bool allowAnonymousFallback = true,
+  }) async {
+    lastQueriedDirection = direction;
+    final filtered = listings.where((l) {
+      if (direction != 'all') {
+        return l.direction == direction;
+      }
+      return true;
+    }).toList();
+    return ListingsResponse(
+      items: filtered,
+      total: filtered.length,
+      limit: limit,
+      offset: offset,
+    );
+  }
+}
+
+class _FakeFailingListingService extends ListingService {
+  @override
+  Future<ListingsResponse> getListings({
+    int limit = 20,
+    int offset = 0,
+    String? category,
+    String? search,
+    List<String>? categories,
+    double? minPriceCny,
+    double? maxPriceCny,
+    String sort = 'newest',
+    String direction = 'offer',
+    bool allowAnonymousFallback = true,
+  }) async {
+    throw Exception('listing_fallback_failed');
+  }
+}
+
+class _FakeStrictListingService extends ListingService {
+  bool allowAnonymousFallbackPassed = true;
+
+  @override
+  Future<ListingsResponse> getListings({
+    int limit = 20,
+    int offset = 0,
+    String? category,
+    String? search,
+    List<String>? categories,
+    double? minPriceCny,
+    double? maxPriceCny,
+    String sort = 'newest',
+    String direction = 'offer',
+    bool allowAnonymousFallback = true,
+  }) async {
+    allowAnonymousFallbackPassed = allowAnonymousFallback;
+    if (!allowAnonymousFallback) {
+      throw Exception('401_unauthorized_strict');
+    }
+    return ListingsResponse(items: [], total: 0, limit: limit, offset: offset);
   }
 }
 
@@ -70,9 +159,7 @@ class _FakeFeedFeedbackService extends FeedFeedbackService {
   }
 }
 
-/// What people have said, independent of what has been listed. Most of what a
-/// campus says never becomes a listing, so these two are genuinely different
-/// kinds of empty.
+/// What people have said, independent of what has been listed.
 class _FakeIntentService extends IntentService {
   _FakeIntentService([this.voices = const []]);
 
@@ -96,6 +183,7 @@ Widget _buildApp({
   Locale locale = const Locale('zh'),
   ThemeMode themeMode = ThemeMode.light,
   RecommendationService? recommendations,
+  ListingService? listings,
   IntentService? intents,
   FeedFeedbackService? feedback,
   double textScaleFactor = 1,
@@ -115,7 +203,8 @@ Widget _buildApp({
       ),
       GoRoute(
         path: '/create',
-        builder: (context, state) => const Text('say something'),
+        builder: (context, state) =>
+            Text('create: ${state.uri.queryParameters['kind'] ?? ''}'),
       ),
     ],
   );
@@ -125,6 +214,7 @@ Widget _buildApp({
       Provider<RecommendationService>.value(
         value: recommendations ?? _FakeRecommendationService(),
       ),
+      Provider<ListingService>.value(value: listings ?? _FakeListingService()),
       Provider<IntentService>.value(value: intents ?? _FakeIntentService()),
       Provider<FeedFeedbackService>.value(
         value: feedback ?? _FakeFeedFeedbackService(),
@@ -149,52 +239,56 @@ Widget _buildApp({
 }
 
 void main() {
-  testWidgets('day one invites the first voice instead of announcing emptiness', (
+  testWidgets('day one invites clear action instead of announcing emptiness', (
     tester,
   ) async {
-    // The most important screen a cold-start community has, and it used to say
-    // "暂无商品" — announcing the place is empty, offering nothing to do, and
-    // framing the product as a shop out of stock. The first thirty students
-    // decide from this screen whether to come back.
     await tester.pumpWidget(
-      _buildApp(recommendations: _EmptyRecommendationService()),
+      _buildApp(
+        recommendations: _EmptyRecommendationService(),
+        listings: _FakeListingService(listings: const []),
+      ),
     );
     await tester.pumpAndSettle();
     final l = AppLocalizations.of(tester.element(find.byType(HomePage)))!;
 
     expect(find.text(l.homeColdStartTitle), findsOneWidget);
     expect(find.text(l.noProducts), findsNothing);
-    // And an actual way to speak: telling someone the first voice matters, then
-    // giving them nowhere to speak, says nothing at all.
-    expect(find.text(l.homeColdStartAction), findsOneWidget);
+    // Action buttons are explicit and balanced
+    expect(find.text(l.homeActionOffer), findsWidgets);
+    expect(find.text(l.homeActionWanted), findsWidgets);
   });
 
-  testWidgets('the invitation leads somewhere', (tester) async {
+  testWidgets('the invitation leads to create page', (tester) async {
     await tester.pumpWidget(
-      _buildApp(recommendations: _EmptyRecommendationService()),
+      _buildApp(
+        recommendations: _EmptyRecommendationService(),
+        listings: _FakeListingService(listings: const []),
+      ),
     );
     await tester.pumpAndSettle();
-    final l = AppLocalizations.of(tester.element(find.byType(HomePage)))!;
 
-    // Below the fold on a test-sized screen.
-    await tester.ensureVisible(find.text(l.homeColdStartAction));
+    await tester.ensureVisible(find.byKey(const ValueKey('home-action-offer')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(l.homeColdStartAction));
+    await tester.tap(find.byKey(const ValueKey('home-action-offer')));
     await tester.pumpAndSettle();
-    expect(find.text('say something'), findsOneWidget);
+    expect(find.text('create: offer'), findsOneWidget);
   });
 
-  testWidgets('home page keeps the customer entry simple', (tester) async {
+  testWidgets('home page removes English eyebrow and marketing slogan', (
+    tester,
+  ) async {
     await tester.pumpWidget(_buildApp());
     await tester.pumpAndSettle();
 
-    expect(find.text('今天想淘点什么？'), findsOneWidget);
-    expect(find.text('试试这样开始'), findsOneWidget);
+    // English eyebrow and marketing sloganeering must not appear
+    expect(find.text('Goods4ncu Campus Market'), findsNothing);
+    expect(find.text('今天想淘点什么？'), findsNothing);
+    expect(find.text('试试这样开始'), findsNothing);
     expect(find.text('推荐怎么来'), findsNothing);
     expect(find.textContaining('相关度'), findsNothing);
-    expect(find.textContaining('新鲜度'), findsNothing);
     expect(find.textContaining('轻量排序'), findsNothing);
 
+    // Compact prompt submit works
     await tester.enterText(
       find.byKey(const ValueKey('home-agent-prompt')),
       '帮我找一本高数教材',
@@ -205,30 +299,32 @@ void main() {
     expect(find.textContaining('chat prompt: 帮我找一本高数教材'), findsOneWidget);
   });
 
-  testWidgets('home page shows a simple marketplace feed', (tester) async {
+  testWidgets('home page shows a simple marketplace feed with action buttons', (
+    tester,
+  ) async {
     await tester.pumpWidget(_buildApp());
     await tester.pumpAndSettle();
 
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -700));
-    await tester.pumpAndSettle();
-
-    expect(find.text('最近上新'), findsOneWidget);
-    expect(find.text('看看同学们正在出什么闲置。'), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-action-find')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-action-offer')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-action-wanted')), findsOneWidget);
     expect(find.text('全部'), findsOneWidget);
     expect(find.text('出'), findsWidgets);
     expect(find.text('收'), findsOneWidget);
-    expect(find.text('可解释排序'), findsNothing);
     expect(find.text('程序设计教材'), findsOneWidget);
     expect(find.text('分类符合你的需求'), findsOneWidget);
-    expect(find.text('same_category'), findsNothing);
   });
 
   testWidgets('home page localizes the entry in English', (tester) async {
     await tester.pumpWidget(_buildApp(locale: const Locale('en')));
     await tester.pumpAndSettle();
 
-    expect(find.text('What are you looking for today?'), findsOneWidget);
-    expect(find.text('Try starting with'), findsOneWidget);
+    expect(
+      find.text('Search items or requests, or ask Xiaochang'),
+      findsOneWidget,
+    );
+    expect(find.text('Post Offer'), findsOneWidget);
+    expect(find.text('Post Request'), findsOneWidget);
     expect(find.text('今天想淘点什么？'), findsNothing);
 
     await tester.enterText(
@@ -263,18 +359,150 @@ void main() {
     expect(gradient.colors.first, AppTheme.surfaceDark);
   });
 
+  testWidgets(
+    'separates network load failure with retry affordance from empty campus',
+    (tester) async {
+      await tester.pumpWidget(
+        _buildApp(
+          recommendations: _FailingRecommendationService(),
+          listings: _FakeListingService(listings: const []),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final l = AppLocalizations.of(tester.element(find.byType(HomePage)))!;
+
+      // Failure must not disguise as empty cold-start
+      expect(find.text(l.homeLoadFailed), findsOneWidget);
+      expect(find.text(l.homeLoadFailedRetry), findsOneWidget);
+      expect(find.text(l.homeColdStartTitle), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'empty recommendation feed falls back to deterministic campus listings preserving direction',
+    (tester) async {
+      final fakeListingService = _FakeListingService(
+        listings: [
+          Listing(
+            id: 'seed-listing-1',
+            title: '高等数学教材',
+            category: 'books',
+            brand: '高等教育出版社',
+            conditionScore: 8,
+            suggestedPriceCny: 35,
+            status: 'active',
+            direction: 'offer',
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        _buildApp(
+          recommendations: _EmptyRecommendationService(),
+          listings: fakeListingService,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('高等数学教材'), findsOneWidget);
+      expect(fakeListingService.lastQueriedDirection, 'all');
+    },
+  );
+
+  testWidgets(
+    'empty recommendation feed with failing listing fallback shows error state and retry',
+    (tester) async {
+      await tester.pumpWidget(
+        _buildApp(
+          recommendations: _EmptyRecommendationService(),
+          listings: _FakeFailingListingService(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final l = AppLocalizations.of(tester.element(find.byType(HomePage)))!;
+
+      expect(find.text(l.homeLoadFailed), findsOneWidget);
+      expect(find.text(l.homeLoadFailedRetry), findsOneWidget);
+      expect(find.text(l.homeColdStartTitle), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'strict listing fallback passes allowAnonymousFallback false and enters error state on 401',
+    (tester) async {
+      final strictService = _FakeStrictListingService();
+      await tester.pumpWidget(
+        _buildApp(
+          recommendations: _EmptyRecommendationService(),
+          listings: strictService,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final l = AppLocalizations.of(tester.element(find.byType(HomePage)))!;
+
+      expect(strictService.allowAnonymousFallbackPassed, isFalse);
+      expect(find.text(l.homeLoadFailed), findsOneWidget);
+      expect(find.text(l.homeLoadFailedRetry), findsOneWidget);
+      expect(find.text(l.homeColdStartTitle), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'action button group has equal widths and heights at normal and 200% text scaling on 390px mobile',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      // 1. Normal text scaling (1.0)
+      await tester.pumpWidget(_buildApp(textScaleFactor: 1.0));
+      await tester.pumpAndSettle();
+
+      final findBtn1 = tester.getRect(
+        find.byKey(const ValueKey('home-action-find')),
+      );
+      final offerBtn1 = tester.getRect(
+        find.byKey(const ValueKey('home-action-offer')),
+      );
+      final wantedBtn1 = tester.getRect(
+        find.byKey(const ValueKey('home-action-wanted')),
+      );
+
+      expect(findBtn1.width, equals(offerBtn1.width));
+      expect(offerBtn1.width, equals(wantedBtn1.width));
+      expect(findBtn1.height, equals(offerBtn1.height));
+      expect(offerBtn1.height, equals(wantedBtn1.height));
+      expect(tester.takeException(), isNull);
+
+      // 2. 200% text scaling (2.0)
+      await tester.pumpWidget(_buildApp(textScaleFactor: 2.0));
+      await tester.pumpAndSettle();
+
+      final findBtn2 = tester.getRect(
+        find.byKey(const ValueKey('home-action-find')),
+      );
+      final offerBtn2 = tester.getRect(
+        find.byKey(const ValueKey('home-action-offer')),
+      );
+      final wantedBtn2 = tester.getRect(
+        find.byKey(const ValueKey('home-action-wanted')),
+      );
+
+      expect(findBtn2.width, equals(offerBtn2.width));
+      expect(offerBtn2.width, equals(wantedBtn2.width));
+      expect(findBtn2.height, equals(offerBtn2.height));
+      expect(offerBtn2.height, equals(wantedBtn2.height));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('an empty grid with people talking is not an empty campus', (
     tester,
   ) async {
-    // The publish tab opens the intent composer, so most of what gets said
-    // here never becomes a listing. A busy week could still open on "还没有人发
-    // 东西", which is both false and the most discouraging thing this screen
-    // could say.
     final intents = _FakeIntentService([
       UserIntent(
         id: 'intent-1',
-        kind: IntentKind.help,
-        rawInput: '有人帮我搬个冰箱吗',
+        kind: IntentKind.goodsSeek,
+        rawInput: '想收一个小冰箱',
         slots: const IntentSlots(),
         status: 'active',
       ),
@@ -282,26 +510,25 @@ void main() {
     await tester.pumpWidget(
       _buildApp(
         recommendations: _EmptyRecommendationService(),
+        listings: _FakeListingService(listings: const []),
         intents: intents,
       ),
     );
     await tester.pumpAndSettle();
     final l = AppLocalizations.of(tester.element(find.byType(HomePage)))!;
 
-    expect(find.text('有人帮我搬个冰箱吗'), findsOneWidget);
+    expect(find.text('想收一个小冰箱'), findsOneWidget);
     expect(find.text(l.homeColdStartTitle), findsNothing);
   });
 
   testWidgets('someone on the home screen can be answered from it', (
     tester,
   ) async {
-    // A wall of things people want with no way to answer any of them is the
-    // same dead end as an empty grid, dressed up as content.
     final intents = _FakeIntentService([
       UserIntent(
         id: 'intent-2',
-        kind: IntentKind.companion,
-        rawInput: '找个羽毛球搭子',
+        kind: IntentKind.goodsSeek,
+        rawInput: '找个羽毛球拍',
         slots: const IntentSlots(),
         status: 'active',
       ),
@@ -309,6 +536,7 @@ void main() {
     await tester.pumpWidget(
       _buildApp(
         recommendations: _EmptyRecommendationService(),
+        listings: _FakeListingService(listings: const []),
         intents: intents,
       ),
     );
@@ -320,21 +548,20 @@ void main() {
     await tester.tap(find.text(l.intentRespondAction));
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextField).last, '我周三下午有空');
+    await tester.enterText(find.byType(TextField).last, '我有闲置尤尼克斯');
     await tester.tap(find.text(l.intentRespondSend));
     await tester.pumpAndSettle();
 
-    expect(intents.responses, [('intent-2', '我周三下午有空')]);
+    expect(intents.responses, [('intent-2', '我有闲置尤尼克斯')]);
   });
 
   testWidgets('a campus that has genuinely said nothing still gets invited', (
     tester,
   ) async {
-    // The day-one card is still right when it is right. Replacing it with an
-    // empty list would be the "暂无商品" mistake in a new costume.
     await tester.pumpWidget(
       _buildApp(
         recommendations: _EmptyRecommendationService(),
+        listings: _FakeListingService(listings: const []),
         intents: _FakeIntentService(),
       ),
     );
@@ -367,31 +594,6 @@ void main() {
     expect(feedback.calls.single.action, FeedFeedbackAction.hide);
   });
 
-  testWidgets('listing controls do not overlap at 200% text scaling', (
-    tester,
-  ) async {
-    await tester.pumpWidget(_buildApp(textScaleFactor: 2));
-    await tester.pumpAndSettle();
-    // At 200% the hero is taller, so the lazily built grid starts farther
-    // below the viewport. Scroll it into the tree before measuring the card.
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -1200));
-    await tester.pumpAndSettle();
-    final menu = find.byKey(const ValueKey('feed-feedback-listing-listing-1'));
-    final direction = find.byKey(const ValueKey('listing-direction-listing-1'));
-
-    await tester.ensureVisible(menu);
-    await tester.pumpAndSettle();
-    final menuRect = tester.getRect(menu);
-    final directionRect = tester.getRect(direction);
-
-    expect(menuRect.overlaps(directionRect), isFalse);
-    expect(
-      menuRect.top,
-      greaterThanOrEqualTo(directionRect.bottom),
-      reason: 'the feedback menu belongs below the direction pill',
-    );
-  });
-
   testWidgets(
     'failed listing feedback keeps the card and explains the failure',
     (tester) async {
@@ -414,4 +616,27 @@ void main() {
       expect(feedback.calls, hasLength(1));
     },
   );
+
+  testWidgets('listing controls do not overlap at 200% text scaling', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_buildApp(textScaleFactor: 2));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -1200));
+    await tester.pumpAndSettle();
+    final menu = find.byKey(const ValueKey('feed-feedback-listing-listing-1'));
+    final direction = find.byKey(const ValueKey('listing-direction-listing-1'));
+
+    await tester.ensureVisible(menu);
+    await tester.pumpAndSettle();
+    final menuRect = tester.getRect(menu);
+    final directionRect = tester.getRect(direction);
+
+    expect(menuRect.overlaps(directionRect), isFalse);
+    expect(
+      menuRect.top,
+      greaterThanOrEqualTo(directionRect.bottom),
+      reason: 'the feedback menu belongs below the direction pill',
+    );
+  });
 }

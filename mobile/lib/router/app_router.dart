@@ -203,8 +203,16 @@ final GoRouter appRouter = GoRouter(
           // never gets over; it stays reachable at /create/listing for anyone
           // who wants to fill one in.
           path: '/create',
-          pageBuilder: (context, state) =>
-              const NoTransitionPage(child: IntentPage()),
+          pageBuilder: (context, state) {
+            final requestedKind = state.uri.queryParameters['kind'];
+            final initialKind = requestedKind == 'wanted'
+                ? IntentKind.goodsSeek
+                : IntentKind.goodsOffer;
+            return NoTransitionPage(
+              key: state.pageKey,
+              child: IntentPage(initialKind: initialKind),
+            );
+          },
         ),
         GoRoute(
           path: '/create/listing',
@@ -259,10 +267,14 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
       case '/':
         return 0;
       case '/conversations':
-      case '/chat':
         return 1;
       case '/create':
+      case '/create/listing':
         return 2;
+      // Xiaobang is a tool entered from home, not a human conversation in the
+      // inbox. Keep the home destination selected while the assistant is open.
+      case '/chat':
+        return 0;
       case '/profile':
       case '/my-listings':
       case '/orders':

@@ -24,7 +24,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get allCategories => '全部';
 
   @override
-  String get appTitle => '校园集市';
+  String get appTitle => '续樟';
 
   @override
   String get brand => '品牌';
@@ -125,13 +125,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get createListingAiReady => 'AI 识别完成';
 
   @override
-  String get createListingAiRecognizing => '小帮正在识别...';
+  String get createListingAiRecognizing => '小昌正在识别...';
 
   @override
-  String get createListingAiSubtitle => '拍照或上传图片，小帮会帮你先填标题、分类、品牌和成色；你只需要确认。';
+  String get createListingAiSubtitle => '拍照或上传图片，小昌会帮你先填标题、分类、品牌和成色；你只需要确认。';
 
   @override
-  String get createListingAiTitle => '先让小帮看一眼';
+  String get createListingAiTitle => '先让小昌看一眼';
 
   @override
   String get createListingModeOffer => '我要出';
@@ -461,22 +461,22 @@ class AppLocalizationsZh extends AppLocalizations {
   String get noProducts => '暂无商品';
 
   @override
-  String get homeColdStartTitle => '这里刚开始';
+  String get homeColdStartTitle => '暂无闲置或求购需求';
 
   @override
-  String get homeColdStartBody => '还没有人发东西。你说一句想出什么或想找什么，别人就能看到——第一个开口的人最重要。';
+  String get homeColdStartBody => '本校还没有人发布物品。你可以发布闲置或发布求购。';
 
   @override
-  String get homeColdStartAction => '我先说一句';
+  String get homeColdStartAction => '发布';
 
   @override
-  String get homeVoicesTitle => '大家在找这些';
+  String get homeVoicesTitle => '求购需求';
 
   @override
-  String get homeVoicesBody => '首页的格子里还没有东西，但这些是同学们正在说的。回一句就能开始。';
+  String get homeVoicesBody => '这些是同学们正在寻找的物品。';
 
   @override
-  String get homeFilterEmpty => '这个筛选下没有东西。换个条件，或者直接说说你想要什么。';
+  String get homeFilterEmpty => '当前筛选下没有内容。你可以调整筛选，或直接发布。';
 
   @override
   String get notFound => '未找到';
@@ -841,7 +841,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get adminTotpCodeHint => '来自身份验证器 App 的 6 位数字';
 
   @override
-  String get agentPlanPendingHeader => '待确认操作（小帮提出，需你确认后执行）';
+  String get agentPlanPendingHeader => '待确认操作（小昌提出，需你确认后执行）';
 
   @override
   String get agentPlanConfirmAction => '确认执行';
@@ -867,14 +867,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get undoFailed => '撤销失败，请重试';
 
   @override
-  String get intentPageTitle => '我想…';
+  String get intentPageTitle => '发布出 / 收';
 
   @override
-  String get intentComposerPrompt =>
-      '用自己的话说就行，不用填表。想出东西、想收东西、想找人、想找人帮忙、想约活动都可以。';
+  String get intentComposerPrompt => '用一句话说明你想出什么或收什么；需要精确填写时可以打开完整商品表单。';
 
   @override
-  String get intentComposerHint => '比如：宿舍要清空了，小冰箱能卖多少卖多少 / 想找人一起打羽毛球';
+  String get intentComposerHint => '比如：宿舍要清空了，小冰箱能卖多少卖多少 / 想收一本高数教材，30 元以内';
 
   @override
   String get intentKindGoodsOffer => '想出东西';
@@ -955,10 +954,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get intentWithdrawn => '已撤回';
 
   @override
-  String get intentFeedHeader => '大家在找什么';
+  String get intentFeedHeader => '校园里的出与收';
 
   @override
-  String get intentFeedEmpty => '现在还没有人在找东西。你可以先说一句，让别人看到。';
+  String get intentFeedEmpty => '现在还没有新的出售信息或求购需求。你可以先发布一条。';
 
   @override
   String get intentRespondAction => '我能帮';
@@ -976,10 +975,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get intentRespondSent => '已发送，对方会在消息里看到';
 
   @override
-  String get priceDiscoveryTitle => '让小帮定价';
+  String get priceDiscoveryTitle => '让小昌定价';
 
   @override
-  String get priceDiscoveryStart => '让小帮定价';
+  String get priceDiscoveryStart => '让小昌定价';
 
   @override
   String get priceDiscoveryYourLimit => '你的底线（元）';
@@ -991,7 +990,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get priceDiscoverySellerHint => '你最少愿意收多少';
 
   @override
-  String get priceDiscoverySubmit => '私下告诉小帮';
+  String get priceDiscoverySubmit => '私下告诉小昌';
 
   @override
   String get priceDiscoveryWaiting => '已收到。等对方也说完就出结果——对方看不到你的数字。';
@@ -1039,7 +1038,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get agreementSlotConditions => '其他约定';
 
   @override
-  String get agreementSuggestion => '小帮从聊天里读到的，要采纳吗？';
+  String get agreementSuggestion => '小昌从聊天里读到的，要采纳吗？';
 
   @override
   String get agreementAdopt => '就这样';
@@ -1393,52 +1392,31 @@ class AppLocalizationsZh extends AppLocalizations {
   String get notSet => '未设置';
 
   @override
-  String get homeHeroEyebrow => 'Goods4ncu Campus Market';
+  String get homePromptHint => '搜物品或求购，也可以问小昌';
 
   @override
-  String get homeHeroTitle => '今天想淘点什么？';
+  String get homePromptSubmitTooltip => '交给小昌';
 
   @override
-  String get homeHeroSubtitle => '输入商品、预算或用途，小帮可以陪你找；也可以直接往下逛同学们刚挂出的闲置。';
+  String get homeActionFind => '找东西';
 
   @override
-  String get homePromptHint => '找二手教材、轻薄本，或让小帮帮你卖闲置…';
+  String get homeActionOffer => '发布闲置';
 
   @override
-  String get homePromptSubmitTooltip => '交给小帮';
+  String get homeActionWanted => '发布求购';
 
   @override
-  String get homeSuggestionTitle => '试试这样开始';
+  String get homeSectionTitle => '同学正在出 / 收';
 
   @override
-  String get homeThoughtLaptopLabel => '找轻薄本';
+  String get homeSectionSubtitle => '同学发布的闲置和求购';
 
   @override
-  String get homeThoughtLaptopPrompt => '预算 3000 元，帮我找一台适合写代码、方便带去教室的轻薄本';
+  String get homeLoadFailed => '暂时没加载出来';
 
   @override
-  String get homeThoughtPriceLabel => '给闲置估价';
-
-  @override
-  String get homeThoughtPricePrompt => '我有一件闲置想卖，先问我几个问题，再帮我估一个合理价格';
-
-  @override
-  String get homeThoughtCopyLabel => '帮我写发布文案';
-
-  @override
-  String get homeThoughtCopyPrompt => '帮我一步步整理闲置信息，并生成一份真实可信的商品发布文案';
-
-  @override
-  String get homeThoughtNegotiateLabel => '替我礼貌议价';
-
-  @override
-  String get homeThoughtNegotiatePrompt => '帮我找值得买的数码好物，并在价格合适时替我发起礼貌议价';
-
-  @override
-  String get homeRecentTitle => '最近上新';
-
-  @override
-  String get homeRecentSubtitle => '看看同学们正在出什么闲置。';
+  String get homeLoadFailedRetry => '重新加载';
 
   @override
   String get conversationLoadFailedTitle => '消息暂时没有加载出来';
@@ -1450,7 +1428,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationEmptySubtitle => '在「大家在找什么」里回应一个人，就有第一次对话了。';
 
   @override
-  String get conversationEmptyAction => '去看看大家在找什么';
+  String get conversationEmptyAction => '发布出 / 收';
+
+  @override
+  String get conversationEmptyAskAssistant => '问小昌（AI 助手）';
+
+  @override
+  String get conversationNextStepsTitle => '接下来可以';
+
+  @override
+  String get conversationNextStepsSubtitle => '再找一位同学、发布你的出 / 收，或让小昌帮你找到入口。';
 
   @override
   String get findClassmate => '找同学';
@@ -1464,7 +1451,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationFilterAll => '全部';
 
   @override
-  String get conversationFilterRealtime => '实时';
+  String get conversationFilterRealtime => '连接';
 
   @override
   String get conversationFilterMail => '留言';
@@ -1548,7 +1535,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get assistantName => '小帮';
+  String get assistantName => '小昌';
 
   @override
   String get assistantSystemBadge => 'AI 助手';
@@ -1560,7 +1547,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get assistantHeaderSubtitle => '你的续樟校园交易助手 · 重要决定会先征求你的确认';
 
   @override
-  String get assistantHistoryLoadFailed => '历史消息暂时没有加载出来，你仍然可以继续询问小帮。';
+  String get assistantHistoryLoadFailed => '历史消息暂时没有加载出来，你仍然可以继续询问小昌。';
 
   @override
   String get assistantTyping => 'AI 正在输入...';
@@ -1860,7 +1847,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationSectionSpaces => '校园群组与频道';
 
   @override
-  String get conversationSectionTools => '小帮';
+  String get conversationSectionTools => '小昌';
 
   @override
   String get conversationCreateGroupSuccess => '群组已创建，已放入消息列表';
@@ -1877,15 +1864,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationPeerFallback => '同学';
 
   @override
-  String get conversationThreadLoading => '读取会话中';
+  String get conversationThreadLoading => '正在打开';
 
   @override
   String conversationThreadStats(int realtime, int mail, int count) {
-    return '实时 $realtime · 留言 $mail · 共 $count 段';
+    return '连接 $realtime · 留言 $mail · 共 $count 段';
   }
 
   @override
-  String get conversationReconnect => '重新联系';
+  String get conversationReconnect => '再联系';
 
   @override
   String get conversationThreadLoadFailedTitle => '联系人线程暂时没加载出来';
@@ -1894,7 +1881,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationThreadEmptyTitle => '还没有可显示的沟通记录';
 
   @override
-  String get conversationThreadEmptySubtitle => '重新联系会创建一段新的实时聊天或留言。';
+  String get conversationThreadEmptySubtitle => '再联系会创建一段新的实时聊天或留言。';
 
   @override
   String get conversationMailThreadTitle => '留言线程';
@@ -1906,7 +1893,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationSegmentHistoryHint => '这段沟通已保留为历史记录。需要继续时，请开启一段新的沟通。';
 
   @override
-  String get conversationSegmentOpenHint => '进入这段沟通后，可以继续查看消息、回复、引用信息或处理接通状态。';
+  String get conversationSegmentOpenHint => '打开后可以继续回复、引用或处理连接。';
 
   @override
   String get conversationViewHistory => '查看历史';
@@ -1941,29 +1928,32 @@ class AppLocalizationsZh extends AppLocalizations {
   String get relationshipSpaceTimeline => '时间轨迹';
 
   @override
-  String get relationshipSpaceNoEvent => '还没有共同记录';
+  String get relationshipSpaceLastConnection => '上次连接';
 
   @override
-  String get relationshipSpacePin => 'Pin 到共同空间';
+  String get relationshipSpaceNoEvent => '长按一条留言固定，或分享商品与文件，它们会留在这里';
 
   @override
-  String get relationshipSpaceUnpin => '从共同空间移除 Pin';
+  String get relationshipSpacePin => '固定到共同空间';
+
+  @override
+  String get relationshipSpaceUnpin => '取消固定';
 
   @override
   String relationshipSpacePinsCount(int count) {
-    return '$count 个 Pin';
+    return '$count 条已固定';
   }
 
   @override
   String relationshipSpaceObjectsCount(int count) {
-    return '$count 个共享对象';
+    return '$count 项共享内容';
   }
 
   @override
-  String get relationshipSpaceSharedObjectsTitle => '共享对象';
+  String get relationshipSpaceSharedObjectsTitle => '共享内容';
 
   @override
-  String get relationshipSpaceSharedObjectsReadOnly => '只读引用，不改变原始事实';
+  String get relationshipSpaceSharedObjectsReadOnly => '从原处分享，只在这里查看';
 
   @override
   String get relationshipSpaceObjectFile => '文件';
@@ -1975,8 +1965,59 @@ class AppLocalizationsZh extends AppLocalizations {
   String get relationshipSpaceObjectReference => '引用';
 
   @override
+  String get relationshipSpacePinsTitle => '已固定留言';
+
+  @override
+  String get relationshipSpaceRecentRecords => '最近记录';
+
+  @override
+  String get relationshipSpaceNoRecentRecords => '这里暂时没有可回看的时间记录';
+
+  @override
+  String get relationshipSpaceRecentRecovery => '上次连接记录';
+
+  @override
+  String get relationshipSpaceExpandAction => '展开共同空间';
+
+  @override
+  String get relationshipSpaceCollapseAction => '收起共同空间';
+
+  @override
+  String get relationshipSpaceEventSentMessage => '发送了留言';
+
+  @override
+  String get relationshipSpaceEventOpeningMessage => '发送了首条留言';
+
+  @override
+  String get relationshipSpaceEventConnectionStarted => '开始了一次连接';
+
+  @override
+  String get relationshipSpaceEventConnectionEnded => '结束了一次连接';
+
+  @override
+  String get relationshipSpaceEventConnectionAccepted => '接受了连接请求';
+
+  @override
+  String get relationshipSpaceEventConnectionDeclined => '婉拒了连接';
+
+  @override
+  String get relationshipSpaceEventConversationCreated => '发起了沟通';
+
+  @override
+  String get relationshipSpaceEventPinChanged => '固定留言有变化';
+
+  @override
+  String get relationshipSpaceEventAcknowledgementChanged => '回应了留言';
+
+  @override
+  String get relationshipSpaceEventSharedObjectChanged => '共享内容有变化';
+
+  @override
+  String get relationshipSpaceEventDefault => '留下了新记录';
+
+  @override
   String conversationRealtimeCount(int count) {
-    return '实时 $count';
+    return '连接 $count';
   }
 
   @override
@@ -2206,7 +2247,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get replyAssistantUnavailable => '小帮暂时没想好，你仍可以直接输入';
+  String get replyAssistantUnavailable => '小昌暂时没想好，你仍可以直接输入';
 
   @override
   String closeConversationFailed(String error) {
@@ -2258,7 +2299,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationFallbackTitle => '会话';
 
   @override
-  String get conversationLoadingState => '正在读取会话状态';
+  String get conversationLoadingState => '正在准备这段沟通';
 
   @override
   String get conversationUnavailable => '这段会话当前不可用';
@@ -2314,7 +2355,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get closeConversationAction => '结束本次沟通';
 
   @override
-  String get replyAssistantButton => '小帮帮我回';
+  String get replyAssistantButton => '小昌帮我回';
 
   @override
   String get mailFallbackTitle => '留言';
@@ -2382,7 +2423,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get endAction => '结束';
 
   @override
-  String get conversationTerminalSubtitle => '历史会保留；重新联系会开启一段新的沟通。';
+  String get conversationTerminalSubtitle => '历史会保留；再联系会开启一段新的沟通。';
+
+  @override
+  String get relationshipContextScrollHint => '向上滑动继续查看';
 
   @override
   String get conversationNaturallyEndedTitle => '本次会话已自然结束';

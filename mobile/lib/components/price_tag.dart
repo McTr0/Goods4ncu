@@ -112,6 +112,10 @@ class ListingCard extends StatelessWidget {
         ? localizedFeedReason(l, listing.rankReason, source: listing.source)
         : null;
 
+    final textScale = MediaQuery.textScalerOf(context).scale(1);
+    final imageFlex = textScale >= 1.4 ? 2 : 3;
+    final contentFlex = textScale >= 1.4 ? 3 : 2;
+
     return Stack(
       children: [
         Material(
@@ -136,7 +140,7 @@ class ListingCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
-                      flex: 3,
+                      flex: imageFlex,
                       child: _ListingImageHeader(
                         imageUrl: listing.imageUrl,
                         category: categoryLabel,
@@ -151,7 +155,7 @@ class ListingCard extends StatelessWidget {
                       ),
                     ),
                     Expanded(
-                      flex: 2,
+                      flex: contentFlex,
                       child: Padding(
                         padding: const EdgeInsets.all(AppTheme.sp12),
                         child: Column(

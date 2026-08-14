@@ -5,7 +5,7 @@
   "aiGreeting": "Hello! I'm your campus secondhand trading assistant. How can I help you today?",
   "aiWillAutoRecognize": "AI will auto-recognize item info",
   "allCategories": "All",
-  "appTitle": "Campus Marketplace",
+  "appTitle": "Goods4ncu",
   "brand": "Brand",
   "brandLabel": "Brand",
   "books": "Books",
@@ -176,12 +176,12 @@
   "connectionRejected": "Connection rejected",
   "negotiationRejected": "Negotiation rejected",
   "noProducts": "No products available",
-  "homeColdStartTitle": "This place is just starting",
-  "homeColdStartBody": "Nobody has posted yet. Say what you're selling or looking for and others will see it — the first person to speak matters most.",
-  "homeColdStartAction": "I'll go first",
-  "homeVoicesTitle": "What people are after",
-  "homeVoicesBody": "Nothing in the grid yet, but these are what people here are saying. A reply is all it takes to start.",
-  "homeFilterEmpty": "Nothing matches this filter. Try another, or just say what you want.",
+  "homeColdStartTitle": "No listings or requests yet",
+  "homeColdStartBody": "No items have been posted yet in this campus. You can post an offer or a request.",
+  "homeColdStartAction": "Post",
+  "homeVoicesTitle": "Campus Requests",
+  "homeVoicesBody": "Items classmates are looking for.",
+  "homeFilterEmpty": "No items match this filter. Try adjusting or posting a new listing.",
   "notFound": "Not found",
   "operationFailed": "Operation failed: {error}",
   "@operationFailed": {
@@ -343,9 +343,9 @@
   "undoSucceeded": "Undone",
   "undoConflict": "Could not undo",
   "undoFailed": "Undo failed, please try again",
-  "intentPageTitle": "What I want",
-  "intentComposerPrompt": "Say it however you like — no form. Selling, looking for something, looking for someone, asking a favour, or planning something.",
-  "intentComposerHint": "e.g. Clearing out my dorm, will take whatever for the mini fridge / Looking for someone to play badminton with",
+  "intentPageTitle": "Offer / Wanted",
+  "intentComposerPrompt": "Describe what you are offering or looking for in one sentence; open the full listing form when you need precise fields.",
+  "intentComposerHint": "e.g. Clearing out my dorm, will take whatever for the mini fridge / Looking for a calculus textbook under ¥30",
   "intentKindGoodsOffer": "Selling",
   "intentKindGoodsSeek": "Looking for",
   "intentKindCompanion": "Looking for company",
@@ -372,8 +372,8 @@
   "intentWithdrawAction": "Never mind",
   "intentFulfilled": "Marked as sorted",
   "intentWithdrawn": "Withdrawn",
-  "intentFeedHeader": "What people are looking for",
-  "intentFeedEmpty": "Nobody is looking for anything yet. Say something first so others can see it.",
+  "intentFeedHeader": "Offers and wants on campus",
+  "intentFeedEmpty": "There are no new offers or wanted posts yet. You can publish the first one.",
   "intentRespondAction": "I can help",
   "intentRespondTitle": "Reply",
   "intentRespondHint": "Say what you have, or how you can help",
@@ -600,26 +600,22 @@
   "emailDomainError": "Enter a valid campus email address",
   "emailChangeSuccess": "Email updated",
   "notSet": "Not set",
-  "homeHeroEyebrow": "Goods4ncu Campus Market",
-  "homeHeroTitle": "What are you looking for today?",
-  "homeHeroSubtitle": "Tell Xiaobang what you need, your budget, or how you plan to use it. You can also keep scrolling through what classmates just listed.",
-  "homePromptHint": "Find textbooks, lightweight laptops, or ask Xiaobang to help sell an item...",
-  "homePromptSubmitTooltip": "Ask Xiaobang",
-  "homeSuggestionTitle": "Try starting with",
-  "homeThoughtLaptopLabel": "Find a laptop",
-  "homeThoughtLaptopPrompt": "My budget is 3000 yuan. Help me find a lightweight laptop for coding and carrying to class.",
-  "homeThoughtPriceLabel": "Price my item",
-  "homeThoughtPricePrompt": "I have an unused item to sell. Ask me a few questions first, then estimate a fair price.",
-  "homeThoughtCopyLabel": "Write listing copy",
-  "homeThoughtCopyPrompt": "Help me organize the item details step by step and write an honest, trustworthy listing.",
-  "homeThoughtNegotiateLabel": "Negotiate politely",
-  "homeThoughtNegotiatePrompt": "Help me find worthwhile digital items and start a polite negotiation when the price makes sense.",
-  "homeRecentTitle": "Recently Listed",
-  "homeRecentSubtitle": "See what classmates are selling right now.",
+  "homePromptHint": "Search items or requests, or ask Xiaochang",
+  "homePromptSubmitTooltip": "Ask Xiaochang",
+  "homeActionFind": "Find",
+  "homeActionOffer": "Post Offer",
+  "homeActionWanted": "Post Request",
+  "homeSectionTitle": "Classmates Buying & Selling",
+  "homeSectionSubtitle": "Listings and requests from your campus",
+  "homeLoadFailed": "Could not load right now",
+  "homeLoadFailedRetry": "Reload",
   "conversationLoadFailedTitle": "Messages could not load",
   "conversationEmptyTitle": "No conversations yet",
   "conversationEmptySubtitle": "Answer someone in \"what people are looking for\" and you'll have your first conversation.",
-  "conversationEmptyAction": "See what people are looking for",
+  "conversationEmptyAction": "Post offer / wanted",
+  "conversationEmptyAskAssistant": "Ask Xiaochang (AI assistant)",
+  "conversationNextStepsTitle": "What you can do next",
+  "conversationNextStepsSubtitle": "Find another classmate, post an offer or wanted request, or ask Xiaochang where to start.",
   "findClassmate": "Find classmate",
   "conversationWaitingCount": "Awaiting your reply · {count}",
   "@conversationWaitingCount": {
@@ -630,7 +626,7 @@
     }
   },
   "conversationFilterAll": "All",
-  "conversationFilterRealtime": "Realtime",
+  "conversationFilterRealtime": "Connections",
   "conversationFilterMail": "Mail",
   "lookupDialogTitle": "Find classmate",
   "lookupDialogSubtitle": "Enter a username, full email, or student ID. If they turned off that discovery method, they will not appear here.",
@@ -694,11 +690,11 @@
       }
     }
   },
-  "assistantName": "Xiaobang",
+  "assistantName": "Xiaochang",
   "assistantSystemBadge": "AI Assistant",
   "assistantInboxSubtitle": "Find items, price, publish, and negotiate from here",
   "assistantHeaderSubtitle": "Your campus trading assistant · important decisions ask for your confirmation first",
-  "assistantHistoryLoadFailed": "History could not load. You can still keep asking Xiaobang.",
+  "assistantHistoryLoadFailed": "History could not load. You can still keep asking Xiaochang.",
   "assistantTyping": "AI is typing...",
   "recordingStatus": "Recording {seconds}s / 60s",
   "@recordingStatus": {
@@ -835,7 +831,7 @@
   },
   "conversationSectionDirect": "Direct messages",
   "conversationSectionSpaces": "Campus groups and channels",
-  "conversationSectionTools": "Xiaobang",
+  "conversationSectionTools": "Xiaochang",
   "conversationCreateGroupSuccess": "Group created and added to Messages",
   "conversationCreateChannelSuccess": "Channel created and added to Messages",
   "conversationCreateFailed": "Create failed: {error}",
@@ -847,8 +843,8 @@
     }
   },
   "conversationPeerFallback": "Classmate",
-  "conversationThreadLoading": "Loading thread",
-  "conversationThreadStats": "Realtime {realtime} · Mail {mail} · {count} segments",
+  "conversationThreadLoading": "Opening",
+  "conversationThreadStats": "Connections {realtime} · Mail {mail} · {count} segments",
   "@conversationThreadStats": {
     "placeholders": {
       "realtime": {
@@ -862,14 +858,14 @@
       }
     }
   },
-  "conversationReconnect": "Reconnect",
+  "conversationReconnect": "Contact again",
   "conversationThreadLoadFailedTitle": "Contact thread could not load",
   "conversationThreadEmptyTitle": "No visible conversation history yet",
   "conversationThreadEmptySubtitle": "Reconnect to start a new realtime chat or mail thread.",
   "conversationMailThreadTitle": "Mail thread",
   "conversationRealtimeThreadTitle": "Realtime session",
   "conversationSegmentHistoryHint": "This segment is kept as history. Start a new conversation when you need to continue.",
-  "conversationSegmentOpenHint": "Open this segment to view messages, reply, quote context, or handle connection state.",
+  "conversationSegmentOpenHint": "After opening, you can reply, quote, or handle the connection.",
   "conversationViewHistory": "View history",
   "conversationOpenSegment": "Open this segment",
   "conversationPendingCount": "Pending {count}",
@@ -887,10 +883,11 @@
   "relationshipSpaceAsync": "Leave a message",
   "relationshipSpaceConnected": "Connected",
   "relationshipSpaceTimeline": "Timeline",
-  "relationshipSpaceNoEvent": "No shared events yet",
+  "relationshipSpaceLastConnection": "Last connection",
+  "relationshipSpaceNoEvent": "Long press a message to pin, or share items and files to keep them here",
   "relationshipSpacePin": "Pin to shared space",
-  "relationshipSpaceUnpin": "Remove from shared space",
-  "relationshipSpacePinsCount": "{count} pins",
+  "relationshipSpaceUnpin": "Unpin",
+  "relationshipSpacePinsCount": "{count} pinned",
   "@relationshipSpacePinsCount": {
     "placeholders": {
       "count": {
@@ -898,7 +895,7 @@
       }
     }
   },
-  "relationshipSpaceObjectsCount": "{count} shared objects",
+  "relationshipSpaceObjectsCount": "{count} shared items",
   "@relationshipSpaceObjectsCount": {
     "placeholders": {
       "count": {
@@ -906,12 +903,29 @@
       }
     }
   },
-  "relationshipSpaceSharedObjectsTitle": "Shared objects",
-  "relationshipSpaceSharedObjectsReadOnly": "Read-only references; original facts stay authoritative",
+  "relationshipSpaceSharedObjectsTitle": "Shared content",
+  "relationshipSpaceSharedObjectsReadOnly": "Shared from the original; view it here",
   "relationshipSpaceObjectFile": "File",
   "relationshipSpaceObjectLink": "Link",
   "relationshipSpaceObjectReference": "Reference",
-  "conversationRealtimeCount": "Realtime {count}",
+  "relationshipSpacePinsTitle": "Pinned messages",
+  "relationshipSpaceRecentRecords": "Recent records",
+  "relationshipSpaceNoRecentRecords": "No time records to revisit yet",
+  "relationshipSpaceRecentRecovery": "Last connection record",
+  "relationshipSpaceExpandAction": "Expand shared space",
+  "relationshipSpaceCollapseAction": "Collapse shared space",
+  "relationshipSpaceEventSentMessage": "Sent a message",
+  "relationshipSpaceEventOpeningMessage": "Sent opening message",
+  "relationshipSpaceEventConnectionStarted": "Started a connection",
+  "relationshipSpaceEventConnectionEnded": "Ended a connection",
+  "relationshipSpaceEventConnectionAccepted": "Accepted connection",
+  "relationshipSpaceEventConnectionDeclined": "Declined connection",
+  "relationshipSpaceEventConversationCreated": "Conversation started",
+  "relationshipSpaceEventPinChanged": "Pinned messages changed",
+  "relationshipSpaceEventAcknowledgementChanged": "Responded to a message",
+  "relationshipSpaceEventSharedObjectChanged": "Shared content changed",
+  "relationshipSpaceEventDefault": "Added a new record",
+  "conversationRealtimeCount": "Connections {count}",
   "@conversationRealtimeCount": {
     "placeholders": {
       "count": {
@@ -1076,7 +1090,7 @@
       }
     }
   },
-  "replyAssistantUnavailable": "Xiaobang is not ready yet. You can still type directly.",
+  "replyAssistantUnavailable": "Xiaochang is not ready yet. You can still type directly.",
   "closeConversationFailed": "End conversation failed: {error}",
   "@closeConversationFailed": {
     "placeholders": {
@@ -1125,7 +1139,7 @@
     }
   },
   "conversationFallbackTitle": "Conversation",
-  "conversationLoadingState": "Loading conversation state",
+  "conversationLoadingState": "Preparing this conversation",
   "conversationUnavailable": "This conversation is currently unavailable",
   "conversationWaitingPeer": "Waiting for them to connect",
   "conversationAcceptToReply": "Connect to reply",
@@ -1150,7 +1164,7 @@
   "videoCallMvp": "Video call MVP",
   "secretChatMvp": "Secret chat MVP",
   "closeConversationAction": "End this conversation",
-  "replyAssistantButton": "Ask Xiaobang",
+  "replyAssistantButton": "Ask Xiaochang",
   "mailFallbackTitle": "Mail",
   "mailProtocolSubtitle": "Async sending · no online, typing, or read status",
   "incomingRealtimeTitle": "They want to chat now",
@@ -1199,6 +1213,7 @@
   },
   "endAction": "End",
   "conversationTerminalSubtitle": "History is kept. Reconnecting starts a new conversation.",
+  "relationshipContextScrollHint": "Swipe up to see more",
   "conversationNaturallyEndedTitle": "This conversation ended naturally",
   "durationHoursMinutes": "{hours}h {minutes}m",
   "@durationHoursMinutes": {

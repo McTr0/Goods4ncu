@@ -215,7 +215,7 @@ void main() {
         find.byKey(const ValueKey('create-ai-capture-panel')),
         findsOneWidget,
       );
-      expect(find.text('先让小帮看一眼'), findsOneWidget);
+      expect(find.text('先让小昌看一眼'), findsOneWidget);
       expect(find.text('还差 标题、品牌、价格'), findsOneWidget);
     },
   );

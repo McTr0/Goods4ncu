@@ -18,6 +18,7 @@ import '../services/ws_service.dart';
 import '../models/models.dart';
 import '../components/audio_message_player.dart';
 import '../components/assistant_markdown.dart';
+import '../components/xiaochang_avatar.dart';
 import 'chat_page_media_sender.dart';
 
 /// Negotiation action card shown in the chat for HITL requests.
@@ -1415,10 +1416,7 @@ class _AssistantHeader extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const CircleAvatar(
-            backgroundColor: Color(0xFFE1F4EF),
-            child: Icon(Icons.auto_awesome_rounded, color: Color(0xFF0F766E)),
-          ),
+          const XiaochangAvatar(size: 40),
           const SizedBox(width: 12),
           Expanded(
             child: Column(

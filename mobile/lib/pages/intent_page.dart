@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:go_router/go_router.dart';
 
 import '../components/intent_respond_dialog.dart';
 import '../components/feed_feedback_menu.dart';
@@ -26,11 +27,17 @@ import '../theme/app_theme.dart';
 /// when they could matter, and "whatever" and "any time" are real answers rather
 /// than skipped fields.
 class IntentPage extends StatefulWidget {
-  const IntentPage({super.key, this.intentService, this.feedbackService});
+  const IntentPage({
+    super.key,
+    this.intentService,
+    this.feedbackService,
+    this.initialKind = IntentKind.goodsOffer,
+  });
 
   /// Injectable for tests.
   final IntentService? intentService;
   final FeedFeedbackService? feedbackService;
+  final IntentKind initialKind;
 
   @override
   State<IntentPage> createState() => _IntentPageState();
@@ -41,7 +48,7 @@ class _IntentPageState extends State<IntentPage> {
   late final FeedFeedbackService _feedbackService;
   final _controller = TextEditingController();
 
-  IntentKind _kind = IntentKind.goodsOffer;
+  late IntentKind _kind;
   PriceSlot? _price;
   bool _flexibleTime = false;
   bool _submitting = false;
@@ -60,6 +67,9 @@ class _IntentPageState extends State<IntentPage> {
   @override
   void initState() {
     super.initState();
+    _kind = widget.initialKind == IntentKind.goodsSeek
+        ? IntentKind.goodsSeek
+        : IntentKind.goodsOffer;
     _service = widget.intentService ?? context.read<IntentService>();
     _feedbackService =
         widget.feedbackService ?? context.read<FeedFeedbackService>();
@@ -78,7 +88,17 @@ class _IntentPageState extends State<IntentPage> {
     // anything to look at, so it must not depend on them having posted.
     try {
       final feed = await _service.campusFeed();
-      if (mounted) setState(() => _feed = feed);
+      if (mounted) {
+        setState(
+          () => _feed = feed
+              .where(
+                (intent) =>
+                    intent.kind == IntentKind.goodsOffer ||
+                    intent.kind == IntentKind.goodsSeek,
+              )
+              .toList(),
+        );
+      }
     } catch (_) {}
     try {
       final mine = await _service.myIntents();
@@ -279,7 +299,11 @@ class _IntentPageState extends State<IntentPage> {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: IntentKind.values
+              // The first production release supports physical goods only.
+              // Companion/help/activity remain valid historical model values,
+              // but exposing them here promises product flows the current
+              // release explicitly does not support.
+              children: const [IntentKind.goodsOffer, IntentKind.goodsSeek]
                   .map(
                     (kind) => ChoiceChip(
                       label: Text(_kindLabel(l, kind)),
@@ -325,6 +349,9 @@ class _IntentPageState extends State<IntentPage> {
               children: [
                 Expanded(
                   child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(44),
+                    ),
                     onPressed: (_submitting || _readingPhoto) ? null : _submit,
                     child: Text(_submitting ? l.intentSaving : l.intentSubmit),
                   ),
@@ -335,6 +362,9 @@ class _IntentPageState extends State<IntentPage> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(44),
+                      ),
                       onPressed: (_submitting || _readingPhoto)
                           ? null
                           : _fromPhoto,
@@ -350,6 +380,12 @@ class _IntentPageState extends State<IntentPage> {
                   ),
                 ],
               ],
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: () => context.push('/create/listing'),
+              icon: const Icon(Icons.tune_rounded, size: 18),
+              label: Text(l.createListing),
             ),
             const Divider(height: 32),
             // Placed above the caller's own intents on purpose: someone who has

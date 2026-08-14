@@ -166,27 +166,25 @@ void main() {
     expect(service.sentSlots?.price?.kind, 'whatever');
   });
 
-  testWidgets('a badminton partner is never asked for a price', (tester) async {
-    // Pricing a person is a category error, and offering the field invites it.
+  testWidgets('the production composer only exposes offer and wanted goods', (
+    tester,
+  ) async {
     final service = _FakeIntentService();
     await tester.pumpWidget(_app(IntentPage(intentService: service)));
     await tester.pumpAndSettle();
     final l = _l(tester);
 
-    expect(find.text(l.intentPriceWhatever), findsOneWidget);
-    await tester.tap(find.text(l.intentKindCompanion));
-    await tester.pumpAndSettle();
-    expect(
-      find.text(l.intentPriceWhatever),
-      findsNothing,
-      reason: 'companion intents have no price to state',
-    );
+    expect(find.text(l.intentKindGoodsOffer), findsOneWidget);
+    expect(find.text(l.intentKindGoodsSeek), findsOneWidget);
+    expect(find.text(l.intentKindCompanion), findsNothing);
+    expect(find.text(l.intentKindHelp), findsNothing);
+    expect(find.text(l.intentKindActivity), findsNothing);
 
-    await tester.enterText(find.byType(TextField), '想找人一起打羽毛球');
+    await tester.tap(find.text(l.intentKindGoodsSeek));
+    await tester.enterText(find.byType(TextField), '想收一本高数教材');
     await tester.tap(find.text(l.intentSubmit));
     await tester.pumpAndSettle();
-    expect(service.sentKind, IntentKind.companion);
-    expect(service.sentSlots?.price, isNull);
+    expect(service.sentKind, IntentKind.goodsSeek);
   });
 
   testWidgets('an unpriced offer is told it will not appear in the grid', (
@@ -227,8 +225,8 @@ void main() {
       mine: [
         UserIntent(
           id: 'intent-9',
-          kind: IntentKind.help,
-          rawInput: '有人会修自行车吗',
+          kind: IntentKind.goodsSeek,
+          rawInput: '想收一套自行车修理工具',
           slots: const IntentSlots(),
           status: 'active',
         ),
@@ -238,7 +236,7 @@ void main() {
     await tester.pumpAndSettle();
     final l = _l(tester);
 
-    expect(find.text('有人会修自行车吗'), findsOneWidget);
+    expect(find.text('想收一套自行车修理工具'), findsOneWidget);
     // The feed sits above the caller's own intents, so the action may be below
     // the fold on a test-sized screen.
     await tester.ensureVisible(find.text(l.intentFulfilAction));
@@ -332,6 +330,8 @@ void main() {
     expect(find.text(l.intentRespondAction), findsOneWidget);
     // Their own list is empty, which is exactly the case that used to show
     // nothing at all.
+    await tester.drag(find.byType(ListView), const Offset(0, -700));
+    await tester.pumpAndSettle();
     expect(find.text(l.intentMineEmpty), findsOneWidget);
   });
 
@@ -340,8 +340,8 @@ void main() {
       feed: [
         UserIntent(
           id: 'intent-feed-2',
-          kind: IntentKind.help,
-          rawInput: '有人会修自行车吗',
+          kind: IntentKind.goodsSeek,
+          rawInput: '想收一套自行车修理工具',
           slots: const IntentSlots(),
           status: 'active',
         ),
@@ -355,7 +355,7 @@ void main() {
     await tester.pumpAndSettle();
     // The dialog shows their words, so the responder can see what they are
     // answering.
-    expect(find.text('有人会修自行车吗'), findsWidgets);
+    expect(find.text('想收一套自行车修理工具'), findsWidgets);
 
     await tester.enterText(find.byType(TextField).last, '我会，明天下午有空');
     await tester.tap(find.text(l.intentRespondSend));
@@ -371,8 +371,8 @@ void main() {
       feed: [
         UserIntent(
           id: 'intent-feed-3',
-          kind: IntentKind.companion,
-          rawInput: '找个羽毛球搭子',
+          kind: IntentKind.goodsSeek,
+          rawInput: '想收一个羽毛球拍',
           slots: const IntentSlots(),
           status: 'active',
         ),
@@ -399,17 +399,16 @@ void main() {
     expect(find.text(_l(tester).intentFeedEmpty), findsOneWidget);
   });
 
-  testWidgets('the photo affordance is offered only for things being sold', (
+  testWidgets('the photo affordance is offered only for goods being sold', (
     tester,
   ) async {
-    // Photographing a badminton partner is not a thing.
     final service = _FakeIntentService();
     await tester.pumpWidget(_app(IntentPage(intentService: service)));
     await tester.pumpAndSettle();
     final l = _l(tester);
 
     expect(find.text(l.intentPhotoAction), findsOneWidget);
-    await tester.tap(find.text(l.intentKindCompanion));
+    await tester.tap(find.text(l.intentKindGoodsSeek));
     await tester.pumpAndSettle();
     expect(find.text(l.intentPhotoAction), findsNothing);
   });
@@ -505,8 +504,8 @@ void main() {
       feed: [
         UserIntent(
           id: 'intent-feedback-1',
-          kind: IntentKind.activity,
-          rawInput: '周末一起去爬山',
+          kind: IntentKind.goodsSeek,
+          rawInput: '想收一根登山杖',
           slots: const IntentSlots(),
           status: 'active',
           rankReason: 'same_kind',
@@ -530,7 +529,7 @@ void main() {
     await tester.tap(find.text(l.feedFeedbackLessLikeThis));
     await tester.pumpAndSettle();
 
-    expect(find.text('周末一起去爬山'), findsNothing);
+    expect(find.text('想收一根登山杖'), findsNothing);
     expect(find.text(l.intentFeedEmpty), findsOneWidget);
     expect(feedback.calls, hasLength(1));
     expect(feedback.calls.single.action, FeedFeedbackAction.lessLikeThis);
