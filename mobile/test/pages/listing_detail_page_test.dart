@@ -356,6 +356,10 @@ void main() {
     expect(find.text('联系卖家'), findsNothing);
     expect(find.text('发起成交意向'), findsNothing);
     expect(find.byKey(const Key('listing-report-action')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('listing-open-discussion')),
+      findsOneWidget,
+    );
   });
 
   testWidgets(

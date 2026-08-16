@@ -3220,4 +3220,142 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get socialPersonaAssetRevokeConfirmBody =>
       'It will stop being public immediately and enter remote cleanup. Conversation history is unchanged.';
+  String get postDiscoveryTitle => 'Campus discovery';
+
+  @override
+  String get postDiscoverySubtitle =>
+      'Discussions and listings from your campus';
+
+  @override
+  String get postFilterAll => 'For you';
+
+  @override
+  String get postFilterDiscussion => 'Discussions';
+
+  @override
+  String get postFilterListing => 'Listings';
+
+  @override
+  String get postSortLatest => 'Latest';
+
+  @override
+  String get postSortActive => 'Active';
+
+  @override
+  String get postSortReplies => 'Most replied';
+
+  @override
+  String get postTypeDiscussion => 'Discussion';
+
+  @override
+  String get postTypeListing => 'Listing';
+
+  @override
+  String get postAnonymousAuthor => 'Campus member';
+
+  @override
+  String get postCreateTooltip => 'Start a discussion';
+
+  @override
+  String get postCreateTitle => 'Start a discussion';
+
+  @override
+  String get postCreateIntro =>
+      'Share a campus question, guide, or idea. To sell or request an item, use the listing publisher so price and condition stay structured.';
+
+  @override
+  String get postTitleLabel => 'Title';
+
+  @override
+  String get postTitleHint => 'Summarize what you want to discuss';
+
+  @override
+  String get postTitleRequired => 'Enter a title';
+
+  @override
+  String get postBodyLabel => 'Details';
+
+  @override
+  String get postBodyHint => 'Add context that will help classmates respond';
+
+  @override
+  String get postBodyRequired => 'Add some details';
+
+  @override
+  String get postCategoryLabel => 'Category (optional)';
+
+  @override
+  String get postCategoryHint => 'For example: Campus life';
+
+  @override
+  String get postTagsLabel => 'Tags (optional)';
+
+  @override
+  String get postTagsHint => 'Separate up to five tags with spaces or commas';
+
+  @override
+  String get postPublishAction => 'Publish';
+
+  @override
+  String get postPublishFailed =>
+      'Could not publish the discussion. Try again.';
+
+  @override
+  String get postDetailTitle => 'Discussion';
+
+  @override
+  String get postLoadFailed => 'Could not load this discussion.';
+
+  @override
+  String get postRepliesTitle => 'Replies';
+
+  @override
+  String get postThreadOrder => 'Oldest first';
+
+  @override
+  String get postNoReplies => 'No replies yet. Add the first helpful response.';
+
+  @override
+  String get postLockedNotice => 'This discussion is closed to new replies.';
+
+  @override
+  String get postReplyHint => 'Write a constructive reply…';
+
+  @override
+  String get postReplyAction => 'Reply';
+
+  @override
+  String get postReplyFailed => 'Could not send your reply. Try again.';
+
+  @override
+  String postReplyingTo(String username) {
+    return 'Replying to $username';
+  }
+
+  @override
+  String get postLinkedListing => 'Marketplace listing';
+
+  @override
+  String get postViewListing => 'View item';
+
+  @override
+  String get listingDiscussionAction => 'Open discussion';
+
+  @override
+  String get listingDiscussionHint =>
+      'This product is also a post. Read or join its campus discussion.';
+
+  @override
+  String get postEmptyTitle => 'Nothing here yet';
+
+  @override
+  String get postEmptyBody =>
+      'Start a useful campus conversation and classmates can build the thread with you.';
+
+  @override
+  String get postEmptyListingBody =>
+      'No marketplace posts match this filter yet.';
+
+  @override
+  String get postStartAction => 'Start a discussion';
 }

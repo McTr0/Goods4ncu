@@ -3080,4 +3080,136 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String get socialPersonaAssetRevokeConfirmBody =>
       '撤销后它会立即停止公开展示，并进入远端清理。历史沟通不会被修改。';
+  String get postDiscoveryTitle => '校园发现';
+
+  @override
+  String get postDiscoverySubtitle => '同校同学的讨论和闲置帖子';
+
+  @override
+  String get postFilterAll => '推荐';
+
+  @override
+  String get postFilterDiscussion => '讨论';
+
+  @override
+  String get postFilterListing => '闲置';
+
+  @override
+  String get postSortLatest => '最新';
+
+  @override
+  String get postSortActive => '活跃';
+
+  @override
+  String get postSortReplies => '热议';
+
+  @override
+  String get postTypeDiscussion => '讨论';
+
+  @override
+  String get postTypeListing => '闲置';
+
+  @override
+  String get postAnonymousAuthor => '校园同学';
+
+  @override
+  String get postCreateTooltip => '发起讨论';
+
+  @override
+  String get postCreateTitle => '发起讨论';
+
+  @override
+  String get postCreateIntro => '可以分享校园问题、经验或想法。出售或求购物品请使用商品发布，让价格和成色保持结构化。';
+
+  @override
+  String get postTitleLabel => '标题';
+
+  @override
+  String get postTitleHint => '用一句话说清想讨论的内容';
+
+  @override
+  String get postTitleRequired => '请输入标题';
+
+  @override
+  String get postBodyLabel => '正文';
+
+  @override
+  String get postBodyHint => '补充能帮助同学理解和回复的背景';
+
+  @override
+  String get postBodyRequired => '请输入正文';
+
+  @override
+  String get postCategoryLabel => '分区（选填）';
+
+  @override
+  String get postCategoryHint => '例如：校园生活';
+
+  @override
+  String get postTagsLabel => '标签（选填）';
+
+  @override
+  String get postTagsHint => '空格或逗号分隔，最多五个';
+
+  @override
+  String get postPublishAction => '发布';
+
+  @override
+  String get postPublishFailed => '讨论发布失败，请稍后重试。';
+
+  @override
+  String get postDetailTitle => '讨论';
+
+  @override
+  String get postLoadFailed => '暂时无法加载这篇帖子。';
+
+  @override
+  String get postRepliesTitle => '回复';
+
+  @override
+  String get postThreadOrder => '按时间正序';
+
+  @override
+  String get postNoReplies => '还没有回复，来留下第一条有帮助的回应吧。';
+
+  @override
+  String get postLockedNotice => '该讨论已关闭回复。';
+
+  @override
+  String get postReplyHint => '写下友善、有帮助的回复…';
+
+  @override
+  String get postReplyAction => '回复';
+
+  @override
+  String get postReplyFailed => '回复发送失败，请稍后重试。';
+
+  @override
+  String postReplyingTo(String username) {
+    return '回复 $username';
+  }
+
+  @override
+  String get postLinkedListing => '关联商品信息';
+
+  @override
+  String get postViewListing => '查看商品';
+
+  @override
+  String get listingDiscussionAction => '查看帖子讨论';
+
+  @override
+  String get listingDiscussionHint => '商品也是帖子，可以查看或参与校园讨论。';
+
+  @override
+  String get postEmptyTitle => '这里还没有内容';
+
+  @override
+  String get postEmptyBody => '发起一个有用的校园讨论，和同学一起把楼盖起来吧。';
+
+  @override
+  String get postEmptyListingBody => '暂时没有符合筛选条件的商品帖子。';
+
+  @override
+  String get postStartAction => '发起讨论';
 }

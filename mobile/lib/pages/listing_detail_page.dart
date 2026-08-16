@@ -916,6 +916,46 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
             ),
           ),
         ],
+        if (listing.status == 'active' && !listing.isRestricted) ...[
+          const SizedBox(height: AppTheme.sp20),
+          Container(
+            padding: const EdgeInsets.all(AppTheme.sp14),
+            decoration: BoxDecoration(
+              color: Theme.of(
+                context,
+              ).colorScheme.primaryContainer.withValues(alpha: 0.38),
+              borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+              border: Border.all(
+                color: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: 0.18),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  l.listingDiscussionHint,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 13,
+                    height: 1.45,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: AppTheme.sp12),
+                OutlinedButton.icon(
+                  key: const ValueKey('listing-open-discussion'),
+                  onPressed: () => context.push(
+                    '/listing/${Uri.encodeComponent(listing.id)}/discussion',
+                  ),
+                  icon: const Icon(Icons.forum_outlined),
+                  label: Text(l.listingDiscussionAction),
+                ),
+              ],
+            ),
+          ),
+        ],
         if (listing.ownerUsername != null) ...[
           const SizedBox(height: AppTheme.sp20),
           const Divider(),

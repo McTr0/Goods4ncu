@@ -12,12 +12,16 @@ import '../components/intent_respond_dialog.dart';
 import '../components/price_tag.dart';
 import '../components/feed_feedback_menu.dart';
 import '../services/feed_feedback_service.dart';
+import '../models/post.dart';
+import '../services/post_service.dart';
+import '../components/post_discovery_card.dart';
 
 class HomePage extends StatefulWidget {
   final RecommendationService? recommendationService;
   final ListingService? listingService;
   final IntentService? intentService;
   final FeedFeedbackService? feedbackService;
+  final PostService? postService;
 
   const HomePage({
     super.key,
@@ -25,6 +29,7 @@ class HomePage extends StatefulWidget {
     this.listingService,
     this.intentService,
     this.feedbackService,
+    this.postService,
   });
 
   @override
@@ -36,16 +41,23 @@ class _HomePageState extends State<HomePage> {
   ListingService? _listingService;
   late final IntentService _intentService;
   late final FeedFeedbackService _feedbackService;
+  PostService? _postService;
   final _promptController = TextEditingController();
   final _promptFocus = FocusNode();
 
   // Recommendation state
   List<Listing> _recommendedListings = [];
+  List<CampusPost> _posts = [];
+  bool _usingPosts = false;
   bool _recommendationLoading = true;
   bool _feedHasMore = true;
   bool _feedLoading = false;
   String _directionFilter = 'all';
+  String _postTypeFilter = 'all';
+  String _postSort = 'for_you';
   String? _loadError;
+  String? _postFeedError;
+  bool _postFeedRetryReset = false;
 
   /// What people have actually said, loaded only when the grid comes back
   /// empty. The publish tab opens the intent composer, so most of what gets
@@ -61,6 +73,7 @@ class _HomePageState extends State<HomePage> {
     _intentService = widget.intentService ?? context.read<IntentService>();
     _feedbackService =
         widget.feedbackService ?? context.read<FeedFeedbackService>();
+    _postService = _resolvePostService();
     _loadRecommendations();
   }
 
@@ -73,14 +86,67 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  PostService? _resolvePostService() {
+    if (widget.postService != null) return widget.postService;
+    try {
+      return context.read<PostService>();
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _loadRecommendations({bool reset = true}) async {
     if (reset) {
       setState(() {
         _recommendationLoading = true;
         _loadError = null;
+        _postFeedError = null;
+        _postFeedRetryReset = false;
       });
     }
     try {
+      final postService = _postService;
+      if (postService != null) {
+        try {
+          final response = await postService.getPosts(
+            limit: 20,
+            offset: reset ? 0 : _posts.length,
+            postType: _postTypeFilter,
+            sort: _postSort,
+          );
+          if (!mounted) return;
+          setState(() {
+            if (reset) {
+              _posts = response.items;
+            } else {
+              _posts = [..._posts, ...response.items];
+            }
+            _recommendedListings = [];
+            _usingPosts = true;
+            _feedHasMore = _posts.length < response.total;
+            _recommendationLoading = false;
+            _feedLoading = false;
+            _loadError = null;
+            _postFeedError = null;
+            _postFeedRetryReset = false;
+          });
+          return;
+        } catch (error) {
+          debugPrint(
+            'Unified posts feed unavailable, using listing feed: $error',
+          );
+          if (_usingPosts) {
+            if (!mounted) return;
+            setState(() {
+              _recommendationLoading = false;
+              _feedLoading = false;
+              _postFeedError = error.toString();
+              _postFeedRetryReset = reset;
+            });
+            return;
+          }
+        }
+      }
       var recommendations = await _recommendationService.getRecommendationFeed(
         limit: 20,
         offset: reset ? 0 : _recommendedListings.length,
@@ -102,16 +168,20 @@ class _HomePageState extends State<HomePage> {
         setState(() {
           if (reset) {
             _recommendedListings = recommendations;
+            _posts = [];
           } else {
             _recommendedListings.addAll(recommendations);
           }
+          _usingPosts = false;
           _feedHasMore = recommendations.length == 20;
           _recommendationLoading = false;
           _feedLoading = false;
           _loadError = null;
+          _postFeedError = null;
+          _postFeedRetryReset = false;
         });
       }
-      if (_recommendedListings.isEmpty) await _loadVoices();
+      if (_recommendedListings.isEmpty && _posts.isEmpty) await _loadVoices();
     } catch (error, stackTrace) {
       debugPrint('Failed to load recommendation feed: $error');
       debugPrintStack(stackTrace: stackTrace);
@@ -161,6 +231,13 @@ class _HomePageState extends State<HomePage> {
     if (_recommendedListings.isEmpty) _loadVoices();
   }
 
+  void _removePost(CampusPost post) {
+    if (!mounted) return;
+    setState(() => _posts.removeWhere((item) => item.id == post.id));
+  }
+
+  bool get _feedIsEmpty => _posts.isEmpty && _recommendedListings.isEmpty;
+
   @override
   void dispose() {
     _promptController.dispose();
@@ -180,6 +257,40 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildDirectionSection() {
+    if (_usingPosts) {
+      return Padding(
+        padding: EdgeInsets.fromLTRB(
+          MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
+              ? AppTheme.sp24
+              : AppTheme.sp16,
+          AppTheme.sp14,
+          MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
+              ? AppTheme.sp24
+              : AppTheme.sp16,
+          AppTheme.sp8,
+        ),
+        child: _PostSectionTitle(
+          selectedType: _postTypeFilter,
+          selectedSort: _postSort,
+          onTypeChanged: (value) {
+            if (_postTypeFilter == value) return;
+            setState(() {
+              _postTypeFilter = value;
+              _feedHasMore = true;
+            });
+            _loadRecommendations(reset: true);
+          },
+          onSortChanged: (value) {
+            if (_postSort == value) return;
+            setState(() {
+              _postSort = value;
+              _feedHasMore = true;
+            });
+            _loadRecommendations(reset: true);
+          },
+        ),
+      );
+    }
     return Padding(
       padding: EdgeInsets.fromLTRB(
         MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
@@ -218,6 +329,16 @@ class _HomePageState extends State<HomePage> {
           l.appTitle,
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
+        actions: [
+          if (_postService != null)
+            IconButton(
+              key: const ValueKey('home-create-post'),
+              tooltip: l.postCreateTooltip,
+              onPressed: () => context.push('/create/post'),
+              icon: const Icon(Icons.edit_square),
+            ),
+          const SizedBox(width: AppTheme.sp8),
+        ],
       ),
       body: DecoratedBox(
         decoration: BoxDecoration(
@@ -240,7 +361,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildContent(AppLocalizations l) {
-    if (_recommendationLoading && _recommendedListings.isEmpty) {
+    if (_recommendationLoading && _feedIsEmpty) {
       return CustomScrollView(
         slivers: [
           SliverToBoxAdapter(
@@ -261,7 +382,7 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    if (_loadError != null && _recommendedListings.isEmpty) {
+    if (_loadError != null && _feedIsEmpty) {
       return RefreshIndicator(
         onRefresh: () async => _loadRecommendations(reset: true),
         child: CustomScrollView(
@@ -287,7 +408,7 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    if (_recommendedListings.isEmpty) {
+    if (_feedIsEmpty) {
       return RefreshIndicator(
         onRefresh: () async => _loadRecommendations(reset: true),
         child: CustomScrollView(
@@ -303,13 +424,20 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             SliverToBoxAdapter(child: _buildDirectionSection()),
-            if (_voices.isNotEmpty && _directionFilter == 'all')
+            if (_voices.isNotEmpty && _directionFilter == 'all' && !_usingPosts)
               SliverToBoxAdapter(
                 child: _WhatPeopleWant(
                   voices: _voices,
                   onRespond: _respond,
                   feedbackService: _feedbackService,
                   onFeedbackApplied: _removeVoice,
+                ),
+              )
+            else if (_usingPosts)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: _PostEmptyState(
+                  showCreateAction: _postTypeFilter != 'listing',
                 ),
               )
             else
@@ -333,7 +461,8 @@ class _HomePageState extends State<HomePage> {
           if (notification is ScrollEndNotification &&
               notification.metrics.extentAfter < 200 &&
               _feedHasMore &&
-              !_feedLoading) {
+              !_feedLoading &&
+              _postFeedError == null) {
             setState(() => _feedLoading = true);
             _loadRecommendations(reset: false);
           }
@@ -352,62 +481,377 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             SliverToBoxAdapter(child: _buildDirectionSection()),
-            SliverPadding(
-              padding: EdgeInsets.fromLTRB(
-                MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
-                    ? AppTheme.sp24
-                    : AppTheme.sp16,
-                AppTheme.sp4,
-                MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
-                    ? AppTheme.sp24
-                    : AppTheme.sp16,
-                AppTheme.sp24,
-              ),
-              sliver: SliverLayoutBuilder(
-                builder: (context, constraints) {
-                  final desktop = constraints.crossAxisExtent >= 820;
-                  final textScale = MediaQuery.textScalerOf(
-                    context,
-                  ).scale(1).clamp(1.0, 2.0);
-                  final baseAspectRatio = desktop ? 0.76 : 0.60;
-                  return SliverGrid(
-                    gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: desktop ? 300 : 320,
-                      childAspectRatio:
-                          baseAspectRatio / (1 + (textScale - 1) * 0.75),
-                      crossAxisSpacing: desktop ? 18 : 14,
-                      mainAxisSpacing: desktop ? 18 : 14,
-                    ),
-                    delegate: SliverChildBuilderDelegate(
-                      (context, i) {
-                        if (i >= _recommendedListings.length) {
-                          return const Center(
-                            child: Padding(
-                              padding: EdgeInsets.all(16),
-                              child: CircularProgressIndicator(strokeWidth: 2),
+            if (_usingPosts && _recommendationLoading)
+              const SliverToBoxAdapter(child: LinearProgressIndicator()),
+            if (_usingPosts)
+              SliverToBoxAdapter(
+                child: _PostMasonryGrid(
+                  posts: _posts,
+                  onTap: (post) => context.push('/posts/${post.id}'),
+                  loadingMore: _feedLoading,
+                  loadError: _postFeedError,
+                  onRetry: () {
+                    final reset = _postFeedRetryReset;
+                    setState(() {
+                      if (!reset) _feedLoading = true;
+                      _postFeedError = null;
+                    });
+                    _loadRecommendations(reset: reset);
+                  },
+                  feedbackMenuBuilder: (post) => FeedFeedbackMenu(
+                    service: _feedbackService,
+                    resourceType: FeedResourceType.post,
+                    resourceId: post.id,
+                    compact: true,
+                    onApplied: (_) => _removePost(post),
+                  ),
+                ),
+              )
+            else
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(
+                  MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
+                      ? AppTheme.sp24
+                      : AppTheme.sp16,
+                  AppTheme.sp4,
+                  MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
+                      ? AppTheme.sp24
+                      : AppTheme.sp16,
+                  AppTheme.sp24,
+                ),
+                sliver: SliverLayoutBuilder(
+                  builder: (context, constraints) {
+                    final desktop = constraints.crossAxisExtent >= 820;
+                    final textScale = MediaQuery.textScalerOf(
+                      context,
+                    ).scale(1).clamp(1.0, 2.0);
+                    final baseAspectRatio = desktop ? 0.76 : 0.60;
+                    return SliverGrid(
+                      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                        maxCrossAxisExtent: desktop ? 300 : 320,
+                        childAspectRatio:
+                            baseAspectRatio / (1 + (textScale - 1) * 0.75),
+                        crossAxisSpacing: desktop ? 18 : 14,
+                        mainAxisSpacing: desktop ? 18 : 14,
+                      ),
+                      delegate: SliverChildBuilderDelegate(
+                        (context, i) {
+                          if (i >= _recommendedListings.length) {
+                            return const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(16),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            );
+                          }
+                          final listing = _recommendedListings[i];
+                          return ListingCard(
+                            listing: listing,
+                            onTap: () => context.push('/listing/${listing.id}'),
+                            feedbackMenu: FeedFeedbackMenu(
+                              service: _feedbackService,
+                              resourceType: FeedResourceType.listing,
+                              resourceId: listing.id,
+                              onApplied: (_) => _removeListing(listing),
                             ),
                           );
-                        }
-                        final listing = _recommendedListings[i];
-                        return ListingCard(
-                          listing: listing,
-                          onTap: () => context.push('/listing/${listing.id}'),
-                          feedbackMenu: FeedFeedbackMenu(
-                            service: _feedbackService,
-                            resourceType: FeedResourceType.listing,
-                            resourceId: listing.id,
-                            onApplied: (_) => _removeListing(listing),
-                          ),
-                        );
-                      },
-                      childCount:
-                          _recommendedListings.length + (_feedHasMore ? 1 : 0),
+                        },
+                        childCount:
+                            _recommendedListings.length +
+                            (_feedHasMore ? 1 : 0),
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PostMasonryGrid extends StatelessWidget {
+  const _PostMasonryGrid({
+    required this.posts,
+    required this.onTap,
+    required this.loadingMore,
+    required this.loadError,
+    required this.onRetry,
+    required this.feedbackMenuBuilder,
+  });
+
+  final List<CampusPost> posts;
+  final ValueChanged<CampusPost> onTap;
+  final bool loadingMore;
+  final String? loadError;
+  final VoidCallback onRetry;
+  final Widget Function(CampusPost post) feedbackMenuBuilder;
+
+  @override
+  Widget build(BuildContext context) {
+    final desktop = MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columnCount = constraints.maxWidth >= 1040
+            ? 4
+            : constraints.maxWidth >= 720
+            ? 3
+            : 2;
+        final columns = List.generate(
+          columnCount,
+          (_) => <Widget>[],
+          growable: false,
+        );
+        for (final entry in posts.indexed) {
+          columns[entry.$1 % columnCount].add(
+            Padding(
+              padding: EdgeInsets.only(
+                bottom: desktop ? AppTheme.sp16 : AppTheme.sp12,
+              ),
+              child: PostDiscoveryCard(
+                post: entry.$2,
+                onTap: () => onTap(entry.$2),
+                feedbackMenu: feedbackMenuBuilder(entry.$2),
+              ),
+            ),
+          );
+        }
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            desktop ? AppTheme.sp24 : AppTheme.sp12,
+            AppTheme.sp4,
+            desktop ? AppTheme.sp24 : AppTheme.sp12,
+            AppTheme.sp24,
+          ),
+          child: Column(
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var i = 0; i < columns.length; i++) ...[
+                    if (i > 0)
+                      SizedBox(width: desktop ? AppTheme.sp16 : AppTheme.sp8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: columns[i],
+                      ),
                     ),
-                  );
-                },
+                  ],
+                ],
+              ),
+              if (loadingMore)
+                const Padding(
+                  padding: EdgeInsets.all(AppTheme.sp24),
+                  child: Center(
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              else if (loadError != null)
+                _PostFeedRetry(onRetry: onRetry),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _PostSectionTitle extends StatelessWidget {
+  const _PostSectionTitle({
+    required this.selectedType,
+    required this.selectedSort,
+    required this.onTypeChanged,
+    required this.onSortChanged,
+  });
+
+  final String selectedType;
+  final String selectedSort;
+  final ValueChanged<String> onTypeChanged;
+  final ValueChanged<String> onSortChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    final scheme = Theme.of(context).colorScheme;
+    final sortLabel = switch (selectedSort) {
+      'for_you' => l.postFilterAll,
+      'active' => l.postSortActive,
+      'replies' => l.postSortReplies,
+      _ => l.postSortLatest,
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l.postDiscoveryTitle,
+                    style: TextStyle(
+                      color: scheme.onSurface,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.sp2),
+                  Text(
+                    l.postDiscoverySubtitle,
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant,
+                      fontSize: 12,
+                      height: 1.3,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            PopupMenuButton<String>(
+              key: const ValueKey('post-sort-menu'),
+              tooltip: sortLabel,
+              initialValue: selectedSort,
+              onSelected: onSortChanged,
+              itemBuilder: (context) => [
+                PopupMenuItem(value: 'for_you', child: Text(l.postFilterAll)),
+                PopupMenuItem(value: 'latest', child: Text(l.postSortLatest)),
+                PopupMenuItem(value: 'active', child: Text(l.postSortActive)),
+                PopupMenuItem(value: 'replies', child: Text(l.postSortReplies)),
+              ],
+              child: Chip(
+                avatar: const Icon(Icons.swap_vert_rounded, size: 17),
+                label: Text(sortLabel),
+                visualDensity: VisualDensity.compact,
               ),
             ),
           ],
+        ),
+        const SizedBox(height: AppTheme.sp12),
+        Wrap(
+          spacing: AppTheme.sp8,
+          runSpacing: AppTheme.sp8,
+          children: [
+            _PostFilterChip(
+              key: const ValueKey('post-filter-all'),
+              label: l.postFilterAll,
+              selected: selectedType == 'all',
+              onSelected: () => onTypeChanged('all'),
+            ),
+            _PostFilterChip(
+              key: const ValueKey('post-filter-discussion'),
+              label: l.postFilterDiscussion,
+              selected: selectedType == 'discussion',
+              onSelected: () => onTypeChanged('discussion'),
+            ),
+            _PostFilterChip(
+              key: const ValueKey('post-filter-listing'),
+              label: l.postFilterListing,
+              selected: selectedType == 'listing',
+              onSelected: () => onTypeChanged('listing'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _PostFilterChip extends StatelessWidget {
+  const _PostFilterChip({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => onSelected(),
+      showCheckmark: false,
+      labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+    );
+  }
+}
+
+class _PostEmptyState extends StatelessWidget {
+  const _PostEmptyState({required this.showCreateAction});
+
+  final bool showCreateAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    final scheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppTheme.sp24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.dynamic_feed_outlined, size: 44, color: scheme.primary),
+            const SizedBox(height: AppTheme.sp12),
+            Text(
+              l.postEmptyTitle,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: AppTheme.sp6),
+            Text(
+              showCreateAction ? l.postEmptyBody : l.postEmptyListingBody,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+            if (showCreateAction) ...[
+              const SizedBox(height: AppTheme.sp16),
+              FilledButton.icon(
+                onPressed: () => context.push('/create/post'),
+                icon: const Icon(Icons.edit_rounded),
+                label: Text(l.postStartAction),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PostFeedRetry extends StatelessWidget {
+  const _PostFeedRetry({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppTheme.sp16,
+        0,
+        AppTheme.sp16,
+        AppTheme.sp24,
+      ),
+      child: Center(
+        child: OutlinedButton.icon(
+          key: const ValueKey('post-feed-retry'),
+          onPressed: onRetry,
+          icon: Icon(Icons.refresh_rounded, color: scheme.primary),
+          label: Text(l.homeLoadFailedRetry),
         ),
       ),
     );

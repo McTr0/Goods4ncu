@@ -25,6 +25,8 @@ import '../services/base_service.dart';
 import '../services/user_service.dart';
 import '../services/admin_role_cache.dart';
 import '../pages/trust_page.dart';
+import '../pages/post_detail_page.dart';
+import '../pages/create_post_page.dart';
 import '../services/token_storage.dart';
 import '../services/ws_service.dart';
 import '../theme/app_theme.dart';
@@ -188,6 +190,20 @@ final GoRouter appRouter = GoRouter(
       builder: (context, state, child) => _ShellScaffold(child: child),
       routes: [
         GoRoute(
+          path: '/listing/:id/discussion',
+          builder: (context, state) {
+            final id = state.pathParameters['id']!;
+            return PostDetailPage(listingId: id);
+          },
+        ),
+        GoRoute(
+          path: '/posts/:id',
+          builder: (context, state) {
+            final id = state.pathParameters['id']!;
+            return PostDetailPage(postId: id);
+          },
+        ),
+        GoRoute(
           path: '/',
           pageBuilder: (context, state) =>
               const NoTransitionPage(child: HomePage()),
@@ -218,6 +234,11 @@ final GoRouter appRouter = GoRouter(
           path: '/create/listing',
           pageBuilder: (context, state) =>
               const NoTransitionPage(child: CreateListingPage()),
+        ),
+        GoRoute(
+          path: '/create/post',
+          pageBuilder: (context, state) =>
+              const NoTransitionPage(child: CreatePostPage()),
         ),
         GoRoute(
           path: '/profile',
@@ -270,6 +291,7 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
         return 1;
       case '/create':
       case '/create/listing':
+      case '/create/post':
         return 2;
       // Xiaobang is a tool entered from home, not a human conversation in the
       // inbox. Keep the home destination selected while the assistant is open.

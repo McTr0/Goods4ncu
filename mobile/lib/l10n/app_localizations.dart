@@ -5927,6 +5927,269 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'It will stop being public immediately and enter remote cleanup. Conversation history is unchanged.'**
   String get socialPersonaAssetRevokeConfirmBody;
+  /// No description provided for @postDiscoveryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Campus discovery'**
+  String get postDiscoveryTitle;
+
+  /// No description provided for @postDiscoverySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Discussions and listings from your campus'**
+  String get postDiscoverySubtitle;
+
+  /// No description provided for @postFilterAll.
+  ///
+  /// In en, this message translates to:
+  /// **'For you'**
+  String get postFilterAll;
+
+  /// No description provided for @postFilterDiscussion.
+  ///
+  /// In en, this message translates to:
+  /// **'Discussions'**
+  String get postFilterDiscussion;
+
+  /// No description provided for @postFilterListing.
+  ///
+  /// In en, this message translates to:
+  /// **'Listings'**
+  String get postFilterListing;
+
+  /// No description provided for @postSortLatest.
+  ///
+  /// In en, this message translates to:
+  /// **'Latest'**
+  String get postSortLatest;
+
+  /// No description provided for @postSortActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get postSortActive;
+
+  /// No description provided for @postSortReplies.
+  ///
+  /// In en, this message translates to:
+  /// **'Most replied'**
+  String get postSortReplies;
+
+  /// No description provided for @postTypeDiscussion.
+  ///
+  /// In en, this message translates to:
+  /// **'Discussion'**
+  String get postTypeDiscussion;
+
+  /// No description provided for @postTypeListing.
+  ///
+  /// In en, this message translates to:
+  /// **'Listing'**
+  String get postTypeListing;
+
+  /// No description provided for @postAnonymousAuthor.
+  ///
+  /// In en, this message translates to:
+  /// **'Campus member'**
+  String get postAnonymousAuthor;
+
+  /// No description provided for @postCreateTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Start a discussion'**
+  String get postCreateTooltip;
+
+  /// No description provided for @postCreateTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Start a discussion'**
+  String get postCreateTitle;
+
+  /// No description provided for @postCreateIntro.
+  ///
+  /// In en, this message translates to:
+  /// **'Share a campus question, guide, or idea. To sell or request an item, use the listing publisher so price and condition stay structured.'**
+  String get postCreateIntro;
+
+  /// No description provided for @postTitleLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Title'**
+  String get postTitleLabel;
+
+  /// No description provided for @postTitleHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Summarize what you want to discuss'**
+  String get postTitleHint;
+
+  /// No description provided for @postTitleRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a title'**
+  String get postTitleRequired;
+
+  /// No description provided for @postBodyLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Details'**
+  String get postBodyLabel;
+
+  /// No description provided for @postBodyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Add context that will help classmates respond'**
+  String get postBodyHint;
+
+  /// No description provided for @postBodyRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Add some details'**
+  String get postBodyRequired;
+
+  /// No description provided for @postCategoryLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Category (optional)'**
+  String get postCategoryLabel;
+
+  /// No description provided for @postCategoryHint.
+  ///
+  /// In en, this message translates to:
+  /// **'For example: Campus life'**
+  String get postCategoryHint;
+
+  /// No description provided for @postTagsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Tags (optional)'**
+  String get postTagsLabel;
+
+  /// No description provided for @postTagsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Separate up to five tags with spaces or commas'**
+  String get postTagsHint;
+
+  /// No description provided for @postPublishAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Publish'**
+  String get postPublishAction;
+
+  /// No description provided for @postPublishFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not publish the discussion. Try again.'**
+  String get postPublishFailed;
+
+  /// No description provided for @postDetailTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Discussion'**
+  String get postDetailTitle;
+
+  /// No description provided for @postLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load this discussion.'**
+  String get postLoadFailed;
+
+  /// No description provided for @postRepliesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Replies'**
+  String get postRepliesTitle;
+
+  /// No description provided for @postThreadOrder.
+  ///
+  /// In en, this message translates to:
+  /// **'Oldest first'**
+  String get postThreadOrder;
+
+  /// No description provided for @postNoReplies.
+  ///
+  /// In en, this message translates to:
+  /// **'No replies yet. Add the first helpful response.'**
+  String get postNoReplies;
+
+  /// No description provided for @postLockedNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'This discussion is closed to new replies.'**
+  String get postLockedNotice;
+
+  /// No description provided for @postReplyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Write a constructive reply…'**
+  String get postReplyHint;
+
+  /// No description provided for @postReplyAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Reply'**
+  String get postReplyAction;
+
+  /// No description provided for @postReplyFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not send your reply. Try again.'**
+  String get postReplyFailed;
+
+  /// No description provided for @postReplyingTo.
+  ///
+  /// In en, this message translates to:
+  /// **'Replying to {username}'**
+  String postReplyingTo(String username);
+
+  /// No description provided for @postLinkedListing.
+  ///
+  /// In en, this message translates to:
+  /// **'Marketplace listing'**
+  String get postLinkedListing;
+
+  /// No description provided for @postViewListing.
+  ///
+  /// In en, this message translates to:
+  /// **'View item'**
+  String get postViewListing;
+
+  /// No description provided for @listingDiscussionAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Open discussion'**
+  String get listingDiscussionAction;
+
+  /// No description provided for @listingDiscussionHint.
+  ///
+  /// In en, this message translates to:
+  /// **'This product is also a post. Read or join its campus discussion.'**
+  String get listingDiscussionHint;
+
+  /// No description provided for @postEmptyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing here yet'**
+  String get postEmptyTitle;
+
+  /// No description provided for @postEmptyBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Start a useful campus conversation and classmates can build the thread with you.'**
+  String get postEmptyBody;
+
+  /// No description provided for @postEmptyListingBody.
+  ///
+  /// In en, this message translates to:
+  /// **'No marketplace posts match this filter yet.'**
+  String get postEmptyListingBody;
+
+  /// No description provided for @postStartAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Start a discussion'**
+  String get postStartAction;
 }
 
 class _AppLocalizationsDelegate
