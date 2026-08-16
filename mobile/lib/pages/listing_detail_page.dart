@@ -1734,7 +1734,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
           const SizedBox(width: AppTheme.sp8),
           PopupMenuButton<_ListingViewerAction>(
             key: const ValueKey('listing-secondary-actions'),
-            tooltip: l.composerMoreTools,
+            tooltip: MaterialLocalizations.of(context).moreButtonTooltip,
             enabled: !_isOperating,
             onSelected: (action) {
               switch (action) {
