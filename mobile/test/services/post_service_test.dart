@@ -67,12 +67,14 @@ void main() {
 
     final response = await service.getPosts(
       postType: 'listing',
+      direction: 'wanted',
       sort: 'replies',
     );
 
     expect(service.lastMethod, 'GET');
     expect(service.lastUri?.path, '/api/posts');
     expect(service.lastUri?.queryParameters['post_type'], 'listing');
+    expect(service.lastUri?.queryParameters['direction'], 'wanted');
     expect(service.lastUri?.queryParameters['sort'], 'replies');
     expect(response.items.single.isListing, isTrue);
     expect(response.items.single.listingId, 'listing-1');

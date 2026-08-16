@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/models/post.dart';
@@ -15,17 +16,24 @@ class _FakePostService extends PostService {
 
   final PostsResponse response;
   int calls = 0;
+  final List<String> postTypes = [];
+  final List<String?> directions = [];
+  final List<String?> searches = [];
 
   @override
   Future<PostsResponse> getPosts({
     int limit = 20,
     int offset = 0,
     String postType = 'all',
+    String? direction,
     String? category,
     String? search,
-    String sort = 'latest',
+    String sort = 'for_you',
   }) async {
     calls += 1;
+    postTypes.add(postType);
+    directions.add(direction);
+    searches.add(search);
     return response;
   }
 }
@@ -56,9 +64,10 @@ class _PagingPostService extends PostService {
     int limit = 20,
     int offset = 0,
     String postType = 'all',
+    String? direction,
     String? category,
     String? search,
-    String sort = 'latest',
+    String sort = 'for_you',
   }) async {
     offsets.add(offset);
     if (offset == 20 && failNextPage) {
@@ -159,7 +168,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('post-filter-all')), findsOneWidget);
-    expect(find.byKey(const ValueKey('home-create-post')), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-create-post')), findsNothing);
     expect(posts.calls, 1);
     expect(legacy.called, isFalse);
   });
@@ -204,7 +213,151 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('25.00'), findsOneWidget);
-    expect(find.text('Listing'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('post-card-post-listing-1')),
+        matching: find.text('Offer'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('opens a listing post in its canonical marketplace detail', (
+    tester,
+  ) async {
+    final posts = _FakePostService(
+      PostsResponse(
+        items: [
+          CampusPost.fromJson({
+            'id': 'post-listing-route',
+            'post_type': 'listing',
+            'title': 'Calculus textbook',
+            'listing_id': 'listing-route',
+            'author': {'id': 'u-1', 'username': 'mira'},
+            'reply_count': 0,
+            'status': 'active',
+            'is_locked': false,
+            'listing': {
+              'id': 'listing-route',
+              'title': 'Calculus textbook',
+              'category': 'books',
+              'brand': 'Pearson',
+              'direction': 'offer',
+              'condition_score': 8,
+              'suggested_price_cny': 25,
+              'status': 'active',
+            },
+          }),
+        ],
+        total: 1,
+        limit: 20,
+        offset: 0,
+      ),
+    );
+    final router = GoRouter(
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (context, state) => HomePage(
+            postService: posts,
+            recommendationService: _UnexpectedRecommendationService(),
+            intentService: _EmptyIntentService(),
+            feedbackService: FeedFeedbackService(),
+          ),
+        ),
+        GoRoute(
+          path: '/listing/:id',
+          builder: (context, state) =>
+              Text('canonical listing ${state.pathParameters['id']}'),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp.router(
+        theme: AppTheme.light,
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        routerConfig: router,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey('post-card-post-listing-route')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('canonical listing listing-route'), findsOneWidget);
+  });
+
+  testWidgets('searches the unified post feed and can clear the query', (
+    tester,
+  ) async {
+    final posts = _FakePostService(
+      PostsResponse(
+        items: [
+          CampusPost.fromJson({
+            'id': 'post-search-1',
+            'post_type': 'discussion',
+            'title': 'Late-night printing',
+            'author': {'id': 'u-1', 'username': 'mira'},
+            'reply_count': 0,
+            'status': 'active',
+            'is_locked': false,
+          }),
+        ],
+        total: 1,
+        limit: 20,
+        offset: 0,
+      ),
+    );
+
+    await tester.pumpWidget(
+      _app(posts: posts, legacy: _UnexpectedRecommendationService()),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('home-agent-prompt')),
+      '  printer  ',
+    );
+    await tester.tap(find.byKey(const ValueKey('home-search-submit')));
+    await tester.pumpAndSettle();
+
+    expect(posts.searches, [null, 'printer']);
+    expect(find.byKey(const ValueKey('home-search-clear')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('home-search-clear')));
+    await tester.pumpAndSettle();
+
+    expect(posts.searches, [null, 'printer', null]);
+    expect(find.byKey(const ValueKey('home-search-clear')), findsNothing);
+  });
+
+  testWidgets('maps sell and wanted filters to server-side direction queries', (
+    tester,
+  ) async {
+    final posts = _FakePostService(
+      const PostsResponse(items: [], total: 0, limit: 20, offset: 0),
+    );
+
+    await tester.pumpWidget(
+      _app(posts: posts, legacy: _UnexpectedRecommendationService()),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('All'), findsOneWidget);
+    expect(find.text('For you'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('post-filter-offer')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('post-filter-wanted')));
+    await tester.pumpAndSettle();
+
+    expect(posts.postTypes, ['all', 'listing', 'listing']);
+    expect(posts.directions, [null, 'offer', 'wanted']);
   });
 
   testWidgets('keeps waterfall results and retries a failed next page', (

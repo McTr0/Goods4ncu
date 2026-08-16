@@ -32,6 +32,13 @@ class PostDiscoveryCard extends StatelessWidget {
         : resolveDisplayUrl(post.coverImageUrl!);
     final hasCover = cover != null && cover.isNotEmpty;
     final listing = post.listing;
+    final typeLabel = post.isListing
+        ? switch (listing?.direction) {
+            'wanted' => l.listingDirectionWanted,
+            'offer' => l.listingDirectionOffer,
+            _ => l.postTypeListing,
+          }
+        : l.postTypeDiscussion;
     final reason =
         (post.rankReason ?? '').isNotEmpty || (post.rankSource ?? '').isNotEmpty
         ? localizedFeedReason(l, post.rankReason, source: post.rankSource)
@@ -74,9 +81,7 @@ class PostDiscoveryCard extends StatelessWidget {
                         left: AppTheme.sp8,
                         top: AppTheme.sp8,
                         child: _TypePill(
-                          label: post.isListing
-                              ? l.postTypeListing
-                              : l.postTypeDiscussion,
+                          label: typeLabel,
                           isListing: post.isListing,
                         ),
                       ),

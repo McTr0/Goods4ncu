@@ -10,6 +10,7 @@ class PostService extends BaseService {
     int limit = 20,
     int offset = 0,
     String postType = 'all',
+    String? direction,
     String? category,
     String? search,
     String sort = 'for_you',
@@ -20,6 +21,8 @@ class PostService extends BaseService {
       'offset': offset.clamp(0, 1 << 31).toString(),
       'post_type': postType,
       'sort': sort,
+      if (direction != null && direction.trim().isNotEmpty)
+        'direction': direction.trim(),
       if (category != null && category.trim().isNotEmpty)
         'category': category.trim(),
       if (search != null && search.trim().isNotEmpty) 'search': search.trim(),

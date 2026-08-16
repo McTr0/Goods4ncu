@@ -15,6 +15,7 @@ import '../services/feed_feedback_service.dart';
 import '../models/post.dart';
 import '../services/post_service.dart';
 import '../components/post_discovery_card.dart';
+import '../router/publish_navigation.dart';
 
 class HomePage extends StatefulWidget {
   final RecommendationService? recommendationService;
@@ -55,13 +56,15 @@ class _HomePageState extends State<HomePage> {
   String _directionFilter = 'all';
   String _postTypeFilter = 'all';
   String _postSort = 'for_you';
+  String? _searchQuery;
   String? _loadError;
   String? _postFeedError;
   bool _postFeedRetryReset = false;
+  int _feedRequestEpoch = 0;
 
-  /// What people have actually said, loaded only when the grid comes back
-  /// empty. The publish tab opens the intent composer, so most of what gets
-  /// said here never becomes a listing — an empty grid is not an empty campus.
+  /// Legacy campus requests that are not represented by the listing grid.
+  /// They remain a homepage fallback while the standard publish flow writes
+  /// offer/wanted listings directly.
   List<UserIntent> _voices = const [];
 
   @override
@@ -96,6 +99,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _loadRecommendations({bool reset = true}) async {
+    final requestEpoch = reset ? ++_feedRequestEpoch : _feedRequestEpoch;
     if (reset) {
       setState(() {
         _recommendationLoading = true;
@@ -111,10 +115,18 @@ class _HomePageState extends State<HomePage> {
           final response = await postService.getPosts(
             limit: 20,
             offset: reset ? 0 : _posts.length,
-            postType: _postTypeFilter,
+            postType: switch (_postTypeFilter) {
+              'offer' || 'wanted' => 'listing',
+              _ => _postTypeFilter,
+            },
+            direction: switch (_postTypeFilter) {
+              'offer' || 'wanted' => _postTypeFilter,
+              _ => null,
+            },
+            search: _searchQuery,
             sort: _postSort,
           );
-          if (!mounted) return;
+          if (!mounted || requestEpoch != _feedRequestEpoch) return;
           setState(() {
             if (reset) {
               _posts = response.items;
@@ -132,19 +144,27 @@ class _HomePageState extends State<HomePage> {
           });
           return;
         } catch (error) {
-          debugPrint(
-            'Unified posts feed unavailable, using listing feed: $error',
-          );
-          if (_usingPosts) {
-            if (!mounted) return;
+          if (!mounted || requestEpoch != _feedRequestEpoch) return;
+          final requiresUnifiedPosts =
+              _usingPosts ||
+              _searchQuery != null ||
+              _postTypeFilter != 'all' ||
+              _postSort != 'for_you';
+          if (requiresUnifiedPosts) {
+            debugPrint('Unified posts feed unavailable: $error');
             setState(() {
+              _usingPosts = true;
               _recommendationLoading = false;
               _feedLoading = false;
               _postFeedError = error.toString();
               _postFeedRetryReset = reset;
+              if (reset && _feedIsEmpty) _loadError = error.toString();
             });
             return;
           }
+          debugPrint(
+            'Unified posts feed unavailable, using listing feed: $error',
+          );
         }
       }
       var recommendations = await _recommendationService.getRecommendationFeed(
@@ -152,6 +172,7 @@ class _HomePageState extends State<HomePage> {
         offset: reset ? 0 : _recommendedListings.length,
         direction: _directionFilter,
       );
+      if (!mounted || requestEpoch != _feedRequestEpoch) return;
 
       // Deterministic campus fallback if recommendation feed is empty
       if (recommendations.isEmpty && reset && _listingService != null) {
@@ -161,6 +182,7 @@ class _HomePageState extends State<HomePage> {
           direction: _directionFilter,
           allowAnonymousFallback: false,
         );
+        if (!mounted || requestEpoch != _feedRequestEpoch) return;
         recommendations = fallbackResponse.items;
       }
 
@@ -183,6 +205,7 @@ class _HomePageState extends State<HomePage> {
       }
       if (_recommendedListings.isEmpty && _posts.isEmpty) await _loadVoices();
     } catch (error, stackTrace) {
+      if (!mounted || requestEpoch != _feedRequestEpoch) return;
       debugPrint('Failed to load recommendation feed: $error');
       debugPrintStack(stackTrace: stackTrace);
       if (mounted) {
@@ -236,6 +259,14 @@ class _HomePageState extends State<HomePage> {
     setState(() => _posts.removeWhere((item) => item.id == post.id));
   }
 
+  void _openPost(CampusPost post) {
+    final listingId = post.listingId;
+    final location = post.isListing && listingId != null
+        ? '/listing/${Uri.encodeComponent(listingId)}'
+        : '/posts/${Uri.encodeComponent(post.id)}';
+    context.push(location);
+  }
+
   bool get _feedIsEmpty => _posts.isEmpty && _recommendedListings.isEmpty;
 
   @override
@@ -245,15 +276,23 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  void _openAgent([String? suggestedPrompt]) {
-    final prompt = (suggestedPrompt ?? _promptController.text).trim();
-    if (prompt.isEmpty) {
-      _promptFocus.requestFocus();
-      return;
-    }
-    context.go(
-      Uri(path: '/chat', queryParameters: {'prompt': prompt}).toString(),
-    );
+  void _submitSearch(String value) {
+    final query = value.trim();
+    final normalized = query.isEmpty ? null : query;
+    _promptFocus.unfocus();
+    if (_searchQuery == normalized) return;
+    setState(() {
+      _searchQuery = normalized;
+      _posts = [];
+      _recommendedListings = [];
+      _feedHasMore = true;
+    });
+    _loadRecommendations(reset: true);
+  }
+
+  void _clearSearch() {
+    _promptController.clear();
+    _submitSearch('');
   }
 
   Widget _buildDirectionSection() {
@@ -329,16 +368,6 @@ class _HomePageState extends State<HomePage> {
           l.appTitle,
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
-        actions: [
-          if (_postService != null)
-            IconButton(
-              key: const ValueKey('home-create-post'),
-              tooltip: l.postCreateTooltip,
-              onPressed: () => context.push('/create/post'),
-              icon: const Icon(Icons.edit_square),
-            ),
-          const SizedBox(width: AppTheme.sp8),
-        ],
       ),
       body: DecoratedBox(
         decoration: BoxDecoration(
@@ -368,10 +397,8 @@ class _HomePageState extends State<HomePage> {
             child: _HomeTaskHeader(
               promptController: _promptController,
               promptFocus: _promptFocus,
-              onSubmit: _openAgent,
-              onFind: () => _promptFocus.requestFocus(),
-              onOffer: () => context.push('/create?kind=offer'),
-              onWanted: () => context.push('/create?kind=wanted'),
+              onSubmit: _submitSearch,
+              onClear: _clearSearch,
             ),
           ),
           const SliverFillRemaining(
@@ -391,10 +418,8 @@ class _HomePageState extends State<HomePage> {
               child: _HomeTaskHeader(
                 promptController: _promptController,
                 promptFocus: _promptFocus,
-                onSubmit: _openAgent,
-                onFind: () => _promptFocus.requestFocus(),
-                onOffer: () => context.push('/create?kind=offer'),
-                onWanted: () => context.push('/create?kind=wanted'),
+                onSubmit: _submitSearch,
+                onClear: _clearSearch,
               ),
             ),
             SliverFillRemaining(
@@ -417,10 +442,8 @@ class _HomePageState extends State<HomePage> {
               child: _HomeTaskHeader(
                 promptController: _promptController,
                 promptFocus: _promptFocus,
-                onSubmit: _openAgent,
-                onFind: () => _promptFocus.requestFocus(),
-                onOffer: () => context.push('/create?kind=offer'),
-                onWanted: () => context.push('/create?kind=wanted'),
+                onSubmit: _submitSearch,
+                onClear: _clearSearch,
               ),
             ),
             SliverToBoxAdapter(child: _buildDirectionSection()),
@@ -437,7 +460,9 @@ class _HomePageState extends State<HomePage> {
               SliverFillRemaining(
                 hasScrollBody: false,
                 child: _PostEmptyState(
-                  showCreateAction: _postTypeFilter != 'listing',
+                  showCreateAction:
+                      _postTypeFilter == 'all' ||
+                      _postTypeFilter == 'discussion',
                 ),
               )
             else
@@ -445,8 +470,12 @@ class _HomePageState extends State<HomePage> {
                 hasScrollBody: false,
                 child: _HomeEmptyState(
                   isColdStart: _directionFilter == 'all',
-                  onOffer: () => context.push('/create?kind=offer'),
-                  onWanted: () => context.push('/create?kind=wanted'),
+                  onOffer: () => context.push(
+                    PublishNavigation.listing(direction: 'offer'),
+                  ),
+                  onWanted: () => context.push(
+                    PublishNavigation.listing(direction: 'wanted'),
+                  ),
                 ),
               ),
           ],
@@ -474,10 +503,8 @@ class _HomePageState extends State<HomePage> {
               child: _HomeTaskHeader(
                 promptController: _promptController,
                 promptFocus: _promptFocus,
-                onSubmit: _openAgent,
-                onFind: () => _promptFocus.requestFocus(),
-                onOffer: () => context.push('/create?kind=offer'),
-                onWanted: () => context.push('/create?kind=wanted'),
+                onSubmit: _submitSearch,
+                onClear: _clearSearch,
               ),
             ),
             SliverToBoxAdapter(child: _buildDirectionSection()),
@@ -487,7 +514,7 @@ class _HomePageState extends State<HomePage> {
               SliverToBoxAdapter(
                 child: _PostMasonryGrid(
                   posts: _posts,
-                  onTap: (post) => context.push('/posts/${post.id}'),
+                  onTap: _openPost,
                   loadingMore: _feedLoading,
                   loadError: _postFeedError,
                   onRetry: () {
@@ -741,7 +768,7 @@ class _PostSectionTitle extends StatelessWidget {
           children: [
             _PostFilterChip(
               key: const ValueKey('post-filter-all'),
-              label: l.postFilterAll,
+              label: l.listingDirectionAll,
               selected: selectedType == 'all',
               onSelected: () => onTypeChanged('all'),
             ),
@@ -752,10 +779,16 @@ class _PostSectionTitle extends StatelessWidget {
               onSelected: () => onTypeChanged('discussion'),
             ),
             _PostFilterChip(
-              key: const ValueKey('post-filter-listing'),
-              label: l.postFilterListing,
-              selected: selectedType == 'listing',
-              onSelected: () => onTypeChanged('listing'),
+              key: const ValueKey('post-filter-offer'),
+              label: l.listingDirectionOffer,
+              selected: selectedType == 'offer',
+              onSelected: () => onTypeChanged('offer'),
+            ),
+            _PostFilterChip(
+              key: const ValueKey('post-filter-wanted'),
+              label: l.listingDirectionWanted,
+              selected: selectedType == 'wanted',
+              onSelected: () => onTypeChanged('wanted'),
             ),
           ],
         ),
@@ -818,7 +851,7 @@ class _PostEmptyState extends StatelessWidget {
             if (showCreateAction) ...[
               const SizedBox(height: AppTheme.sp16),
               FilledButton.icon(
-                onPressed: () => context.push('/create/post'),
+                onPressed: () => context.push('/publish/discussion'),
                 icon: const Icon(Icons.edit_rounded),
                 label: Text(l.postStartAction),
               ),
@@ -858,24 +891,18 @@ class _PostFeedRetry extends StatelessWidget {
   }
 }
 
-/// Compact, task-first header containing:
-/// 1. Compact search bar & optional Xiaobang assistant entry
-/// 2. Consistent action button group (找东西 / 发布闲置 / 发布求购)
+/// Compact search bar for the unified campus post feed.
 class _HomeTaskHeader extends StatelessWidget {
   final TextEditingController promptController;
   final FocusNode promptFocus;
   final ValueChanged<String> onSubmit;
-  final VoidCallback onFind;
-  final VoidCallback onOffer;
-  final VoidCallback onWanted;
+  final VoidCallback onClear;
 
   const _HomeTaskHeader({
     required this.promptController,
     required this.promptFocus,
     required this.onSubmit,
-    required this.onFind,
-    required this.onOffer,
-    required this.onWanted,
+    required this.onClear,
   });
 
   @override
@@ -893,194 +920,80 @@ class _HomeTaskHeader extends StatelessWidget {
         desktop ? AppTheme.sp24 : AppTheme.sp16,
         AppTheme.sp4,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 1. Compact Search & Assistant Input Bar
-          Container(
-            constraints: const BoxConstraints(minHeight: 48),
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest.withValues(
-                alpha: dark ? 0.6 : 0.8,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 48),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest.withValues(
+            alpha: dark ? 0.6 : 0.8,
+          ),
+          borderRadius: BorderRadius.circular(AppTheme.radiusXl),
+          border: Border.all(color: scheme.outlineVariant),
+        ),
+        child: Row(
+          children: [
+            const SizedBox(width: AppTheme.sp8),
+            Icon(Icons.search_rounded, color: scheme.primary, size: 20),
+            const SizedBox(width: AppTheme.sp8),
+            Expanded(
+              child: TextField(
+                key: const ValueKey('home-agent-prompt'),
+                controller: promptController,
+                focusNode: promptFocus,
+                maxLines: 1,
+                textInputAction: TextInputAction.send,
+                onSubmitted: onSubmit,
+                style: TextStyle(
+                  color: scheme.onSurface,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+                decoration: InputDecoration(
+                  hintText: l.homePromptHint,
+                  hintStyle: TextStyle(
+                    color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                    fontWeight: FontWeight.w500,
+                    fontSize: 13,
+                  ),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  isDense: true,
+                  filled: false,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                ),
               ),
-              borderRadius: BorderRadius.circular(AppTheme.radiusXl),
-              border: Border.all(color: scheme.outlineVariant),
             ),
-            child: Row(
-              children: [
-                const SizedBox(width: AppTheme.sp8),
-                Icon(Icons.search_rounded, color: scheme.primary, size: 20),
-                const SizedBox(width: AppTheme.sp8),
-                Expanded(
-                  child: TextField(
-                    key: const ValueKey('home-agent-prompt'),
-                    controller: promptController,
-                    focusNode: promptFocus,
-                    maxLines: 1,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: onSubmit,
-                    style: TextStyle(
-                      color: scheme.onSurface,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: l.homePromptHint,
-                      hintStyle: TextStyle(
-                        color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-                        fontWeight: FontWeight.w500,
-                        fontSize: 13,
-                      ),
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      isDense: true,
-                      filled: false,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: AppTheme.sp4),
-                IconButton.filled(
-                  tooltip: l.homePromptSubmitTooltip,
-                  onPressed: () => onSubmit(promptController.text),
-                  icon: const Icon(Icons.arrow_forward_rounded, size: 16),
-                  style: IconButton.styleFrom(
-                    backgroundColor: scheme.primary,
-                    foregroundColor: scheme.onPrimary,
-                    minimumSize: const Size(36, 36),
-                    padding: EdgeInsets.zero,
-                  ),
-                ),
-              ],
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: promptController,
+              builder: (context, value, _) {
+                if (value.text.isEmpty) return const SizedBox.shrink();
+                return IconButton(
+                  key: const ValueKey('home-search-clear'),
+                  tooltip: MaterialLocalizations.of(
+                    context,
+                  ).deleteButtonTooltip,
+                  onPressed: onClear,
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  visualDensity: VisualDensity.compact,
+                );
+              },
             ),
-          ),
-          const SizedBox(height: 10),
-
-          // 2. Action Buttons Group: Exactly equal widths & heights across all 3 actions
-          () {
-            final textScale = MediaQuery.textScalerOf(context).scale(1.0);
-            final clampedScale = textScale.clamp(1.0, 2.0);
-            final actionWidth = (112.0 + (clampedScale - 1.0) * 60.0)
-                .roundToDouble();
-            final actionHeight = (44.0 + (clampedScale - 1.0) * 16.0)
-                .roundToDouble();
-
-            return Wrap(
-              spacing: 10,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                _HomeActionButton(
-                  key: const ValueKey('home-action-find'),
-                  label: l.homeActionFind,
-                  icon: Icons.search_rounded,
-                  onPressed: onFind,
-                  width: actionWidth,
-                  height: actionHeight,
-                ),
-                _HomeActionButton(
-                  key: const ValueKey('home-action-offer'),
-                  label: l.homeActionOffer,
-                  icon: Icons.north_east_rounded,
-                  onPressed: onOffer,
-                  isPrimary: true,
-                  width: actionWidth,
-                  height: actionHeight,
-                ),
-                _HomeActionButton(
-                  key: const ValueKey('home-action-wanted'),
-                  label: l.homeActionWanted,
-                  icon: Icons.south_west_rounded,
-                  onPressed: onWanted,
-                  width: actionWidth,
-                  height: actionHeight,
-                ),
-              ],
-            );
-          }(),
-        ],
-      ),
-    );
-  }
-}
-
-class _HomeActionButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final VoidCallback onPressed;
-  final bool isPrimary;
-  final double width;
-  final double height;
-
-  const _HomeActionButton({
-    super.key,
-    required this.label,
-    required this.icon,
-    required this.onPressed,
-    this.isPrimary = false,
-    required this.width,
-    required this.height,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final size = Size(width, height);
-    final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-    );
-    const textStyle = TextStyle(fontSize: 13, fontWeight: FontWeight.w700);
-
-    if (isPrimary) {
-      return SizedBox(
-        width: width,
-        height: height,
-        child: FilledButton.icon(
-          style: ButtonStyle(
-            fixedSize: WidgetStatePropertyAll(size),
-            minimumSize: WidgetStatePropertyAll(size),
-            maximumSize: WidgetStatePropertyAll(size),
-            padding: const WidgetStatePropertyAll(
-              EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+            const SizedBox(width: AppTheme.sp4),
+            IconButton.filled(
+              key: const ValueKey('home-search-submit'),
+              tooltip: l.homePromptSubmitTooltip,
+              onPressed: () => onSubmit(promptController.text),
+              icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+              style: IconButton.styleFrom(
+                backgroundColor: scheme.primary,
+                foregroundColor: scheme.onPrimary,
+                minimumSize: const Size(36, 36),
+                padding: EdgeInsets.zero,
+              ),
             ),
-            visualDensity: VisualDensity.compact,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            shape: WidgetStatePropertyAll(shape),
-            textStyle: const WidgetStatePropertyAll(textStyle),
-            backgroundColor: WidgetStatePropertyAll(scheme.primary),
-            foregroundColor: WidgetStatePropertyAll(scheme.onPrimary),
-          ),
-          onPressed: onPressed,
-          icon: Icon(icon, size: 16),
-          label: Text(label, maxLines: 1),
+          ],
         ),
-      );
-    }
-
-    return SizedBox(
-      width: width,
-      height: height,
-      child: OutlinedButton.icon(
-        style: ButtonStyle(
-          fixedSize: WidgetStatePropertyAll(size),
-          minimumSize: WidgetStatePropertyAll(size),
-          maximumSize: WidgetStatePropertyAll(size),
-          padding: const WidgetStatePropertyAll(
-            EdgeInsets.symmetric(horizontal: 4, vertical: 0),
-          ),
-          visualDensity: VisualDensity.compact,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          shape: WidgetStatePropertyAll(shape),
-          textStyle: const WidgetStatePropertyAll(textStyle),
-          foregroundColor: WidgetStatePropertyAll(scheme.primary),
-          side: WidgetStatePropertyAll(BorderSide(color: scheme.outline)),
-        ),
-        onPressed: onPressed,
-        icon: Icon(icon, size: 16),
-        label: Text(label, maxLines: 1),
       ),
     );
   }

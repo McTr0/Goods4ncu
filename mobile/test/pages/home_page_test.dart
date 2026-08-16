@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/pages/home_page.dart';
+import 'package:goods4ncu_mobile/router/publish_navigation.dart';
 import 'package:goods4ncu_mobile/services/feed_feedback_service.dart';
 import 'package:goods4ncu_mobile/services/intent_service.dart';
 import 'package:goods4ncu_mobile/services/listing_service.dart';
@@ -202,9 +203,9 @@ Widget _buildApp({
             Text('listing ${state.pathParameters['id'] ?? ''}'),
       ),
       GoRoute(
-        path: '/create',
+        path: PublishNavigation.listingPath,
         builder: (context, state) =>
-            Text('create: ${state.uri.queryParameters['kind'] ?? ''}'),
+            Text('publish: ${state.uri.queryParameters['direction'] ?? ''}'),
       ),
     ],
   );
@@ -266,12 +267,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    final l = AppLocalizations.of(tester.element(find.byType(HomePage)))!;
 
-    await tester.ensureVisible(find.byKey(const ValueKey('home-action-offer')));
+    await tester.ensureVisible(find.text(l.homeActionOffer));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('home-action-offer')));
+    await tester.tap(find.text(l.homeActionOffer));
     await tester.pumpAndSettle();
-    expect(find.text('create: offer'), findsOneWidget);
+    expect(find.text('publish: offer'), findsOneWidget);
   });
 
   testWidgets('home page removes English eyebrow and marketing slogan', (
@@ -288,7 +290,7 @@ void main() {
     expect(find.textContaining('相关度'), findsNothing);
     expect(find.textContaining('轻量排序'), findsNothing);
 
-    // Compact prompt submit works
+    // Search stays on the discovery page instead of duplicating the AI tab.
     await tester.enterText(
       find.byKey(const ValueKey('home-agent-prompt')),
       '帮我找一本高数教材',
@@ -296,35 +298,36 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('chat prompt: 帮我找一本高数教材'), findsOneWidget);
+    expect(find.byType(HomePage), findsOneWidget);
+    expect(find.textContaining('chat prompt:'), findsNothing);
   });
 
-  testWidgets('home page shows a simple marketplace feed with action buttons', (
-    tester,
-  ) async {
-    await tester.pumpWidget(_buildApp());
-    await tester.pumpAndSettle();
+  testWidgets(
+    'home page shows a simple feed without duplicate publish actions',
+    (tester) async {
+      await tester.pumpWidget(_buildApp());
+      await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('home-action-find')), findsOneWidget);
-    expect(find.byKey(const ValueKey('home-action-offer')), findsOneWidget);
-    expect(find.byKey(const ValueKey('home-action-wanted')), findsOneWidget);
-    expect(find.text('全部'), findsOneWidget);
-    expect(find.text('出'), findsWidgets);
-    expect(find.text('收'), findsOneWidget);
-    expect(find.text('程序设计教材'), findsOneWidget);
-    expect(find.text('分类符合你的需求'), findsOneWidget);
-  });
+      expect(find.byKey(const ValueKey('home-action-find')), findsNothing);
+      expect(find.byKey(const ValueKey('home-action-offer')), findsNothing);
+      expect(find.byKey(const ValueKey('home-action-wanted')), findsNothing);
+      expect(find.text('全部'), findsOneWidget);
+      expect(find.text('出'), findsWidgets);
+      expect(find.text('收'), findsOneWidget);
+      expect(find.text('程序设计教材'), findsOneWidget);
+      expect(find.text('分类符合你的需求'), findsOneWidget);
+    },
+  );
 
   testWidgets('home page localizes the entry in English', (tester) async {
     await tester.pumpWidget(_buildApp(locale: const Locale('en')));
     await tester.pumpAndSettle();
 
-    expect(
-      find.text('Search items or requests, or ask Xiaochang'),
-      findsOneWidget,
-    );
-    expect(find.text('Post Offer'), findsOneWidget);
-    expect(find.text('Post Request'), findsOneWidget);
+    expect(find.text('Search items or requests'), findsOneWidget);
+    // Publishing lives in the persistent center navigation destination; the
+    // home feed does not duplicate those actions.
+    expect(find.text('Post Offer'), findsNothing);
+    expect(find.text('Post Request'), findsNothing);
     expect(find.text('今天想淘点什么？'), findsNothing);
 
     await tester.enterText(
@@ -334,10 +337,8 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
 
-    expect(
-      find.textContaining('chat prompt: help me find a laptop'),
-      findsOneWidget,
-    );
+    expect(find.byType(HomePage), findsOneWidget);
+    expect(find.textContaining('chat prompt:'), findsNothing);
   });
 
   testWidgets('home page uses the dark surface gradient in dark mode', (
@@ -447,53 +448,20 @@ void main() {
     },
   );
 
-  testWidgets(
-    'action button group has equal widths and heights at normal and 200% text scaling on 390px mobile',
-    (tester) async {
-      await tester.binding.setSurfaceSize(const Size(390, 844));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
+  testWidgets('publish shortcuts stay absent at 200% text scaling', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(_buildApp(textScaleFactor: 2.0));
+    await tester.pumpAndSettle();
 
-      // 1. Normal text scaling (1.0)
-      await tester.pumpWidget(_buildApp(textScaleFactor: 1.0));
-      await tester.pumpAndSettle();
-
-      final findBtn1 = tester.getRect(
-        find.byKey(const ValueKey('home-action-find')),
-      );
-      final offerBtn1 = tester.getRect(
-        find.byKey(const ValueKey('home-action-offer')),
-      );
-      final wantedBtn1 = tester.getRect(
-        find.byKey(const ValueKey('home-action-wanted')),
-      );
-
-      expect(findBtn1.width, equals(offerBtn1.width));
-      expect(offerBtn1.width, equals(wantedBtn1.width));
-      expect(findBtn1.height, equals(offerBtn1.height));
-      expect(offerBtn1.height, equals(wantedBtn1.height));
-      expect(tester.takeException(), isNull);
-
-      // 2. 200% text scaling (2.0)
-      await tester.pumpWidget(_buildApp(textScaleFactor: 2.0));
-      await tester.pumpAndSettle();
-
-      final findBtn2 = tester.getRect(
-        find.byKey(const ValueKey('home-action-find')),
-      );
-      final offerBtn2 = tester.getRect(
-        find.byKey(const ValueKey('home-action-offer')),
-      );
-      final wantedBtn2 = tester.getRect(
-        find.byKey(const ValueKey('home-action-wanted')),
-      );
-
-      expect(findBtn2.width, equals(offerBtn2.width));
-      expect(offerBtn2.width, equals(wantedBtn2.width));
-      expect(findBtn2.height, equals(offerBtn2.height));
-      expect(offerBtn2.height, equals(wantedBtn2.height));
-      expect(tester.takeException(), isNull);
-    },
-  );
+    expect(find.byKey(const ValueKey('home-action-find')), findsNothing);
+    expect(find.byKey(const ValueKey('home-action-offer')), findsNothing);
+    expect(find.byKey(const ValueKey('home-action-wanted')), findsNothing);
+    expect(find.byKey(const ValueKey('home-agent-prompt')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('an empty grid with people talking is not an empty campus', (
     tester,
