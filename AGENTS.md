@@ -35,3 +35,13 @@ After adding any feature, also verify the affected user journey manually with Co
 Use Conventional Commits, typically with a scope: `fix(auth): block refresh replay`, `feat(mobile): add watchlist badge`. Feature branches usually follow `feat/<description>` or `fix/<description>`.
 
 PRs should be rebased onto the current mainline branch, include a short summary and test plan, and call out migrations, config changes, or follow-up risks. Include screenshots for visible mobile UI changes and link the relevant issue when one exists.
+
+## Commit and Push Cadence
+
+- Commit at each independently verifiable milestone, or roughly every 15–30 minutes during a longer task; do not accumulate an entire feature into one oversized commit.
+- Keep commits granular: one behavior change, focused refactor, test update, documentation update, or migration per commit. Do not mix unrelated work, drive-by formatting, generated artifacts, or pre-existing user changes.
+- Every commit message must use Conventional Commits with an appropriate scope and imperative summary, for example `fix(mobile): keep chat navigation visible` or `test(chat): cover stale refresh responses`.
+- Run the relevant formatter, analyzer, and focused tests before committing. Before pushing, inspect `git status`, the staged diff, the commit contents, and the target branch/remote.
+- After a milestone passes its checks, push the commit to the current branch's configured remote. Use normal `git push`; never force-push or rewrite shared history unless the user explicitly authorizes it.
+- Never commit or push secrets, local environment files, credentials, temporary build output, or unrelated changes. If the worktree already contains user changes, isolate the agent's files and call out anything that cannot be safely separated.
+- Report each commit hash, the pushed branch/remote, and the validation completed; if commit or push is blocked, state the exact blocker instead of silently deferring it.
