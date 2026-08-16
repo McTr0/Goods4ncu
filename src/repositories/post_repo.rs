@@ -270,8 +270,8 @@ impl PostRepository for PostgresPostRepository {
               AND p.status IN ('active', 'locked')
               AND ($2::text IS NULL OR p.post_type = $2)
               AND ($3::text IS NULL OR p.category = $3)
-              AND ($4::text IS NULL OR p.title ILIKE $4 ESCAPE '\\'
-                   OR p.body ILIKE $4 ESCAPE '\\')
+              AND ($4::text IS NULL OR p.title ILIKE $4
+                   OR p.body ILIKE $4)
               AND ($5::text IS NULL OR listing.direction = $5)
               AND (p.listing_id IS NULL OR NOT listing_has_active_restriction(p.listing_id))";
         let query = format!(
@@ -420,8 +420,8 @@ impl PostRepository for PostgresPostRepository {
                  AND p.status IN ('active', 'locked')
                  AND ($3::text IS NULL OR p.post_type = $3)
                  AND ($4::text IS NULL OR p.category = $4)
-                 AND ($5::text IS NULL OR p.title ILIKE $5 ESCAPE '\\'
-                      OR p.body ILIKE $5 ESCAPE '\\')
+                 AND ($5::text IS NULL OR p.title ILIKE $5
+                      OR p.body ILIKE $5)
                  AND ($6::text IS NULL OR listing.direction = $6)
                  AND ($2::text IS NULL OR p.author_id <> $2)
                  AND (p.listing_id IS NULL
@@ -462,8 +462,8 @@ impl PostRepository for PostgresPostRepository {
                  AND p.status IN ('active', 'locked')
                  AND ($2::text IS NULL OR p.post_type = $2)
                  AND ($3::text IS NULL OR p.category = $3)
-                 AND ($4::text IS NULL OR p.title ILIKE $4 ESCAPE '\\'
-                      OR p.body ILIKE $4 ESCAPE '\\')
+                 AND ($4::text IS NULL OR p.title ILIKE $4
+                      OR p.body ILIKE $4)
                  AND ($5::text IS NULL OR listing_filter.direction = $5)
                  AND ($6::text IS NULL OR p.author_id <> $6)
                  AND (p.listing_id IS NULL

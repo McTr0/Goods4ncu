@@ -395,6 +395,30 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
         );
         assert!(items.first().and_then(|post| post.ranking_score).is_some());
 
+        let search_filter = PostFilter {
+            search: Some("教材".to_string()),
+            sort: PostSort::ForYou,
+            ..Default::default()
+        };
+        let (search_items, search_total) = service
+            .list_for_viewer(campus_id, Some(&viewer), &search_filter, 50, 0)
+            .await
+            .expect("personalized search");
+        assert_eq!(search_total, search_items.len() as i64);
+        assert!(search_items.iter().any(|post| post.id == relevant.id));
+
+        let escaped_search_filter = PostFilter {
+            search: Some("%".to_string()),
+            sort: PostSort::ForYou,
+            ..Default::default()
+        };
+        let (escaped_items, escaped_total) = service
+            .list_for_viewer(campus_id, Some(&viewer), &escaped_search_filter, 50, 0)
+            .await
+            .expect("personalized search escapes wildcard input");
+        assert_eq!(escaped_total, 0);
+        assert!(escaped_items.is_empty());
+
         FeedService::new(pool.clone())
             .submit_feedback(
                 campus_id,
