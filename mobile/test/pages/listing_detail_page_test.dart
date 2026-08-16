@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
+import 'package:goods4ncu_mobile/models/post.dart';
 import 'package:goods4ncu_mobile/pages/listing_detail_page.dart';
 import 'package:goods4ncu_mobile/services/api_service.dart';
 import 'package:goods4ncu_mobile/services/base_service.dart';
@@ -11,6 +12,7 @@ import 'package:goods4ncu_mobile/services/chat_service.dart';
 import 'package:goods4ncu_mobile/services/content_report_service.dart';
 import 'package:goods4ncu_mobile/services/feed_feedback_service.dart';
 import 'package:goods4ncu_mobile/services/order_service.dart';
+import 'package:goods4ncu_mobile/services/post_service.dart';
 import 'package:goods4ncu_mobile/services/recommendation_service.dart';
 import 'package:goods4ncu_mobile/theme/app_theme.dart';
 
@@ -249,6 +251,47 @@ class _RecordingContentReportService extends ContentReportService {
   }
 }
 
+class _InlinePostService extends PostService {
+  @override
+  Future<CampusPost> getPostByListing(String listingId) async {
+    return CampusPost.fromJson({
+      'id': 'post-for-$listingId',
+      'post_type': 'listing',
+      'listing_id': listingId,
+      'title': 'Listing post',
+      'body': 'Listing body',
+      'author': {'id': 'owner-1', 'username': 'owner'},
+      'reply_count': 1,
+      'status': 'active',
+      'is_locked': false,
+      'created_at': '2026-08-15T10:00:00Z',
+    });
+  }
+
+  @override
+  Future<PostRepliesResponse> getReplies(
+    String postId, {
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    return PostRepliesResponse(
+      items: [
+        PostReply(
+          id: 'reply-1',
+          postId: postId,
+          body: 'Is pickup available on campus?',
+          author: const PostAuthor(id: 'viewer-1', username: 'viewer'),
+          createdAt: DateTime.utc(2026, 8, 15, 10, 10),
+          updatedAt: DateTime.utc(2026, 8, 15, 10, 10),
+        ),
+      ],
+      total: 1,
+      limit: limit,
+      offset: offset,
+    );
+  }
+}
+
 Widget _buildDetail({
   required Listing listing,
   required String? currentUserId,
@@ -257,6 +300,7 @@ Widget _buildDetail({
   List<Listing> wantedMatches = const [],
   List<WantedResponse> wantedResponses = const [],
   FeedFeedbackService? feedbackService,
+  PostService? postService,
   _ListingApiService? apiService,
 }) {
   final resolvedApiService =
@@ -281,6 +325,7 @@ Widget _buildDetail({
       contentReportService:
           contentReportService ?? _RecordingContentReportService(),
       feedbackService: feedbackService ?? _RecordingFeedFeedbackService(),
+      postService: postService,
     ),
   );
 }
@@ -352,14 +397,91 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('我的发布'), findsOneWidget);
+    expect(find.text('我的商品'), findsOneWidget);
     expect(find.text('联系卖家'), findsNothing);
     expect(find.text('发起成交意向'), findsNothing);
     expect(find.byKey(const Key('listing-report-action')), findsNothing);
+    expect(find.byKey(const ValueKey('listing-open-discussion')), findsNothing);
+  });
+
+  testWidgets(
+    'listing detail contains its thread without a second detail CTA',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final listing = Listing(
+        id: 'listing-with-thread',
+        title: 'Mechanical keyboard',
+        category: 'electronics',
+        brand: 'NCU',
+        conditionScore: 8,
+        suggestedPriceCny: 120,
+        status: 'active',
+        ownerId: 'owner-1',
+        ownerUsername: 'owner',
+      );
+
+      await tester.pumpWidget(
+        _buildDetail(
+          listing: listing,
+          currentUserId: 'viewer-1',
+          postService: _InlinePostService(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('listing-inline-discussion')),
+        findsOneWidget,
+      );
+      expect(find.text('Is pickup available on campus?'), findsOneWidget);
+      expect(find.byKey(const ValueKey('post-reply-field')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('listing-open-discussion')),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('post-original-floor')), findsNothing);
+    },
+  );
+
+  testWidgets('offer actions expose one primary action and a secondary menu', (
+    tester,
+  ) async {
+    final listing = Listing(
+      id: 'listing-actions',
+      title: 'Desk lamp',
+      category: 'dailyGoods',
+      brand: 'NCU',
+      conditionScore: 8,
+      suggestedPriceCny: 20,
+      status: 'active',
+      ownerId: 'owner-2',
+      ownerUsername: 'owner',
+      availableActions: const {
+        Listing.actionBuy,
+        Listing.actionContact,
+        Listing.actionPriceDiscovery,
+      },
+    );
+
+    await tester.pumpWidget(
+      _buildDetail(listing: listing, currentUserId: 'viewer-1'),
+    );
+    await tester.pumpAndSettle();
+
     expect(
-      find.byKey(const ValueKey('listing-open-discussion')),
+      find.byKey(const ValueKey('listing-primary-action')),
       findsOneWidget,
     );
+    expect(find.text('发起成交意向'), findsOneWidget);
+    expect(find.text('联系卖家'), findsNothing);
+    expect(find.text('发起价格协商'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('listing-secondary-actions')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('联系卖家'), findsOneWidget);
+    expect(find.text('发起价格协商'), findsOneWidget);
   });
 
   testWidgets(

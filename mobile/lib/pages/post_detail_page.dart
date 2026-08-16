@@ -20,6 +20,8 @@ class PostDetailPage extends StatefulWidget {
     this.listingId,
     this.postService,
     this.listingService,
+    this.embedded = false,
+    this.omitOriginalPost = false,
   }) : assert(
          postId != null || listingId != null,
          'Either postId or listingId must be provided.',
@@ -30,13 +32,22 @@ class PostDetailPage extends StatefulWidget {
   final PostService? postService;
   final ListingService? listingService;
 
+  /// Renders the thread as part of another detail page. Embedded threads use
+  /// their parent's scroll view and keep the reply composer in the document
+  /// flow instead of creating a second scaffold/navigation bar.
+  final bool embedded;
+
+  /// Listing detail already represents floor #1, so its embedded discussion
+  /// can start at the reply heading without repeating the whole listing.
+  final bool omitOriginalPost;
+
   @override
   State<PostDetailPage> createState() => _PostDetailPageState();
 }
 
 class _PostDetailPageState extends State<PostDetailPage> {
   late final PostService _postService;
-  late final ListingService _listingService;
+  ListingService? _listingService;
   final _replyController = TextEditingController();
   final _replyFocus = FocusNode();
 
@@ -58,7 +69,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
   void initState() {
     super.initState();
     _postService = widget.postService ?? context.read<PostService>();
-    _listingService = widget.listingService ?? context.read<ListingService>();
+    _listingService = widget.listingService ?? context.read<ListingService?>();
     _loadThread();
   }
 
@@ -98,8 +109,12 @@ class _PostDetailPageState extends State<PostDetailPage> {
           ? await _postService.getPost(widget.postId!)
           : await _postService.getPostByListing(widget.listingId!);
       final repliesFuture = _postService.getReplies(post.id, limit: 50);
-      final listingFuture = post.isListing && post.listingId != null
-          ? _listingService.getListingDetail(post.listingId!)
+      final listingFuture =
+          post.isListing &&
+              post.listingId != null &&
+              !widget.omitOriginalPost &&
+              _listingService != null
+          ? _listingService!.getListingDetail(post.listingId!)
           : Future<Listing?>.value(null);
       final replies = await repliesFuture;
       Listing? listing;
@@ -110,6 +125,17 @@ class _PostDetailPageState extends State<PostDetailPage> {
         // unreadable. The linked-listing affordance simply stays hidden.
       }
       if (!mounted || generation != _loadGeneration) return;
+
+      // A marketplace listing has one canonical detail hierarchy. Legacy
+      // links to its post projection resolve to the listing page, whose body
+      // contains this same thread inline. A plain MaterialApp (for example a
+      // widget test or an isolated embed) has no router and retains the local
+      // thread rendering as a safe fallback.
+      final router = widget.embedded ? null : GoRouter.maybeOf(context);
+      if (post.isListing && post.listingId != null && router != null) {
+        router.go('/listing/${Uri.encodeComponent(post.listingId!)}');
+        return;
+      }
       setState(() {
         _post = post;
         _listing = listing;
@@ -222,6 +248,25 @@ class _PostDetailPageState extends State<PostDetailPage> {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     final post = _post;
+    if (widget.embedded) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildBody(),
+          if (post != null && !_loading)
+            _ReplyComposer(
+              controller: _replyController,
+              focusNode: _replyFocus,
+              replyingTo: _replyingTo,
+              locked: post.isLocked,
+              sending: _sending,
+              embedded: true,
+              onCancelReply: () => setState(() => _replyingTo = null),
+              onSubmit: _submitReply,
+            ),
+        ],
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -273,6 +318,13 @@ class _PostDetailPageState extends State<PostDetailPage> {
     }
 
     final post = _post!;
+    final content = ResponsiveContent(
+      maxWidth: 960,
+      child: _buildThreadContent(post),
+    );
+    if (widget.embedded) {
+      return content;
+    }
     return RefreshIndicator(
       onRefresh: _loadThread,
       child: ListView(
@@ -286,64 +338,64 @@ class _PostDetailPageState extends State<PostDetailPage> {
               : AppTheme.sp12,
           AppTheme.sp32,
         ),
-        children: [
-          ResponsiveContent(
-            maxWidth: 960,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _ThreadPostCard(post: post, listing: _listing),
-                const SizedBox(height: AppTheme.sp16),
-                Row(
-                  children: [
-                    Text(
-                      l.postRepliesTitle,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(width: AppTheme.sp8),
-                    _CountBadge(count: _replyTotal),
-                    const Spacer(),
-                    Text(
-                      l.postThreadOrder,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppTheme.sp8),
-                if (_replies.isEmpty)
-                  _ThreadEmptyState(locked: post.isLocked)
-                else
-                  ..._replies.indexed.map(
-                    (entry) => Padding(
-                      padding: const EdgeInsets.only(bottom: AppTheme.sp8),
-                      child: _ThreadReplyCard(
-                        reply: entry.$2,
-                        floor: entry.$1 + 2,
-                        replyingTo: _replyById(entry.$2.replyToId),
-                        canReply: !post.isLocked,
-                        onReply: () => _startReply(entry.$2),
-                      ),
-                    ),
-                  ),
-                if (_repliesHasMore ||
-                    _repliesLoadingMore ||
-                    _repliesPageError != null)
-                  _ReplyPagination(
-                    isLoading: _repliesLoadingMore,
-                    hasError: _repliesPageError != null,
-                    onLoad: _loadMoreReplies,
-                  ),
-              ],
+        children: [content],
+      ),
+    );
+  }
+
+  Widget _buildThreadContent(CampusPost post) {
+    final l = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (!widget.omitOriginalPost) ...[
+          _ThreadPostCard(post: post, listing: _listing),
+          const SizedBox(height: AppTheme.sp16),
+        ],
+        Row(
+          children: [
+            Text(
+              l.postRepliesTitle,
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(width: AppTheme.sp8),
+            _CountBadge(count: _replyTotal),
+            const Spacer(),
+            Text(
+              l.postThreadOrder,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppTheme.sp8),
+        if (_replies.isEmpty)
+          _ThreadEmptyState(locked: post.isLocked)
+        else
+          ..._replies.indexed.map(
+            (entry) => Padding(
+              padding: const EdgeInsets.only(bottom: AppTheme.sp8),
+              child: _ThreadReplyCard(
+                reply: entry.$2,
+                floor: entry.$1 + 2,
+                replyingTo: _replyById(entry.$2.replyToId),
+                canReply: !post.isLocked,
+                onReply: () => _startReply(entry.$2),
+              ),
             ),
           ),
-        ],
-      ),
+        if (_repliesHasMore || _repliesLoadingMore || _repliesPageError != null)
+          _ReplyPagination(
+            isLoading: _repliesLoadingMore,
+            hasError: _repliesPageError != null,
+            onLoad: _loadMoreReplies,
+          ),
+      ],
     );
   }
 
@@ -466,7 +518,7 @@ class _ThreadPostCard extends StatelessWidget {
                 ],
                 if (post.isListing) ...[
                   const SizedBox(height: AppTheme.sp20),
-                  _LinkedListingCard(post: post, listing: listing),
+                  _LinkedListingCard(listing: listing),
                 ],
                 if (post.isLocked) ...[
                   const SizedBox(height: AppTheme.sp16),
@@ -494,9 +546,8 @@ class _ThreadPostCard extends StatelessWidget {
 }
 
 class _LinkedListingCard extends StatelessWidget {
-  const _LinkedListingCard({required this.post, required this.listing});
+  const _LinkedListingCard({required this.listing});
 
-  final CampusPost post;
   final Listing? listing;
 
   @override
@@ -510,44 +561,78 @@ class _LinkedListingCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppTheme.radiusMd),
         border: Border.all(color: AppTheme.accent.withValues(alpha: 0.2)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: scheme.surface,
-              borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-            ),
-            child: const Icon(Icons.inventory_2_outlined),
-          ),
-          const SizedBox(width: AppTheme.sp12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: scheme.surface,
+                  borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                ),
+                child: const Icon(Icons.inventory_2_outlined),
+              ),
+              const SizedBox(width: AppTheme.sp12),
+              Expanded(
+                child: Text(
                   l.postLinkedListing,
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                if (listing != null) ...[
-                  const SizedBox(height: 3),
-                  PriceTag(priceCny: listing!.suggestedPriceCny, fontSize: 17),
-                ],
+              ),
+              if (listing != null)
+                PriceTag(priceCny: listing!.suggestedPriceCny, fontSize: 19),
+            ],
+          ),
+          if (listing != null) ...[
+            const SizedBox(height: AppTheme.sp12),
+            Wrap(
+              spacing: AppTheme.sp12,
+              runSpacing: AppTheme.sp6,
+              children: [
+                _ListingFact(label: l.categoryLabel, value: listing!.category),
+                _ListingFact(label: l.brandLabel, value: listing!.brand),
+                _ListingFact(
+                  label: l.conditionLabel,
+                  value: '${listing!.conditionScore}/10',
+                ),
               ],
             ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ListingFact extends StatelessWidget {
+  const _ListingFact({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: '$label: ',
+            style: TextStyle(color: scheme.onSurfaceVariant),
           ),
-          FilledButton.tonal(
-            onPressed: post.listingId == null
-                ? null
-                : () => context.push('/listing/${post.listingId}'),
-            child: Text(l.postViewListing),
+          TextSpan(
+            text: value,
+            style: const TextStyle(fontWeight: FontWeight.w700),
           ),
         ],
       ),
+      style: const TextStyle(fontSize: 13),
     );
   }
 }
@@ -672,6 +757,7 @@ class _ReplyComposer extends StatelessWidget {
     required this.sending,
     required this.onCancelReply,
     required this.onSubmit,
+    this.embedded = false,
   });
 
   final TextEditingController controller;
@@ -681,93 +767,103 @@ class _ReplyComposer extends StatelessWidget {
   final bool sending;
   final VoidCallback onCancelReply;
   final VoidCallback onSubmit;
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
-    return SafeArea(
-      child: Material(
-        color: scheme.surface,
-        elevation: 8,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-          child: Align(
-            alignment: Alignment.topCenter,
-            heightFactor: 1,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 960),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (replyingTo != null)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            l.postReplyingTo(replyingTo!.author.username),
-                            style: TextStyle(
-                              color: scheme.primary,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: l.cancel,
-                          onPressed: onCancelReply,
-                          icon: const Icon(Icons.close_rounded, size: 18),
-                        ),
-                      ],
-                    ),
+    final composer = Material(
+      color: scheme.surface,
+      elevation: embedded ? 0 : 8,
+      shape: embedded
+          ? RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+              side: BorderSide(color: scheme.outlineVariant),
+            )
+          : null,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        child: Align(
+          alignment: Alignment.topCenter,
+          heightFactor: 1,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 960),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (replyingTo != null)
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Expanded(
-                        child: TextField(
-                          key: const ValueKey('post-reply-field'),
-                          controller: controller,
-                          focusNode: focusNode,
-                          enabled: !locked && !sending,
-                          minLines: 1,
-                          maxLines: 4,
-                          textInputAction: TextInputAction.newline,
-                          decoration: InputDecoration(
-                            hintText: locked
-                                ? l.postLockedNotice
-                                : l.postReplyHint,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(
-                                AppTheme.radiusLg,
-                              ),
-                            ),
+                        child: Text(
+                          l.postReplyingTo(replyingTo!.author.username),
+                          style: TextStyle(
+                            color: scheme.primary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                       ),
-                      const SizedBox(width: AppTheme.sp8),
-                      IconButton.filled(
-                        key: const ValueKey('post-reply-submit'),
-                        tooltip: l.postReplyAction,
-                        onPressed: locked || sending ? null : onSubmit,
-                        icon: sending
-                            ? const SizedBox.square(
-                                dimension: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.send_rounded),
+                      IconButton(
+                        tooltip: l.cancel,
+                        onPressed: onCancelReply,
+                        icon: const Icon(Icons.close_rounded, size: 18),
                       ),
                     ],
                   ),
-                ],
-              ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        key: const ValueKey('post-reply-field'),
+                        controller: controller,
+                        focusNode: focusNode,
+                        enabled: !locked && !sending,
+                        minLines: 1,
+                        maxLines: 4,
+                        textInputAction: TextInputAction.newline,
+                        decoration: InputDecoration(
+                          hintText: locked
+                              ? l.postLockedNotice
+                              : l.postReplyHint,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(
+                              AppTheme.radiusLg,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: AppTheme.sp8),
+                    IconButton.filled(
+                      key: const ValueKey('post-reply-submit'),
+                      tooltip: l.postReplyAction,
+                      onPressed: locked || sending ? null : onSubmit,
+                      icon: sending
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.send_rounded),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         ),
       ),
     );
+    if (embedded) {
+      return Padding(
+        padding: const EdgeInsets.only(top: AppTheme.sp8),
+        child: composer,
+      );
+    }
+    return SafeArea(child: composer);
   }
 }
 

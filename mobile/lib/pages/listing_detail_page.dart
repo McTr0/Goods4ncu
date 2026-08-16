@@ -22,6 +22,8 @@ import '../components/feed_feedback_menu.dart';
 import '../components/wanted_response_section.dart';
 import '../services/feed_feedback_service.dart';
 import '../utils/platform_utils.dart';
+import '../services/post_service.dart';
+import 'post_detail_page.dart';
 
 class ListingDetailPage extends StatefulWidget {
   final String listingId;
@@ -31,6 +33,7 @@ class ListingDetailPage extends StatefulWidget {
   final ChatService? chatService;
   final ContentReportService? contentReportService;
   final FeedFeedbackService? feedbackService;
+  final PostService? postService;
 
   const ListingDetailPage({
     super.key,
@@ -41,6 +44,7 @@ class ListingDetailPage extends StatefulWidget {
     this.chatService,
     this.contentReportService,
     this.feedbackService,
+    this.postService,
   });
 
   @override
@@ -54,6 +58,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
   late final ChatService _chatService;
   late final ContentReportService _contentReportService;
   late final FeedFeedbackService _feedbackService;
+  PostService? _postService;
   Listing? _listing;
   bool _loading = true;
   String? _error;
@@ -90,6 +95,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         widget.contentReportService ?? context.read<ContentReportService>();
     _feedbackService =
         widget.feedbackService ?? context.read<FeedFeedbackService>();
+    _postService = widget.postService ?? context.read<PostService?>();
     _loadDetail();
     _loadCurrentUserId();
   }
@@ -735,6 +741,9 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
                     ],
                   ),
                   const SizedBox(height: AppTheme.sp32),
+                  _buildDiscussionSection(),
+                  if (_postService != null)
+                    const SizedBox(height: AppTheme.sp32),
                   _buildWantedResponseSection(l),
                   const SizedBox(height: AppTheme.sp32),
                   _buildSimilarSection(l),
@@ -748,6 +757,9 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
                   const SizedBox(height: AppTheme.sp20),
                   _buildListingInformation(listing, l),
                   const SizedBox(height: AppTheme.sp24),
+                  _buildDiscussionSection(),
+                  if (_postService != null)
+                    const SizedBox(height: AppTheme.sp24),
                   _buildWantedResponseSection(l),
                   const SizedBox(height: AppTheme.sp24),
                   _buildSimilarSection(l),
@@ -916,46 +928,6 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
             ),
           ),
         ],
-        if (listing.status == 'active' && !listing.isRestricted) ...[
-          const SizedBox(height: AppTheme.sp20),
-          Container(
-            padding: const EdgeInsets.all(AppTheme.sp14),
-            decoration: BoxDecoration(
-              color: Theme.of(
-                context,
-              ).colorScheme.primaryContainer.withValues(alpha: 0.38),
-              borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-              border: Border.all(
-                color: Theme.of(
-                  context,
-                ).colorScheme.primary.withValues(alpha: 0.18),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  l.listingDiscussionHint,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    fontSize: 13,
-                    height: 1.45,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: AppTheme.sp12),
-                OutlinedButton.icon(
-                  key: const ValueKey('listing-open-discussion'),
-                  onPressed: () => context.push(
-                    '/listing/${Uri.encodeComponent(listing.id)}/discussion',
-                  ),
-                  icon: const Icon(Icons.forum_outlined),
-                  label: Text(l.listingDiscussionAction),
-                ),
-              ],
-            ),
-          ),
-        ],
         if (listing.ownerUsername != null) ...[
           const SizedBox(height: AppTheme.sp20),
           const Divider(),
@@ -1032,6 +1004,58 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
           _buildActionButtons(),
         ],
       ],
+    );
+  }
+
+  Widget _buildDiscussionSection() {
+    final postService = _postService;
+    if (postService == null) return const SizedBox.shrink();
+    final l = AppLocalizations.of(context)!;
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const ValueKey('listing-inline-discussion'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppTheme.sp16),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.forum_outlined, color: scheme.primary),
+              const SizedBox(width: AppTheme.sp8),
+              Expanded(
+                child: Text(
+                  l.postTypeDiscussion,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppTheme.sp4),
+          Text(
+            l.listingDiscussionHint,
+            style: TextStyle(
+              color: scheme.onSurfaceVariant,
+              fontSize: 13,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: AppTheme.sp16),
+          PostDetailPage(
+            listingId: widget.listingId,
+            postService: postService,
+            embedded: true,
+            omitOriginalPost: true,
+          ),
+        ],
+      ),
     );
   }
 
@@ -1663,52 +1687,99 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         child: Text(l.wantedClosedResponderHint),
       );
     }
+    final primaryAction = canBuy
+        ? _ListingViewerAction.buy
+        : canContact
+        ? _ListingViewerAction.contact
+        : _ListingViewerAction.priceDiscovery;
+    final secondaryActions = <_ListingViewerAction>[
+      if (canContact && primaryAction != _ListingViewerAction.contact)
+        _ListingViewerAction.contact,
+      if (canDiscover && primaryAction != _ListingViewerAction.priceDiscovery)
+        _ListingViewerAction.priceDiscovery,
+    ];
     return Row(
       children: [
         Expanded(
-          child: OutlinedButton.icon(
-            onPressed: _isOperating || !canContact
-                ? null
-                : () => _handleContactSeller(context),
-            icon: const Icon(Icons.chat_bubble_outline),
-            label: Text(l.contactSeller),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        // Offered beside haggling rather than instead of it: both sides have to
-        // choose this mechanism, and someone who would rather talk keeps that.
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: (!canDiscover || _isOperating)
-                ? null
-                : _handlePriceDiscovery,
-            icon: const Icon(Icons.balance_outlined),
-            label: Text(l.priceDiscoveryStart, softWrap: false),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
           child: ElevatedButton.icon(
-            onPressed: (!canBuy || _isOperating) ? null : _handleBuyNow,
-            icon: Icon(canBuy ? Icons.handshake_outlined : Icons.done),
-            label: Text(canBuy ? l.buyNow : l.sold),
+            key: const ValueKey('listing-primary-action'),
+            onPressed: _isOperating
+                ? null
+                : switch (primaryAction) {
+                    _ListingViewerAction.buy => _handleBuyNow,
+                    _ListingViewerAction.contact => () => _handleContactSeller(
+                      context,
+                    ),
+                    _ListingViewerAction.priceDiscovery =>
+                      _handlePriceDiscovery,
+                  },
+            icon: Icon(switch (primaryAction) {
+              _ListingViewerAction.buy => Icons.handshake_outlined,
+              _ListingViewerAction.contact => Icons.chat_bubble_outline,
+              _ListingViewerAction.priceDiscovery => Icons.balance_outlined,
+            }),
+            label: Text(switch (primaryAction) {
+              _ListingViewerAction.buy => l.buyNow,
+              _ListingViewerAction.contact => l.contactSeller,
+              _ListingViewerAction.priceDiscovery => l.priceDiscoveryStart,
+            }),
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 14),
-              backgroundColor: canBuy ? AppTheme.primary : Colors.grey,
+              backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
             ),
           ),
         ),
+        if (secondaryActions.isNotEmpty) ...[
+          const SizedBox(width: AppTheme.sp8),
+          PopupMenuButton<_ListingViewerAction>(
+            key: const ValueKey('listing-secondary-actions'),
+            tooltip: l.composerMoreTools,
+            enabled: !_isOperating,
+            onSelected: (action) {
+              switch (action) {
+                case _ListingViewerAction.contact:
+                  _handleContactSeller(context);
+                case _ListingViewerAction.priceDiscovery:
+                  _handlePriceDiscovery();
+                case _ListingViewerAction.buy:
+                  _handleBuyNow();
+              }
+            },
+            itemBuilder: (context) => secondaryActions
+                .map(
+                  (action) => PopupMenuItem(
+                    value: action,
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        action == _ListingViewerAction.contact
+                            ? Icons.chat_bubble_outline
+                            : Icons.balance_outlined,
+                      ),
+                      title: Text(
+                        action == _ListingViewerAction.contact
+                            ? l.contactSeller
+                            : l.priceDiscoveryStart,
+                      ),
+                    ),
+                  ),
+                )
+                .toList(growable: false),
+            icon: const Icon(Icons.more_horiz_rounded),
+            style: IconButton.styleFrom(
+              side: BorderSide(color: Theme.of(context).dividerColor),
+              minimumSize: const Size(48, 48),
+            ),
+          ),
+        ],
       ],
     );
   }
 }
+
+enum _ListingViewerAction { buy, contact, priceDiscovery }
 
 String _listingLifecycleLabel(AppLocalizations l, String status) =>
     switch (status) {

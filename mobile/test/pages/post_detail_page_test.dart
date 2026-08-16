@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/post.dart';
 import 'package:goods4ncu_mobile/pages/post_detail_page.dart';
@@ -106,6 +107,27 @@ class _FakePostService extends PostService {
 
 class _FakeListingService extends ListingService {}
 
+class _ListingPostService extends _FakePostService {
+  final listingPost = CampusPost.fromJson({
+    'id': 'listing-post-1',
+    'post_type': 'listing',
+    'listing_id': 'listing-1',
+    'title': 'Desk lamp',
+    'body': 'Warm light, pickup on campus.',
+    'author': {'id': 'u-1', 'username': 'mira'},
+    'reply_count': 1,
+    'status': 'active',
+    'is_locked': false,
+    'created_at': '2026-08-15T10:00:00Z',
+  });
+
+  @override
+  Future<CampusPost> getPost(String id) async => listingPost;
+
+  @override
+  Future<CampusPost> getPostByListing(String listingId) async => listingPost;
+}
+
 void main() {
   testWidgets('renders a LinuxDO-style thread and sends a reply', (
     tester,
@@ -163,6 +185,46 @@ void main() {
     expect(postService.requestedListingId, 'listing-1');
     expect(postService.getPostCalled, isFalse);
     expect(find.text('Where can I print tonight?'), findsOneWidget);
+  });
+
+  testWidgets('canonicalizes a listing post link to the unified listing page', (
+    tester,
+  ) async {
+    final postService = _ListingPostService();
+    final router = GoRouter(
+      initialLocation: '/posts/listing-post-1',
+      routes: [
+        GoRoute(
+          path: '/posts/:id',
+          builder: (context, state) => PostDetailPage(
+            postId: state.pathParameters['id'],
+            postService: postService,
+          ),
+        ),
+        GoRoute(
+          path: '/listing/:id',
+          builder: (context, state) => Text(
+            'Canonical listing ${state.pathParameters['id']}',
+            textDirection: TextDirection.ltr,
+          ),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp.router(
+        theme: AppTheme.light,
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        routerConfig: router,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Canonical listing listing-1'), findsOneWidget);
+    expect(router.state.uri.path, '/listing/listing-1');
   });
 
   testWidgets('loads replies in stable pages instead of dropping floor 51', (
