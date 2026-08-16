@@ -19,6 +19,7 @@ import '../services/recommendation_service.dart';
 import '../services/upload_service.dart';
 import '../services/content_report_service.dart';
 import '../services/feed_feedback_service.dart';
+import '../services/post_service.dart';
 
 /// All service providers for dependency injection.
 /// Pages can use these directly for better testability,
@@ -42,6 +43,7 @@ List<SingleChildWidget> get serviceProviders => [
   Provider<OrderService>(create: (_) => OrderService()),
   Provider<ContentReportService>(create: (_) => ContentReportService()),
   Provider<FeedFeedbackService>(create: (_) => FeedFeedbackService()),
+  Provider<PostService>(create: (_) => PostService()),
   Provider<AdminImpersonationService>(
     create: (context) =>
         AdminImpersonationService(apiService: context.read<ApiService>()),
