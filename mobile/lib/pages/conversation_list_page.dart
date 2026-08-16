@@ -460,15 +460,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
               onTap: () => _openThread(thread),
             ),
           ),
-          if (_filter == null && _error == null && _threads.length == 1)
-            Padding(
-              padding: const EdgeInsets.only(top: 4, bottom: 12),
-              child: _InboxNextSteps(
-                onFindClassmate: _openUserLookup,
-                onCreate: () => context.push('/create'),
-                onAskAssistant: () => context.push('/chat'),
-              ),
-            ),
           if (_threads.isNotEmpty) const SizedBox(height: 12),
           if (_spaces.isNotEmpty) ...[
             Padding(
@@ -2263,69 +2254,6 @@ class _LookupResultCard extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _InboxNextSteps extends StatelessWidget {
-  const _InboxNextSteps({
-    required this.onFindClassmate,
-    required this.onCreate,
-    required this.onAskAssistant,
-  });
-
-  final VoidCallback onFindClassmate;
-  final VoidCallback onCreate;
-  final VoidCallback onAskAssistant;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            l.conversationNextStepsTitle,
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            l.conversationNextStepsSubtitle,
-            style: TextStyle(color: scheme.onSurfaceVariant, height: 1.3),
-          ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 4,
-            runSpacing: 2,
-            children: [
-              TextButton.icon(
-                onPressed: onFindClassmate,
-                icon: const Icon(Icons.person_search_rounded, size: 17),
-                label: Text(l.findClassmate),
-              ),
-              TextButton.icon(
-                onPressed: onCreate,
-                icon: const Icon(Icons.add_box_outlined, size: 17),
-                label: Text(l.conversationEmptyAction),
-              ),
-              TextButton.icon(
-                onPressed: onAskAssistant,
-                icon: const Icon(Icons.auto_awesome_rounded, size: 17),
-                label: Text(l.conversationEmptyAskAssistant),
-              ),
-            ],
-          ),
-        ],
       ),
     );
   }

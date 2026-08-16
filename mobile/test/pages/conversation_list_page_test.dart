@@ -258,7 +258,7 @@ void main() {
   });
 
   testWidgets(
-    'single-contact inbox explains next steps and fits 390px at 200% text',
+    'single-contact inbox omits coaching copy at 200% text',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(390, 844));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -278,10 +278,10 @@ void main() {
       await tester.pumpWidget(_buildPage(service, textScale: 2));
       await tester.pumpAndSettle();
 
-      expect(find.text('接下来可以'), findsOneWidget);
-      expect(find.text('找同学'), findsOneWidget);
-      expect(find.text('发布出 / 收'), findsOneWidget);
-      expect(find.text('问小昌（AI 助手）'), findsOneWidget);
+      expect(find.text('接下来可以'), findsNothing);
+      expect(find.text('找同学'), findsNothing);
+      expect(find.text('发布出 / 收'), findsNothing);
+      expect(find.text('问小昌（AI 助手）'), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );
