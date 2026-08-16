@@ -81,6 +81,7 @@ pub struct UpdateDiscussionPost {
 #[derive(Debug, Clone, Default)]
 pub struct PostFilter {
     pub post_type: Option<String>,
+    pub direction: Option<String>,
     pub category: Option<String>,
     pub search: Option<String>,
     pub sort: PostSort,
@@ -271,9 +272,10 @@ impl PostRepository for PostgresPostRepository {
               AND ($3::text IS NULL OR p.category = $3)
               AND ($4::text IS NULL OR p.title ILIKE $4 ESCAPE '\\'
                    OR p.body ILIKE $4 ESCAPE '\\')
+              AND ($5::text IS NULL OR listing.direction = $5)
               AND (p.listing_id IS NULL OR NOT listing_has_active_restriction(p.listing_id))";
         let query = format!(
-            "{} WHERE {} ORDER BY {} LIMIT $5 OFFSET $6",
+            "{} WHERE {} ORDER BY {} LIMIT $6 OFFSET $7",
             Self::post_select(),
             visibility,
             order_by
@@ -283,17 +285,23 @@ impl PostRepository for PostgresPostRepository {
             .bind(filter.post_type.as_deref())
             .bind(filter.category.as_deref())
             .bind(search.as_deref())
+            .bind(filter.direction.as_deref())
             .bind(limit)
             .bind(offset)
             .fetch_all(&self.pool)
             .await
             .map_err(db_error)?;
-        let count_query = format!("SELECT COUNT(*) FROM posts p WHERE {visibility}");
+        let count_query = format!(
+            "SELECT COUNT(*) {} WHERE {}",
+            Self::post_relations(),
+            visibility
+        );
         let total: i64 = sqlx::query_scalar(&count_query)
             .bind(campus_id)
             .bind(filter.post_type.as_deref())
             .bind(filter.category.as_deref())
             .bind(search.as_deref())
+            .bind(filter.direction.as_deref())
             .fetch_one(&self.pool)
             .await
             .map_err(db_error)?;
@@ -414,6 +422,7 @@ impl PostRepository for PostgresPostRepository {
                  AND ($4::text IS NULL OR p.category = $4)
                  AND ($5::text IS NULL OR p.title ILIKE $5 ESCAPE '\\'
                       OR p.body ILIKE $5 ESCAPE '\\')
+                 AND ($6::text IS NULL OR listing.direction = $6)
                  AND ($2::text IS NULL OR p.author_id <> $2)
                  AND (p.listing_id IS NULL
                       OR NOT listing_has_active_restriction(p.listing_id))
@@ -430,7 +439,7 @@ impl PostRepository for PostgresPostRepository {
                          )
                      ))
                ORDER BY ranking_score DESC, p.last_activity_at DESC, p.id DESC
-               LIMIT $6 OFFSET $7"#,
+               LIMIT $7 OFFSET $8"#,
             columns = Self::post_columns(),
             relations = Self::post_relations(),
         );
@@ -440,6 +449,7 @@ impl PostRepository for PostgresPostRepository {
             .bind(filter.post_type.as_deref())
             .bind(filter.category.as_deref())
             .bind(search.as_deref())
+            .bind(filter.direction.as_deref())
             .bind(limit)
             .bind(offset)
             .fetch_all(&self.pool)
@@ -447,18 +457,20 @@ impl PostRepository for PostgresPostRepository {
             .map_err(db_error)?;
 
         let count_query = r#"SELECT COUNT(*) FROM posts p
+               LEFT JOIN inventory listing_filter ON listing_filter.id = p.listing_id
                WHERE p.campus_id = $1
                  AND p.status IN ('active', 'locked')
                  AND ($2::text IS NULL OR p.post_type = $2)
                  AND ($3::text IS NULL OR p.category = $3)
                  AND ($4::text IS NULL OR p.title ILIKE $4 ESCAPE '\\'
                       OR p.body ILIKE $4 ESCAPE '\\')
-                 AND ($5::text IS NULL OR p.author_id <> $5)
+                 AND ($5::text IS NULL OR listing_filter.direction = $5)
+                 AND ($6::text IS NULL OR p.author_id <> $6)
                  AND (p.listing_id IS NULL
                       OR NOT listing_has_active_restriction(p.listing_id))
-                 AND ($5::text IS NULL OR NOT EXISTS (
+                 AND ($6::text IS NULL OR NOT EXISTS (
                        SELECT 1 FROM feed_feedback exact_feedback
-                       WHERE exact_feedback.user_id = $5
+                       WHERE exact_feedback.user_id = $6
                          AND exact_feedback.campus_id = $1
                          AND (
                            (exact_feedback.resource_type = 'post'
@@ -473,6 +485,7 @@ impl PostRepository for PostgresPostRepository {
             .bind(filter.post_type.as_deref())
             .bind(filter.category.as_deref())
             .bind(search.as_deref())
+            .bind(filter.direction.as_deref())
             .bind(viewer_id)
             .fetch_one(&self.pool)
             .await

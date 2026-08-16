@@ -153,6 +153,7 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 campus_id,
                 &PostFilter {
                     post_type: Some("discussion".to_string()),
+                    direction: None,
                     category: Some("campus-life".to_string()),
                     search: Some("宿舍".to_string()),
                     sort: PostSort::Replies,
@@ -208,6 +209,37 @@ async fn every_listing_is_a_synced_post_and_visibility_follows_listing_policy() 
         assert_eq!(listing_preview.suggested_price_cny, 10_000);
         assert_eq!(listing_preview.direction, "offer");
         assert_eq!(listing_preview.condition_score, 8);
+
+        let (offered, total) = service
+            .list(
+                campus_id,
+                &PostFilter {
+                    post_type: Some("listing".to_string()),
+                    direction: Some("offer".to_string()),
+                    ..Default::default()
+                },
+                20,
+                0,
+            )
+            .await
+            .expect("offer direction filter");
+        assert_eq!(total, 1);
+        assert_eq!(offered[0].id, projected.id);
+
+        let (_, wanted_total) = service
+            .list(
+                campus_id,
+                &PostFilter {
+                    post_type: Some("listing".to_string()),
+                    direction: Some("wanted".to_string()),
+                    ..Default::default()
+                },
+                20,
+                0,
+            )
+            .await
+            .expect("wanted direction filter");
+        assert_eq!(wanted_total, 0);
 
         sqlx::query(
             "UPDATE inventory

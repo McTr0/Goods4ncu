@@ -26,6 +26,7 @@ Query parameters:
 - `limit`: 1–50, default 20
 - `offset`: non-negative, default 0
 - `post_type`: `all`, `discussion`, or `listing`
+- `direction`: `all`, `offer`, or `wanted` (applies to listing posts)
 - `category`: exact category filter
 - `search`: title/body substring, up to 200 characters
 - `sort`: `active` (default), `latest`, `replies`, or `for_you`

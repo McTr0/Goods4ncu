@@ -24,6 +24,7 @@ pub struct PostListQuery {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
     pub post_type: Option<String>,
+    pub direction: Option<String>,
     pub category: Option<String>,
     pub search: Option<String>,
     pub sort: Option<String>,
@@ -197,8 +198,19 @@ fn normalize_filter(query: &PostListQuery) -> Result<PostFilter, ApiError> {
     };
     let category = normalized_optional_query(&query.category, "category", 80)?;
     let search = normalized_optional_query(&query.search, "search", 200)?;
+    let direction = match query.direction.as_deref().map(str::trim) {
+        None | Some("") | Some("all") => None,
+        Some("offer") => Some("offer".to_string()),
+        Some("wanted") => Some("wanted".to_string()),
+        Some(_) => {
+            return Err(ApiError::BadRequest(
+                "direction 可选值为 all、offer、wanted".to_string(),
+            ))
+        }
+    };
     Ok(PostFilter {
         post_type,
+        direction,
         category,
         search,
         sort,
@@ -526,18 +538,21 @@ mod tests {
             limit: None,
             offset: None,
             post_type: Some("listing".to_string()),
+            direction: Some("wanted".to_string()),
             category: None,
             search: None,
             sort: Some("replies".to_string()),
         })
         .unwrap();
         assert_eq!(valid.post_type.as_deref(), Some("listing"));
+        assert_eq!(valid.direction.as_deref(), Some("wanted"));
         assert_eq!(valid.sort, PostSort::Replies);
 
         let personalized = normalize_filter(&PostListQuery {
             limit: None,
             offset: None,
             post_type: None,
+            direction: None,
             category: None,
             search: None,
             sort: Some("for_you".to_string()),
@@ -549,6 +564,7 @@ mod tests {
             limit: None,
             offset: None,
             post_type: Some("video".to_string()),
+            direction: None,
             category: None,
             search: None,
             sort: None,
