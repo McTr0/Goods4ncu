@@ -7,7 +7,6 @@ import 'package:provider/provider.dart';
 import '../components/contact_conversation_sheet.dart';
 import '../components/relationship_space_preview.dart';
 import '../components/user_avatar.dart';
-import '../components/xiaochang_avatar.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
@@ -261,17 +260,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
       appBar: AppBar(
         title: Text(l.messagesTab),
         actions: [
-          Tooltip(
-            message: l.conversationEmptyAskAssistant,
-            child: TextButton.icon(
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-              ),
-              onPressed: () => context.push('/chat'),
-              icon: const XiaochangAvatar(size: 24),
-              label: Text(l.assistantSystemBadge),
-            ),
-          ),
           PopupMenuButton<String>(
             tooltip: l.createAction,
             icon: const Icon(Icons.add_rounded),
@@ -419,10 +407,8 @@ class _ConversationListPageState extends State<ConversationListPage> {
           if (_error == null && !hasInboxData)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
-              // The old wording pointed at contacting someone from a listing
-              // or searching for a classmate — the two paths that do not work
-              // on day one, when there are no listings and you do not yet know
-              // anyone. Answering an intent is the one that does.
+              // Keep this state focused on starting a conversation. Publishing
+              // remains available from the persistent global destination.
               child: _InlineEmptyMessage(
                 icon: Icons.forum_outlined,
                 title: l.conversationEmptyTitle,
@@ -438,14 +424,9 @@ class _ConversationListPageState extends State<ConversationListPage> {
                       label: Text(l.findClassmate),
                     ),
                     TextButton.icon(
-                      onPressed: () => context.push('/create'),
-                      icon: const Icon(Icons.add_box_outlined, size: 18),
-                      label: Text(l.conversationEmptyAction),
-                    ),
-                    TextButton.icon(
-                      onPressed: () => context.push('/chat'),
-                      icon: const Icon(Icons.auto_awesome_rounded, size: 18),
-                      label: Text(l.conversationEmptyAskAssistant),
+                      onPressed: () => context.go('/'),
+                      icon: const Icon(Icons.explore_outlined, size: 18),
+                      label: Text(l.postDiscoveryTitle),
                     ),
                   ],
                 ),

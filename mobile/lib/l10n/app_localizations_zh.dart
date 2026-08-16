@@ -398,13 +398,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get markAllReadSuccess => '已将全部通知标记为已读';
 
   @override
-  String get myListings => '我的发布';
+  String get myListings => '我的商品';
 
   @override
   String get myListingsMenu => '查看和管理你的商品';
 
   @override
-  String get myListingsTab => '我的发布';
+  String get myListingsTab => '我的商品';
 
   @override
   String get myOrders => '成交记录';

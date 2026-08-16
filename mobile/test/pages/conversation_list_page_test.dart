@@ -174,23 +174,25 @@ Widget _buildPage(
 }
 
 void main() {
-  testWidgets('assistant is a tool action, not a peer thread', (tester) async {
+  testWidgets('Xiaochang is not duplicated inside the inbox', (tester) async {
     await tester.pumpWidget(_buildPage(_FakeChatService()));
     await tester.pumpAndSettle();
 
     expect(find.text('小昌'), findsNothing);
-    expect(find.text('AI 助手'), findsOneWidget);
+    expect(find.text('AI 助手'), findsNothing);
     expect(find.text('上次我们聊到高数教材。'), findsNothing);
-    expect(find.byTooltip('问小昌（AI 助手）'), findsOneWidget);
+    expect(find.byTooltip('问小昌（AI 助手）'), findsNothing);
+    expect(find.text('校园发现'), findsOneWidget);
+    expect(find.text('发布出 / 收'), findsNothing);
 
     await tester.tap(find.widgetWithText(ChoiceChip, '连接'));
     await tester.pumpAndSettle();
 
     expect(find.text('小昌'), findsNothing);
-    expect(find.byTooltip('问小昌（AI 助手）'), findsOneWidget);
+    expect(find.byTooltip('问小昌（AI 助手）'), findsNothing);
   });
 
-  testWidgets('assistant tool remains available when direct inbox fails', (
+  testWidgets('inbox failure does not add a duplicate Xiaochang action', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -199,7 +201,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('小昌'), findsNothing);
-    expect(find.byTooltip('问小昌（AI 助手）'), findsOneWidget);
+    expect(find.byTooltip('问小昌（AI 助手）'), findsNothing);
     expect(find.text('消息暂时没有加载出来'), findsOneWidget);
   });
 
@@ -212,7 +214,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Xiaochang'), findsNothing);
-    expect(find.byTooltip('Ask Xiaochang (AI assistant)'), findsOneWidget);
+    expect(find.byTooltip('Ask Xiaochang (AI assistant)'), findsNothing);
     expect(find.widgetWithText(ChoiceChip, 'Connections'), findsOneWidget);
     expect(find.text('No conversations yet'), findsOneWidget);
     expect(find.text('找同学'), findsNothing);
