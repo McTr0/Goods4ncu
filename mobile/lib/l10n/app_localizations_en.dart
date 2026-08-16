@@ -140,10 +140,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get createListingAiTitle => 'Let the assistant take a look first';
 
   @override
-  String get createListingModeOffer => 'I am offering';
+  String get createListingModeOffer => 'Sell';
 
   @override
-  String get createListingModeWanted => 'I am looking for';
+  String get createListingModeWanted => 'Request';
 
   @override
   String get createWantedPanelTitle => 'Describe what you want';
@@ -1011,10 +1011,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get intentRespondSent => 'Sent — they\'ll see it in their messages';
 
   @override
-  String get priceDiscoveryTitle => 'Let the assistant settle it';
+  String get priceDiscoveryTitle => 'Price negotiation';
 
   @override
-  String get priceDiscoveryStart => 'Settle by private limits';
+  String get priceDiscoveryStart => 'Start price negotiation';
 
   @override
   String get priceDiscoveryYourLimit => 'Your limit (CNY)';
@@ -1448,10 +1448,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get notSet => 'Not set';
 
   @override
-  String get homePromptHint => 'Search items or requests, or ask Xiaochang';
+  String get homePromptHint => 'Search items or requests';
 
   @override
-  String get homePromptSubmitTooltip => 'Ask Xiaochang';
+  String get homePromptSubmitTooltip => 'Search';
 
   @override
   String get homeActionFind => 'Find';

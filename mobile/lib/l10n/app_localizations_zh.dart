@@ -134,10 +134,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get createListingAiTitle => '先让小昌看一眼';
 
   @override
-  String get createListingModeOffer => '我要出';
+  String get createListingModeOffer => '出售';
 
   @override
-  String get createListingModeWanted => '我要收';
+  String get createListingModeWanted => '求购';
 
   @override
   String get createWantedPanelTitle => '描述你想收什么';
@@ -975,10 +975,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get intentRespondSent => '已发送，对方会在消息里看到';
 
   @override
-  String get priceDiscoveryTitle => '让小昌定价';
+  String get priceDiscoveryTitle => '价格协商';
 
   @override
-  String get priceDiscoveryStart => '让小昌定价';
+  String get priceDiscoveryStart => '发起价格协商';
 
   @override
   String get priceDiscoveryYourLimit => '你的底线（元）';
@@ -1392,10 +1392,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get notSet => '未设置';
 
   @override
-  String get homePromptHint => '搜物品或求购，也可以问小昌';
+  String get homePromptHint => '搜索物品或求购信息';
 
   @override
-  String get homePromptSubmitTooltip => '交给小昌';
+  String get homePromptSubmitTooltip => '搜索';
 
   @override
   String get homeActionFind => '找东西';
