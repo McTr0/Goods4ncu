@@ -76,22 +76,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
     final l = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(l.postCreateTitle),
-        actions: [
-          TextButton(
-            key: const ValueKey('post-publish-action'),
-            onPressed: _submitting ? null : _submit,
-            child: _submitting
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Text(l.postPublishAction),
-          ),
-          const SizedBox(width: AppTheme.sp8),
-        ],
-      ),
+      appBar: AppBar(title: Text(l.postCreateTitle)),
       body: SingleChildScrollView(
         padding: EdgeInsets.all(
           MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
@@ -181,6 +166,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
                 ),
                 const SizedBox(height: AppTheme.sp24),
                 FilledButton.icon(
+                  key: const ValueKey('post-publish-action'),
                   onPressed: _submitting ? null : _submit,
                   icon: const Icon(Icons.publish_rounded),
                   label: Text(l.postPublishAction),

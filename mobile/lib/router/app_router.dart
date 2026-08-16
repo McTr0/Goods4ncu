@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import '../brand/app_brand.dart';
+import '../components/xiaochang_avatar.dart';
 import '../l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 import '../pages/home_page.dart';
 import '../pages/listing_detail_page.dart';
 import '../pages/create_listing_page.dart';
-import '../pages/intent_page.dart';
 import '../pages/my_listings_page.dart';
 import '../pages/profile_page.dart';
 import '../pages/chat_page.dart';
@@ -27,11 +27,13 @@ import '../services/admin_role_cache.dart';
 import '../pages/trust_page.dart';
 import '../pages/post_detail_page.dart';
 import '../pages/create_post_page.dart';
+import '../pages/publish_hub_page.dart';
 import '../services/token_storage.dart';
 import '../services/ws_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
 import 'package:provider/provider.dart';
+import 'publish_navigation.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = BaseService.navigatorKey;
 
@@ -88,107 +90,27 @@ final GoRouter appRouter = GoRouter(
   },
   routes: [
     GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
-    GoRoute(path: '/trust', builder: (context, state) => const TrustPage()),
-    GoRoute(
-      path: '/settings',
-      builder: (context, state) => const SettingsPage(),
-    ),
-    GoRoute(path: '/admin', builder: (context, state) => const AdminPage()),
-    GoRoute(
-      path: '/watchlist',
-      builder: (context, state) => const WatchlistPage(),
-    ),
-    GoRoute(
-      path: '/notifications',
-      builder: (context, state) => const NotificationsPage(),
-    ),
-    GoRoute(
-      path: '/moderation',
-      builder: (context, state) => const ModerationCasesPage(),
-    ),
-
-    // Detail routes (Hide bottom bar)
-    GoRoute(
-      path: '/listing/:id',
-      builder: (context, state) {
-        final id = state.pathParameters['id']!;
-        return ListingDetailPage(listingId: id);
-      },
-    ),
-    GoRoute(
-      path: '/orders/:id',
-      builder: (context, state) {
-        final id = state.pathParameters['id']!;
-        return OrderDetailPage(orderId: id);
-      },
-    ),
-    GoRoute(
-      path: '/users/:id',
-      builder: (context, state) {
-        final id = state.pathParameters['id']!;
-        return UserHomePage(userId: id);
-      },
-    ),
-    GoRoute(
-      path: '/chat/:conversationId',
-      redirect: (context, state) {
-        final id = state.pathParameters['conversationId']!;
-        return Uri(pathSegments: ['user-chat', id]).toString();
-      },
-    ),
-    GoRoute(
-      name: 'user-chat',
-      path: '/user-chat/:conversationId',
-      pageBuilder: (context, state) {
-        final id = state.pathParameters['conversationId']!;
-        final extra = state.extra as Map<String, dynamic>?;
-        final otherUserId = extra?['otherUserId'] as String? ?? '';
-        final otherUsername = extra?['otherUsername'] as String? ?? '';
-        return MaterialPage<void>(
-          key: state.pageKey,
-          restorationId: state.pageKey.value,
-          child: UserChatPage(
-            conversationId: id,
-            otherUserId: otherUserId,
-            otherUsername: otherUsername,
-          ),
-        );
-      },
-    ),
-    GoRoute(
-      name: 'chat-thread',
-      path: '/chat/threads/:peerUserId',
-      pageBuilder: (context, state) {
-        final id = state.pathParameters['peerUserId']!;
-        final extra = state.extra as Map<String, dynamic>?;
-        return MaterialPage<void>(
-          key: state.pageKey,
-          restorationId: state.pageKey.value,
-          child: ChatThreadPage(
-            peerUserId: id,
-            initialThread: extra?['thread'] as ChatThread?,
-          ),
-        );
-      },
-    ),
-    GoRoute(
-      name: 'chat-space',
-      path: '/spaces/:spaceId',
-      pageBuilder: (context, state) {
-        final id = state.pathParameters['spaceId']!;
-        final extra = state.extra as Map<String, dynamic>?;
-        return MaterialPage<void>(
-          key: state.pageKey,
-          restorationId: state.pageKey.value,
-          child: SpaceChatPage(spaceId: id, initialSpace: extra),
-        );
-      },
-    ),
-
-    // Tab routes (Show bottom bar)
     ShellRoute(
       builder: (context, state, child) => _ShellScaffold(child: child),
       routes: [
+        GoRoute(path: '/trust', builder: (context, state) => const TrustPage()),
+        GoRoute(
+          path: '/settings',
+          builder: (context, state) => const SettingsPage(),
+        ),
+        GoRoute(path: '/admin', builder: (context, state) => const AdminPage()),
+        GoRoute(
+          path: '/watchlist',
+          builder: (context, state) => const WatchlistPage(),
+        ),
+        GoRoute(
+          path: '/notifications',
+          builder: (context, state) => const NotificationsPage(),
+        ),
+        GoRoute(
+          path: '/moderation',
+          builder: (context, state) => const ModerationCasesPage(),
+        ),
         GoRoute(
           path: '/listing/:id/discussion',
           builder: (context, state) {
@@ -197,10 +119,86 @@ final GoRouter appRouter = GoRouter(
           },
         ),
         GoRoute(
+          path: '/listing/:id',
+          builder: (context, state) {
+            final id = state.pathParameters['id']!;
+            return ListingDetailPage(listingId: id);
+          },
+        ),
+        GoRoute(
           path: '/posts/:id',
           builder: (context, state) {
             final id = state.pathParameters['id']!;
             return PostDetailPage(postId: id);
+          },
+        ),
+        GoRoute(
+          path: '/orders/:id',
+          builder: (context, state) {
+            final id = state.pathParameters['id']!;
+            return OrderDetailPage(orderId: id);
+          },
+        ),
+        GoRoute(
+          path: '/users/:id',
+          builder: (context, state) {
+            final id = state.pathParameters['id']!;
+            return UserHomePage(userId: id);
+          },
+        ),
+        GoRoute(
+          path: '/chat/:conversationId',
+          redirect: (context, state) {
+            final id = state.pathParameters['conversationId']!;
+            return Uri(pathSegments: ['user-chat', id]).toString();
+          },
+        ),
+        GoRoute(
+          name: 'user-chat',
+          path: '/user-chat/:conversationId',
+          pageBuilder: (context, state) {
+            final id = state.pathParameters['conversationId']!;
+            final extra = state.extra as Map<String, dynamic>?;
+            final otherUserId = extra?['otherUserId'] as String? ?? '';
+            final otherUsername = extra?['otherUsername'] as String? ?? '';
+            return MaterialPage<void>(
+              key: state.pageKey,
+              restorationId: state.pageKey.value,
+              child: UserChatPage(
+                conversationId: id,
+                otherUserId: otherUserId,
+                otherUsername: otherUsername,
+              ),
+            );
+          },
+        ),
+        GoRoute(
+          name: 'chat-thread',
+          path: '/chat/threads/:peerUserId',
+          pageBuilder: (context, state) {
+            final id = state.pathParameters['peerUserId']!;
+            final extra = state.extra as Map<String, dynamic>?;
+            return MaterialPage<void>(
+              key: state.pageKey,
+              restorationId: state.pageKey.value,
+              child: ChatThreadPage(
+                peerUserId: id,
+                initialThread: extra?['thread'] as ChatThread?,
+              ),
+            );
+          },
+        ),
+        GoRoute(
+          name: 'chat-space',
+          path: '/spaces/:spaceId',
+          pageBuilder: (context, state) {
+            final id = state.pathParameters['spaceId']!;
+            final extra = state.extra as Map<String, dynamic>?;
+            return MaterialPage<void>(
+              key: state.pageKey,
+              restorationId: state.pageKey.value,
+              child: SpaceChatPage(spaceId: id, initialSpace: extra),
+            );
           },
         ),
         GoRoute(
@@ -214,31 +212,44 @@ final GoRouter appRouter = GoRouter(
               const NoTransitionPage(child: ConversationListPage()),
         ),
         GoRoute(
-          // The bottom-nav "publish" tab opens the intent composer, not the
-          // listing form. The form is the threshold most demand on a campus
-          // never gets over; it stays reachable at /create/listing for anyone
-          // who wants to fill one in.
-          path: '/create',
+          path: PublishNavigation.hub,
+          pageBuilder: (context, state) =>
+              const NoTransitionPage(child: PublishHubPage()),
+        ),
+        GoRoute(
+          path: PublishNavigation.discussion,
+          pageBuilder: (context, state) => NoTransitionPage(
+            key: state.pageKey,
+            child: const CreatePostPage(),
+          ),
+        ),
+        GoRoute(
+          path: PublishNavigation.listingPath,
           pageBuilder: (context, state) {
-            final requestedKind = state.uri.queryParameters['kind'];
-            final initialKind = requestedKind == 'wanted'
-                ? IntentKind.goodsSeek
-                : IntentKind.goodsOffer;
+            final direction = state.uri.queryParameters['direction'];
             return NoTransitionPage(
               key: state.pageKey,
-              child: IntentPage(initialKind: initialKind),
+              child: CreateListingPage(
+                initialDirection: direction == 'wanted' ? 'wanted' : 'offer',
+                showBackButton: true,
+              ),
             );
           },
         ),
         GoRoute(
-          path: '/create/listing',
-          pageBuilder: (context, state) =>
-              const NoTransitionPage(child: CreateListingPage()),
+          path: '/create',
+          redirect: (context, state) =>
+              PublishNavigation.redirectLegacy(state.uri),
         ),
         GoRoute(
           path: '/create/post',
-          pageBuilder: (context, state) =>
-              const NoTransitionPage(child: CreatePostPage()),
+          redirect: (context, state) =>
+              PublishNavigation.redirectLegacy(state.uri),
+        ),
+        GoRoute(
+          path: '/create/listing',
+          redirect: (context, state) =>
+              PublishNavigation.redirectLegacy(state.uri),
         ),
         GoRoute(
           path: '/profile',
@@ -281,29 +292,45 @@ class _ShellScaffold extends StatefulWidget {
 class _ShellScaffoldState extends State<_ShellScaffold> {
   int _currentIndex = 0;
 
-  static const _routes = ['/', '/conversations', '/create', '/profile'];
+  static const _routes = [
+    '/',
+    '/conversations',
+    '/chat',
+    PublishNavigation.hub,
+    '/profile',
+  ];
 
   int _tabIndexForLocation(String location) {
-    switch (location) {
-      case '/':
-        return 0;
-      case '/conversations':
-        return 1;
-      case '/create':
-      case '/create/listing':
-      case '/create/post':
-        return 2;
-      // Xiaobang is a tool entered from home, not a human conversation in the
-      // inbox. Keep the home destination selected while the assistant is open.
-      case '/chat':
-        return 0;
-      case '/profile':
-      case '/my-listings':
-      case '/orders':
-        return 3;
-      default:
-        return _currentIndex;
+    if (location == '/') return 0;
+    if (location == '/conversations' ||
+        location.startsWith('/user-chat/') ||
+        location.startsWith('/chat/threads/') ||
+        location.startsWith('/spaces/')) {
+      return 1;
     }
+    if (location == '/chat') return 2;
+    if (location == PublishNavigation.hub ||
+        location.startsWith('${PublishNavigation.hub}/')) {
+      return 3;
+    }
+    if (location == '/profile' ||
+        location == '/my-listings' ||
+        location == '/orders' ||
+        location.startsWith('/orders/') ||
+        location == '/settings' ||
+        location == '/watchlist' ||
+        location == '/notifications' ||
+        location == '/moderation' ||
+        location == '/admin' ||
+        location == '/trust') {
+      return 4;
+    }
+    if (location.startsWith('/listing/') ||
+        location.startsWith('/posts/') ||
+        location.startsWith('/users/')) {
+      return 0;
+    }
+    return _currentIndex;
   }
 
   @override
@@ -338,6 +365,7 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
                   labels: [
                     l.homeTab,
                     l.messagesTab,
+                    l.assistantName,
                     l.publishTab,
                     l.profileTab,
                   ],
@@ -381,6 +409,11 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
                   icon: const Icon(Icons.chat_bubble_outline),
                   selectedIcon: const Icon(Icons.chat_bubble_rounded),
                   label: l.messagesTab,
+                ),
+                NavigationDestination(
+                  icon: const _XiaochangNavigationIcon(),
+                  selectedIcon: const _XiaochangNavigationIcon(selected: true),
+                  label: l.assistantName,
                 ),
                 NavigationDestination(
                   icon: const Icon(Icons.add_circle_outline),
@@ -471,19 +504,60 @@ class _DesktopNavigation extends StatelessWidget {
               label: Text(labels[1]),
             ),
             NavigationRailDestination(
+              icon: const _XiaochangNavigationIcon(desktop: true),
+              selectedIcon: const _XiaochangNavigationIcon(
+                selected: true,
+                desktop: true,
+              ),
+              label: Text(labels[2]),
+            ),
+            NavigationRailDestination(
               icon: const Icon(Icons.add_circle_outline),
               selectedIcon: const Icon(Icons.add_circle_rounded),
-              label: Text(labels[2]),
+              label: Text(labels[3]),
             ),
             NavigationRailDestination(
               icon: const Icon(Icons.person_outline),
               selectedIcon: const Icon(Icons.person_rounded),
-              label: Text(labels[3]),
+              label: Text(labels[4]),
             ),
           ],
         ),
       ),
     );
+  }
+}
+
+class _XiaochangNavigationIcon extends StatelessWidget {
+  const _XiaochangNavigationIcon({this.selected = false, this.desktop = false});
+
+  final bool selected;
+  final bool desktop;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = desktop ? 36.0 : 42.0;
+    final avatar = Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(
+          color: selected
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.outlineVariant,
+          width: selected ? 2 : 1,
+        ),
+        boxShadow: selected ? AppTheme.cardShadow : null,
+      ),
+      child: XiaochangAvatar(
+        size: size,
+        borderRadius: BorderRadius.circular(12),
+      ),
+    );
+    return desktop
+        ? avatar
+        : Transform.translate(offset: const Offset(0, -7), child: avatar);
   }
 }
 

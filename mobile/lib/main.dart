@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'l10n/app_localizations.dart';
 import 'brand/app_brand.dart';
@@ -10,6 +11,7 @@ import 'providers/service_providers.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  GoRouter.optionURLReflectsImperativeAPIs = true;
   await LocaleService.init();
   ErrorWidget.builder = (details) => _FallbackErrorWidget(details: details);
   runApp(const Goods4ncuApp());

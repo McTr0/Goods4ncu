@@ -17,8 +17,16 @@ typedef ImageBase64Picker = Future<String?> Function(ImageSource source);
 class CreateListingPage extends StatefulWidget {
   final ApiService? apiService;
   final ImageBase64Picker? imageBase64Picker;
+  final String initialDirection;
+  final bool showBackButton;
 
-  const CreateListingPage({super.key, this.apiService, this.imageBase64Picker});
+  const CreateListingPage({
+    super.key,
+    this.apiService,
+    this.imageBase64Picker,
+    this.initialDirection = 'offer',
+    this.showBackButton = false,
+  });
 
   @override
   State<CreateListingPage> createState() => _CreateListingPageState();
@@ -36,7 +44,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
   final _defectController = TextEditingController();
 
   String _category = 'electronics';
-  String _direction = 'offer';
+  late String _direction;
   int _conditionScore = 7;
   final List<String> _defects = [];
   bool _isLoading = false;
@@ -59,6 +67,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
   void initState() {
     super.initState();
     _apiService = widget.apiService ?? context.read<ApiService>();
+    _direction = widget.initialDirection == 'wanted' ? 'wanted' : 'offer';
     _titleController.addListener(_refreshRequiredSummary);
     _brandController.addListener(_refreshRequiredSummary);
     _priceController.addListener(_refreshRequiredSummary);
@@ -1277,10 +1286,7 @@ class _CreateListingPageState extends State<CreateListingPage> {
           context,
         ).scaffoldBackgroundColor.withValues(alpha: 0.92),
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => context.pop(),
-        ),
+        automaticallyImplyLeading: widget.showBackButton,
       ),
       body: SafeArea(
         top: false,
