@@ -33,6 +33,7 @@ pub mod moderation_cases;
 pub mod negotiate;
 pub mod notifications;
 pub mod orders;
+pub mod posts;
 pub mod price_discovery;
 pub mod recommendations;
 pub mod reputation;
@@ -740,6 +741,28 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             post(feed::clear_personalization),
         )
         .route("/api/categories", get(listings::get_categories))
+        .route(
+            "/api/posts",
+            get(posts::list_posts).post(posts::create_post),
+        )
+        .route(
+            "/api/posts/by-listing/{listing_id}",
+            get(posts::get_post_by_listing),
+        )
+        .route(
+            "/api/posts/{id}",
+            get(posts::get_post)
+                .put(posts::update_post)
+                .delete(posts::delete_post),
+        )
+        .route(
+            "/api/posts/{id}/replies",
+            get(posts::list_replies).post(posts::create_reply),
+        )
+        .route(
+            "/api/posts/{post_id}/replies/{reply_id}",
+            put(posts::update_reply).delete(posts::delete_reply),
+        )
         .route("/api/campuses", get(campuses::list_campuses))
         .route("/api/chat", post(chat::handle_chat))
         .route(

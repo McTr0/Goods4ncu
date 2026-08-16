@@ -9,6 +9,7 @@ use crate::api::error::ApiError;
 pub enum FeedResourceType {
     Listing,
     Intent,
+    Post,
 }
 
 impl FeedResourceType {
@@ -16,6 +17,7 @@ impl FeedResourceType {
         match self {
             Self::Listing => "listing",
             Self::Intent => "intent",
+            Self::Post => "post",
         }
     }
 }
@@ -122,6 +124,30 @@ impl FeedService {
                 (
                     id.to_string(),
                     format!("intent:kind:{}", normalized_signal(&kind)),
+                )
+            }
+            FeedResourceType::Post => {
+                let post_id = Uuid::parse_str(resource_id).map_err(|_| ApiError::NotFound)?;
+                let row = sqlx::query(
+                    "SELECT id, category
+                     FROM posts
+                     WHERE id = $1 AND campus_id = $2 AND author_id <> $3
+                       AND status IN ('active', 'locked')
+                       AND (listing_id IS NULL
+                            OR NOT listing_has_active_restriction(listing_id))",
+                )
+                .bind(post_id)
+                .bind(campus_id)
+                .bind(user_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(db_error)?
+                .ok_or(ApiError::NotFound)?;
+                let id: Uuid = row.get("id");
+                let category: String = row.get("category");
+                (
+                    id.to_string(),
+                    format!("post:category:{}", normalized_signal(&category)),
                 )
             }
         };

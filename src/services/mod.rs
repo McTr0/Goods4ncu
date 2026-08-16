@@ -29,6 +29,7 @@ pub mod notification;
 pub mod order;
 pub mod order_worker;
 pub mod outbox;
+pub mod post;
 pub mod price_discovery;
 pub mod product;
 pub mod reputation;
