@@ -95,6 +95,10 @@ when the listing is inactive or has an active moderation restriction. Cover
 images and avatars are returned only after their existing moderation status is
 approved; private-bucket deployments receive signed URLs.
 
+Discussion posts may use the same `cover_image_url` field. The value is
+returned only after the `post_image` moderation job is approved, so a newly
+published image can briefly be absent from the feed while it is reviewed.
+
 ### `GET /api/posts/{id}`
 
 Returns the core topic fields from a list item, except `body` contains the
@@ -155,11 +159,15 @@ Creates a discussion topic. Products must still be created with
   "title": "Graduation move-out tips",
   "body": "Share pickup windows early so people can plan.",
   "category": "campus-life",
-  "tags": ["graduation", "guide"]
+  "tags": ["graduation", "guide"],
+  "cover_image_url": "https://bucket.example.com/post/image/cover.jpg"
 }
 ```
 
-The response is the new post detail.
+`cover_image_url` is optional and must point at the configured platform object
+storage. Mobile clients should upload the image first, then pass the returned
+platform URL. The response is the new post detail; until moderation approves
+the image, its `cover_image_url` is `null`.
 
 ### `PUT /api/posts/{id}`
 
@@ -212,9 +220,8 @@ a database trigger.
 - Category: 80 Unicode characters
 - Tags: at most 5 unique tags, each at most 32 Unicode characters
 
-This first slice deliberately reuses the listing image as the cover for listing
-posts. Uploading images directly to discussion posts needs a post-specific
-moderation job lifecycle before it can be exposed safely. Reactions, bookmarks,
-post reports and admin topic moderation are also separate follow-up slices; the
-current API already enforces tenant isolation, text moderation, owner-only
-mutation, soft deletion, locking and listing restriction visibility.
+Listing posts continue to reuse the listing image as their cover. Discussion
+posts use the post-specific `post_image` moderation lifecycle described above.
+Reactions, bookmarks, post reports and admin topic moderation remain separate
+follow-up slices; the current API enforces tenant isolation, text moderation,
+owner-only mutation, soft deletion, locking and listing restriction visibility.

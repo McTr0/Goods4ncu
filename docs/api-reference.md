@@ -190,13 +190,13 @@ Content-Type: application/json
 
 ### GET `/api/user/profile`
 
-需要登录。返回当前用户资料，包括 `user_id`、`username`、`email`、`student_id`、`avatar_url`、`role`、`created_at`、`discoverability` 和 `payment_qr`。
+需要登录。返回当前用户资料，包括 `user_id`、`username`、`email`、`student_id`、legacy `avatar_url`、`role`、`created_at`、`discoverability` 和 `payment_qr`。`avatar_url` 仅为未版本化 API 的旧客户端兼容字段，不是当前 Avatar 呈现；新客户端必须使用 `persona`/默认系统 Avatar，不能把照片 URL 当作回退头像。
 
 `student_id` 是只读派生字段：当学校邮箱形如 `{8-12位数字}@email.ncu.edu.cn` 时，后端从邮箱本地部分推断；否则为 `null`。`discoverability.username` 默认 `true`，`discoverability.email` 和 `discoverability.student_id` 默认 `false`。
 
 ### PATCH `/api/user/profile`
 
-需要登录。可更新昵称、学校邮箱、头像 URL、查找设置和收款码设置。邮箱更新后会同步重新推断 `student_id`。聊天注意力设置不属于用户资料；连接隐私通过下文的 connection preferences 接口单独管理。
+需要登录。可更新昵称、学校邮箱、legacy 头像 URL、查找设置和收款码设置。`avatar_url` 仅为旧客户端兼容输入，新客户端不得上传或依赖它，SocialPersona Avatar 不从该字段回退。邮箱更新后会同步重新推断 `student_id`。聊天注意力设置不属于用户资料；连接隐私通过下文的 connection preferences 接口单独管理。
 
 ```json
 {
@@ -255,15 +255,17 @@ Content-Type: application/json
 
 ### POST `/api/user/persona/archive`
 
-[已实现] 需要同一 verified campus 下已有 persona。将记录设为 `archived` 并清除 `published_at`，公开主页回退普通头像。归档动作可审计，后续仍可通过 PUT 编辑并再次发布。
+[已实现] 需要同一 verified campus 下已有 persona。将记录设为 `archived` 并清除 `published_at`，公开主页使用默认系统 Avatar。归档动作可审计，后续仍可通过 PUT 编辑并再次发布。
 
 ### GET `/api/users/{id}`
 
-公开用户主页。返回允许公开的用户名、头像、加入时间、active listing 总数和用户主动公开的 `payment_qr` URL。当前计数不拆分出/收。不会返回完整邮箱、学号、发现设置、公开开关或私有收款码。
+公开用户主页。返回允许公开的用户名、SocialPersona Avatar 投影（未发布时为默认系统 Avatar）、加入时间、active listing 总数和用户主动公开的 `payment_qr` URL。未版本化响应可能仍携带 legacy `avatar_url` 供旧客户端兼容，但新客户端不得渲染或上传照片头像。当前计数不拆分出/收。不会返回完整邮箱、学号、发现设置、公开开关或私有收款码。
 
 ### GET `/api/users/{id}/persona`
 
-[已实现] 游客或登录用户均可读取，但校园由当前登录 session 的活动校园解析，游客使用默认公开校园。响应为 `{ "persona": null | {...} }`；只有目标用户在该校园有 verified membership 且明确 `published` 时才返回角色配置。草稿、归档、非活动校园和未认证成员统一返回 `persona: null`，不泄漏存在性。响应包含受控 token、用户标签、主动 `contact_posture` 和 `published_at`；不返回用户素材、storage key、账号、认证或注意力状态。旧客户端若仍理解 `asset` 字段会收到 `null`，不得把图片加载或资源失败解释为在线或已读信号。
+[已实现] 游客或登录用户均可读取，但校园由当前登录 session 的活动校园解析，游客使用默认公开校园。响应为 `{ "persona": null | {...} }`；只有目标用户在该校园有 verified membership 且明确 `published` 时才返回角色配置。草稿、归档、非活动校园和未认证成员统一返回 `persona: null`，不泄漏存在性；`persona: null` 对新客户端的呈现就是默认系统 Avatar，不是照片头像回退。响应包含受控 token、用户标签、主动 `contact_posture` 和 `published_at`；不返回用户素材、storage key、账号、认证或注意力状态。旧客户端若仍理解 `asset` 字段会收到 `null`，不得把图片加载或资源失败解释为在线或已读信号。
+
+Avatar 渲染是客户端职责：当前 Flutter 使用类型化本地状态机与可替换 renderer，默认系统角色采用版本化 Sprite Atlas，已配置角色与失败路径采用确定性代码绘制。尺寸契约为 24px 静态关键帧、48px 低频动效、160px 完整交互，加载失败、reduced-motion 或低能力设备回退同一角色静态 poster。任何角色动作都不得表达 online、read、typing、连接接受或成交确认；API 不返回这些注意力状态，客户端也不得由消息内容推断用户角色情绪。
 
 ### POST `/api/users/{id}/report`
 
@@ -829,7 +831,7 @@ Flutter 在 wanted 详情按当前用户身份展示“收到的推荐”或“�
 
 ## AI Chat
 
-移动端把“小昌”作为收件箱中的虚拟系统会话，但它不属于 `chat_conversations` 的 `realtime` 或 `mail` 状态机。客户端使用公共会话标识 `__agent__`；后端根据 JWT 将它映射到当前用户专属的内部会话，因此不同账号不会共享历史。
+移动端把“小昌”作为主导航中央的个人核心 Avatar 入口，不再放入收件箱或消息页工具栏；它不属于 `chat_conversations` 的 `realtime` 或 `mail` 状态机。客户端使用公共会话标识 `__agent__`；后端根据 JWT 将它映射到当前用户专属的内部会话，因此不同账号不会共享历史。
 
 ### GET `/api/chat/assistant`
 

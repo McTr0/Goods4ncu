@@ -93,7 +93,7 @@
 ### 媒体与审核
 
 - [已实现] 媒体审核任务继承资源 campus，后台队列按校园和状态读取；Worker 的 processing 状态已纳入数据库约束，`0069_moderation_job_leases` 为每次领取写入 `locked_by/locked_until`，硬退出后可安全回收过期任务。
-- [已实现] 媒体隔离已覆盖 API、对象存储和审核任务三层。API 层（`0041`）：提交审核与资源置 `pending` 同事务；商品图与头像在所有公开读取路径按 `approved` 门槛输出，pending/rejected/failed 返回 null，所有者仍可见自己的待审图。存储层（`src/services/storage.rs`）：生产配置强制 `MEDIA_PRIVATE_BUCKET=true`，商品、头像和共享对象由 owner-scoped `upload-target` 返回只绑定服务器 key 的 presigned PUT，公开读取按 approved 门槛下发短期 presigned GET；SocialPersona 角色/皮肤不接受用户上传，使用 `/api/persona/catalog` 的系统 token。开发/测试仍可关闭以兼容旧 fixture。审核任务由 `0072_moderation_job_storage_key` 保存稳定平台 key，私有 bucket worker 每次领取都重新签发短期 provider URL，legacy job 仍使用原始 `image_url` fallback。已对真实 S3 实现（MinIO）验证：匿名直连 403、未上传 key 亦拒绝、presigned PUT/GET 可取、签名篡改与过期均被拒（`tests/storage_acl_integration.rs`，并纳入生产演练 check 2b）。
+- [已实现] 媒体隔离已覆盖 API、对象存储和审核任务三层。API 层（`0041`）：提交审核与资源置 `pending` 同事务；商品图、legacy 头像和共享对象在仍保留的公开读取路径按 `approved` 门槛输出，pending/rejected/failed 返回 null，所有者仍可见自己的待审图。SocialPersona Avatar 不使用照片或 `avatar_url`，角色/皮肤不接受用户上传，使用 `/api/persona/catalog` 的系统 token；legacy 头像媒体链路只为旧客户端兼容保留。存储层（`src/services/storage.rs`）：生产配置强制 `MEDIA_PRIVATE_BUCKET=true`，商品、legacy 头像和共享对象由 owner-scoped `upload-target` 返回只绑定服务器 key 的 presigned PUT，公开读取按 approved 门槛下发短期 presigned GET。开发/测试仍可关闭以兼容旧 fixture。审核任务由 `0072_moderation_job_storage_key` 保存稳定平台 key，私有 bucket worker 每次领取都重新签发短期 provider URL，legacy job 仍使用原始 `image_url` fallback。已对真实 S3 实现（MinIO）验证：匿名直连 403、未上传 key 亦拒绝、presigned PUT/GET 可取、签名篡改与过期均被拒（`tests/storage_acl_integration.rs`，并纳入生产演练 check 2b）。
 - 校验文件头、MIME、尺寸和解码，审核通过后生成公开 URL 和缩略图。
 - Base64 fallback 加指标和 feature flag，不再作为新客户端主路径。
 - [已实现] `0034_moderation_cases.sql` 建立案件、状态事件和一次性申诉；机器拒绝和聊天举报自动关联，listing/user 也已有 `VerifiedTenant` 举报入口（同校目标由服务端派生、1–80/1000 字限制、每小时 10 条新举报）并与 ModerationCase 同事务关联。未处理的同一举报会更新 standing report，已处理后的新举报创建新 report/case。listing restrict/restore 已由 case-owned 可逆 effect 驱动；user 的多来源 restriction effect 仍待实现。
@@ -193,19 +193,19 @@
 
 1. **留言与连接仍是两种基本语义。** 留言只承诺服务端已发送，连接是一次双方明确同意、可以结束的实时交流；主动 acknowledgement 继续是用户行为，不由打开页面、Push、输入或角色动画代替。
 2. **关系空间是长期入口，不是新的消息服务器。** 同一对用户只有一个关系入口，消息、连接起止、共享对象、Pin 和确认在空间内可回到；现有 Conversation 继续保存每次留言/连接边界，通用 `SpaceEvent` 写模型后置。
-3. **角色是呈现层，不是代理人格。** 用户的 `SocialPersona` 只能从系统目录选择角色/皮肤，再由用户确认和发布；它表达身份、边界和接近方式，不证明真人外貌，不自动模仿语气，也不替用户聊天。角色未发布或撤销时回退普通头像。
-4. **平台 Agent 的视觉人格必须独立。** 小昌作为已定平台 Agent 人格，使用统一视觉 skin 表达搜索、草拟、等待确认、执行和失败等可验证工具状态，但不能作为桌宠主动召回用户；进入真实连接后应退出视觉中心，只有用户明确请求时才出现，并始终标识为 Agent。
+3. **角色是呈现层，不是代理人格。** 用户的 `SocialPersona` Avatar 只能从系统目录选择角色/皮肤，再由用户确认和发布；它表达身份、边界和接近方式，不证明真人外貌，不自动模仿语气，也不替用户聊天。角色未发布、撤销或加载失败时使用默认系统 Avatar，不回退照片或 `avatar_url`。
+4. **小昌是私有核心 Avatar，不是联系人。** 小昌固定在主导航中央，使用统一视觉 skin 表达搜索、草拟、等待确认、执行和失败等可验证工具状态；它不能进入收件箱、冒充对方或主动召回用户。进入真实连接后，小昌退出正文，只有用户明确请求工具时才显示本地协助结果。
 5. **接收者控制注意力入口。** 发送者可以选择普通留言或希望今天处理等时间尺度，但不能越过接收方的联系人、陌生人、忙碌和静音规则；不做“紧急/超级紧急”红色等级，也不以在线、最后上线、正在输入或未读数施压。
 6. **群聊另起模型。** 长期 Group 只承载群留言，临时 `Discussion` 才承载一段有参与者和结束边界的讨论；一对一关系空间通过验证前，群组临时讨论、语音/视频升级和全量动态角色均不进入本阶段承诺。
 
-**R1 修订（系统目录选择）**：`0080_system_persona_catalog_only` 已撤销旧的用户素材、清空公开引用并移除 persona asset 上传路由；`/api/persona/catalog` 与 PUT 白名单共同约束角色/皮肤只能从系统提供项选择。真实图片审核 provider、生产 bucket/CDN 和实体设备仍需部署侧验收（仅适用于仍需媒体的商品、头像和共享对象）。
+**R1 修订（系统目录选择）**：`0080_system_persona_catalog_only` 已撤销旧的用户素材、清空公开引用并移除 persona asset 上传路由；`/api/persona/catalog` 与 PUT 白名单共同约束角色/皮肤只能从系统提供项选择。真实图片审核 provider、生产 bucket/CDN 和实体设备仍需部署侧验收（仅适用于仍需媒体的商品、legacy 头像兼容链路和共享对象；SocialPersona Avatar 不使用照片媒体）。
 
-当前进度：[部分完成] R0 的 Flutter 共同空间静态投影已接入联系人线程和独立私聊；只读取现有 Thread/Conversation 事实，`active` 只显示为“已连接”，连接建立后角色 token 退到背景，只保留双方名称与连接状态。R1 已收敛为 `SocialPersona` v1 的系统目录：目录版本、白名单 token、草稿/发布/归档、同校园公开读取、审计和普通头像回退均已接入；Flutter 提供静态 24/48/160 token、深色主题对比度和 reduced-motion-safe fallback，个人资料页不接受用户导入角色、皮肤、图片、URL 或 prompt。`0080_system_persona_catalog_only` 清空公开 asset 引用并撤销历史导入行，旧表只作回滚/审计；商品、头像和共享对象仍沿用各自媒体隔离与审核路径。R2 已落地同校园无序用户对 `relationship_key`、`space-events` cursor、显式幂等 Pin、最近连接恢复点，以及从既有 quote 派生的共享对象入口；`0065_chat_shared_objects`、`0066_shared_object_upload_lifecycle` 与 `0067_chat_shared_object_storage_cleanup` 为 file/link 提供同校园、同会话、可撤销的平台权威引用、上传审核边界和耐久远端清理。`MessageBubble` 已在 `390×844` widget 视口回归中确认 acknowledgement 菜单可达；实体设备验收仍需完成，不把视口测试或未验证的对象存在性冒充为上传成功。
+当前进度：[部分完成] R0 的 Flutter 共同空间静态投影已接入联系人线程和独立私聊；只读取现有 Thread/Conversation 事实，`active` 只显示为“已连接”。进入 realtime Conversation 后，共同空间占据主画布，对方 Avatar 固定左上、我方固定右下，消息与连接信息在空间内部呈现，底部仅保留输入和操作；旧的独立“说好的事”与 Handoff 卡片已从聊天页删除。R1 已收敛为 `SocialPersona` v1 的系统目录：目录版本、白名单 token、草稿/发布/归档、同校园公开读取、审计和默认系统 Avatar 回退均已接入；Flutter 已建立可替换的 `SocialPersonaRenderer` 与 `AvatarMotionCue`，默认系统角色使用版本化 Sprite Atlas，已配置角色及资源失败路径使用代码绘制，24px 静态、48/160px 允许无语义的低频本地 idle，并提供深色主题与 reduced-motion 静态帧；个人资料页不接受用户导入角色、皮肤、图片、URL 或 prompt。Flame 仅在后续 160px 关系空间需要多角色移动、碰撞或粒子时局部评估；商品和共享对象仍沿用各自媒体隔离与审核路径，legacy `avatar_url` 仅为旧客户端兼容保留。`0080_system_persona_catalog_only` 清空公开 asset 引用并撤销历史导入行，旧表只作回滚/审计。R2 已落地同校园无序用户对 `relationship_key`、`space-events` cursor、显式幂等 Pin、最近连接恢复点，以及从既有 quote 派生的共享对象入口；`0065_chat_shared_objects`、`0066_shared_object_upload_lifecycle` 与 `0067_chat_shared_object_storage_cleanup` 为 file/link 提供同校园、同会话、可撤销的平台权威引用、上传审核边界和耐久远端清理。`MessageBubble` 已在 `390×844` widget 视口回归中确认 acknowledgement 菜单可达；实体设备验收仍需完成，不把视口测试或未验证的对象存在性冒充为上传成功。
 
 1. **R0：体验原型与词义测试。** 用真实移动端尺寸验证“对方左上 / 自己右下”、留言/连接切换、角色缩放和 Memory Rail；确认用户不会把角色姿态理解成在线、已读或 Agent 参与。此阶段不改后端。
 
 > R1 的历史图片候选、上传目标、审核和短期 asset URL 描述已被上面的“系统目录选择”修订取代；它们不再是当前客户端或公开 API 行为。共享对象、商品和头像的媒体上传仍按 R2/媒体章节执行。
-2. **R1：静态角色身份层。** [部分完成] `0063_social_personas` 与 `0080_system_persona_catalog_only` 已将角色/皮肤收敛为服务器版本化目录；`GET /api/persona/catalog` 提供 allow-list，`PUT /api/user/persona` 只接受目录 token，发布/归档/撤销、同校园边界和审计继续有效。Flutter 个人资料页只展示系统提供的角色、配色、轮廓、配饰和服装选项，不提供照片、图片、URL、prompt 或自定义皮肤导入入口。旧 `social_persona_assets` 表及迁移字段仅用于回滚/审计，0080 已清空公开引用并撤销历史行；真实媒体审核、生产 bucket/CDN 和实体设备验收只适用于商品、头像及共享对象等仍需媒体的领域。
+2. **R1：角色身份层。** [部分完成] `0063_social_personas` 与 `0080_system_persona_catalog_only` 已将角色/皮肤收敛为服务器版本化目录；`GET /api/persona/catalog` 提供 allow-list，`PUT /api/user/persona` 只接受目录 token，发布/归档/撤销、同校园边界和审计继续有效。Flutter 个人资料页只展示系统提供的角色、配色、轮廓、配饰和服装选项；未配置时显示默认系统 Avatar，不提供照片、图片、URL、prompt 或自定义皮肤导入入口。当前可替换 renderer 已接入默认系统角色的版本化 Sprite Atlas manifest，并保留已配置角色的代码绘制与资源失败 fallback；24px 静态、48/160px 允许低频本地 idle，所有失败/reduced-motion 路径仍回退同角色静态 poster。旧 `social_persona_assets` 表及迁移字段仅用于回滚/审计，0080 已清空公开引用并撤销历史行；真实媒体审核、生产 bucket/CDN 和实体设备验收只适用于商品、legacy 头像及共享对象等仍需媒体的领域。
 3. **R2：Relationship Space 投影（消息只读，Pin/对象显式写入）。** [部分完成] 复用 `Thread / Conversation / Message / Quote`，为同校园无序用户对提供稳定 relationship key 和 cursor；已实现“时间 + Pin”、最近连接恢复点，以及商品 quote 和 file/link 权威对象的只读共享对象入口。Pin 通过 `0064_relationship_space_pins` 保存为用户主动、可撤销的共享事实，`0065_chat_shared_objects`/`0066_shared_object_upload_lifecycle`/`0067_shared_object_storage_cleanup` 保存平台 key/规范化链接、来源会话、创建者、上传/审核和 `pending_upload -> pending_review/active -> revoked/deleted` 生命周期；撤销后的文件由耐久 worker 以 signed DELETE 清理并保留重试审计，不建立第二套消息事实。回归已覆盖对象创建、服务端完成上传状态转换、同会话引用、未完成文件引用拒绝、非创建者撤销拒绝、撤销后消息 quote/space 投影失效、链接片段规范化和 API 媒体入口在撤销后返回 404；真实生产演练已通过 MinIO `/complete`、签名删除和远端不存在断言；Flutter API 模型、上传到服务端 key 的方法与共享 rail 已覆盖只读显示，外部 URL 仍不得由消息正文直接加载。下一步是生产 bucket/CDN、图片审核 provider 和实体设备验收。
 4. **R3：连接空间化。** [部分完成] 留言状态已拉开角色并强调历史；请求/接受/结束连接由明确状态机驱动，连接期间弱化角色与 Rail。发送方可以选择普通留言、希望今天处理或请求连接，`mail_expectation=ordinary|today` 已进入服务端、API 和 Flutter 入口；接收方的联系人/陌生人/忙碌/静音规则始终优先，时间尺度不改变通知优先级；不引入“紧急”红色等级。2026-08-12 已在干净种子账号上完成真实 Flutter Web 双账号“发起 → 接通 → 确认 → 结束”旅程，另验证了接收消息的无障碍“打开消息操作 → 我会看 → 撤销主动确认”菜单，页面保留历史且没有在线/输入中/已读事实。`MessageBubble` 的 `390×844` widget 回归已覆盖三种 acknowledgement 动作的窄屏可达性；下一步仍需实体设备上的 acknowledgement 替换、撤销与跨设备实时同步截图。Flutter widget、API driver 和后端回归已覆盖语义与权限。接收方规则始终优先，不引入 online、typing、last seen 或 read。
 5. **R4：可选语义增强。** 主题聚类、自然语言回忆与共识提议必须携带 `source_event_ids`；模型不可用时自动退回确定性时间、Pin、文件和搜索。共享约定只有用户明确采纳后才生效。
@@ -216,7 +216,7 @@
 
 审核补充：共享文件任务同样保存服务器生成的稳定对象 key，私有 worker 每次领取时重新签发 provider URL，避免审核排队期间复用过期签名。
 
-- `390x844`、平板和桌面布局在 200% 文字缩放下可用；角色不会遮挡正文，减少动态和普通头像 fallback 完整。
+- `390x844`、平板和桌面布局在 200% 文字缩放下可用；角色不会遮挡正文，减少动态和默认系统 Avatar/static poster fallback 完整。
 - 用户能正确区分校园认证、角色形象、公开接近方式和 Agent 参与；测试中不把角色动作误认成已读/在线的比例达到产品验收阈值。
 - 打开页面、Push、输入、滚动和角色缩放不会产生对方可见事件；只有明确留言、连接、Pin、acknowledgement 或共享对象动作写入事实。
 - 时间 + Pin 轨迹在 LLM 完全关闭时可重建；源事件隐藏、删除、审核或权限变化后投影同步失效。

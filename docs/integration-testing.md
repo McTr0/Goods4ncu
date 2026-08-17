@@ -149,10 +149,10 @@ GOOD4NCU_API_BASE=http://127.0.0.1:3000 \
 | 跨校园确认隔离 | 同一账号的设备分别停在两个校园 | A 校园接收 acknowledgement | 只有 A 校园 socket 收到事件；B 校园只能通过自己的 HTTP 会话看到自己的会话，不能收到 A 的消息或确认。 |
 | 连接不是在线 | `buyer1` 发起连接，`seller1` 接受并结束 | 双方观察状态 | `syn_sent/syn_ack` 在线程摘要和会话卡片中都只显示等待/确认，只有 `active` 才显示 `请求连接 -> 已连接 -> 已结束`；不额外显示 online、last seen 或 typing。 |
 | Agent 提案重试幂等 | 同一条小昌请求携带相同 `Idempotency-Key` 并重复触发待确认写动作 | Rust ActionPlan 集成回归 | 同一用户/校园和相同动作参数只保留一个计划并复用其编号；同 key 改变动作、风险等级或参数哈希安全拒绝，不执行或追加第二个计划；key 不进入模型上下文。 |
-| 共同空间投影（R0） | 打开联系人线程，再打开一段留言或连接 | 双方观察页面 | 留言阶段显示双方角色锚点、时间轨迹和明确的“可以留言”；活动校园 Thread 只投影已发布 persona，列表/线程头/完整空间分别使用 24/48/160 静态 token；进入明确连接后角色 token 退到背景，只保留双方名称与“已连接”状态；草稿/归档回退普通头像。页面打开、滚动和角色缩放不产生对方可见事件。390×844、200% 文字缩放与桌面分栏都不得遮挡正文。 |
+| 共同空间投影（R0） | 打开联系人线程，再进入一段实时连接 | 双方观察页面 | 联系人从列表进入后占据完整页面；共同空间占据除底部输入/操作之外的主画布，只承载所属 Conversation。对方 Avatar 在左上、我方在右下，消息、连接状态和共享信息全部在空间内部；不得出现独立“说好的事”或 Handoff 卡片。拍一拍当前只产生本地动作和明确的“你拍了拍…”反馈，不声称对方收到或回应；草稿/归档使用默认系统 Avatar，不回退照片。页面打开、滚动和角色缩放不产生对方可见事件。390×844、200% 文字缩放与桌面全页路由都不得遮挡正文。 |
 | 共同空间事件轨迹（R2） | API driver 按 `relationship_key` 首页读取，再用 `next_cursor` 翻页 | 对方尝试跨校园或访问未参与的 peer | 只返回当前用户可见的会话事件与消息来源；cursor 不改变 `LOCALLY_SEEN`，跨校园/越权返回 404，不产生 read/typing/online 事实。 |
 | 共同空间 Pin 与共享对象（R2） | `r2-chat` 驱动与 Rust 回归共同覆盖双方 Pin、创建 file/link 权威对象、消息引用、撤销后读取 `space-events`；2026-08-12 生产 OSS rehearsal 已调用 `/complete` 并验证 signed DELETE 清理 | 重复 Pin、撤销不存在的 Pin、伪造外部文件 URL、未完成上传就引用、隐藏源消息、跨校园读取、非创建者撤销、远端删除失败重试 | Pin 幂等且可撤销；`actor_id` 保留主动者；file 创建后为 `pending_upload`，只有服务端 Range probe 成功、尺寸/类型匹配后才进入 `active` 或 `pending_review`；file/link 只能引用活动 `chat_shared_objects`，链接片段被规范化且不抓取；撤销后原消息保留但 quote、媒体入口和共享对象投影失效，双方收到 `shared_object_revoked`；后台 worker 对 revoked/deleted file 执行可重试、幂等的远端 DELETE 并保留错误审计；Flutter rail 只读且不自动加载资源，不产生 read/typing/online 事实。 |
-| 角色化社交分身（R1） | 已认证用户在个人资料创建并保存角色草稿，再显式发布、编辑和归档；Flutter widget 覆盖 24/48/160 token、深色主题和 `disableAnimations`；线程集成回归验证活动校园 Thread 附带发布角色 | 另一用户打开同校园公开主页；未认证/跨校园用户尝试读取；legacy 无校园 Thread 读取 | 草稿只对本人可见；发布后只返回受控 token、用户标签和主动接近方式；归档后恢复普通头像；跨校园或非 verified membership 不公开；legacy 无校园 Thread 不附带 persona；任一页面打开、Push 或输入不改变 persona 状态；角色 token 在三种尺寸保持静态且不表达在线、输入中或已读。 |
+| 角色化社交分身（R1） | 已认证用户在个人资料创建并保存角色草稿，再显式发布、编辑和归档；Flutter widget 覆盖 24/48/160 Avatar、深色主题和 `disableAnimations`；线程集成回归验证活动校园 Thread 附带发布角色 | 另一用户打开同校园公开主页；未认证/跨校园用户尝试读取；legacy 无校园 Thread 读取 | 草稿只对本人可见；发布后只返回受控 token、用户标签和主动接近方式；归档后恢复默认系统 Avatar；跨校园或非 verified membership 不公开；legacy 无校园 Thread 不附带 persona；24px 保持静态，48/160px 只允许无语义的低频本地动效；任一页面打开、Push、输入或动画不得表达在线、输入中或已读。 |
 | 角色/皮肤系统目录（R1） | 读取 `/api/persona/catalog`，从系统提供的 role/skin token 选择并保存草稿，再显式发布；Flutter 只渲染静态 token | 客户端提交未知 token、自由文本、图片、外部 URL 或旧 `/api/user/persona/assets` 上传路径；迁移后的历史素材仍被引用 | 目录只返回当前 `style_version` 的 allow-list；服务端再次校验并拒绝未知字段；旧 assets 路由不存在，`0080` 清空 `selected_asset_id` 并撤销既有素材；公开主页、Thread 和 Space 只返回静态 token，不产生在线/已读/Agent 事实。 |
 | 回复引用 | `buyer1` 长按回复 | `seller1` 发一条消息 | 引用气泡展示原发送者和摘要。 |
 | 表情反应 | `buyer1` 添加反应 | 无 | 反应出现在气泡下方，自己的反应高亮。 |
@@ -176,7 +176,7 @@ node scripts/codex_browser_api_driver.mjs p0-chat
 | --- | --- | --- |
 | 首页推荐 | 打开首页、滚动、切换深色/浅色 | 用户长期看到的是信息和操作；推荐原因靠近条目，不展示制作说明。 |
 | 出/收筛选 | 切换全部、出、收 | badge、空状态、分页和返回结果方向一致。 |
-| 发布 wanted | 选择“我要收”，填写预算、最低成色和要求 | 不要求图片；发布后在“我的发布/收”可见。 |
+| 发布 wanted | 在标准发布表单选择“求购”，填写预算、最低成色和要求 | 不要求图片；发布后在“我的发布/收”可见。 |
 | wanted 匹配 | 打开 wanted 详情 | 只显示满足预算/成色的 active offer，不显示自己的 offer。 |
 | 推荐我的商品 | seller 选择自己的 active offer 响应 wanted | 需求方收到通知；不自动创建聊天或成交。 |
 | wanted 双角色闭环 | buyer 发布 wanted；seller 推荐三件 offer 并撤回一件；buyer 从通知接受/忽略 | 两侧详情分别显示 received/sent history；状态动作只在合法阶段出现，动作通知可回到 wanted。 |
@@ -198,7 +198,7 @@ node scripts/codex_browser_api_driver.mjs p0-chat
 
 ### Wanted 双角色浏览器验收
 
-1. `buyer1` 从“我的发布”的“发布商品”入口进入结构化表单，切到“我要收”，填写唯一标题、预算、最低成色和要求并提交。
+1. `buyer1` 从“我的发布”的“发布商品”入口进入标准表单，切到“求购”，填写唯一标题、预算、最低成色和要求并提交。
 2. 切换到 `seller1`，从首页收物 feed 打开该需求，连续推荐四件自己的 active offer；在“我发出的推荐”中撤回第四件。
 3. 切回 `buyer1`，从推荐通知进入 wanted 详情；接受第一件、忽略第二件，保留第三件 pending，确认失败或重复操作不会提前移除卡片。
 4. 从 accepted response 打开 offer，确认联系卖家入口存在；回到 wanted，经过确认弹窗标记 fulfilled。

@@ -193,18 +193,20 @@ selected_asset_id -> legacy SocialPersonaAsset (always null for current public d
 published_at / created_at / updated_at
 ```
 
-`contact_posture` 可以表达可留言、可请求连接、忙或稍后，但不能保存或派生 online、last seen、typing 或 read。角色目录由平台统一审核和版本化；`representation_mode` 只是展示披露，不证明外貌真实性。用户未发布分身时继续使用普通头像和文字资料，核心联系能力不能被 AI 生成服务绑架。
+`contact_posture` 可以表达可留言、可请求连接、忙或稍后，但不能保存或派生 online、last seen、typing 或 read。角色目录由平台统一审核和版本化；`representation_mode` 只是展示披露，不证明外貌真实性。SocialPersona Avatar 是唯一的用户头像产品呈现；用户未发布分身时使用稳定的默认系统 Avatar 和文字资料，不回退照片或 `avatar_url`，核心联系能力不能被 AI 生成服务绑架。
 
-当前 API 通过 `VerifiedTenant` 只允许活动校园的 verified member 创建、编辑、发布和归档；草稿只对本人返回，公开接口只返回同一校园中已发布的配置。Thread 列表和详情可以在活动校园中附带同一份已发布 `persona` 投影，legacy 无校园读取不附带角色；该字段只是展示资源，不改变会话权限。每次创建、编辑、发布和归档都写入 `social_persona_audits`。`archived` 会恢复普通头像展示。
+当前 API 通过 `VerifiedTenant` 只允许活动校园的 verified member 创建、编辑、发布和归档；草稿只对本人返回，公开接口只返回同一校园中已发布的配置。Thread 列表和详情可以在活动校园中附带同一份已发布 `persona` 投影，legacy 无校园读取不附带角色；该字段只是展示资源，不改变会话权限。每次创建、编辑、发布和归档都写入 `social_persona_audits`。`archived` 或公开投影缺失时恢复默认系统 Avatar。未版本化 API 中仍可能出现 `avatar_url` 以兼容旧客户端，但它不是当前 Avatar 事实，新客户端不得渲染或上传它。
 
 角色与皮肤来自服务端 `SocialPersonaCatalog`（当前 `style_version=v1`）的稳定 token；客户端只能选择目录项，服务端在写入时再次白名单校验，不接受图片、角色包、外部 URL 或 prompt。`0070_social_persona_assets` 与 `0071_social_persona_asset_upload_expiry` 只保留历史回滚/清理所需的表和字段；`0080_system_persona_catalog_only` 撤销既有用户素材、清空 `selected_asset_id`，公开投影和 Thread 聚合不再读取这些图片。这样角色资源可以被平台统一审核、版本化和下线，而不会开放用户导入入口。
 
-`Relationship` 表示同一校园内两个人之间的长期入口；`RelationshipSpace` 是它的交互投影。当前没有必要立刻新增权威关系表：`campus_id + 无序用户对` 的 Thread 聚合可以作为迁移桥梁，屏蔽、membership 和可见性依旧由现有事实控制。当前 API 已在活动校园作用域返回只读 `relationship_key`（`relationship:v1:{campus}:{lo}:{hi}`）；它只用于投影缓存和未来 cursor 的关联，不授予权限，也不代表在线或注意力状态。
+渲染实现分为角色规格、动作 cue 与 renderer 三层：当前 Flutter 的 `SocialPersonaRenderer` 对默认系统角色读取版本化 Sprite Atlas manifest，对已配置角色使用受控 token 绘制确定性角色，资源异常时回退代码绘制。`AvatarMotionCue` 只包含本地 `idle` 与当前用户显式操作反馈，不接收自由字符串或服务端注意力状态。24px 静态，48/160px 允许无语义的低频本地 idle，reduced-motion 使用同角色静态帧；加载失败或不支持动效时也回退静态 poster。动效只表达角色自身或本地显式操作，不产生 online、read、typing 或其他注意力事实。
+
+`Relationship` 表示同一校园内两个人之间的长期索引，Thread 只负责组织多次 Conversation；前端呈现的 `RelationshipSpace` 必须归入一段具体 realtime Conversation，不能与 mail 或历史 Conversation 平铺成一个无边界工作台。当前没有必要立刻新增权威关系表：`campus_id + 无序用户对` 的 Thread 聚合可以作为迁移桥梁，屏蔽、membership 和可见性依旧由现有事实控制。当前 API 已在活动校园作用域返回只读 `relationship_key`（`relationship:v1:{campus}:{lo}:{hi}`）；客户端按 `conversation_id` 过滤事件、Pin、共享对象与最近连接后再投影。该 key 只用于聚合读取和 cursor 关联，不授予权限，也不代表在线或注意力状态。
 
 ```text
 RelationshipSpace
 ├── Participants / SocialPersona refs
-├── Conversations / Sessions
+├── Realtime Conversation ref
 ├── SpaceEvents
 ├── SharedObjects
 └── MemoryIndex projections
