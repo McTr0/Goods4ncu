@@ -12,6 +12,7 @@ import '../services/listing_service.dart';
 import '../services/post_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
+import '../utils/platform_utils.dart';
 
 class PostDetailPage extends StatefulWidget {
   const PostDetailPage({
@@ -475,6 +476,23 @@ class _ThreadPostCard extends StatelessWidget {
               ],
             ),
           ),
+          if (!post.isListing && post.coverImageUrl != null)
+            AspectRatio(
+              aspectRatio: 4 / 3,
+              child: Image.network(
+                resolveDisplayUrl(post.coverImageUrl!),
+                key: const ValueKey('post-detail-cover'),
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => ColoredBox(
+                  color: scheme.surfaceContainerHighest,
+                  child: Icon(
+                    Icons.broken_image_outlined,
+                    color: scheme.onSurfaceVariant,
+                    size: 42,
+                  ),
+                ),
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.all(AppTheme.sp20),
             child: Column(

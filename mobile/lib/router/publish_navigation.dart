@@ -1,6 +1,7 @@
 abstract final class PublishNavigation {
   static const hub = '/publish';
   static const discussion = '/publish/discussion';
+  static const errand = '/publish/errand';
   static const listingPath = '/publish/listing';
 
   static String listing({required String direction}) {

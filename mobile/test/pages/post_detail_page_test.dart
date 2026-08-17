@@ -22,6 +22,7 @@ class _FakePostService extends PostService {
     'post_type': 'discussion',
     'title': 'Where can I print tonight?',
     'body': 'Looking for a printer near campus.',
+    'cover_image_url': 'https://cdn.test/printing.jpg',
     'tags': ['printing'],
     'author': {'id': 'u-1', 'username': 'mira'},
     'reply_count': 1,
@@ -149,6 +150,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Where can I print tonight?'), findsOneWidget);
+    expect(find.byKey(const ValueKey('post-detail-cover')), findsOneWidget);
     expect(find.text('The east gate has one.'), findsOneWidget);
     expect(find.text('#1'), findsOneWidget);
 

@@ -69,7 +69,7 @@ class _MyListingsPageState extends State<MyListingsPage> {
           IconButton(
             key: const ValueKey('my-listings-create-action'),
             tooltip: l.createListing,
-            onPressed: () => context.push('/create/listing'),
+            onPressed: () => context.push('/create'),
             icon: const Icon(Icons.add_circle_outline),
           ),
         ],
@@ -118,7 +118,7 @@ class _MyListingsPageState extends State<MyListingsPage> {
             const SizedBox(height: 24),
             ElevatedButton.icon(
               key: const ValueKey('my-listings-empty-create-action'),
-              onPressed: () => context.push('/create/listing'),
+              onPressed: () => context.push('/create'),
               icon: const Icon(Icons.add),
               label: Text(l.createListing),
             ),

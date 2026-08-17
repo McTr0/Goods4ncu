@@ -66,6 +66,8 @@ class _HomePageState extends State<HomePage> {
   /// They remain a homepage fallback while the standard publish flow writes
   /// offer/wanted listings directly.
   List<UserIntent> _voices = const [];
+  List<UserIntent> _errands = const [];
+  String? _errandLoadError;
 
   @override
   void initState() {
@@ -78,6 +80,7 @@ class _HomePageState extends State<HomePage> {
         widget.feedbackService ?? context.read<FeedFeedbackService>();
     _postService = _resolvePostService();
     _loadRecommendations();
+    _loadErrands();
   }
 
   ListingService? _resolveListingService() {
@@ -145,26 +148,16 @@ class _HomePageState extends State<HomePage> {
           return;
         } catch (error) {
           if (!mounted || requestEpoch != _feedRequestEpoch) return;
-          final requiresUnifiedPosts =
-              _usingPosts ||
-              _searchQuery != null ||
-              _postTypeFilter != 'all' ||
-              _postSort != 'for_you';
-          if (requiresUnifiedPosts) {
-            debugPrint('Unified posts feed unavailable: $error');
-            setState(() {
-              _usingPosts = true;
-              _recommendationLoading = false;
-              _feedLoading = false;
-              _postFeedError = error.toString();
-              _postFeedRetryReset = reset;
-              if (reset && _feedIsEmpty) _loadError = error.toString();
-            });
-            return;
-          }
-          debugPrint(
-            'Unified posts feed unavailable, using listing feed: $error',
-          );
+          debugPrint('Unified posts feed unavailable: $error');
+          setState(() {
+            _usingPosts = true;
+            _recommendationLoading = false;
+            _feedLoading = false;
+            _postFeedError = error.toString();
+            _postFeedRetryReset = reset;
+            if (reset && _feedIsEmpty) _loadError = error.toString();
+          });
+          return;
         }
       }
       var recommendations = await _recommendationService.getRecommendationFeed(
@@ -235,15 +228,41 @@ class _HomePageState extends State<HomePage> {
     } catch (_) {}
   }
 
+  Future<void> _loadErrands() async {
+    try {
+      final errands = await _intentService.campusFeed(
+        kind: IntentKind.help,
+        limit: 8,
+      );
+      if (mounted) {
+        setState(() {
+          _errands = errands;
+          _errandLoadError = null;
+        });
+      }
+    } catch (error) {
+      if (mounted) setState(() => _errandLoadError = error.toString());
+    }
+  }
+
   Future<void> _respond(UserIntent intent) async {
     if (await respondToIntentFlow(context, _intentService, intent)) {
-      await _loadVoices();
+      if (intent.kind == IntentKind.help) {
+        await _loadErrands();
+      } else {
+        await _loadVoices();
+      }
     }
   }
 
   void _removeVoice(UserIntent intent) {
     if (!mounted) return;
     setState(() => _voices.removeWhere((item) => item.id == intent.id));
+  }
+
+  void _removeErrand(UserIntent intent) {
+    if (!mounted) return;
+    setState(() => _errands.removeWhere((item) => item.id == intent.id));
   }
 
   void _removeListing(Listing listing) {
@@ -356,6 +375,21 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildErrandSliver() {
+    return SliverToBoxAdapter(
+      child: _ErrandRail(
+        errands: _errands,
+        onRespond: _respond,
+        onFeedbackApplied: _removeErrand,
+        feedbackService: _feedbackService,
+        onCreate: () => context.push(PublishNavigation.errand),
+        onOpenBoard: () => context.push('/errands'),
+        loadError: _errandLoadError,
+        onRetry: _loadErrands,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
@@ -401,6 +435,7 @@ class _HomePageState extends State<HomePage> {
               onClear: _clearSearch,
             ),
           ),
+          _buildErrandSliver(),
           const SliverFillRemaining(
             hasScrollBody: false,
             child: _HomeLoadingState(),
@@ -422,6 +457,7 @@ class _HomePageState extends State<HomePage> {
                 onClear: _clearSearch,
               ),
             ),
+            _buildErrandSliver(),
             SliverFillRemaining(
               hasScrollBody: false,
               child: _HomeErrorState(
@@ -446,6 +482,7 @@ class _HomePageState extends State<HomePage> {
                 onClear: _clearSearch,
               ),
             ),
+            _buildErrandSliver(),
             SliverToBoxAdapter(child: _buildDirectionSection()),
             if (_voices.isNotEmpty && _directionFilter == 'all' && !_usingPosts)
               SliverToBoxAdapter(
@@ -507,6 +544,7 @@ class _HomePageState extends State<HomePage> {
                 onClear: _clearSearch,
               ),
             ),
+            _buildErrandSliver(),
             SliverToBoxAdapter(child: _buildDirectionSection()),
             if (_usingPosts && _recommendationLoading)
               const SliverToBoxAdapter(child: LinearProgressIndicator()),
@@ -1291,6 +1329,274 @@ class _HomeEmptyState extends StatelessWidget {
               ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ErrandRail extends StatelessWidget {
+  const _ErrandRail({
+    required this.errands,
+    required this.onRespond,
+    required this.onFeedbackApplied,
+    required this.feedbackService,
+    required this.onCreate,
+    required this.onOpenBoard,
+    required this.loadError,
+    required this.onRetry,
+  });
+
+  final List<UserIntent> errands;
+  final void Function(UserIntent) onRespond;
+  final void Function(UserIntent) onFeedbackApplied;
+  final FeedFeedbackService feedbackService;
+  final VoidCallback onCreate;
+  final VoidCallback onOpenBoard;
+  final String? loadError;
+  final VoidCallback onRetry;
+
+  String _modeLabel(AppLocalizations l, String? mode) => switch (mode) {
+    'pickup' => l.errandModePickup,
+    'buy' => l.errandModeBuy,
+    'queue' => l.errandModeQueue,
+    'print' => l.errandModePrint,
+    'return' => l.errandModeReturn,
+    _ => l.errandModeOther,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppTheme.sp16,
+        AppTheme.sp12,
+        AppTheme.sp16,
+        AppTheme.sp8,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l.errandFeedTitle,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: AppTheme.sp4),
+                    Text(
+                      l.errandFeedBody,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                key: const ValueKey('home-open-errands'),
+                tooltip: l.errandBoardTitle,
+                onPressed: onOpenBoard,
+                icon: const Icon(Icons.view_list_outlined),
+              ),
+              IconButton.filledTonal(
+                key: const ValueKey('home-create-errand'),
+                tooltip: l.errandCreateAction,
+                onPressed: onCreate,
+                icon: const Icon(Icons.add_task_rounded),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppTheme.sp8),
+          if (errands.isEmpty && loadError != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppTheme.sp8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      l.errandLoadFailed,
+                      style: TextStyle(
+                        color: theme.colorScheme.error,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh_rounded, size: 17),
+                    label: Text(l.retry),
+                  ),
+                ],
+              ),
+            )
+          else if (errands.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppTheme.sp8),
+              child: Text(
+                l.errandCampusEmpty,
+                style: TextStyle(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ...errands.map(
+            (intent) => _ErrandCard(
+              intent: intent,
+              modeLabel: _modeLabel(l, intent.slots.serviceMode),
+              onRespond: () => onRespond(intent),
+              feedbackMenu: FeedFeedbackMenu(
+                service: feedbackService,
+                resourceType: FeedResourceType.intent,
+                resourceId: intent.id,
+                compact: true,
+                onApplied: (_) => onFeedbackApplied(intent),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrandCard extends StatelessWidget {
+  const _ErrandCard({
+    required this.intent,
+    required this.modeLabel,
+    required this.onRespond,
+    required this.feedbackMenu,
+  });
+
+  final UserIntent intent;
+  final String modeLabel;
+  final VoidCallback onRespond;
+  final Widget feedbackMenu;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    final theme = Theme.of(context);
+    final pickup = intent.slots.pickupPlace?.trim();
+    final dropoff = intent.slots.dropoffPlace?.trim();
+    final time = intent.slots.time?.hint?.trim();
+    final reward = intent.slots.price?.cents;
+    return Card(
+      margin: const EdgeInsets.only(bottom: AppTheme.sp8),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppTheme.sp14,
+          AppTheme.sp12,
+          AppTheme.sp8,
+          AppTheme.sp12,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    intent.slots.subject?.trim().isNotEmpty == true
+                        ? intent.slots.subject!.trim()
+                        : intent.rawInput,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                feedbackMenu,
+              ],
+            ),
+            const SizedBox(height: AppTheme.sp8),
+            Wrap(
+              spacing: AppTheme.sp6,
+              runSpacing: AppTheme.sp6,
+              children: [
+                Chip(
+                  avatar: Icon(
+                    intent.slots.isServiceOffer
+                        ? Icons.north_east_rounded
+                        : Icons.south_west_rounded,
+                    size: 16,
+                  ),
+                  label: Text(
+                    intent.slots.isServiceOffer
+                        ? l.errandServiceOffer
+                        : l.errandServiceWanted,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                ),
+                Chip(
+                  avatar: const Icon(Icons.add_task_rounded, size: 16),
+                  label: Text(modeLabel),
+                  visualDensity: VisualDensity.compact,
+                ),
+                if (reward != null && reward > 0)
+                  Chip(
+                    avatar: const Icon(Icons.payments_outlined, size: 16),
+                    label: Text('${(reward / 100).toStringAsFixed(0)} 元'),
+                    visualDensity: VisualDensity.compact,
+                  ),
+              ],
+            ),
+            if ((pickup?.isNotEmpty == true) || (dropoff?.isNotEmpty == true))
+              Padding(
+                padding: const EdgeInsets.only(top: AppTheme.sp4),
+                child: Text(
+                  [
+                    if (pickup?.isNotEmpty == true)
+                      '${l.errandPickupShort} $pickup',
+                    if (dropoff?.isNotEmpty == true)
+                      '${l.errandDropoffShort} $dropoff',
+                  ].join('  ·  '),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            if (time?.isNotEmpty == true)
+              Padding(
+                padding: const EdgeInsets.only(top: AppTheme.sp4),
+                child: Text(
+                  '${l.errandTimeShort} $time',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            const SizedBox(height: AppTheme.sp8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.tonalIcon(
+                key: ValueKey('errand-respond-${intent.id}'),
+                onPressed: onRespond,
+                icon: const Icon(Icons.handshake_outlined, size: 18),
+                label: Text(
+                  intent.slots.isServiceOffer
+                      ? l.errandNeedServiceAction
+                      : l.errandRespondAction,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

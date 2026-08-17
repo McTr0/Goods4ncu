@@ -104,4 +104,34 @@ void main() {
     expect(jsonDecode(service.lastBody!)['reply_to_id'], 'reply-1');
     expect(reply.id, 'reply-2');
   });
+
+  test('createPost includes an optional cover image URL', () async {
+    final service = _FakePostService()
+      ..response = http.Response(
+        jsonEncode({
+          'id': 'post-3',
+          'post_type': 'discussion',
+          'title': 'Campus market',
+          'body': 'Tonight',
+          'cover_image_url': 'https://cdn.test/market.jpg',
+          'author': {'id': 'u-1', 'username': 'mira'},
+          'reply_count': 0,
+          'status': 'active',
+          'is_locked': false,
+        }),
+        200,
+      );
+
+    final post = await service.createPost(
+      title: 'Campus market',
+      body: 'Tonight',
+      coverImageUrl: 'https://cdn.test/market.jpg',
+    );
+
+    expect(
+      jsonDecode(service.lastBody!)['cover_image_url'],
+      'https://cdn.test/market.jpg',
+    );
+    expect(post.coverImageUrl, 'https://cdn.test/market.jpg');
+  });
 }

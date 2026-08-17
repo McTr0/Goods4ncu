@@ -97,6 +97,7 @@ class PostService extends BaseService {
     required String body,
     String? category,
     List<String> tags = const [],
+    String? coverImageUrl,
   }) async {
     final headers = await authHeaders();
     final response = await post(
@@ -107,6 +108,8 @@ class PostService extends BaseService {
         'body': body.trim(),
         if (category != null && category.trim().isNotEmpty)
           'category': category.trim(),
+        if (coverImageUrl != null && coverImageUrl.trim().isNotEmpty)
+          'cover_image_url': coverImageUrl.trim(),
         'tags': tags
             .map((tag) => tag.trim())
             .where((tag) => tag.isNotEmpty)

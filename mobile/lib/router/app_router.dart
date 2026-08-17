@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../brand/app_brand.dart';
 import '../components/xiaochang_avatar.dart';
+import '../components/contact_conversation_sheet.dart';
 import '../l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 import '../pages/home_page.dart';
@@ -22,11 +23,15 @@ import '../pages/notifications_page.dart';
 import '../pages/moderation_cases_page.dart';
 import '../models/models.dart';
 import '../services/base_service.dart';
+import '../services/chat_service.dart';
 import '../services/user_service.dart';
 import '../services/admin_role_cache.dart';
 import '../pages/trust_page.dart';
 import '../pages/post_detail_page.dart';
 import '../pages/create_post_page.dart';
+import '../pages/create_errand_page.dart';
+import '../pages/campus_errands_page.dart';
+import '../pages/campus_map_page.dart';
 import '../pages/publish_hub_page.dart';
 import '../services/token_storage.dart';
 import '../services/ws_service.dart';
@@ -133,6 +138,14 @@ final GoRouter appRouter = GoRouter(
           },
         ),
         GoRoute(
+          path: '/errands',
+          builder: (context, state) => const CampusErrandsPage(),
+        ),
+        GoRoute(
+          path: '/campus-map',
+          builder: (context, state) => const CampusMapPage(),
+        ),
+        GoRoute(
           path: '/orders/:id',
           builder: (context, state) {
             final id = state.pathParameters['id']!;
@@ -151,6 +164,27 @@ final GoRouter appRouter = GoRouter(
           redirect: (context, state) {
             final id = state.pathParameters['conversationId']!;
             return Uri(pathSegments: ['user-chat', id]).toString();
+          },
+        ),
+        GoRoute(
+          name: 'contact-user',
+          path: '/contact/:recipientId',
+          pageBuilder: (context, state) {
+            final recipientId = state.pathParameters['recipientId']!;
+            final extra = state.extra as Map<String, dynamic>?;
+            return MaterialPage<Conversation>(
+              key: state.pageKey,
+              restorationId: state.pageKey.value,
+              child: ContactConversationPage(
+                chatService:
+                    extra?['chatService'] as ChatService? ??
+                    context.read<ChatService>(),
+                recipientId: recipientId,
+                listingId: state.uri.queryParameters['listingId'],
+                listingTitle: state.uri.queryParameters['listingTitle'],
+                recipientName: state.uri.queryParameters['recipientName'],
+              ),
+            );
           },
         ),
         GoRoute(
@@ -221,6 +255,13 @@ final GoRouter appRouter = GoRouter(
           pageBuilder: (context, state) => NoTransitionPage(
             key: state.pageKey,
             child: const CreatePostPage(),
+          ),
+        ),
+        GoRoute(
+          path: PublishNavigation.errand,
+          pageBuilder: (context, state) => NoTransitionPage(
+            key: state.pageKey,
+            child: const CreateErrandPage(),
           ),
         ),
         GoRoute(
@@ -302,7 +343,9 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
 
   int _tabIndexForLocation(String location) {
     if (location == '/') return 0;
+    if (location == '/errands') return 0;
     if (location == '/conversations' ||
+        location == '/campus-map' ||
         location.startsWith('/user-chat/') ||
         location.startsWith('/chat/threads/') ||
         location.startsWith('/spaces/')) {

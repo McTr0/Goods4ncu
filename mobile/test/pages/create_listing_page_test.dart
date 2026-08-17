@@ -61,6 +61,7 @@ Widget _buildApp({
   ThemeMode themeMode = ThemeMode.light,
   _FakeApiService? apiService,
   ImageBase64Picker? imageBase64Picker,
+  String initialDirection = 'offer',
 }) {
   final router = GoRouter(
     initialLocation: '/create',
@@ -70,6 +71,7 @@ Widget _buildApp({
         builder: (context, state) => CreateListingPage(
           apiService: apiService ?? _FakeApiService(),
           imageBase64Picker: imageBase64Picker,
+          initialDirection: initialDirection,
         ),
       ),
       GoRoute(
@@ -163,17 +165,14 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('信息齐了，可以发布'), findsOneWidget);
+    expect(find.text('信息完整'), findsOneWidget);
   });
 
   testWidgets('wanted mode rewrites the create form semantics', (tester) async {
-    await tester.pumpWidget(_buildApp());
+    await tester.pumpWidget(_buildApp(initialDirection: 'wanted'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('我要收'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('描述你想收什么'), findsOneWidget);
+    expect(find.text('求购信息'), findsOneWidget);
     expect(find.text('预算上限（元） *'), findsOneWidget);
 
     await tester.drag(
@@ -201,7 +200,7 @@ void main() {
       find.byKey(const ValueKey('create-desktop-workspace')),
       findsOneWidget,
     );
-    expect(find.text('Let the assistant take a look first'), findsOneWidget);
+    expect(find.text('Image recognition'), findsOneWidget);
     expect(find.text('Missing Title, Brand, Price'), findsOneWidget);
   });
 
@@ -215,7 +214,7 @@ void main() {
         find.byKey(const ValueKey('create-ai-capture-panel')),
         findsOneWidget,
       );
-      expect(find.text('先让小昌看一眼'), findsOneWidget);
+      expect(find.text('图片识别'), findsOneWidget);
       expect(find.text('还差 标题、品牌、价格'), findsOneWidget);
     },
   );

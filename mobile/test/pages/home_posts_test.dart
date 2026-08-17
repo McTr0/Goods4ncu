@@ -83,6 +83,21 @@ class _PagingPostService extends PostService {
   }
 }
 
+class _FailingPostService extends PostService {
+  @override
+  Future<PostsResponse> getPosts({
+    int limit = 20,
+    int offset = 0,
+    String postType = 'all',
+    String? direction,
+    String? category,
+    String? search,
+    String sort = 'for_you',
+  }) async {
+    throw Exception('posts_unavailable');
+  }
+}
+
 class _UnexpectedRecommendationService extends RecommendationService {
   bool called = false;
 
@@ -105,9 +120,36 @@ class _EmptyIntentService extends IntentService {
   }) async => const [];
 }
 
+class _ErrandIntentService extends IntentService {
+  @override
+  Future<List<UserIntent>> campusFeed({
+    IntentKind? kind,
+    int limit = 30,
+  }) async {
+    if (kind != IntentKind.help) return const [];
+    return [
+      UserIntent.fromJson({
+        'id': 'errand-home-1',
+        'kind': 'help',
+        'raw_input': '帮我取打印材料',
+        'slots': {
+          'subject': '取打印材料',
+          'service_mode': 'print',
+          'pickup_place': '前湖校区图书馆',
+          'dropoff_place': '修贤广场',
+          'time': {'kind': 'flexible', 'hint': '今天 18:00 前'},
+          'price': {'kind': 'exact', 'cents': 1200},
+        },
+        'status': 'active',
+      }),
+    ];
+  }
+}
+
 Widget _app({
   required PostService posts,
   required RecommendationService legacy,
+  IntentService? intents,
 }) {
   return MaterialApp(
     theme: AppTheme.light,
@@ -117,13 +159,37 @@ Widget _app({
     home: HomePage(
       postService: posts,
       recommendationService: legacy,
-      intentService: _EmptyIntentService(),
+      intentService: intents ?? _EmptyIntentService(),
       feedbackService: FeedFeedbackService(),
     ),
   );
 }
 
 void main() {
+  testWidgets('shows structured campus errands above the post feed', (
+    tester,
+  ) async {
+    final posts = _FakePostService(
+      const PostsResponse(items: [], total: 0, limit: 20, offset: 0),
+    );
+    await tester.pumpWidget(
+      _app(
+        posts: posts,
+        legacy: _UnexpectedRecommendationService(),
+        intents: _ErrandIntentService(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Campus errands'), findsOneWidget);
+    expect(find.text('Pick up 前湖校区图书馆  ·  Drop off 修贤广场'), findsOneWidget);
+    expect(find.text(r'12 元'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('errand-respond-errand-home-1')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('renders successful unified post results as discovery cards', (
     tester,
   ) async {
@@ -135,6 +201,7 @@ void main() {
             'post_type': 'discussion',
             'title': 'Where can I print tonight?',
             'body_excerpt': 'Looking for a printer near campus.',
+            'cover_image_url': 'https://cdn.test/printing.jpg',
             'author': {'id': 'u-1', 'username': 'mira'},
             'reply_count': 2,
             'status': 'active',
@@ -152,6 +219,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('post-card-post-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('post-cover-post-1')), findsOneWidget);
     expect(find.text('Where can I print tonight?'), findsOneWidget);
     expect(legacy.called, isFalse);
   });
@@ -172,6 +240,22 @@ void main() {
     expect(posts.calls, 1);
     expect(legacy.called, isFalse);
   });
+
+  testWidgets(
+    'does not hide a failed post feed behind the legacy listing feed',
+    (tester) async {
+      final legacy = _UnexpectedRecommendationService();
+
+      await tester.pumpWidget(
+        _app(posts: _FailingPostService(), legacy: legacy),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Could not load right now'), findsOneWidget);
+      expect(find.text('Campus errands'), findsOneWidget);
+      expect(legacy.called, isFalse);
+    },
+  );
 
   testWidgets('shows price from a server listing preview in a post card', (
     tester,

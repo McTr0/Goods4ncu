@@ -1,16 +1,41 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../l10n/app_localizations.dart';
 import '../services/post_service.dart';
+import '../services/upload_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
 
+class PickedPostImage {
+  const PickedPostImage({
+    required this.bytes,
+    required this.extension,
+    required this.contentType,
+  });
+
+  final Uint8List bytes;
+  final String extension;
+  final String contentType;
+}
+
+typedef PostImagePicker = Future<PickedPostImage?> Function();
+
 class CreatePostPage extends StatefulWidget {
-  const CreatePostPage({super.key, this.postService});
+  const CreatePostPage({
+    super.key,
+    this.postService,
+    this.uploadService,
+    this.imagePicker,
+  });
 
   final PostService? postService;
+  final UploadService? uploadService;
+  final PostImagePicker? imagePicker;
 
   @override
   State<CreatePostPage> createState() => _CreatePostPageState();
@@ -23,12 +48,16 @@ class _CreatePostPageState extends State<CreatePostPage> {
   final _categoryController = TextEditingController();
   final _tagsController = TextEditingController();
   late final PostService _postService;
+  late final UploadService _uploadService;
+  final ImagePicker _nativeImagePicker = ImagePicker();
+  PickedPostImage? _coverImage;
   bool _submitting = false;
 
   @override
   void initState() {
     super.initState();
     _postService = widget.postService ?? context.read<PostService>();
+    _uploadService = widget.uploadService ?? context.read<UploadService>();
   }
 
   @override
@@ -44,6 +73,14 @@ class _CreatePostPageState extends State<CreatePostPage> {
     if (_submitting || _formKey.currentState?.validate() != true) return;
     setState(() => _submitting = true);
     try {
+      final selectedImage = _coverImage;
+      final coverImageUrl = selectedImage == null
+          ? null
+          : await _uploadService.uploadPostImageBytes(
+              selectedImage.bytes,
+              extension: selectedImage.extension,
+              contentType: selectedImage.contentType,
+            );
       final post = await _postService.createPost(
         title: _titleController.text,
         body: _bodyController.text,
@@ -55,6 +92,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
             .toSet()
             .take(5)
             .toList(growable: false),
+        coverImageUrl: coverImageUrl,
       );
       if (!mounted) return;
       context.go('/posts/${post.id}');
@@ -69,6 +107,38 @@ class _CreatePostPageState extends State<CreatePostPage> {
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  Future<void> _pickCoverImage() async {
+    if (_submitting) return;
+    final picked = await (widget.imagePicker?.call() ?? _pickNativeImage());
+    if (picked == null || !mounted) return;
+    setState(() => _coverImage = picked);
+  }
+
+  Future<PickedPostImage?> _pickNativeImage() async {
+    final image = await _nativeImagePicker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 82,
+      maxWidth: 1600,
+    );
+    if (image == null) return null;
+    final extension = image.name.split('.').last.toLowerCase();
+    final normalizedExtension = switch (extension) {
+      'png' => 'png',
+      'webp' => 'webp',
+      _ => 'jpg',
+    };
+    final contentType = switch (normalizedExtension) {
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      _ => 'image/jpeg',
+    };
+    return PickedPostImage(
+      bytes: await image.readAsBytes(),
+      extension: normalizedExtension,
+      contentType: contentType,
+    );
   }
 
   @override
@@ -114,6 +184,59 @@ class _CreatePostPageState extends State<CreatePostPage> {
                   ),
                 ),
                 const SizedBox(height: AppTheme.sp20),
+                if (_coverImage == null)
+                  OutlinedButton.icon(
+                    key: const ValueKey('post-pick-cover-action'),
+                    onPressed: _submitting ? null : _pickCoverImage,
+                    icon: const Icon(Icons.add_photo_alternate_outlined),
+                    label: Text(l.gallery),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                    ),
+                  )
+                else
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+                    child: AspectRatio(
+                      aspectRatio: 4 / 3,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Image.memory(
+                            _coverImage!.bytes,
+                            key: const ValueKey('post-cover-preview'),
+                            fit: BoxFit.cover,
+                          ),
+                          Positioned(
+                            top: AppTheme.sp8,
+                            right: AppTheme.sp8,
+                            child: IconButton.filled(
+                              key: const ValueKey('post-remove-cover-action'),
+                              tooltip: l.delete,
+                              onPressed: _submitting
+                                  ? null
+                                  : () => setState(() => _coverImage = null),
+                              icon: const Icon(Icons.close_rounded),
+                              style: IconButton.styleFrom(
+                                backgroundColor: Colors.black54,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            left: AppTheme.sp12,
+                            bottom: AppTheme.sp12,
+                            child: FilledButton.tonalIcon(
+                              onPressed: _submitting ? null : _pickCoverImage,
+                              icon: const Icon(Icons.photo_library_outlined),
+                              label: Text(l.createListingChangeImage),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: AppTheme.sp14),
                 TextFormField(
                   key: const ValueKey('post-title-field'),
                   controller: _titleController,

@@ -8,6 +8,7 @@ import 'package:goods4ncu_mobile/pages/publish_hub_page.dart';
 import 'package:goods4ncu_mobile/router/publish_navigation.dart';
 import 'package:goods4ncu_mobile/services/api_service.dart';
 import 'package:goods4ncu_mobile/services/post_service.dart';
+import 'package:goods4ncu_mobile/services/upload_service.dart';
 import 'package:goods4ncu_mobile/theme/app_theme.dart';
 
 MaterialApp _localizedApp({required Widget home}) {
@@ -101,6 +102,7 @@ void main() {
     expect(find.byKey(const ValueKey('publish-choice-discussion')), findsOne);
     expect(find.byKey(const ValueKey('publish-choice-offer')), findsOne);
     expect(find.byKey(const ValueKey('publish-choice-wanted')), findsOne);
+    expect(find.byKey(const ValueKey('publish-choice-errand')), findsOne);
 
     await tester.tap(find.byKey(const ValueKey('publish-choice-discussion')));
     await tester.pumpAndSettle();
@@ -134,7 +136,12 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      _localizedApp(home: CreatePostPage(postService: PostService())),
+      _localizedApp(
+        home: CreatePostPage(
+          postService: PostService(),
+          uploadService: UploadService(),
+        ),
+      ),
     );
     await tester.pumpAndSettle();
 

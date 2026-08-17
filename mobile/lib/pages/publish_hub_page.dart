@@ -35,6 +35,13 @@ class PublishHubPage extends StatelessWidget {
         color: AppTheme.info,
         location: PublishNavigation.listing(direction: 'wanted'),
       ),
+      _PublishChoice(
+        choiceKey: const ValueKey('publish-choice-errand'),
+        title: l.errandPublishTitle,
+        icon: Icons.directions_run_rounded,
+        color: AppTheme.warning,
+        location: PublishNavigation.errand,
+      ),
     ];
 
     return Scaffold(
@@ -62,18 +69,14 @@ class PublishHubPage extends StatelessWidget {
                 LayoutBuilder(
                   builder: (context, constraints) {
                     if (constraints.maxWidth >= 680) {
-                      return Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          for (
-                            var index = 0;
-                            index < choices.length;
-                            index++
-                          ) ...[
-                            if (index > 0) const SizedBox(width: AppTheme.sp16),
-                            Expanded(child: choices[index]),
-                          ],
-                        ],
+                      return GridView.count(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        crossAxisCount: 2,
+                        childAspectRatio: 2.6,
+                        crossAxisSpacing: AppTheme.sp16,
+                        mainAxisSpacing: AppTheme.sp16,
+                        children: choices,
                       );
                     }
                     return Column(

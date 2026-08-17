@@ -71,6 +71,7 @@ class PostDiscoveryCard extends StatelessWidget {
                       if (hasCover)
                         Image.network(
                           cover,
+                          key: ValueKey('post-cover-${post.id}'),
                           fit: BoxFit.cover,
                           errorBuilder: (_, _, _) =>
                               _PostCoverFallback(isListing: post.isListing),

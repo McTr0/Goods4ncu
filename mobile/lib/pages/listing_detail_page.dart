@@ -21,6 +21,7 @@ import '../services/content_report_service.dart';
 import '../components/feed_feedback_menu.dart';
 import '../components/wanted_response_section.dart';
 import '../services/feed_feedback_service.dart';
+import '../components/user_avatar.dart';
 import '../utils/platform_utils.dart';
 import '../services/post_service.dart';
 import 'post_detail_page.dart';
@@ -375,7 +376,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
       }
 
       setState(() => _isOperating = false);
-      final conversation = await showContactConversationSheet(
+      final conversation = await openContactConversationPage(
         context: context,
         chatService: _chatService,
         recipientId: listing.ownerId!,
@@ -941,10 +942,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
               padding: const EdgeInsets.symmetric(vertical: AppTheme.sp4),
               child: Row(
                 children: [
-                  CircleAvatar(
-                    backgroundColor: AppTheme.primary.withValues(alpha: 0.15),
-                    child: const Icon(Icons.person, color: AppTheme.primary),
-                  ),
+                  UserAvatar(name: listing.ownerUsername ?? '', size: 40),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(

@@ -10,6 +10,7 @@ void main() {
       'category': 'campus-life',
       'title': 'Where can I print tonight?',
       'body_excerpt': 'The library is closed.',
+      'cover_image_url': 'https://cdn.test/printing.jpg',
       'tags': ['printing', 'late-night'],
       'author': {'id': 'user-1', 'username': 'mira'},
       'reply_count': 4,
@@ -22,6 +23,7 @@ void main() {
 
     expect(post.isListing, isFalse);
     expect(post.displayBody, 'The library is closed.');
+    expect(post.coverImageUrl, 'https://cdn.test/printing.jpg');
     expect(post.author.username, 'mira');
     expect(post.replyCount, 4);
     expect(post.createdAt, isNotNull);

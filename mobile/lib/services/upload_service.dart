@@ -30,11 +30,7 @@ class UploadService extends BaseService {
       throw NetworkException('文件上传目标无效');
     }
     final response = await http
-        .put(
-          uri,
-          headers: {'Content-Type': contentType},
-          body: bytes,
-        )
+        .put(uri, headers: {'Content-Type': contentType}, body: bytes)
         .timeout(const Duration(seconds: 30));
     if (response.statusCode != 200 &&
         response.statusCode != 201 &&
@@ -135,10 +131,49 @@ class UploadService extends BaseService {
     List<int> imageBytes, {
     String extension = 'jpg',
     String contentType = 'image/jpeg',
+  }) => _uploadImageBytes(
+    imageBytes,
+    objectPrefix: 'chat/image',
+    extension: extension,
+    contentType: contentType,
+  );
+
+  Future<String> uploadPostImageBytes(
+    List<int> imageBytes, {
+    String extension = 'jpg',
+    String contentType = 'image/jpeg',
+  }) => _uploadImageBytes(
+    imageBytes,
+    objectPrefix: 'post/image',
+    extension: extension,
+    contentType: contentType,
+  );
+
+  Future<String> _uploadImageBytes(
+    List<int> imageBytes, {
+    required String objectPrefix,
+    required String extension,
+    required String contentType,
   }) async {
+    if (imageBytes.isEmpty || imageBytes.length > 10 * 1024 * 1024) {
+      throw NetworkException('图片为空或超过 10 MB');
+    }
+    final safeExtension = switch (extension.toLowerCase()) {
+      'png' => 'png',
+      'webp' => 'webp',
+      _ => 'jpg',
+    };
+    final expectedContentType = switch (safeExtension) {
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      _ => 'image/jpeg',
+    };
+    final safeContentType = contentType.toLowerCase() == expectedContentType
+        ? contentType.toLowerCase()
+        : expectedContentType;
     final stsToken = await _userService.getUploadToken();
     final objectKey =
-        'chat/image/${DateTime.now().millisecondsSinceEpoch}_${_uuid.v4()}.$extension';
+        '$objectPrefix/${DateTime.now().millisecondsSinceEpoch}_${_uuid.v4()}.$safeExtension';
     final endpointHost = stsToken.endpoint
         .replaceFirst(RegExp(r'^https?://'), '')
         .replaceAll(RegExp(r'/$'), '');
@@ -146,7 +181,7 @@ class UploadService extends BaseService {
     final ossDate = _buildOssDateHeader();
     final authorization = _buildOssAuthorization(
       method: 'PUT',
-      contentType: contentType,
+      contentType: safeContentType,
       date: ossDate,
       bucket: stsToken.bucket,
       objectKey: objectKey,
@@ -162,7 +197,7 @@ class UploadService extends BaseService {
             'Date': ossDate,
             'Authorization': authorization,
             'x-oss-security-token': stsToken.securityToken,
-            'Content-Type': contentType,
+            'Content-Type': safeContentType,
           },
           body: imageBytes,
         )

@@ -171,7 +171,10 @@ class _FakeIntentService extends IntentService {
   Future<List<UserIntent>> campusFeed({
     IntentKind? kind,
     int limit = 30,
-  }) async => voices;
+  }) async => voices
+      .where((intent) => kind == null || intent.kind == kind)
+      .take(limit)
+      .toList();
 
   @override
   Future<String> respondToIntent(String intentId, String content) async {
