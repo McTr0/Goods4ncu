@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:goods4ncu_mobile/components/audio_message_player.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/pages/user_chat_composer_controller.dart';
@@ -582,7 +581,9 @@ void main() {
       expect(find.byIcon(Icons.done_rounded), findsOneWidget);
     });
 
-    testWidgets('displays voice message player', (tester) async {
+    testWidgets('renders legacy voice payload without playback controls', (
+      tester,
+    ) async {
       final message = ConversationMessage(
         id: '1',
         conversationId: 'conv-1',
@@ -604,9 +605,8 @@ void main() {
         ),
       );
 
-      expect(find.text('语音消息'), findsOneWidget);
-      expect(find.byType(AudioMessagePlayer), findsOneWidget);
-      expect(find.byIcon(Icons.play_circle), findsOneWidget);
+      expect(find.text('[语音消息]'), findsOneWidget);
+      expect(find.byIcon(Icons.play_circle), findsNothing);
     });
 
     testWidgets('triggers onEdit callback when edit is tapped', (tester) async {
