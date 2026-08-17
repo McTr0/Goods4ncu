@@ -26,6 +26,8 @@ class WsNotification {
   final String? conversationId;
   final String? conversationMode;
   final String? conversationState;
+  final String? spaceId;
+  final int? onlineCount;
   final DateTime? expiresAt;
 
   WsNotification({
@@ -42,6 +44,8 @@ class WsNotification {
     this.conversationId,
     this.conversationMode,
     this.conversationState,
+    this.spaceId,
+    this.onlineCount,
     this.expiresAt,
   });
 
@@ -62,6 +66,8 @@ class WsNotification {
       conversationId: json['conversation_id']?.toString(),
       conversationMode: json['mode']?.toString(),
       conversationState: json['state']?.toString(),
+      spaceId: json['space_id']?.toString(),
+      onlineCount: (json['online_count'] as num?)?.toInt(),
       expiresAt: json['expires_at'] == null
           ? null
           : DateTime.tryParse(json['expires_at'].toString()),

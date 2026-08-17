@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../models/location_space.dart';
+
 import 'package:uuid/uuid.dart';
 
 import '../models/models.dart';
@@ -26,9 +28,9 @@ class ChatService extends BaseService {
   /// returned by this endpoint.
   Future<List<AgentRun>> getAgentRuns({int limit = 20}) async {
     final headers = await authHeaders();
-    final uri = Uri.parse('$baseUrl/api/agent/runs').replace(
-      queryParameters: {'limit': '$limit'},
-    );
+    final uri = Uri.parse(
+      '$baseUrl/api/agent/runs',
+    ).replace(queryParameters: {'limit': '$limit'});
     final response = await get(uri, headers);
     final data = handleResponse(response, (d) => d as Map<String, dynamic>);
     final items = data['items'] as List<dynamic>? ?? [];
@@ -645,6 +647,101 @@ class ChatService extends BaseService {
     return (data['items'] as List<dynamic>? ?? const [])
         .map((item) => item as Map<String, dynamic>)
         .toList();
+  }
+
+  Future<List<CampusLocationSpace>> getLocationSpaces() async {
+    final headers = await authHeaders();
+    final response = await get(
+      Uri.parse('$baseUrl/api/chat/location-spaces/tree'),
+      headers,
+    );
+    final data = handleResponse(
+      response,
+      (value) => value as Map<String, dynamic>,
+    );
+    return (data['items'] as List<dynamic>? ?? const [])
+        .whereType<Map>()
+        .map(
+          (item) =>
+              CampusLocationSpace.fromJson(Map<String, dynamic>.from(item)),
+        )
+        .toList(growable: false);
+  }
+
+  Future<CampusLocationRecommendation> recommendLocationSpace({
+    required double latitude,
+    required double longitude,
+  }) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/chat/location-spaces/recommend'),
+      headers,
+      jsonEncode({'latitude': latitude, 'longitude': longitude}),
+    );
+    return handleResponse(
+      response,
+      (data) => CampusLocationRecommendation.fromJson(
+        Map<String, dynamic>.from(data as Map),
+      ),
+    );
+  }
+
+  Future<CampusLocationPresence> setLocationSpacePresence(
+    String spaceId, {
+    required bool active,
+  }) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/chat/location-spaces/$spaceId/presence'),
+      headers,
+      jsonEncode({'active': active}),
+    );
+    return handleResponse(
+      response,
+      (data) => CampusLocationPresence.fromJson(
+        Map<String, dynamic>.from(data as Map),
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>> enterLocationSpace(String spaceId) async {
+    final space = await getSpace(spaceId);
+    final presence = await setLocationSpacePresence(spaceId, active: true);
+    return {
+      ...space,
+      'online_count': presence.onlineCount,
+      'presence_expires_in_seconds': presence.expiresInSeconds,
+    };
+  }
+
+  /// Kept for compatibility with older servers. Location-room entry uses
+  /// [enterLocationSpace] and ephemeral presence instead of membership.
+  Future<Map<String, dynamic>> joinLocationSpace(String spaceId) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/chat/location-spaces/$spaceId/join'),
+      headers,
+      '{}',
+    );
+    return handleResponse(response, (data) => data as Map<String, dynamic>);
+  }
+
+  Future<Map<String, dynamic>> createLocationChild({
+    required String parentSpaceId,
+    required String name,
+    String? description,
+  }) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/chat/location-spaces/$parentSpaceId/children'),
+      headers,
+      jsonEncode({
+        'name': name.trim(),
+        if (description != null && description.trim().isNotEmpty)
+          'description': description.trim(),
+      }),
+    );
+    return handleResponse(response, (data) => data as Map<String, dynamic>);
   }
 
   Future<Map<String, dynamic>> getSpace(String spaceId) async {

@@ -2,22 +2,18 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:record/record.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
-import 'dart:io';
 import '../services/api_service.dart';
 import '../services/chat_service.dart';
 import '../services/sse_service.dart';
 import '../services/upload_service.dart';
 import '../services/ws_service.dart';
 import '../models/models.dart';
-import '../components/audio_message_player.dart';
 import '../components/assistant_markdown.dart';
+import '../components/unified_message_composer.dart';
 import '../components/xiaochang_avatar.dart';
 import 'chat_page_media_sender.dart';
 
@@ -445,7 +441,6 @@ class ChatPage extends StatefulWidget {
   final String? initialPrompt;
   final bool embedded;
   final VoidCallback? onConversationUpdated;
-  final VoidCallback? onExit;
 
   const ChatPage({
     super.key,
@@ -457,7 +452,6 @@ class ChatPage extends StatefulWidget {
     this.initialPrompt,
     this.embedded = false,
     this.onConversationUpdated,
-    this.onExit,
   });
 
   @override
@@ -467,6 +461,7 @@ class ChatPage extends StatefulWidget {
 class _ChatPageState extends State<ChatPage> {
   static const _uuid = Uuid();
   final TextEditingController _controller = TextEditingController();
+  final FocusNode _composerFocusNode = FocusNode();
   final List<ChatMessage> _messages = [];
   late final ApiService _apiService;
   late final ChatService _chatService;
@@ -475,14 +470,9 @@ class _ChatPageState extends State<ChatPage> {
   late final UploadService _uploadService;
   late final ChatPageMediaSender _mediaSender;
   final ImagePicker _picker = ImagePicker();
-  final AudioRecorder _audioRecorder = AudioRecorder();
 
   XFile? _selectedImage;
   Uint8List? _selectedImageBytes;
-  List<int>? _selectedAudioBytes;
-  bool _isRecording = false;
-  int _recordingSeconds = 0;
-  Timer? _recordingTimer;
   bool _isStreaming = false;
   bool _isLoadingHistory = true;
   String? _historyError;
@@ -780,11 +770,10 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
-    _audioRecorder.dispose();
     _controller.dispose();
+    _composerFocusNode.dispose();
     if (_ownsSseService) _sseService.dispose();
     _wsSubscription?.cancel();
-    _recordingTimer?.cancel();
     _undoTicker?.cancel();
     super.dispose();
   }
@@ -804,54 +793,12 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  Future<void> _toggleRecording() async {
-    if (_isRecording) {
-      _recordingTimer?.cancel();
-      final path = await _audioRecorder.stop();
-      if (path != null) {
-        final bytes = await File(path).readAsBytes();
-        setState(() {
-          _isRecording = false;
-          _selectedAudioBytes = bytes;
-        });
-        _sendMessage();
-      } else {
-        setState(() => _isRecording = false);
-      }
-    } else {
-      if (await _audioRecorder.hasPermission()) {
-        final directory = await getTemporaryDirectory();
-        final path =
-            '${directory.path}/audio_${DateTime.now().millisecondsSinceEpoch}.ogg';
-        await _audioRecorder.start(
-          const RecordConfig(encoder: AudioEncoder.opus),
-          path: path,
-        );
-        setState(() {
-          _isRecording = true;
-          _recordingSeconds = 0;
-        });
-        _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-          if (mounted) {
-            setState(() => _recordingSeconds++);
-            if (_recordingSeconds >= 60) {
-              _toggleRecording(); // 自动停止
-            }
-          }
-        });
-      }
-    }
-  }
-
   /// Send a message using SSE streaming (token-by-token render).
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
     final selectedImage = _selectedImage;
     final selectedImageBytes = _selectedImageBytes;
-    final selectedAudioBytes = _selectedAudioBytes;
-    if (text.isEmpty &&
-        selectedImageBytes == null &&
-        selectedAudioBytes == null) {
+    if (text.isEmpty && selectedImageBytes == null) {
       return;
     }
 
@@ -863,14 +810,12 @@ class _ChatPageState extends State<ChatPage> {
       final uploadedMedia = await _mediaSender.uploadSelectedMedia(
         pickedImage: selectedImage,
         imageBytes: selectedImageBytes,
-        audioBytes: selectedAudioBytes,
       );
 
       final userMsg = ChatMessage(
         sender: 'user',
         content: text.isEmpty ? '[Multimedia Message]' : text,
         imageUrl: uploadedMedia.imageUrl,
-        audioUrl: uploadedMedia.audioUrl,
         timestamp: DateTime.now(),
       );
 
@@ -879,7 +824,6 @@ class _ChatPageState extends State<ChatPage> {
         _controller.clear();
         _selectedImage = null;
         _selectedImageBytes = null;
-        _selectedAudioBytes = null;
       });
 
       // Append a placeholder streaming message.
@@ -902,7 +846,6 @@ class _ChatPageState extends State<ChatPage> {
               message: userMsg.content,
               conversationId: '__agent__',
               imageUrl: uploadedMedia.imageUrl,
-              audioUrl: uploadedMedia.audioUrl,
               idempotencyKey: proposalIdempotencyKey,
             )
             .timeout(const Duration(seconds: 30));
@@ -975,7 +918,6 @@ class _ChatPageState extends State<ChatPage> {
         _isStreaming = false;
         _selectedImage = selectedImage;
         _selectedImageBytes = selectedImageBytes;
-        _selectedAudioBytes = selectedAudioBytes;
       });
       return;
     } catch (e) {
@@ -1002,7 +944,7 @@ class _ChatPageState extends State<ChatPage> {
     final l = AppLocalizations.of(context)!;
     return Column(
       children: [
-        _AssistantHeader(embedded: widget.embedded, onExit: _exitAssistant),
+        _AssistantHeader(embedded: widget.embedded),
         if (_historyError != null)
           Container(
             width: double.infinity,
@@ -1185,110 +1127,79 @@ class _ChatPageState extends State<ChatPage> {
               },
             ),
           ),
-        if (_selectedImageBytes != null)
-          Container(
-            padding: const EdgeInsets.all(8),
-            height: 100,
-            child: Stack(
-              children: [
-                Image.memory(_selectedImageBytes!),
-                Positioned(
-                  right: 0,
-                  top: 0,
-                  child: IconButton(
-                    icon: const Icon(Icons.close, color: Colors.red),
-                    onPressed: () => setState(() {
-                      _selectedImage = null;
-                      _selectedImageBytes = null;
-                    }),
-                  ),
-                ),
-              ],
+        UnifiedMessageComposer(
+          controller: _controller,
+          focusNode: _composerFocusNode,
+          hintText: l.typeMessage,
+          isSending: _isStreaming,
+          onSubmitted: (_) => _sendMessage(),
+          onSend: _sendMessage,
+          primaryActions: [
+            MessageComposerAction(
+              id: 'image',
+              icon: Icons.image_outlined,
+              label: l.composerImageAction,
+              onPressed: _pickImage,
             ),
-          ),
-        if (_isRecording)
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.circle, color: Colors.red, size: 12),
-                const SizedBox(width: 8),
-                Text(
-                  l.recordingStatus(_recordingSeconds),
-                  style: const TextStyle(
-                    color: Colors.red,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Simple waveform animation
-                Row(
-                  children: List.generate(
-                    5,
-                    (i) => Container(
-                      width: 3,
-                      height: 8 + (i % 2 == 0 ? 4 : 0),
-                      margin: const EdgeInsets.symmetric(horizontal: 1),
-                      decoration: BoxDecoration(
-                        color: Colors.red.shade300,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+          ],
+          expandedActions: [
+            MessageComposerAction(
+              id: 'assistant-find',
+              icon: Icons.search_rounded,
+              label: l.assistantToolFind,
+              onPressed: () => _applyAssistantPrompt(l.assistantToolFindPrompt),
             ),
-          ),
-        Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Row(
-            children: [
-              IconButton(icon: const Icon(Icons.image), onPressed: _pickImage),
-              IconButton(
-                icon: Icon(
-                  _isRecording ? Icons.stop : Icons.mic,
-                  color: _isRecording ? Colors.red : null,
-                ),
-                onPressed: _toggleRecording,
-              ),
-              Expanded(
-                child: TextField(
-                  controller: _controller,
-                  decoration: InputDecoration(
-                    hintText: l.typeMessage,
-                    border: const OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(24)),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                  ),
-                  onSubmitted: (_) => _sendMessage(),
-                ),
-              ),
-              IconButton(
-                icon: Icon(
-                  Icons.send,
-                  color: _isStreaming ? Colors.grey : const Color(0xFF6366F1),
-                ),
-                onPressed: _isStreaming ? null : _sendMessage,
-              ),
-            ],
-          ),
+            MessageComposerAction(
+              id: 'assistant-estimate',
+              icon: Icons.price_check_outlined,
+              label: l.assistantToolEstimate,
+              onPressed: () =>
+                  _applyAssistantPrompt(l.assistantToolEstimatePrompt),
+            ),
+          ],
+          contextContent: [
+            if (_selectedImageBytes != null) _buildSelectedImagePreview(l),
+          ],
         ),
       ],
     );
   }
 
-  void _exitAssistant() {
-    if (widget.onExit != null) {
-      widget.onExit!();
-      return;
-    }
-    if (context.canPop()) {
-      context.pop();
-    } else {
-      context.go('/conversations');
-    }
+  void _applyAssistantPrompt(String prompt) {
+    _controller.value = TextEditingValue(
+      text: prompt,
+      selection: TextSelection.collapsed(offset: prompt.length),
+    );
+    _composerFocusNode.requestFocus();
+  }
+
+  Widget _buildSelectedImagePreview(AppLocalizations l) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: SizedBox(
+        height: 84,
+        child: Stack(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.memory(_selectedImageBytes!),
+            ),
+            Positioned(
+              right: 0,
+              top: 0,
+              child: IconButton.filledTonal(
+                tooltip: l.deleteAction,
+                icon: const Icon(Icons.close_rounded, size: 18),
+                onPressed: () => setState(() {
+                  _selectedImage = null;
+                  _selectedImageBytes = null;
+                }),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showNegotiationCard(HitlRequest req) {
@@ -1397,10 +1308,9 @@ class _HitlChip extends StatelessWidget {
 }
 
 class _AssistantHeader extends StatelessWidget {
-  const _AssistantHeader({required this.embedded, required this.onExit});
+  const _AssistantHeader({required this.embedded});
 
   final bool embedded;
-  final VoidCallback onExit;
 
   @override
   Widget build(BuildContext context) {
@@ -1440,12 +1350,6 @@ class _AssistantHeader extends StatelessWidget {
             ),
           ),
           const _AgentStatusPill(),
-          const SizedBox(width: 8),
-          IconButton.filledTonal(
-            tooltip: l.closeConversationAction,
-            onPressed: onExit,
-            icon: const Icon(Icons.close_rounded),
-          ),
         ],
       ),
     );
@@ -1567,15 +1471,6 @@ class _ChatBubble extends StatelessWidget {
                             )
                           : Image.memory(base64Decode(message.imageBase64!)),
                     ),
-                  ),
-                if ((message.audioUrl != null &&
-                        message.audioUrl!.isNotEmpty) ||
-                    (message.audioBase64 != null &&
-                        message.audioBase64!.isNotEmpty))
-                  AudioMessagePlayer(
-                    audioUrl: message.audioUrl,
-                    audioBase64: message.audioBase64,
-                    isMe: isUser,
                   ),
                 if (!isUser && !message.isPartial)
                   AssistantMarkdown(data: message.content)

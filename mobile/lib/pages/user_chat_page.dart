@@ -2,11 +2,8 @@ import 'dart:async';
 
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
-import '../components/agreement_card.dart';
-import '../components/handoff_prompt.dart';
-import '../services/agreement_service.dart';
-import '../services/reputation_service.dart';
 import '../models/models.dart';
 import '../providers/chat_notifier.dart';
 import '../services/chat_service.dart';
@@ -32,9 +29,6 @@ class UserChatPage extends StatefulWidget {
   final String otherUsername;
   final ChatService? chatService;
 
-  /// Injectable for tests, like the services above it.
-  final AgreementService? agreementService;
-  final ReputationService? reputationService;
   final UserService? userService;
   final UploadService? uploadService;
   final ChatNotifier? chatNotifier;
@@ -49,8 +43,6 @@ class UserChatPage extends StatefulWidget {
     required this.otherUserId,
     required this.otherUsername,
     this.chatService,
-    this.agreementService,
-    this.reputationService,
     this.userService,
     this.uploadService,
     this.chatNotifier,
@@ -79,13 +71,13 @@ class _UserChatPageState extends State<UserChatPage> {
   late final ChatNotifier _chatNotifier;
   late final void Function() _removeChatListener;
   final ImagePicker _imagePicker = ImagePicker();
-  final ScrollController _scrollController = ScrollController();
-  final ScrollController _relationshipContextScrollController =
-      ScrollController();
+  // Chat pages always restore themselves to the newest message. Avoid sharing
+  // PageStorage with an enclosing ExpansionTile, which stores a bool under its
+  // page key and can otherwise be read back as a scroll offset on Flutter Web.
+  final ScrollController _scrollController = ScrollController(
+    keepScrollOffset: false,
+  );
   ChatViewState _chatState = const ChatViewInitial();
-  bool _relationshipContextCanScroll = false;
-  bool _relationshipContextAtEnd = false;
-  bool _relationshipContextMeasureScheduled = false;
 
   ChatViewData? get _chatData =>
       _chatState is ChatViewData ? _chatState as ChatViewData : null;
@@ -98,14 +90,9 @@ class _UserChatPageState extends State<UserChatPage> {
 
   String? get _currentUserId => _chatData?.currentUserId;
 
-  Agreement? _agreement;
   RelationshipSpace? _relationshipSpace;
   SocialPersona? _otherPersona;
   SocialPersona? _selfPersona;
-  String? _otherAvatarUrl;
-  bool _awaitingHandoff = false;
-  late final AgreementService _agreementService;
-  late final ReputationService _reputationService;
 
   String? get _editingMessageId => _chatData?.editingMessageId;
   ConversationMessage? get _replyingToMessage => _chatData?.replyingToMessage;
@@ -124,13 +111,10 @@ class _UserChatPageState extends State<UserChatPage> {
       (_connectionStatus == 'connected' || _connectionStatus == 'active');
   bool get _isMail => _conversation?.mode == ConversationMode.mail;
 
-  bool get _isRecording => _sessionController.isRecording;
-
-  int get _recordingSeconds => _sessionController.recordingSeconds;
-
   Timer? _countdownTimer;
   List<ReplySuggestion> _replySuggestions = const [];
   bool _suggestionsLoading = false;
+  bool _callStarting = false;
   String? _suggestionsError;
   Map<String, String>? _pendingQuote;
 
@@ -139,10 +123,6 @@ class _UserChatPageState extends State<UserChatPage> {
     super.initState();
     _chatService = widget.chatService ?? context.read<ChatService>();
     _userService = widget.userService ?? context.read<UserService>();
-    _agreementService =
-        widget.agreementService ?? context.read<AgreementService>();
-    _reputationService =
-        widget.reputationService ?? context.read<ReputationService>();
     final uploadService = widget.uploadService ?? context.read<UploadService>();
     _mediaSender =
         widget.mediaSender ?? UserChatMediaSender(uploadService: uploadService);
@@ -170,17 +150,12 @@ class _UserChatPageState extends State<UserChatPage> {
     _sessionController.addListener(_handleSessionStateChange);
     _chatNotifier.hydrateConnectionStatus();
     _sessionController.connectWs(_handleWsNotification);
-    _relationshipContextScrollController.addListener(
-      _handleRelationshipContextScroll,
-    );
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _conversation?.expiresAt != null) setState(() {});
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadArrangement();
       _loadRelationshipSpace();
       _loadPersonas();
-      _loadOtherAvatar();
     });
   }
 
@@ -198,7 +173,6 @@ class _UserChatPageState extends State<UserChatPage> {
       _chatNotifier.dispose();
     }
     _scrollController.dispose();
-    _relationshipContextScrollController.dispose();
     _countdownTimer?.cancel();
     super.dispose();
   }
@@ -218,30 +192,6 @@ class _UserChatPageState extends State<UserChatPage> {
   void _handleSessionStateChange() {
     if (!mounted) return;
     setState(() {});
-  }
-
-  void _handleRelationshipContextScroll() {
-    if (!mounted || !_relationshipContextScrollController.hasClients) return;
-    final position = _relationshipContextScrollController.position;
-    final canScroll = position.maxScrollExtent > 1;
-    final atEnd = !canScroll || position.pixels >= position.maxScrollExtent - 1;
-    if (canScroll == _relationshipContextCanScroll &&
-        atEnd == _relationshipContextAtEnd) {
-      return;
-    }
-    setState(() {
-      _relationshipContextCanScroll = canScroll;
-      _relationshipContextAtEnd = atEnd;
-    });
-  }
-
-  void _scheduleRelationshipContextMeasure() {
-    if (_relationshipContextMeasureScheduled) return;
-    _relationshipContextMeasureScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _relationshipContextMeasureScheduled = false;
-      _handleRelationshipContextScroll();
-    });
   }
 
   void _handleWsNotification(WsNotification notif) {
@@ -588,28 +538,6 @@ class _UserChatPageState extends State<UserChatPage> {
     }
   }
 
-  /// 切换录音状态
-  Future<void> _toggleRecording() async {
-    await _sessionController.toggleRecording(
-      canSendMedia: () => _canSend,
-      sendMessage:
-          ({
-            required String content,
-            String? imageBase64,
-            String? audioBase64,
-            String? imageUrl,
-            String? audioUrl,
-          }) => _chatNotifier.sendMessage(
-            content: content,
-            imageBase64: imageBase64,
-            audioBase64: audioBase64,
-            imageUrl: imageUrl,
-            audioUrl: audioUrl,
-          ),
-      onError: _showSnackBar,
-    );
-  }
-
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -698,11 +626,13 @@ class _UserChatPageState extends State<UserChatPage> {
   Future<void> _startCall(String media) async {
     final l = AppLocalizations.of(context)!;
     final conversation = _conversation;
-    if (conversation == null ||
+    if (_callStarting ||
+        conversation == null ||
         conversation.state != ConversationState.active) {
-      _showSnackBar(l.callRequiresActiveConversation);
+      if (!_callStarting) _showSnackBar(l.callRequiresActiveConversation);
       return;
     }
+    setState(() => _callStarting = true);
     try {
       await _chatService.createCall(
         conversationId: conversation.id,
@@ -715,13 +645,15 @@ class _UserChatPageState extends State<UserChatPage> {
       );
     } catch (error) {
       _showSnackBar(l.callStartFailed(error.toString()));
+    } finally {
+      if (mounted) setState(() => _callStarting = false);
     }
   }
 
   Future<void> _restartConversation() async {
     final conversation = _conversation;
     if (conversation == null || !conversation.capabilities.canRestart) return;
-    final next = await showContactConversationSheet(
+    final next = await openContactConversationPage(
       context: context,
       chatService: _chatService,
       recipientId: conversation.otherUserId,
@@ -730,14 +662,13 @@ class _UserChatPageState extends State<UserChatPage> {
       recipientName: conversation.otherUsername,
     );
     if (!mounted || next == null) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(
-        builder: (_) => UserChatPage(
-          conversationId: next.id,
-          otherUserId: next.otherUserId,
-          otherUsername: next.otherUsername,
-        ),
-      ),
+    context.goNamed(
+      'user-chat',
+      pathParameters: {'conversationId': next.id},
+      extra: {
+        'otherUserId': next.otherUserId,
+        'otherUsername': next.otherUsername,
+      },
     );
   }
 
@@ -745,52 +676,18 @@ class _UserChatPageState extends State<UserChatPage> {
   void didUpdateWidget(UserChatPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     // The same page object can be reused for a different conversation, in which
-    // case initState does not run again. Without this the card from the
-    // previous conversation stays on screen — showing one person's arrangement
-    // inside another person's thread.
+    // case initState does not run again. Clear relationship-specific visuals so
+    // one person's space never appears in another person's conversation.
     if (oldWidget.conversationId != widget.conversationId ||
         oldWidget.otherUserId != widget.otherUserId) {
       setState(() {
-        _agreement = null;
         _relationshipSpace = null;
         _otherPersona = null;
         _selfPersona = null;
-        _otherAvatarUrl = null;
-        _awaitingHandoff = false;
-        _relationshipContextCanScroll = false;
-        _relationshipContextAtEnd = false;
       });
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_relationshipContextScrollController.hasClients) {
-          _relationshipContextScrollController.jumpTo(0);
-        }
-      });
-      _loadArrangement();
       _loadRelationshipSpace();
       _loadPersonas();
-      _loadOtherAvatar();
     }
-  }
-
-  /// The arrangement card and the handoff question, loaded lazily.
-  ///
-  /// Failures here are swallowed: neither is worth taking the conversation down
-  /// for, and a chat that will not open because a card failed to load is a much
-  /// worse outcome than a missing card.
-  Future<void> _loadArrangement() async {
-    try {
-      final agreement = await _agreementService.ensure(
-        widget.conversationId,
-        'deal',
-      );
-      if (!mounted) return;
-      setState(() => _agreement = agreement);
-      if (agreement.isSettled) {
-        final pending = await _reputationService.pending();
-        if (!mounted) return;
-        setState(() => _awaitingHandoff = pending.contains(agreement.id));
-      }
-    } catch (_) {}
   }
 
   Future<void> _loadRelationshipSpace() async {
@@ -840,31 +737,10 @@ class _UserChatPageState extends State<UserChatPage> {
     try {
       final persona = await _userService.getSocialPersona();
       // A private draft is useful on the profile editor, never as a public
-      // anchor beside a message. Archive means ordinary avatar fallback.
+      // anchor beside a message. Archive means default system Avatar fallback.
       return persona?.isPublished == true ? persona : null;
     } catch (_) {
       return null;
-    }
-  }
-
-  Future<void> _loadOtherAvatar() async {
-    final conversationId = widget.conversationId;
-    final otherUserId = widget.otherUserId;
-    try {
-      final profile = await _userService.getPublicUserProfile(otherUserId);
-      if (!mounted ||
-          widget.conversationId != conversationId ||
-          widget.otherUserId != otherUserId) {
-        return;
-      }
-      final avatarUrl = profile['avatar_url']?.toString();
-      if (avatarUrl != null && avatarUrl.isNotEmpty) {
-        setState(() {
-          _otherAvatarUrl = avatarUrl;
-        });
-      }
-    } catch (_) {
-      // Safe fallback, failure does not block messaging
     }
   }
 
@@ -897,168 +773,83 @@ class _UserChatPageState extends State<UserChatPage> {
 
   @override
   Widget build(BuildContext context) {
-    final relationshipContext = <Widget>[
-      if (!widget.embedded)
-        RelationshipSpacePreview(
-          otherName: _displayName,
-          otherAvatarUrl: _otherAvatarUrl,
-          otherPersona: _otherPersona,
-          selfPersona: _selfPersona,
-          events: _relationshipSpace?.events ?? const [],
-          pins: _relationshipSpace?.pins ?? const [],
-          pinCount: _relationshipSpace?.pins.length ?? 0,
-          sharedObjects: _relationshipSpace?.sharedObjects ?? const [],
-          sharedObjectCount: _relationshipSpace?.sharedObjects.length ?? 0,
-          recentConnection: _relationshipSpace?.recentConnection,
-          hasRecentConnection: _relationshipSpace?.recentConnection != null,
-          isConnected: _conversation?.state == ConversationState.active,
-          compact: true,
-        ),
-      // Pinned above the messages: the whole point is that "how much, when,
-      // where" stops living in the scrollback.
-      if (_agreement != null)
-        AgreementCard(
-          agreement: _agreement!,
-          service: _agreementService,
-          currentUserId: _currentUserId ?? '',
-          onChanged: (updated) => setState(() {
-            _agreement = updated;
-            if (updated.isSettled) _awaitingHandoff = true;
-          }),
-        ),
-      // Asked only after the arrangement was settled, and only once.
-      if (_awaitingHandoff && _agreement != null)
-        HandoffPrompt(
-          agreementId: _agreement!.id,
-          service: _reputationService,
-          onAnswered: () => setState(() => _awaitingHandoff = false),
-        ),
-      if (_conversation != null)
-        _ConversationProtocolBanner(
-          conversation: _conversation!,
-          onAccept: () => _acceptConnection(widget.conversationId),
-          onDecline: () => _rejectConnection(widget.conversationId),
-          onClose: _closeConversation,
-          onRestart: _restartConversation,
-        ),
-    ];
-    final relationshipContextMaxHeight =
-        MediaQuery.sizeOf(context).height * (widget.embedded ? 0.5 : 0.44);
-    if (relationshipContext.isNotEmpty) {
-      _scheduleRelationshipContextMeasure();
-    }
-    final contextScheme = Theme.of(context).colorScheme;
     final pageBackground = Theme.of(context).scaffoldBackgroundColor;
+    final messageList = UserChatMessageList(
+      isLoading: _isLoading,
+      error: _error,
+      messages: _messages,
+      currentUserId: _currentUserId,
+      connectionStatus: _canSend ? 'connected' : _connectionStatus,
+      scrollController: _scrollController,
+      onRetry: _chatNotifier.loadMessages,
+      onEditMessage: _startEditMessage,
+      onReplyMessage: _startReplyMessage,
+      onReactMessage: _reactToMessage,
+      onAcknowledgeMessage: _acknowledgeMessage,
+      onWithdrawAcknowledgement: _withdrawMessageAcknowledgement,
+      onHideMessage: _hideMessage,
+      onReportMessage: _reportMessage,
+      onRetryMessage: _retryMessage,
+      onTogglePinMessage: _togglePinMessage,
+      isPinned: _isMessagePinnedByMe,
+      allowEditing:
+          !_isMail && _conversation?.state == ConversationState.active,
+      deliveryOnly: _isMail,
+    );
+    final spaceInformation = Column(
+      key: const Key('relationship-space-information'),
+      children: [
+        if (_conversation != null)
+          _ConversationProtocolBanner(
+            conversation: _conversation!,
+            onAccept: () => _acceptConnection(widget.conversationId),
+            onDecline: () => _rejectConnection(widget.conversationId),
+            onClose: _closeConversation,
+            onRestart: _restartConversation,
+          ),
+        Expanded(child: messageList),
+      ],
+    );
     final body = Column(
       children: [
         if (widget.embedded) _buildEmbeddedHeader(),
-        if (relationshipContext.isNotEmpty)
-          ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: relationshipContextMaxHeight,
-            ),
-            child: Stack(
-              children: [
-                SingleChildScrollView(
-                  controller: _relationshipContextScrollController,
-                  key: const Key('relationship-context-scroll'),
-                  child: Column(children: relationshipContext),
-                ),
-                if (_relationshipContextCanScroll && !_relationshipContextAtEnd)
-                  Positioned(
-                    key: const Key('relationship-context-scroll-hint'),
-                    left: 0,
-                    right: 0,
-                    bottom: 6,
-                    child: IgnorePointer(
-                      child: Semantics(
-                        label: AppLocalizations.of(
-                          context,
-                        )!.relationshipContextScrollHint,
-                        excludeSemantics: true,
-                        child: Align(
-                          alignment: Alignment.bottomCenter,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: contextScheme.surfaceContainerHighest
-                                  .withValues(alpha: 0.96),
-                              border: Border.all(
-                                color: contextScheme.outlineVariant,
-                              ),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 5,
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.swipe_up_alt_rounded,
-                                    size: 16,
-                                    color: contextScheme.onSurfaceVariant,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    AppLocalizations.of(
-                                      context,
-                                    )!.relationshipContextScrollHint,
-                                    style: TextStyle(
-                                      color: contextScheme.onSurfaceVariant,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
         Expanded(
-          child: UserChatMessageList(
-            isLoading: _isLoading,
-            error: _error,
-            messages: _messages,
-            currentUserId: _currentUserId,
-            connectionStatus: _canSend ? 'connected' : _connectionStatus,
-            scrollController: _scrollController,
-            onRetry: _chatNotifier.loadMessages,
-            onEditMessage: _startEditMessage,
-            onReplyMessage: _startReplyMessage,
-            onReactMessage: _reactToMessage,
-            onAcknowledgeMessage: _acknowledgeMessage,
-            onWithdrawAcknowledgement: _withdrawMessageAcknowledgement,
-            onHideMessage: _hideMessage,
-            onReportMessage: _reportMessage,
-            onRetryMessage: _retryMessage,
-            onTogglePinMessage: _togglePinMessage,
-            isPinned: _isMessagePinnedByMe,
-            allowEditing:
-                !_isMail && _conversation?.state == ConversationState.active,
-            deliveryOnly: _isMail,
-          ),
+          child: _isMail
+              ? messageList
+              : Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+                  child: RelationshipSpacePreview(
+                    otherName: _displayName,
+                    otherPersona: _otherPersona,
+                    selfPersona: _selfPersona,
+                    events: _relationshipSpace?.events ?? const [],
+                    pins: _relationshipSpace?.pins ?? const [],
+                    pinCount: _relationshipSpace?.pins.length ?? 0,
+                    sharedObjects:
+                        _relationshipSpace?.sharedObjects ?? const [],
+                    sharedObjectCount:
+                        _relationshipSpace?.sharedObjects.length ?? 0,
+                    recentConnection: _relationshipSpace?.recentConnection,
+                    hasRecentConnection:
+                        _relationshipSpace?.recentConnection != null,
+                    isConnected:
+                        _conversation?.state == ConversationState.active,
+                    showRecentRecords: false,
+                    stageMode: true,
+                    stageContent: spaceInformation,
+                  ),
+                ),
         ),
         if (_canSend) _buildSuggestionArea(),
         UserChatInputArea(
           connectionStatus: _canSend ? 'connected' : _connectionStatus,
           unavailableMessage: _unavailableMessage,
-          isRecording: _isRecording,
-          recordingSeconds: _recordingSeconds,
           isSending: _isSending,
           isEditing: _editingMessageId != null,
           replyingToMessage: _replyingToMessage,
           structuredQuoteLabel: _pendingQuoteLabel,
           textController: _composerController.textController,
           onPickImage: _pickAndSendImage,
-          onToggleRecording: _toggleRecording,
           onPickQuote: _showQuotePicker,
           onCancelQuote: _clearPendingQuote,
           onCancelEdit: _cancelEdit,
@@ -1066,6 +857,8 @@ class _UserChatPageState extends State<UserChatPage> {
           onChanged: (_) {},
           onSubmitted: (_) => _sendMessage(),
           onSend: _editingMessageId != null ? _confirmEdit : _sendMessage,
+          onAudioCall: _callStarting ? null : () => _startCall('audio'),
+          onVideoCall: _callStarting ? null : () => _startCall('video'),
         ),
       ],
     );
@@ -1140,9 +933,9 @@ class _UserChatPageState extends State<UserChatPage> {
       child: Row(
         children: [
           UserAvatar(
+            key: const Key('embedded-header-avatar'),
             name: _displayName,
             persona: _otherPersona,
-            avatarUrl: _otherAvatarUrl,
             size: 48,
             showPersona: !isActive,
           ),
@@ -1171,18 +964,8 @@ class _UserChatPageState extends State<UserChatPage> {
         if (value == 'block') {
           _blockUser();
         }
-        if (value == 'call_audio') {
-          _startCall('audio');
-        }
-        if (value == 'call_video') {
-          _startCall('video');
-        }
       },
       itemBuilder: (context) => [
-        if (_conversation?.state == ConversationState.active) ...[
-          PopupMenuItem(value: 'call_audio', child: Text(l.audioCallMvp)),
-          PopupMenuItem(value: 'call_video', child: Text(l.videoCallMvp)),
-        ],
         if (_conversation?.capabilities.canClose == true)
           PopupMenuItem(value: 'close', child: Text(l.closeConversationAction)),
         PopupMenuItem(value: 'block', child: Text(l.blockAction)),

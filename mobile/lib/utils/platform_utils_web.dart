@@ -48,6 +48,21 @@ String resolveDisplayUrl(String url) {
   final page = Uri.base;
   if (!page.hasScheme || page.host.isEmpty) return value;
 
+  // Demo product images are Flutter bundle assets. Their seed URLs may carry
+  // the historical local web port (3001), but the same bundle can be served on
+  // any development port. Resolve only bundle assets against the current page;
+  // object-storage and media-service URLs must retain their own port.
+  if (uri.path.startsWith('/assets/')) {
+    return Uri(
+      scheme: page.scheme,
+      host: page.host,
+      port: page.hasPort ? page.port : null,
+      path: uri.path,
+      query: uri.hasQuery ? uri.query : null,
+      fragment: uri.hasFragment ? uri.fragment : null,
+    ).toString();
+  }
+
   // Keep the media service port intact. Replacing it with the Flutter web
   // dev-server port makes image requests return index.html instead of bytes.
   return uri.replace(scheme: page.scheme, host: page.host).toString();

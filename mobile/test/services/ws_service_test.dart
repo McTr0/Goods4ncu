@@ -3,6 +3,18 @@ import 'package:goods4ncu_mobile/services/ws_service.dart';
 
 void main() {
   group('WsNotification', () {
+    test('parses aggregate location presence without user details', () {
+      final notification = WsNotification.fromJson({
+        'event': 'space_presence_changed',
+        'space_id': 'xian-su-yuan',
+        'online_count': 7,
+      });
+
+      expect(notification.eventType, 'space_presence_changed');
+      expect(notification.spaceId, 'xian-su-yuan');
+      expect(notification.onlineCount, 7);
+    });
+
     test('parses new_message event correctly', () {
       final json = {
         'id': 'notif-123',

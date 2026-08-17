@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
 
-Future<Conversation?> showContactConversationSheet({
+Future<Conversation?> openContactConversationPage({
   required BuildContext context,
   required ChatService chatService,
   required String recipientId,
@@ -12,22 +13,23 @@ Future<Conversation?> showContactConversationSheet({
   String? listingTitle,
   String? recipientName,
 }) {
-  return showModalBottomSheet<Conversation>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (context) => _ContactConversationSheet(
-      chatService: chatService,
-      recipientId: recipientId,
-      listingId: listingId,
-      listingTitle: listingTitle,
-      recipientName: recipientName,
-    ),
+  final route = Uri(
+    pathSegments: ['contact', recipientId],
+    queryParameters: {
+      'listingId': ?listingId,
+      'listingTitle': ?listingTitle,
+      'recipientName': ?recipientName,
+    },
+  ).toString();
+  return context.push<Conversation>(
+    '/$route',
+    extra: {'chatService': chatService},
   );
 }
 
-class _ContactConversationSheet extends StatefulWidget {
-  const _ContactConversationSheet({
+class ContactConversationPage extends StatefulWidget {
+  const ContactConversationPage({
+    super.key,
     required this.chatService,
     required this.recipientId,
     this.listingId,
@@ -42,11 +44,11 @@ class _ContactConversationSheet extends StatefulWidget {
   final String? recipientName;
 
   @override
-  State<_ContactConversationSheet> createState() =>
-      _ContactConversationSheetState();
+  State<ContactConversationPage> createState() =>
+      _ContactConversationPageState();
 }
 
-class _ContactConversationSheetState extends State<_ContactConversationSheet> {
+class _ContactConversationPageState extends State<ContactConversationPage> {
   final _subjectController = TextEditingController();
   final _contentController = TextEditingController();
   ConversationMode? _mode;
@@ -101,24 +103,75 @@ class _ContactConversationSheetState extends State<_ContactConversationSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final l = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
-    return SafeArea(
-      child: Center(
-        child: Container(
-          width: double.infinity,
-          constraints: const BoxConstraints(maxWidth: 680),
-          margin: const EdgeInsets.only(top: 48),
-          padding: EdgeInsets.fromLTRB(24, 20, 24, 24 + bottom),
-          decoration: BoxDecoration(
-            color: scheme.surface,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-            border: Border(top: BorderSide(color: scheme.outlineVariant)),
-          ),
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 220),
-            child: _mode == null ? _buildModeChoice() : _buildComposer(),
-          ),
+    final contextLine = widget.listingTitle == null
+        ? l.contactContextUser(widget.recipientName ?? l.contactFallbackUser)
+        : l.contactContextListing(widget.listingTitle!);
+    return Scaffold(
+      appBar: AppBar(title: Text(l.contactModePromptTitle)),
+      body: SafeArea(
+        top: false,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final horizontalPadding = constraints.maxWidth < 600 ? 16.0 : 28.0;
+            return SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: EdgeInsets.fromLTRB(
+                horizontalPadding,
+                18,
+                horizontalPadding,
+                28 + MediaQuery.viewInsetsOf(context).bottom,
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  key: const ValueKey('contact-page-content'),
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: scheme.surfaceContainerLow,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: scheme.outlineVariant),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            children: [
+                              Icon(
+                                widget.listingTitle == null
+                                    ? Icons.person_outline_rounded
+                                    : Icons.sell_outlined,
+                                color: scheme.primary,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  contextLine,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 180),
+                        child: _mode == null
+                            ? _buildModeChoice()
+                            : _buildComposer(),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -127,33 +180,19 @@ class _ContactConversationSheetState extends State<_ContactConversationSheet> {
   Widget _buildModeChoice() {
     final l = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
-    final contextLine = widget.listingTitle == null
-        ? l.contactContextUser(widget.recipientName ?? l.contactFallbackUser)
-        : l.contactContextListing(widget.listingTitle!);
     return Column(
       key: const ValueKey('contact-mode-choice'),
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                l.contactModePromptTitle,
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            IconButton(
-              onPressed: () => Navigator.of(context).pop(),
-              icon: const Icon(Icons.close),
-            ),
-          ],
+        Text(
+          l.contactModePromptTitle,
+          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
         ),
-        const SizedBox(height: 4),
-        Text(contextLine, style: TextStyle(color: scheme.onSurfaceVariant)),
+        const SizedBox(height: 6),
+        Text(
+          l.contactPageModeHint,
+          style: TextStyle(color: scheme.onSurfaceVariant, height: 1.4),
+        ),
         const SizedBox(height: 22),
         _ModeCard(
           icon: Icons.bolt_rounded,
@@ -180,18 +219,18 @@ class _ContactConversationSheetState extends State<_ContactConversationSheet> {
     final isMail = _mode == ConversationMode.mail;
     return Column(
       key: ValueKey('contact-compose-${_mode!.wireValue}'),
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
-            IconButton(
+            IconButton.filledTonal(
+              tooltip: l.contactBackAction,
               onPressed: _submitting
                   ? null
                   : () => setState(() => _mode = null),
-              icon: const Icon(Icons.arrow_back),
+              icon: const Icon(Icons.arrow_back_rounded),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 12),
             Expanded(
               child: Text(
                 isMail
@@ -205,12 +244,13 @@ class _ContactConversationSheetState extends State<_ContactConversationSheet> {
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 18),
         if (isMail) ...[
           TextField(
             key: const ValueKey('mail-subject-field'),
             controller: _subjectController,
             maxLength: 120,
+            textInputAction: TextInputAction.next,
             decoration: InputDecoration(
               labelText: l.contactMailSubjectLabel,
               hintText: l.contactMailSubjectHint,
@@ -250,15 +290,16 @@ class _ContactConversationSheetState extends State<_ContactConversationSheet> {
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
         ],
         TextField(
           key: const ValueKey('conversation-opening-field'),
           controller: _contentController,
-          minLines: 4,
-          maxLines: 7,
+          minLines: 5,
+          maxLines: 10,
           maxLength: 2000,
           autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
           decoration: InputDecoration(
             labelText: isMail
                 ? l.contactMailBodyLabel
@@ -274,20 +315,17 @@ class _ContactConversationSheetState extends State<_ContactConversationSheet> {
           Text(_error!, style: TextStyle(color: scheme.error)),
         ],
         const SizedBox(height: 14),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            key: const ValueKey('submit-contact-conversation'),
-            onPressed: _submitting ? null : _submit,
-            icon: _submitting
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Icon(isMail ? Icons.send_outlined : Icons.wifi_tethering),
-            label: Text(isMail ? l.contactMailSubmit : l.contactRealtimeSubmit),
-          ),
+        FilledButton.icon(
+          key: const ValueKey('submit-contact-conversation'),
+          onPressed: _submitting ? null : _submit,
+          icon: _submitting
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Icon(isMail ? Icons.send_outlined : Icons.wifi_tethering),
+          label: Text(isMail ? l.contactMailSubmit : l.contactRealtimeSubmit),
         ),
       ],
     );

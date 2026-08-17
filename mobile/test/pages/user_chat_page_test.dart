@@ -8,14 +8,10 @@ import 'package:goods4ncu_mobile/pages/user_chat_components.dart';
 import 'package:goods4ncu_mobile/pages/user_chat_page.dart';
 import 'package:goods4ncu_mobile/providers/chat_notifier.dart';
 import 'package:provider/provider.dart';
-import 'package:goods4ncu_mobile/components/agreement_card.dart';
-import 'package:goods4ncu_mobile/components/handoff_prompt.dart';
-import 'package:goods4ncu_mobile/services/agreement_service.dart';
-import 'package:goods4ncu_mobile/services/reputation_service.dart';
+import 'package:goods4ncu_mobile/components/relationship_space_preview.dart';
 import 'package:goods4ncu_mobile/services/upload_service.dart';
 import 'package:goods4ncu_mobile/services/chat_service.dart';
 import 'package:goods4ncu_mobile/services/user_service.dart';
-import 'package:goods4ncu_mobile/components/user_avatar.dart';
 
 class _FakePageChatService extends ChatService {
   @override
@@ -37,43 +33,7 @@ class _FakePageUserService extends UserService {
   Future<SocialPersona?> getSocialPersona() async => null;
 }
 
-class _BrokenAgreementService extends AgreementService {
-  @override
-  Future<Agreement> ensure(String conversationId, String kind) async =>
-      throw Exception('unreachable');
-}
-
-class _FakePageAgreementService extends AgreementService {
-  _FakePageAgreementService({required this.agreement});
-  Agreement agreement;
-  @override
-  Future<Agreement> ensure(String conversationId, String kind) async =>
-      agreement;
-}
-
-class _FakePageReputationService extends ReputationService {
-  _FakePageReputationService({this.awaiting = const []});
-  final List<String> awaiting;
-  @override
-  Future<List<String>> pending() async => awaiting;
-}
-
-Agreement _pageAgreement({
-  List<AgreementTerm> terms = const [],
-  String status = 'forming',
-}) => Agreement(
-  id: 'agreement-1',
-  kind: 'deal',
-  status: status,
-  terms: terms,
-  participants: const ['user-me', 'user-other'],
-  fullyAgreed: false,
-  availableSlots: const ['item', 'price', 'time', 'place', 'conditions'],
-);
-
 UserChatPage _pageWith({
-  required AgreementService agreements,
-  required ReputationService reputation,
   String conversationId = 'conv-1',
   Key? key,
 }) => UserChatPage(
@@ -86,8 +46,6 @@ UserChatPage _pageWith({
   otherUsername: 'Other User',
   chatService: _FakePageChatService(),
   userService: _FakePageUserService(),
-  agreementService: agreements,
-  reputationService: reputation,
 );
 
 void main() {
@@ -97,9 +55,13 @@ void main() {
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       builder: (context, child) => MediaQuery(
-        data: MediaQuery.of(
-          context,
-        ).copyWith(textScaler: TextScaler.linear(textScale)),
+        data: MediaQuery.of(context).copyWith(
+          textScaler: TextScaler.linear(textScale),
+          // Avatar idle motion intentionally loops in production. Keep widget
+          // tests deterministic so pumpAndSettle only waits for the finite UI
+          // transitions exercised by each test.
+          disableAnimations: true,
+        ),
         child: child!,
       ),
       // UserChatPage takes most of its collaborators as parameters; this is the
@@ -136,161 +98,33 @@ void main() {
     });
   });
 
-  group('the arrangement is reachable from the conversation', () {
-    // Three times this session a feature landed complete at the widget level
-    // and unreachable at the page level, so nobody could actually use it. These
-    // assert the wiring; the widgets are covered on their own.
-
-    testWidgets('the card is pinned above the messages', (tester) async {
-      await tester.pumpWidget(
-        buildTestableWidget(
-          _pageWith(
-            agreements: _FakePageAgreementService(
-              agreement: _pageAgreement(
-                terms: [
-                  const AgreementTerm(
-                    slot: 'price',
-                    value: '300 元',
-                    proposedBy: 'user-other',
-                    agreedBy: ['user-other'],
-                    isSuggestion: false,
-                  ),
-                ],
-              ),
-            ),
-            reputation: _FakePageReputationService(),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.byType(AgreementCard), findsOneWidget);
-      expect(find.text('300 元'), findsOneWidget);
-    });
-
-    testWidgets('the handoff question waits until it is settled', (
+  group('realtime relationship space', () {
+    testWidgets('uses the shared space as the primary conversation canvas', (
       tester,
     ) async {
-      // Asking before anything was arranged would be asking about a meeting
-      // that was never planned.
-      await tester.pumpWidget(
-        buildTestableWidget(
-          _pageWith(
-            key: const ValueKey('conv-1'),
-            agreements: _FakePageAgreementService(agreement: _pageAgreement()),
-            reputation: _FakePageReputationService(
-              awaiting: const ['agreement-1'],
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(find.byType(HandoffPrompt), findsNothing);
-
-      await tester.pumpWidget(
-        buildTestableWidget(
-          _pageWith(
-            key: const ValueKey('conv-2'),
-            conversationId: 'conv-2',
-            agreements: _FakePageAgreementService(
-              agreement: _pageAgreement(status: 'settled'),
-            ),
-            reputation: _FakePageReputationService(
-              awaiting: const ['agreement-1'],
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(find.byType(HandoffPrompt), findsOneWidget);
-    });
-
-    testWidgets('a card that fails to load does not break the chat', (
-      tester,
-    ) async {
-      // A conversation that will not open because a card failed is a much worse
-      // outcome than a missing card.
-      await tester.pumpWidget(
-        buildTestableWidget(
-          _pageWith(
-            agreements: _BrokenAgreementService(),
-            reputation: _FakePageReputationService(),
-          ),
-        ),
-      );
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(buildTestableWidget(_pageWith()));
       await tester.pumpAndSettle();
 
-      expect(find.byType(AgreementCard), findsNothing);
+      expect(find.byType(RelationshipSpacePreview), findsOneWidget);
+      expect(find.byKey(const Key('relationship-space-stage')), findsOneWidget);
+      expect(
+        find.byKey(const Key('relationship-space-information')),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
-      expect(find.byType(UserChatPage), findsOneWidget);
     });
 
-    testWidgets(
-      'shows a scroll affordance when the shared context exceeds a narrow viewport',
-      (tester) async {
-        await tester.binding.setSurfaceSize(const Size(390, 844));
-        addTearDown(() => tester.binding.setSurfaceSize(null));
-        final terms = [
-          const AgreementTerm(
-            slot: 'item',
-            value: '教材',
-            proposedBy: 'user-other',
-            agreedBy: ['user-other'],
-            isSuggestion: false,
-          ),
-          const AgreementTerm(
-            slot: 'price',
-            value: '300 元',
-            proposedBy: 'user-other',
-            agreedBy: ['user-other'],
-            isSuggestion: false,
-          ),
-          const AgreementTerm(
-            slot: 'time',
-            value: '周五',
-            proposedBy: 'user-other',
-            agreedBy: ['user-other'],
-            isSuggestion: false,
-          ),
-          const AgreementTerm(
-            slot: 'place',
-            value: '校门口',
-            proposedBy: 'user-other',
-            agreedBy: ['user-other'],
-            isSuggestion: false,
-          ),
-          const AgreementTerm(
-            slot: 'conditions',
-            value: '当面确认',
-            proposedBy: 'user-other',
-            agreedBy: ['user-other'],
-            isSuggestion: false,
-          ),
-        ];
-        await tester.pumpWidget(
-          buildTestableWidget(
-            _pageWith(
-              agreements: _FakePageAgreementService(
-                agreement: _pageAgreement(terms: terms),
-              ),
-              reputation: _FakePageReputationService(),
-            ),
-            textScale: 2,
-          ),
-        );
-        await tester.pumpAndSettle();
+    testWidgets('does not load or render the legacy arrangement card', (
+      tester,
+    ) async {
+      await tester.pumpWidget(buildTestableWidget(_pageWith()));
+      await tester.pumpAndSettle();
 
-        expect(
-          find.byKey(const Key('relationship-context-scroll')),
-          findsOneWidget,
-        );
-        expect(
-          find.byKey(const Key('relationship-context-scroll-hint')),
-          findsOneWidget,
-        );
-        expect(tester.takeException(), isNull);
-      },
-    );
+      expect(find.text('说好的事'), findsNothing);
+      expect(find.text('300 元'), findsNothing);
+    });
   });
 
   group('MessageBubble', () {
@@ -992,7 +826,7 @@ void main() {
         ),
       );
 
-      expect(find.text('暂无消息，开始聊天吧'), findsOneWidget);
+      expect(find.text('暂无消息'), findsOneWidget);
     });
   });
 
@@ -1007,13 +841,10 @@ void main() {
         buildTestableWidget(
           UserChatInputArea(
             connectionStatus: 'pending',
-            isRecording: false,
-            recordingSeconds: 0,
             isSending: false,
             isEditing: false,
             textController: controller,
             onPickImage: () {},
-            onToggleRecording: () {},
             onCancelEdit: () {},
             onChanged: (_) {},
             onSubmitted: (_) {},
@@ -1023,7 +854,8 @@ void main() {
       );
 
       expect(find.text('等待对方接通'), findsOneWidget);
-      expect(find.byType(TextField), findsNothing);
+      expect(find.byType(TextField), findsOneWidget);
+      expect(tester.widget<TextField>(find.byType(TextField)).enabled, isFalse);
     });
 
     testWidgets('shows edit affordances when editing a message', (
@@ -1036,13 +868,10 @@ void main() {
         buildTestableWidget(
           UserChatInputArea(
             connectionStatus: 'connected',
-            isRecording: false,
-            recordingSeconds: 0,
             isSending: false,
             isEditing: true,
             textController: controller,
             onPickImage: () {},
-            onToggleRecording: () {},
             onCancelEdit: () {},
             onChanged: (_) {},
             onSubmitted: (_) {},
@@ -1052,8 +881,37 @@ void main() {
       );
 
       expect(find.text('编辑消息...'), findsOneWidget);
-      expect(find.byIcon(Icons.check), findsOneWidget);
-      expect(find.byIcon(Icons.close), findsOneWidget);
+      expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.close_rounded), findsOneWidget);
+    });
+
+    testWidgets('expands realtime-only call actions', (tester) async {
+      final controller = TextEditingController();
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        buildTestableWidget(
+          UserChatInputArea(
+            connectionStatus: 'connected',
+            isSending: false,
+            isEditing: false,
+            textController: controller,
+            onPickImage: () {},
+            onCancelEdit: () {},
+            onChanged: (_) {},
+            onSubmitted: (_) {},
+            onSend: () {},
+            onAudioCall: () {},
+            onVideoCall: () {},
+          ),
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('composer-tools-toggle')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('语音通话'), findsOneWidget);
+      expect(find.text('视频通话'), findsOneWidget);
     });
 
     testWidgets(
@@ -1068,19 +926,18 @@ void main() {
               embedded: true,
               chatService: _FakePageChatService(),
               userService: _FakePageUserService(),
-              agreementService: _FakePageAgreementService(
-                agreement: _pageAgreement(),
-              ),
-              reputationService: _FakePageReputationService(),
             ),
           ),
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('seller1'), findsOneWidget);
+        // The relationship-space stage may repeat the peer name; the header
+        // only needs to keep the identity label present alongside its avatar.
+        expect(find.text('seller1'), findsWidgets);
         // Renders 48px UserAvatar
-        expect(find.byType(UserAvatar), findsOneWidget);
-        expect(tester.getSize(find.byType(UserAvatar)), const Size(48, 48));
+        final headerAvatar = find.byKey(const Key('embedded-header-avatar'));
+        expect(headerAvatar, findsOneWidget);
+        expect(tester.getSize(headerAvatar), const Size(48, 48));
         // Must NOT render old single-letter CircleAvatar
         expect(find.byType(CircleAvatar), findsNothing);
         expect(find.text('S'), findsNothing);

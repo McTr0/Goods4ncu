@@ -1094,7 +1094,6 @@ class ChatThread {
     required this.peerUserId,
     required this.peerUsername,
     required this.latestActivityAt,
-    this.peerAvatarUrl,
     this.relationshipKey,
     this.latestPreview,
     this.unreadCount = 0,
@@ -1109,7 +1108,6 @@ class ChatThread {
 
   final String peerUserId;
   final String peerUsername;
-  final String? peerAvatarUrl;
   final DateTime latestActivityAt;
 
   /// Server-provided campus-scoped relationship key. Legacy servers may omit
@@ -1129,7 +1127,6 @@ class ChatThread {
   ChatThread copyWith({int? unreadCount}) => ChatThread(
     peerUserId: peerUserId,
     peerUsername: peerUsername,
-    peerAvatarUrl: peerAvatarUrl,
     latestActivityAt: latestActivityAt,
     relationshipKey: relationshipKey,
     latestPreview: latestPreview,
@@ -1147,7 +1144,6 @@ class ChatThread {
     return ChatThread(
       peerUserId: json['peer_user_id']?.toString() ?? '',
       peerUsername: json['peer_username']?.toString() ?? '',
-      peerAvatarUrl: json['peer_avatar_url']?.toString(),
       latestActivityAt:
           DateTime.tryParse(json['latest_activity_at']?.toString() ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0),
@@ -2571,6 +2567,15 @@ class IntentSlots {
   final PriceSlot? price;
   final TimeSlot? time;
   final String? place;
+  final String? pickupPlace;
+  final String? dropoffPlace;
+  final String? serviceMode;
+
+  /// For campus errands, `wanted` means I need someone to do it and `offer`
+  /// means I can do it for someone else. Older servers omit this field; those
+  /// records remain compatible and are treated as requests by the UI.
+  final String? serviceDirection;
+  final List<String> notes;
 
   const IntentSlots({
     this.subject,
@@ -2578,6 +2583,11 @@ class IntentSlots {
     this.price,
     this.time,
     this.place,
+    this.pickupPlace,
+    this.dropoffPlace,
+    this.serviceMode,
+    this.serviceDirection,
+    this.notes = const [],
   });
 
   factory IntentSlots.fromJson(Map<String, dynamic> json) => IntentSlots(
@@ -2590,6 +2600,14 @@ class IntentSlots {
         ? TimeSlot.fromJson(json['time'] as Map<String, dynamic>)
         : null,
     place: json['place']?.toString(),
+    pickupPlace: json['pickup_place']?.toString(),
+    dropoffPlace: json['dropoff_place']?.toString(),
+    serviceMode: json['service_mode']?.toString(),
+    serviceDirection: json['service_direction']?.toString(),
+    notes: (json['notes'] as List<dynamic>? ?? const [])
+        .map((value) => value.toString())
+        .where((value) => value.trim().isNotEmpty)
+        .toList(growable: false),
   );
 
   Map<String, dynamic> toJson() => {
@@ -2598,7 +2616,25 @@ class IntentSlots {
     if (price != null) 'price': price!.toJson(),
     if (time != null) 'time': time!.toJson(),
     if (place != null && place!.isNotEmpty) 'place': place,
+    if (pickupPlace != null && pickupPlace!.isNotEmpty)
+      'pickup_place': pickupPlace,
+    if (dropoffPlace != null && dropoffPlace!.isNotEmpty)
+      'dropoff_place': dropoffPlace,
+    if (serviceMode != null && serviceMode!.isNotEmpty)
+      'service_mode': serviceMode,
+    if (serviceDirection != null && serviceDirection!.isNotEmpty)
+      'service_direction': serviceDirection,
+    if (notes.isNotEmpty) 'notes': notes,
   };
+
+  /// Legacy errands were all requests. Keep that interpretation when the
+  /// server has not started returning the direction slot yet.
+  String get normalizedServiceDirection =>
+      serviceDirection == 'offer' ? 'offer' : 'wanted';
+
+  bool get isServiceOffer => normalizedServiceDirection == 'offer';
+
+  bool get isServiceWanted => normalizedServiceDirection == 'wanted';
 }
 
 class UserIntent {

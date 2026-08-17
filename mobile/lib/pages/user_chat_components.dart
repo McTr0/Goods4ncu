@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
-import '../components/audio_message_player.dart';
+import '../components/unified_message_composer.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../services/ws_service.dart';
@@ -275,18 +275,6 @@ class MessageBubble extends StatelessWidget {
                               width: 200,
                               fit: BoxFit.cover,
                             ),
-                    ),
-                  ),
-                if ((message.audioUrl != null &&
-                        message.audioUrl!.isNotEmpty) ||
-                    (message.audioBase64 != null &&
-                        message.audioBase64!.isNotEmpty))
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: AudioMessagePlayer(
-                      audioUrl: message.audioUrl,
-                      audioBase64: message.audioBase64,
-                      isMe: isMe,
                     ),
                   ),
                 if (message.replyPreview != null)
@@ -878,19 +866,18 @@ class UserChatMessageList extends StatelessWidget {
 
 class UserChatInputArea extends StatelessWidget {
   final String? connectionStatus;
-  final bool isRecording;
-  final int recordingSeconds;
   final bool isSending;
   final bool isEditing;
   final ConversationMessage? replyingToMessage;
   final String? structuredQuoteLabel;
   final TextEditingController textController;
   final VoidCallback onPickImage;
-  final VoidCallback onToggleRecording;
   final VoidCallback? onPickQuote;
   final VoidCallback? onCancelQuote;
   final VoidCallback onCancelEdit;
   final VoidCallback? onCancelReply;
+  final VoidCallback? onAudioCall;
+  final VoidCallback? onVideoCall;
   final ValueChanged<String> onChanged;
   final ValueChanged<String> onSubmitted;
   final VoidCallback onSend;
@@ -899,19 +886,18 @@ class UserChatInputArea extends StatelessWidget {
   const UserChatInputArea({
     super.key,
     required this.connectionStatus,
-    required this.isRecording,
-    required this.recordingSeconds,
     required this.isSending,
     required this.isEditing,
     this.replyingToMessage,
     this.structuredQuoteLabel,
     required this.textController,
     required this.onPickImage,
-    required this.onToggleRecording,
     this.onPickQuote,
     this.onCancelQuote,
     required this.onCancelEdit,
     this.onCancelReply,
+    this.onAudioCall,
+    this.onVideoCall,
     required this.onChanged,
     required this.onSubmitted,
     required this.onSend,
@@ -921,182 +907,140 @@ class UserChatInputArea extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
-    if (connectionStatus != 'connected') {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.orange.shade50,
-          border: Border(top: BorderSide(color: Colors.orange.shade200)),
+    final connected = connectionStatus == 'connected';
+    final contextContent = <Widget>[
+      if (replyingToMessage != null)
+        _ComposerContextPreview(
+          icon: Icons.reply_rounded,
+          text: replyingToMessage!.content.isEmpty
+              ? l.replyMediaMessage
+              : replyingToMessage!.content,
+          tooltip: l.cancelReply,
+          onClose: onCancelReply,
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.hourglass_empty,
-              color: Colors.orange.shade700,
-              size: 18,
-            ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                unavailableMessage.isEmpty
-                    ? l.conversationWaitingPeer
-                    : unavailableMessage,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.orange.shade700),
-              ),
-            ),
-          ],
+      if (structuredQuoteLabel != null)
+        _ComposerContextPreview(
+          icon: Icons.format_quote_rounded,
+          text: structuredQuoteLabel!,
+          tooltip: l.cancelQuote,
+          onClose: onCancelQuote,
+          secondary: true,
         ),
+    ];
+
+    Widget? status;
+    if (!connected) {
+      status = Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.hourglass_empty, color: Colors.orange.shade700, size: 18),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              unavailableMessage.isEmpty
+                  ? l.conversationWaitingPeer
+                  : unavailableMessage,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.orange.shade700),
+            ),
+          ),
+        ],
       );
     }
 
-    if (isRecording) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.red.shade50,
-          border: Border(top: BorderSide(color: Colors.red.shade200)),
+    return UnifiedMessageComposer(
+      controller: textController,
+      hintText: isEditing ? l.editMessageHint : l.messageInputHint,
+      enabled: connected,
+      isSending: isSending,
+      isEditing: isEditing,
+      onChanged: onChanged,
+      onSubmitted: onSubmitted,
+      onSend: onSend,
+      statusContent: status,
+      contextContent: contextContent,
+      primaryActions: [
+        MessageComposerAction(
+          id: 'image',
+          icon: Icons.image_outlined,
+          label: l.composerImageAction,
+          onPressed: onPickImage,
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.circle, color: Colors.red, size: 12),
-            const SizedBox(width: 8),
-            Text(
-              l.recordingStatus(recordingSeconds),
-              style: TextStyle(
-                color: Colors.red.shade700,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const Spacer(),
-            TextButton(onPressed: onToggleRecording, child: Text(l.stopAction)),
-          ],
-        ),
-      );
-    }
+        if (isEditing)
+          MessageComposerAction(
+            id: 'cancel-edit',
+            icon: Icons.close_rounded,
+            label: l.cancel,
+            onPressed: onCancelEdit,
+          ),
+      ],
+      expandedActions: [
+        if (onPickQuote != null)
+          MessageComposerAction(
+            id: 'quote',
+            icon: Icons.format_quote_rounded,
+            label: l.quoteContextTooltip,
+            onPressed: onPickQuote,
+          ),
+        if (onAudioCall != null)
+          MessageComposerAction(
+            id: 'audio-call',
+            icon: Icons.call_outlined,
+            label: l.audioCallMvp,
+            onPressed: onAudioCall,
+          ),
+        if (onVideoCall != null)
+          MessageComposerAction(
+            id: 'video-call',
+            icon: Icons.videocam_outlined,
+            label: l.videoCallMvp,
+            onPressed: onVideoCall,
+          ),
+      ],
+    );
+  }
+}
 
+class _ComposerContextPreview extends StatelessWidget {
+  const _ComposerContextPreview({
+    required this.icon,
+    required this.text,
+    required this.tooltip,
+    required this.onClose,
+    this.secondary = false,
+  });
+
+  final IconData icon;
+  final String text;
+  final String tooltip;
+  final VoidCallback? onClose;
+  final bool secondary;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.all(8),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardTheme.color,
-        border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
+        color: secondary
+            ? scheme.secondaryContainer
+            : scheme.primaryContainer.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(14),
       ),
-      child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (replyingToMessage != null)
-              Container(
-                margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.reply_rounded, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        replyingToMessage!.content.isEmpty
-                            ? l.replyMediaMessage
-                            : replyingToMessage!.content,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: l.cancelReply,
-                      onPressed: onCancelReply,
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
-                ),
-              ),
-            if (structuredQuoteLabel != null)
-              Container(
-                margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.format_quote_rounded, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        structuredQuoteLabel!,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: l.cancelQuote,
-                      onPressed: onCancelQuote,
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
-                ),
-              ),
-            Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.image),
-                  onPressed: isSending ? null : onPickImage,
-                ),
-                IconButton(
-                  tooltip: l.quoteContextTooltip,
-                  icon: const Icon(Icons.format_quote_rounded),
-                  onPressed: isSending ? null : onPickQuote,
-                ),
-                IconButton(
-                  icon: Icon(
-                    isRecording ? Icons.stop : Icons.mic,
-                    color: isRecording ? Colors.red : null,
-                  ),
-                  onPressed: onToggleRecording,
-                ),
-                if (isEditing)
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.grey),
-                    onPressed: onCancelEdit,
-                  ),
-                Expanded(
-                  child: TextField(
-                    controller: textController,
-                    decoration: InputDecoration(
-                      hintText: isEditing
-                          ? l.editMessageHint
-                          : l.messageInputHint,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                    ),
-                    onChanged: onChanged,
-                    onSubmitted: onSubmitted,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: Icon(
-                    isEditing ? Icons.check : Icons.send,
-                    color: isEditing ? Colors.green : AppTheme.primary,
-                  ),
-                  onPressed: onSend,
-                ),
-              ],
-            ),
-          ],
-        ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis),
+          ),
+          IconButton(
+            tooltip: tooltip,
+            onPressed: onClose,
+            icon: const Icon(Icons.close_rounded, size: 18),
+          ),
+        ],
       ),
     );
   }

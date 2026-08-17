@@ -89,9 +89,9 @@ Widget _buildTestApp(Widget child) {
 }
 
 void main() {
-  testWidgets('assistant page exposes an exit action', (tester) async {
-    var exited = false;
-
+  testWidgets('assistant page keeps navigation in the persistent shell', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       _buildTestApp(
         ChatPage(
@@ -100,17 +100,24 @@ void main() {
           sseService: SseService(),
           uploadService: _FakeUploadService(),
           embedded: true,
-          onExit: () => exited = true,
         ),
       ),
     );
     await tester.pumpAndSettle();
 
     final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
-    await tester.tap(find.byTooltip(l.closeConversationAction));
-    await tester.pump();
+    expect(find.text(l.assistantName), findsOneWidget);
+    expect(find.byTooltip(l.closeConversationAction), findsNothing);
+    expect(find.byKey(const Key('unified-message-composer')), findsOneWidget);
 
-    expect(exited, isTrue);
+    await tester.tap(find.byKey(const Key('composer-tools-toggle')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('composer-tool-assistant-publish')),
+      findsNothing,
+    );
+    expect(find.byKey(const Key('composer-tool-assistant-find')), findsOne);
+    expect(find.byKey(const Key('composer-tool-assistant-estimate')), findsOne);
   });
 
   testWidgets('a reversible write offers an undo affordance with a countdown', (
