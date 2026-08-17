@@ -6285,3 +6285,142 @@ async fn intent_feedback_filters_and_explains_feed_and_matches() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn campus_errand_matches_cross_service_direction_and_legacy_is_wanted() {
+    with_test_pool(|pool| async move {
+        let password_hash = hash_password("Test1234");
+        let requester_id = Uuid::new_v4().to_string();
+        let provider_id = Uuid::new_v4().to_string();
+        for (id, label) in [(&requester_id, "requester"), (&provider_id, "provider")] {
+            insert_user(
+                &pool,
+                id,
+                &format!("errand_direction_{label}_{}", Uuid::new_v4().simple()),
+                &password_hash,
+                "user",
+                "active",
+            )
+            .await;
+        }
+        let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
+            .fetch_one(&pool)
+            .await
+            .expect("ncu campus");
+        let (requester_token, _, _) = generate_access_token_for_campus(
+            &requester_id,
+            "user",
+            Some(campus_id),
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("requester token");
+        let app = create_router(build_state(pool.clone()), &[]);
+
+        let (status, invalid) = authenticated_json(
+            &app,
+            Method::POST,
+            "/api/intents",
+            &requester_token,
+            Some(json!({
+                "kind": "help",
+                "raw_input": "方向不合法",
+                "slots": {
+                    "category": "campus_errand",
+                    "service_direction": "both"
+                }
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{invalid}");
+
+        let (status, created) = authenticated_json(
+            &app,
+            Method::POST,
+            "/api/intents",
+            &requester_token,
+            Some(json!({
+                "kind": "help",
+                "raw_input": "需要代取打印材料",
+                "slots": {
+                    "subject": "代取打印材料",
+                    "category": "campus_errand",
+                    "service_mode": "pickup",
+                    "service_direction": "wanted",
+                    "price": {"kind": "exact", "cents": 1000}
+                }
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        let mine = created["id"].as_str().expect("created intent id");
+
+        let service = IntentService::new(pool.clone());
+        let offer = service
+            .create(active_intent(
+                campus_id,
+                &provider_id,
+                kinds::HELP,
+                "可以代取打印材料",
+                Slots {
+                    subject: Some("代取打印材料".to_string()),
+                    category: Some("campus_errand".to_string()),
+                    service_direction: Some("offer".to_string()),
+                    price: Some(PriceSlot::Exact { cents: 800 }),
+                    ..Default::default()
+                },
+            ))
+            .await
+            .expect("create service offer");
+        let same_direction = service
+            .create(active_intent(
+                campus_id,
+                &provider_id,
+                kinds::HELP,
+                "也需要代取材料",
+                Slots {
+                    category: Some("campus_errand".to_string()),
+                    service_direction: Some("wanted".to_string()),
+                    ..Default::default()
+                },
+            ))
+            .await
+            .expect("create same-direction request");
+        let legacy_request = service
+            .create(active_intent(
+                campus_id,
+                &provider_id,
+                kinds::HELP,
+                "旧版客户端发布的代取需求",
+                Slots {
+                    category: Some("campus_errand".to_string()),
+                    ..Default::default()
+                },
+            ))
+            .await
+            .expect("create legacy request");
+
+        let (status, matches) = authenticated_json(
+            &app,
+            Method::GET,
+            &format!("/api/intents/{mine}/matches"),
+            &requester_token,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{matches}");
+        let ids: Vec<_> = matches["items"]
+            .as_array()
+            .expect("match items")
+            .iter()
+            .filter_map(|item| item["id"].as_str())
+            .collect();
+        let offer = offer.to_string();
+        let same_direction = same_direction.to_string();
+        let legacy_request = legacy_request.to_string();
+        assert!(ids.contains(&offer.as_str()));
+        assert!(!ids.contains(&same_direction.as_str()));
+        assert!(!ids.contains(&legacy_request.as_str()));
+    })
+    .await;
+}

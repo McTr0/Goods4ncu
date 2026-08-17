@@ -69,6 +69,10 @@ pub async fn create_intent(
             kinds::ALL.join(", ")
         )));
     }
+    payload
+        .slots
+        .validate_for_kind(&payload.kind)
+        .map_err(ApiError::BadRequest)?;
     let raw_input = payload.raw_input.trim();
     if raw_input.is_empty() {
         return Err(ApiError::BadRequest("请说说你想要什么".to_string()));
@@ -181,6 +185,11 @@ pub async fn create_draft_batch(
         return Err(ApiError::BadRequest(
             "一次最多识别 20 件，请分批确认".to_string(),
         ));
+    }
+    for item in &payload.items {
+        item.slots
+            .validate_for_kind(&payload.kind)
+            .map_err(ApiError::BadRequest)?;
     }
 
     let items = payload
@@ -687,37 +696,29 @@ pub async fn intent_matches(
         .await
         .map_err(ApiError::Internal)?;
 
-    // Which side is the constraint depends on direction: a seeker's slots
-    // constrain an offer, not the other way round.
-    let seeking = mine.kind == kinds::GOODS_SEEK;
     let candidates: Vec<_> = pool
         .into_iter()
-        .filter(|other| {
-            if seeking {
-                mine.slots.compatible_with(&other.slots)
-            } else {
-                other.slots.compatible_with(&mine.slots)
-            }
-        })
-        .map(|other| {
-            let (constraint, offer) = if seeking {
-                (&mine.slots, &other.slots)
-            } else {
-                (&other.slots, &mine.slots)
+        .filter_map(|other| {
+            let match_summary = {
+                let (constraint, offer) =
+                    match_roles(&mine.kind, &mine.slots, &other.kind, &other.slots)?;
+                if !constraint.compatible_with(offer) {
+                    return None;
+                }
+                deterministic_match_summary(constraint, offer)
             };
-            let match_summary = deterministic_match_summary(constraint, offer);
             let rank_reason = if match_summary.len() > 1 {
                 "known_slots_compatible"
             } else {
                 "kind_compatible"
             };
-            RankedIntent {
+            Some(RankedIntent {
                 intent: other,
                 rank_reason,
                 match_summary,
                 source: "hard_constraints",
                 ranking_version: INTENT_RANKING_VERSION,
-            }
+            })
         })
         .collect();
 
@@ -727,6 +728,39 @@ pub async fn intent_matches(
         "items": candidates,
         "ranking_version": INTENT_RANKING_VERSION,
     })))
+}
+
+/// Put the requester's slots first and the provider's second.
+///
+/// Goods encode the side in `kind`; campus services encode it in a slot so
+/// both sides can continue using the existing `help` lifecycle. Help intents
+/// created before that slot existed are requests, not offers. This makes an old
+/// request visible to a new provider while keeping two old requests from being
+/// presented as a match.
+fn match_roles<'a>(
+    mine_kind: &str,
+    mine: &'a Slots,
+    other_kind: &str,
+    other: &'a Slots,
+) -> Option<(&'a Slots, &'a Slots)> {
+    if mine_kind == kinds::HELP && other_kind == kinds::HELP {
+        if !mine.has_complementary_service_direction(other) {
+            return None;
+        }
+        return if mine.service_direction()
+            == crate::services::intent::slots::SERVICE_DIRECTION_WANTED
+        {
+            Some((mine, other))
+        } else {
+            Some((other, mine))
+        };
+    }
+
+    if mine_kind == kinds::GOODS_SEEK {
+        Some((mine, other))
+    } else {
+        Some((other, mine))
+    }
 }
 
 fn deterministic_match_summary(constraint: &Slots, offer: &Slots) -> Vec<&'static str> {
@@ -761,9 +795,10 @@ fn deterministic_match_summary(constraint: &Slots, offer: &Slots) -> Vec<&'stati
 
 /// The kind an intent naturally pairs with.
 ///
-/// Goods are two-sided, so they cross. Companion, help and activity intents
-/// pair with their own kind: two people each looking for a badminton partner
-/// are each other's match.
+/// Goods are two-sided, so they cross. Companion and activity intents pair with
+/// their own kind: two people each looking for a badminton partner are each
+/// other's match. Help uses its own kind as a pool too, but only crosses the
+/// `wanted` and `offer` service directions.
 fn counterpart(kind: &str) -> &str {
     match kind {
         kinds::GOODS_OFFER => kinds::GOODS_SEEK,
@@ -806,6 +841,58 @@ mod tests {
         assert_eq!(counterpart(kinds::COMPANION), kinds::COMPANION);
         assert_eq!(counterpart(kinds::ACTIVITY), kinds::ACTIVITY);
         assert_eq!(counterpart(kinds::HELP), kinds::HELP);
+    }
+
+    #[test]
+    fn help_matches_only_cross_service_directions_and_legacy_means_wanted() {
+        let legacy = Slots::default();
+        let wanted = Slots {
+            service_direction: Some("wanted".to_string()),
+            ..Default::default()
+        };
+        let offer = Slots {
+            service_direction: Some("offer".to_string()),
+            ..Default::default()
+        };
+
+        assert!(match_roles(kinds::HELP, &legacy, kinds::HELP, &legacy).is_none());
+        assert!(match_roles(kinds::HELP, &wanted, kinds::HELP, &legacy).is_none());
+        assert!(match_roles(kinds::HELP, &offer, kinds::HELP, &offer).is_none());
+
+        let (constraint, provider) =
+            match_roles(kinds::HELP, &legacy, kinds::HELP, &offer).unwrap();
+        assert_eq!(constraint.service_direction(), "wanted");
+        assert_eq!(provider.service_direction(), "offer");
+
+        let (constraint, provider) =
+            match_roles(kinds::HELP, &offer, kinds::HELP, &legacy).unwrap();
+        assert_eq!(constraint.service_direction(), "wanted");
+        assert_eq!(provider.service_direction(), "offer");
+
+        assert!(
+            match_roles(kinds::COMPANION, &legacy, kinds::COMPANION, &legacy).is_some(),
+            "directional filtering is specific to help intents",
+        );
+    }
+
+    #[test]
+    fn help_price_constraints_always_run_from_wanted_to_offer() {
+        let wanted = Slots {
+            service_direction: Some("wanted".to_string()),
+            price: Some(PriceSlot::Exact { cents: 1_000 }),
+            ..Default::default()
+        };
+        let offer = Slots {
+            service_direction: Some("offer".to_string()),
+            price: Some(PriceSlot::Exact { cents: 1_500 }),
+            ..Default::default()
+        };
+
+        for (mine, other) in [(&wanted, &offer), (&offer, &wanted)] {
+            let (constraint, provider) =
+                match_roles(kinds::HELP, mine, kinds::HELP, other).unwrap();
+            assert!(!constraint.compatible_with(provider));
+        }
     }
 
     #[test]

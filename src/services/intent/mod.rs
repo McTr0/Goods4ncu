@@ -101,6 +101,10 @@ impl IntentService {
         if intent.raw_input.trim().is_empty() {
             anyhow::bail!("an intent needs the author's own words");
         }
+        intent
+            .slots
+            .validate_for_kind(intent.kind)
+            .map_err(|error| anyhow::anyhow!(error))?;
 
         let id: Uuid = sqlx::query_scalar(
             "INSERT INTO intents (
@@ -142,6 +146,9 @@ impl IntentService {
         let mut tx = self.db.begin().await?;
         let mut ids = Vec::with_capacity(items.len());
         for (slots, confidence) in items {
+            slots
+                .validate_for_kind(kind)
+                .map_err(|error| anyhow::anyhow!(error))?;
             let id: Uuid = sqlx::query_scalar(
                 "INSERT INTO intents (
                      campus_id, author_id, kind, raw_input, slots, confidence, status
