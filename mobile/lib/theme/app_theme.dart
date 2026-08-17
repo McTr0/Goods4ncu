@@ -90,6 +90,7 @@ class AppTheme {
     dividerColor: borderLight,
     fontFamily: 'Roboto',
     fontFamilyFallback: const [
+      'NotoSansSCApp',
       'PingFang SC',
       'Hiragino Sans GB',
       'Noto Sans CJK SC',
@@ -237,6 +238,7 @@ class AppTheme {
     dividerColor: borderDark,
     fontFamily: 'Roboto',
     fontFamilyFallback: const [
+      'NotoSansSCApp',
       'PingFang SC',
       'Hiragino Sans GB',
       'Noto Sans CJK SC',
