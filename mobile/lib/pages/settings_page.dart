@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import '../components/payment_qr_image.dart';
+import '../components/user_avatar.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../services/locale_service.dart';
@@ -37,6 +38,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late final ChatService _chatService;
 
   Map<String, dynamic>? _profile;
+  SocialPersona? _persona;
   bool _loading = true;
   String? _error;
   bool? _personalizationEnabled;
@@ -79,9 +81,16 @@ class _SettingsPageState extends State<SettingsPage> {
     });
     try {
       final profile = await _userService.getUserProfile();
+      SocialPersona? persona;
+      try {
+        persona = await _userService.getSocialPersona();
+      } catch (_) {
+        // The default system Avatar remains available if persona loading fails.
+      }
       if (mounted) {
         setState(() {
           _profile = profile;
+          _persona = persona;
           _loading = false;
         });
       }
@@ -209,49 +218,14 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildAvatarHeader() {
-    final avatarUrl = _profile?['avatar_url'] as String?;
     final username = _profile?['username'] as String? ?? '';
 
     return Center(
-      child: GestureDetector(
-        onTap: () => _pickAndUploadAvatar(context),
-        child: Stack(
-          children: [
-            CircleAvatar(
-              radius: 52,
-              backgroundColor: AppTheme.primary.withValues(alpha: 0.15),
-              backgroundImage: avatarUrl != null && avatarUrl.isNotEmpty
-                  ? NetworkImage(avatarUrl)
-                  : null,
-              child: avatarUrl == null || avatarUrl.isEmpty
-                  ? Text(
-                      username.isNotEmpty ? username[0].toUpperCase() : '?',
-                      style: const TextStyle(
-                        fontSize: 40,
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.primary,
-                      ),
-                    )
-                  : null,
-            ),
-            Positioned(
-              right: 0,
-              bottom: 0,
-              child: Container(
-                padding: const EdgeInsets.all(6),
-                decoration: const BoxDecoration(
-                  color: AppTheme.primary,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.camera_alt,
-                  size: 18,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ],
-        ),
+      child: UserAvatar(
+        name: username,
+        persona: _persona,
+        size: 104,
+        semanticLabel: username,
       ),
     );
   }
@@ -682,43 +656,6 @@ class _SettingsPageState extends State<SettingsPage> {
     }
 
     return ossUrl.toString();
-  }
-
-  Future<void> _pickAndUploadAvatar(BuildContext context) async {
-    final l = AppLocalizations.of(context)!;
-    final messenger = ScaffoldMessenger.of(context);
-    final source = await _pickImageSource(context);
-    if (source == null) return;
-
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(
-      source: source,
-      maxWidth: 512,
-      maxHeight: 512,
-      imageQuality: 80,
-    );
-    if (pickedFile == null) return;
-
-    try {
-      messenger.showSnackBar(SnackBar(content: Text('${l.uploading}...')));
-
-      final avatarUrl = await _uploadImageToOss(
-        pickedFile,
-        folder: 'avatars',
-        prefix: 'avatar',
-      );
-      final updated = await _userService.updateProfile(avatarUrl: avatarUrl);
-      if (mounted) {
-        setState(() => _profile = updated);
-        messenger.showSnackBar(SnackBar(content: Text(l.avatarUpdated)));
-      }
-    } catch (e) {
-      if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('${l.uploadFailed}: $e')),
-        );
-      }
-    }
   }
 
   String _buildOssDateHeader() {

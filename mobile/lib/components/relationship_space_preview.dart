@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import 'social_persona_renderer.dart';
 import 'user_avatar.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
@@ -15,7 +18,6 @@ class RelationshipSpacePreview extends StatefulWidget {
   const RelationshipSpacePreview({
     super.key,
     required this.otherName,
-    this.otherAvatarUrl,
     this.otherPersona,
     this.selfPersona,
     this.events = const [],
@@ -28,10 +30,12 @@ class RelationshipSpacePreview extends StatefulWidget {
     this.isConnected = false,
     this.initiallyExpanded = false,
     this.compact = false,
+    this.showRecentRecords = true,
+    this.stageMode = false,
+    this.stageContent,
   });
 
   final String otherName;
-  final String? otherAvatarUrl;
   final SocialPersona? otherPersona;
   final SocialPersona? selfPersona;
   final List<RelationshipSpaceEvent> events;
@@ -44,6 +48,9 @@ class RelationshipSpacePreview extends StatefulWidget {
   final bool isConnected;
   final bool initiallyExpanded;
   final bool compact;
+  final bool showRecentRecords;
+  final bool stageMode;
+  final Widget? stageContent;
 
   @override
   State<RelationshipSpacePreview> createState() =>
@@ -52,6 +59,8 @@ class RelationshipSpacePreview extends StatefulWidget {
 
 class _RelationshipSpacePreviewState extends State<RelationshipSpacePreview> {
   late bool _expanded;
+  bool _pokeActive = false;
+  Timer? _pokeTimer;
 
   @override
   void initState() {
@@ -63,6 +72,29 @@ class _RelationshipSpacePreviewState extends State<RelationshipSpacePreview> {
     setState(() {
       _expanded = !_expanded;
     });
+  }
+
+  void _poke() {
+    _pokeTimer?.cancel();
+    setState(() => _pokeActive = true);
+    _pokeTimer = Timer(const Duration(milliseconds: 700), () {
+      if (mounted) setState(() => _pokeActive = false);
+    });
+    final l = AppLocalizations.of(context)!;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          duration: const Duration(milliseconds: 1400),
+          content: Text(l.relationshipSpacePokeFeedback(widget.otherName)),
+        ),
+      );
+  }
+
+  @override
+  void dispose() {
+    _pokeTimer?.cancel();
+    super.dispose();
   }
 
   static String _formatTimestamp(DateTime dt, {required bool chinese}) {
@@ -193,6 +225,16 @@ class _RelationshipSpacePreviewState extends State<RelationshipSpacePreview> {
         : widget.sharedObjectCount;
     final effectiveHasRecentConnection =
         widget.recentConnection != null || widget.hasRecentConnection;
+    final availableWidth = MediaQuery.sizeOf(context).width;
+    final avatarSize = widget.compact
+        ? 40.0
+        : availableWidth < 600
+        ? 88.0
+        : 120.0;
+
+    if (widget.stageMode) {
+      return _buildStage(context, l, scheme, stateLabel);
+    }
 
     return Semantics(
       container: true,
@@ -256,34 +298,46 @@ class _RelationshipSpacePreviewState extends State<RelationshipSpacePreview> {
                 Expanded(
                   child: _PersonaAnchor(
                     name: widget.otherName,
-                    imageUrl: widget.otherAvatarUrl,
                     persona: widget.otherPersona,
-                    showPersona: !widget.isConnected,
+                    showPersona: true,
                     alignment: CrossAxisAlignment.start,
                     compact: widget.compact,
+                    size: avatarSize,
+                    motionCue: _pokeActive
+                        ? AvatarMotionCue.pressed
+                        : AvatarMotionCue.idle,
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: AppTheme.sp8),
-                  child: Icon(
-                    widget.isConnected
-                        ? Icons.compare_arrows_rounded
-                        : Icons.hub_outlined,
-                    semanticLabel: widget.isConnected
-                        ? l.relationshipSpaceConnected
-                        : l.relationshipSpaceTitle,
-                    color: widget.isConnected
-                        ? AppTheme.success
-                        : scheme.onSurfaceVariant,
+                  padding: const EdgeInsets.symmetric(horizontal: AppTheme.sp4),
+                  child: TextButton.icon(
+                    key: const Key('relationship-space-poke'),
+                    onPressed: _poke,
+                    icon: Icon(
+                      Icons.touch_app_rounded,
+                      size: widget.compact ? 16 : 20,
+                    ),
+                    label: Text(l.relationshipSpacePokeAction),
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: widget.compact ? 6 : 10,
+                        vertical: 6,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                    ),
                   ),
                 ),
                 Expanded(
                   child: _PersonaAnchor(
                     name: l.relationshipSpaceMe,
                     persona: widget.selfPersona,
-                    showPersona: !widget.isConnected,
+                    showPersona: true,
                     alignment: CrossAxisAlignment.end,
                     compact: widget.compact,
+                    size: avatarSize,
+                    motionCue: _pokeActive
+                        ? AvatarMotionCue.selected
+                        : AvatarMotionCue.idle,
                   ),
                 ),
               ],
@@ -297,9 +351,134 @@ class _RelationshipSpacePreviewState extends State<RelationshipSpacePreview> {
               effectiveSharedObjectCount,
               effectiveHasRecentConnection,
             ),
-            const SizedBox(height: AppTheme.sp12),
-            _buildRecentRecords(context, l, scheme),
+            if (widget.showRecentRecords) ...[
+              const SizedBox(height: AppTheme.sp12),
+              _buildRecentRecords(context, l, scheme),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStage(
+    BuildContext context,
+    AppLocalizations l,
+    ColorScheme scheme,
+    String stateLabel,
+  ) {
+    return Semantics(
+      container: true,
+      label: l.relationshipSpaceTitle,
+      child: Container(
+        key: const Key('relationship-space-stage'),
+        width: double.infinity,
+        height: double.infinity,
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerLowest,
+          border: Border.all(color: scheme.outlineVariant),
+          borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              scheme.primaryContainer.withValues(alpha: 0.22),
+              scheme.surfaceContainerLowest,
+              scheme.tertiaryContainer.withValues(alpha: 0.18),
+            ],
+          ),
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isNarrow = constraints.maxWidth < 600;
+            final avatarSize = isNarrow ? 104.0 : 148.0;
+            final edge = isNarrow ? 16.0 : 24.0;
+            final contentHorizontal = isNarrow ? 14.0 : avatarSize + edge + 28;
+            final contentTop = isNarrow ? 204.0 : 126.0;
+            final contentBottom = isNarrow ? 142.0 : 76.0;
+
+            return Stack(
+              children: [
+                Positioned(
+                  left: edge,
+                  right: edge,
+                  top: 14,
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.hub_outlined,
+                        size: 20,
+                        color: AppTheme.primary,
+                      ),
+                      const SizedBox(width: AppTheme.sp8),
+                      Expanded(
+                        child: Text(
+                          l.relationshipSpaceTitle,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      _StatePill(
+                        label: stateLabel,
+                        isConnected: widget.isConnected,
+                      ),
+                    ],
+                  ),
+                ),
+                Positioned(
+                  left: edge,
+                  top: 62,
+                  child: _PersonaAnchor(
+                    name: widget.otherName,
+                    persona: widget.otherPersona,
+                    showPersona: true,
+                    alignment: CrossAxisAlignment.start,
+                    size: avatarSize,
+                    motionCue: _pokeActive
+                        ? AvatarMotionCue.pressed
+                        : AvatarMotionCue.idle,
+                  ),
+                ),
+                Positioned(
+                  right: edge,
+                  bottom: edge,
+                  child: _PersonaAnchor(
+                    name: l.relationshipSpaceMe,
+                    persona: widget.selfPersona,
+                    showPersona: true,
+                    alignment: CrossAxisAlignment.end,
+                    size: avatarSize,
+                    motionCue: _pokeActive
+                        ? AvatarMotionCue.selected
+                        : AvatarMotionCue.idle,
+                  ),
+                ),
+                Positioned(
+                  top: isNarrow ? 112 : 72,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: TextButton.icon(
+                      key: const Key('relationship-space-poke'),
+                      onPressed: _poke,
+                      icon: const Icon(Icons.touch_app_rounded, size: 20),
+                      label: Text(l.relationshipSpacePokeAction),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: contentHorizontal,
+                  right: contentHorizontal,
+                  top: contentTop,
+                  bottom: contentBottom,
+                  child: widget.stageContent ?? const SizedBox.shrink(),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -734,34 +913,35 @@ class _RailChip extends StatelessWidget {
 class _PersonaAnchor extends StatelessWidget {
   const _PersonaAnchor({
     required this.name,
-    this.imageUrl,
     this.persona,
     this.showPersona = true,
     required this.alignment,
     this.compact = false,
+    required this.size,
+    this.motionCue = AvatarMotionCue.idle,
   });
 
   final String name;
-  final String? imageUrl;
   final SocialPersona? persona;
   final bool showPersona;
   final CrossAxisAlignment alignment;
   final bool compact;
+  final double size;
+  final AvatarMotionCue motionCue;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final trimmedName = name.trim();
-    final effectiveSize = compact ? 24.0 : (showPersona ? 160.0 : 48.0);
     return Column(
       crossAxisAlignment: alignment,
       children: [
         UserAvatar(
           name: trimmedName,
           persona: persona,
-          avatarUrl: imageUrl,
-          size: effectiveSize,
+          size: size,
           showPersona: showPersona,
+          motionCue: motionCue,
           semanticLabel: trimmedName.isEmpty ? null : trimmedName,
         ),
         SizedBox(height: compact ? AppTheme.sp2 : AppTheme.sp4),

@@ -39,21 +39,24 @@ dependencies:
   http: ^1.2.1
   web_socket_channel: ^3.0.1
   image_picker: ^1.1.2
-  record: ^5.1.0
   path_provider: ^2.1.3
   uuid: ^4.3.3
   intl: ^0.20.2
   shared_preferences: ^2.5.4
+  speech_to_text: ^7.4.0
   flutter_secure_storage: ^9.2.4
   go_router: ^14.8.0
   shimmer: ^3.0.0
   cached_network_image: ^3.4.0
   audioplayers: ^6.1.0
   fl_chart: ^0.69.0
+  flutter_map: ^8.3.1
+  latlong2: ^0.10.1
   provider: ^6.1.0
   state_notifier: ^0.7.0
   crypto: ^3.0.6
   markdown_widget: ^2.3.2+8
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:
@@ -97,6 +100,7 @@ flutter:
     - assets/brand/
     - assets/test_product_images/
     - assets/characters/
+    - assets/avatars/v1/sprout/
 
   # To add more assets to your application, extend the assets section:
   #   - images/a_dot_burr.jpeg

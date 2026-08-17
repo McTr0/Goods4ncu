@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 import '../components/social_persona_card.dart';
+import '../components/user_avatar.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
 import '../services/admin_role_cache.dart';
@@ -383,7 +384,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
     final username = _profile?['username'] ?? l.profile;
     final createdAt = _profile?['created_at'];
-    final avatarUrl = _profile?['avatar_url'] as String?;
     final isAdmin = _profile?['role'] == 'admin';
     final userId = _profile?['user_id']?.toString();
     CampusMembership? campusMembership;
@@ -413,7 +413,7 @@ class _ProfilePageState extends State<ProfilePage> {
             const SizedBox(height: AppTheme.sp16),
             _ProfileAvatar(
               username: username,
-              avatarUrl: avatarUrl,
+              persona: _persona,
               tooltip: l.viewPublicProfile,
               onTap: userId == null || userId.isEmpty
                   ? null
@@ -716,34 +716,24 @@ class _CampusMembershipBadge extends StatelessWidget {
 
 class _ProfileAvatar extends StatelessWidget {
   final String username;
-  final String? avatarUrl;
+  final SocialPersona? persona;
   final String tooltip;
   final VoidCallback? onTap;
 
   const _ProfileAvatar({
     required this.username,
-    required this.avatarUrl,
+    this.persona,
     required this.tooltip,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final hasAvatar = avatarUrl != null && avatarUrl!.isNotEmpty;
-    final avatar = CircleAvatar(
-      radius: 52,
-      backgroundColor: AppTheme.primary.withValues(alpha: 0.15),
-      backgroundImage: hasAvatar ? NetworkImage(avatarUrl!) : null,
-      child: hasAvatar
-          ? null
-          : Text(
-              username.isNotEmpty ? username[0].toUpperCase() : '?',
-              style: const TextStyle(
-                fontSize: 40,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.primary,
-              ),
-            ),
+    final avatar = UserAvatar(
+      name: username,
+      persona: persona,
+      size: 104,
+      semanticLabel: username,
     );
 
     if (onTap == null) {
@@ -765,19 +755,7 @@ class _ProfileAvatar extends StatelessWidget {
             child: Stack(
               clipBehavior: Clip.none,
               children: [
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: AppTheme.primary.withValues(alpha: 0.28),
-                      width: 2,
-                    ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(3),
-                    child: avatar,
-                  ),
-                ),
+                avatar,
                 Positioned(
                   right: 2,
                   bottom: 2,

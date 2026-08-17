@@ -12,11 +12,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get aiAssistantTab => 'AI Assistant';
 
   @override
-  String get aiError => 'Sorry, something went wrong. Please try again.';
+  String get aiError => 'Service unavailable. Try again.';
 
   @override
-  String get aiGreeting =>
-      'Hello! I\'m your campus secondhand trading assistant. How can I help you today?';
+  String get aiGreeting => 'Goods4ncu intelligent services';
 
   @override
   String get aiWillAutoRecognize => 'AI will auto-recognize item info';
@@ -130,14 +129,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get createListingAiReady => 'AI recognition complete';
 
   @override
-  String get createListingAiRecognizing => 'Assistant is recognizing...';
+  String get createListingAiRecognizing => 'Identifying…';
 
   @override
   String get createListingAiSubtitle =>
-      'Take or upload a photo, and the assistant will draft the title, category, brand, and condition for you to confirm.';
+      'Upload an image to identify the title, category, brand, and condition. Confirmation is required before publishing.';
 
   @override
-  String get createListingAiTitle => 'Let the assistant take a look first';
+  String get createListingAiTitle => 'Image recognition';
 
   @override
   String get createListingModeOffer => 'Sell';
@@ -146,25 +145,24 @@ class AppLocalizationsEn extends AppLocalizations {
   String get createListingModeWanted => 'Request';
 
   @override
-  String get createWantedPanelTitle => 'Describe what you want';
+  String get createWantedPanelTitle => 'Request details';
 
   @override
   String get createWantedPanelSubtitle =>
-      'Add budget, minimum condition, and the details you care about. The system will match classmates\' active offers.';
+      'Enter a budget, minimum condition, and other requirements for campus listing matching.';
 
   @override
   String get createListingBasicInfo => 'Listing basics';
 
   @override
   String get createListingBasicInfoSubtitle =>
-      'These details decide whether classmates will open the listing.';
+      'Used to generate the item list and detail view.';
 
   @override
   String get createWantedBasicInfo => 'Wanted basics';
 
   @override
-  String get createWantedBasicInfoSubtitle =>
-      'A clear request helps classmates know whether their item matches.';
+  String get createWantedBasicInfoSubtitle => 'Enter clear request criteria.';
 
   @override
   String get createListingBrandHint => 'For example: Apple, Casio, NCU';
@@ -186,14 +184,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get createListingConditionSubtitle =>
-      'Being clear about flaws makes the listing easier to trust.';
+      'Accurately describe the item\'s condition and defects.';
 
   @override
   String get createWantedConditionSection => 'Minimum requirements';
 
   @override
   String get createWantedConditionSubtitle =>
-      'Set the lowest condition and notes you can accept.';
+      'Enter the minimum acceptable condition and requirements.';
 
   @override
   String get createListingDefectHint => 'For example: minor screen scratch';
@@ -220,7 +218,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get createListingDescriptionSubtitle =>
-      'Optional, but concrete details reduce back-and-forth.';
+      'Optional. Used to reduce follow-up questions.';
 
   @override
   String get createWantedDescriptionHint =>
@@ -234,7 +232,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get createWantedDescriptionSubtitle =>
-      'Optional, but details help you get better recommendations.';
+      'Optional. Used to improve matching accuracy.';
 
   @override
   String createListingMissingFields(String fields) {
@@ -263,14 +261,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get createListingProgressImage => 'Image-assisted recognition';
 
   @override
-  String get createListingProgressSubtitle =>
-      'Follow this rhythm and the listing will stay tidy.';
+  String get createListingProgressSubtitle => 'Complete the required fields.';
 
   @override
   String get createListingProgressTitle => 'Publish progress';
 
   @override
-  String get createListingReadyHint => 'Everything is ready to publish';
+  String get createListingReadyHint => 'Information complete';
 
   @override
   String get createListingTitleHint => 'For example: iPhone 13 Pro Max 256G';
@@ -483,8 +480,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get homeColdStartTitle => 'No listings or requests yet';
 
   @override
-  String get homeColdStartBody =>
-      'No items have been posted yet in this campus. You can post an offer or a request.';
+  String get homeColdStartBody => 'No offers or requests at this school.';
 
   @override
   String get homeColdStartAction => 'Post';
@@ -496,8 +492,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get homeVoicesBody => 'Items classmates are looking for.';
 
   @override
-  String get homeFilterEmpty =>
-      'No items match this filter. Try adjusting or posting a new listing.';
+  String get homeFilterEmpty => 'No content under this filter.';
 
   @override
   String get notFound => 'Not found';
@@ -872,8 +867,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminTotpCodeHint => '6-digit code from your authenticator app';
 
   @override
-  String get agentPlanPendingHeader =>
-      'Pending actions (proposed by assistant, run only after you confirm)';
+  String get agentPlanPendingHeader => 'Pending actions';
 
   @override
   String get agentPlanConfirmAction => 'Confirm';
@@ -899,110 +893,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get undoFailed => 'Undo failed, please try again';
 
   @override
-  String get intentPageTitle => 'Offer / Wanted';
-
-  @override
-  String get intentComposerPrompt =>
-      'Describe what you are offering or looking for in one sentence; open the full listing form when you need precise fields.';
-
-  @override
-  String get intentComposerHint =>
-      'e.g. Clearing out my dorm, will take whatever for the mini fridge / Looking for a calculus textbook under ¥30';
-
-  @override
-  String get intentKindGoodsOffer => 'Selling';
-
-  @override
-  String get intentKindGoodsSeek => 'Looking for';
-
-  @override
-  String get intentKindCompanion => 'Looking for company';
-
-  @override
-  String get intentKindHelp => 'Asking a favour';
-
-  @override
-  String get intentKindActivity => 'Planning something';
-
-  @override
-  String get intentPriceWhatever => 'Whatever you\'ll give me';
-
-  @override
-  String get intentPriceFree => 'Giving it away';
-
-  @override
-  String get intentPriceFlexible => 'Price open';
-
-  @override
-  String get intentTimeFlexible => 'Any time';
-
-  @override
-  String get intentSubmit => 'Post it';
-
-  @override
-  String get intentPhotoAction => 'One photo, everything at once';
-
-  @override
-  String get intentPhotoWorking => 'Reading the photo…';
-
-  @override
-  String get intentPhotoSplit => 'Found a few — confirm which to post';
-
-  @override
-  String get intentPhotoNothing => 'Nothing recognised — saved what you wrote';
-
-  @override
-  String get intentSaving => 'Saving…';
-
-  @override
-  String get intentSaved => 'Noted — you\'ll hear if something fits';
-
-  @override
-  String get intentSavedNotListed =>
-      'Noted. Without a price it won\'t appear in the browse grid, but it will still be matched';
-
-  @override
-  String get intentMineHeader => 'What I\'ve said';
-
-  @override
-  String get intentMineEmpty => 'Nothing yet. One sentence above is enough.';
-
-  @override
-  String get intentDraftBadge => 'Awaiting your confirmation';
-
-  @override
-  String get intentConfirmDraft => 'Confirm';
-
-  @override
-  String get intentNoMatchesYet => 'Nothing fits yet';
-
-  @override
-  String get intentFulfilAction => 'Sorted';
-
-  @override
-  String get intentWithdrawAction => 'Never mind';
-
-  @override
-  String get intentFulfilled => 'Marked as sorted';
-
-  @override
-  String get intentWithdrawn => 'Withdrawn';
-
-  @override
-  String get intentFeedHeader => 'Offers and wants on campus';
-
-  @override
-  String get intentFeedEmpty =>
-      'There are no new offers or wanted posts yet. You can publish the first one.';
-
-  @override
-  String get intentRespondAction => 'I can help';
+  String get intentRespondAction => 'Contact publisher';
 
   @override
   String get intentRespondTitle => 'Reply';
 
   @override
-  String get intentRespondHint => 'Say what you have, or how you can help';
+  String get intentRespondHint =>
+      'Describe the item or relevant information you can provide';
 
   @override
   String get intentRespondSend => 'Send';
@@ -1026,24 +924,24 @@ class AppLocalizationsEn extends AppLocalizations {
   String get priceDiscoverySellerHint => 'The least you\'d accept';
 
   @override
-  String get priceDiscoverySubmit => 'Tell the assistant privately';
+  String get priceDiscoverySubmit => 'Submit offer';
 
   @override
   String get priceDiscoveryWaiting =>
-      'Got it. The result comes once they\'ve answered too — they cannot see your number.';
+      'Offer submitted. Offers remain hidden until both parties submit.';
 
   @override
   String get priceDiscoveryNoDeal =>
-      'It didn\'t work out this time. Want to just talk instead?';
+      'The submitted offers do not currently overlap.';
 
   @override
-  String get priceDiscoveryAcceptInvite => 'They\'d like to settle it this way';
+  String get priceDiscoveryAcceptInvite => 'Price negotiation request received';
 
   @override
-  String get priceDiscoveryAgree => 'Alright';
+  String get priceDiscoveryAgree => 'Confirm';
 
   @override
-  String get priceDiscoveryPreferHaggle => 'I\'d rather talk';
+  String get priceDiscoveryPreferHaggle => 'Switch to direct negotiation';
 
   @override
   String get priceDiscoveryDeclined => 'Switched to talking it over';
@@ -1052,79 +950,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get priceDiscoveryInvalid => 'Enter a sensible price';
 
   @override
-  String get agreementCardTitle => 'What we agreed';
-
-  @override
-  String get agreementSlotItem => 'Item';
-
-  @override
-  String get agreementSlotPrice => 'Price';
-
-  @override
-  String get agreementSlotTime => 'When';
-
-  @override
-  String get agreementSlotPlace => 'Where';
-
-  @override
-  String get agreementSlotWho => 'Who';
-
-  @override
-  String get agreementSlotBring => 'Bring';
-
-  @override
-  String get agreementSlotConditions => 'Other terms';
-
-  @override
-  String get agreementSuggestion => 'Read from the chat — adopt it?';
-
-  @override
-  String get agreementAdopt => 'Adopt';
-
-  @override
-  String get agreementWaitingOther => 'Waiting for them';
-
-  @override
-  String get agreementAgreed => 'Both agreed';
-
-  @override
-  String get agreementNotSet => 'Not set';
-
-  @override
-  String get agreementSet => 'Set';
-
-  @override
-  String get agreementSettle => 'It\'s settled';
-
-  @override
-  String get agreementSettled => 'Settled';
-
-  @override
-  String get agreementStale => 'This changed — take a look';
-
-  @override
-  String get handoffPromptTitle => 'How did it go?';
-
-  @override
-  String get handoffHappened => 'We met and it worked out';
-
-  @override
-  String get handoffMissed => 'It didn\'t happen';
-
-  @override
-  String get handoffOnTime => 'They were on time';
-
-  @override
-  String get handoffLate => 'They were late';
-
-  @override
-  String get handoffThanks => 'Thanks — noted';
-
-  @override
-  String get handoffOnce => 'Asked once, and it cannot be changed later';
-
-  @override
-  String get reputationNewcomer => 'New here — no record yet';
+  String get reputationNewcomer => 'No record';
 
   @override
   String reputationSummary(int completed, int onTime) {
@@ -1134,11 +960,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String priceDiscoveryMatched(String price) {
     return 'Agreed at ¥$price';
-  }
-
-  @override
-  String intentMatchCount(int count) {
-    return '$count possible match(es)';
   }
 
   @override
@@ -1454,9 +1275,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get homePromptSubmitTooltip => 'Search';
 
   @override
-  String get homeActionFind => 'Find';
-
-  @override
   String get homeActionOffer => 'Post Offer';
 
   @override
@@ -1478,24 +1296,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get conversationLoadFailedTitle => 'Messages could not load';
 
   @override
-  String get conversationEmptyTitle => 'No conversations yet';
+  String get conversationEmptyTitle => 'No conversations';
 
   @override
   String get conversationEmptySubtitle =>
-      'Answer someone in \"what people are looking for\" and you\'ll have your first conversation.';
+      'Conversations appear here after contact is initiated.';
 
   @override
   String get conversationEmptyAction => 'Post offer / wanted';
 
   @override
-  String get conversationEmptyAskAssistant => 'Ask Xiaochang (AI assistant)';
-
-  @override
-  String get conversationNextStepsTitle => 'What you can do next';
-
-  @override
-  String get conversationNextStepsSubtitle =>
-      'Find another classmate, post an offer or wanted request, or ask Xiaochang where to start.';
+  String get conversationEmptyAskAssistant => 'Xiaochang';
 
   @override
   String get findClassmate => 'Find classmate';
@@ -1601,22 +1412,29 @@ class AppLocalizationsEn extends AppLocalizations {
   String get assistantName => 'Xiaochang';
 
   @override
-  String get assistantSystemBadge => 'AI Assistant';
+  String get assistantSystemBadge => 'Core Avatar';
 
   @override
   String get assistantInboxSubtitle =>
-      'Find items, price, publish, and negotiate from here';
+      'Item search, pricing, publishing, and negotiation';
 
   @override
   String get assistantHeaderSubtitle =>
-      'Your campus trading assistant · important decisions ask for your confirmation first';
+      'Personal transaction assistant · important actions require confirmation';
 
   @override
-  String get assistantHistoryLoadFailed =>
-      'History could not load. You can still keep asking Xiaochang.';
+  String get assistantHistoryLoadFailed => 'History failed to load.';
 
   @override
-  String get assistantTyping => 'AI is typing...';
+  String get assistantTyping => 'Processing…';
+
+  @override
+  String get relationshipSpacePokeAction => 'Poke';
+
+  @override
+  String relationshipSpacePokeFeedback(String name) {
+    return 'You poked $name';
+  }
 
   @override
   String recordingStatus(int seconds) {
@@ -1627,13 +1445,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get viewAction => 'View';
 
   @override
-  String get invitationFallbackTitle => 'Wants to chat with you now';
+  String get invitationFallbackTitle => 'Realtime conversation invitation';
 
   @override
-  String get declineNow => 'Not now';
+  String get declineNow => 'Decline';
 
   @override
-  String get connectNow => 'Connect';
+  String get connectNow => 'Accept';
 
   @override
   String get modeRealtime => 'Realtime';
@@ -1655,7 +1473,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get conversationStateActive => 'This conversation is connected';
 
   @override
-  String get conversationStateDeclined => 'This time did not connect';
+  String get conversationStateDeclined => 'Connection not established';
 
   @override
   String get conversationStateCancelled => 'Invitation cancelled';
@@ -1674,7 +1492,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'Realtime conversations and mail threads stay clearly separated here.';
 
   @override
-  String get contactModePromptTitle => 'How would you like to reach out?';
+  String get contactModePromptTitle => 'Select contact method';
+
+  @override
+  String get contactPageModeHint =>
+      'This is a full contact page. Choose realtime contact or mail; going back preserves the previous page.';
+
+  @override
+  String get contactBackAction => 'Back to contact methods';
 
   @override
   String contactContextUser(String username) {
@@ -1690,22 +1515,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get contactFallbackUser => 'this classmate';
 
   @override
-  String get contactModeRealtimeTitle => 'Chat now';
+  String get contactModeRealtimeTitle => 'Realtime conversation';
 
   @override
   String get contactModeRealtimeDescription =>
       'Send a 10-minute realtime invite. The conversation starts once they connect.';
 
   @override
-  String get contactModeMailTitle => 'Leave a message';
+  String get contactModeMailTitle => 'Message';
 
   @override
   String get contactModeMailDescription =>
       'Send it directly without online, typing, or read indicators.';
 
   @override
-  String get contactOpeningRequired =>
-      'Please write what you want to say first.';
+  String get contactOpeningRequired => 'Enter an opening message.';
 
   @override
   String get contactMailSubjectRequired => 'Mail needs a subject.';
@@ -1727,10 +1551,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'When would you like them to look? (optional)';
 
   @override
-  String get contactMailExpectationOrdinary => 'Whenever convenient';
+  String get contactMailExpectationOrdinary => 'No time requirement';
 
   @override
-  String get contactMailExpectationToday => 'Hopefully today';
+  String get contactMailExpectationToday => 'Reply today';
 
   @override
   String get contactMailBodyLabel => 'Body';
@@ -1741,7 +1565,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get contactMailBodyHint =>
-      'Share your question and when it is convenient to reply...';
+      'Enter your question and preferred reply time...';
 
   @override
   String get contactRealtimeOpeningHint => 'Hi, is this item still available?';
@@ -1926,7 +1750,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get conversationSectionDirect => 'Direct messages';
 
   @override
-  String get conversationSectionSpaces => 'Campus groups and channels';
+  String get conversationSectionSpaces => 'Campus group chats';
 
   @override
   String get conversationSectionTools => 'Xiaochang';
@@ -1948,7 +1772,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get conversationPeerFallback => 'Classmate';
 
   @override
-  String get conversationThreadLoading => 'Opening';
+  String get conversationThreadLoading => 'Loading';
 
   @override
   String conversationThreadStats(int realtime, int mail, int count) {
@@ -1960,15 +1784,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get conversationThreadLoadFailedTitle =>
-      'Contact thread could not load';
+      'Contact conversation failed to load';
 
   @override
-  String get conversationThreadEmptyTitle =>
-      'No visible conversation history yet';
+  String get conversationThreadEmptyTitle => 'No communication records';
 
   @override
   String get conversationThreadEmptySubtitle =>
-      'Reconnect to start a new realtime chat or mail thread.';
+      'Start a new realtime conversation or message.';
 
   @override
   String get conversationMailThreadTitle => 'Mail thread';
@@ -2133,6 +1956,193 @@ class AppLocalizationsEn extends AppLocalizations {
   String get createChannel => 'Create channel';
 
   @override
+  String get campusMapTitle => 'Campus map';
+
+  @override
+  String get campusMapOpenTooltip => 'Open campus map';
+
+  @override
+  String get campusMapLogicalTitle => 'Nanchang University real map';
+
+  @override
+  String get campusMapEstimateBadge => 'North/south zones · progressive labels';
+
+  @override
+  String get campusMapLogicalHint =>
+      'Blue dashed lines show public map boundaries, with the Qianhu main campus and medical campus outlined separately. Gates appear first, other places appear as you zoom, and only a narrow road buffer remains outside.';
+
+  @override
+  String get campusMapZoomIn => 'Zoom in';
+
+  @override
+  String get campusMapZoomOut => 'Zoom out';
+
+  @override
+  String get campusMapResetView => 'Recenter current campus';
+
+  @override
+  String get campusMapTogglePoints => 'Show or hide place labels';
+
+  @override
+  String get campusMapDirectoryTitle => 'Place chat directory';
+
+  @override
+  String get campusMapPlannerTitle => 'Plan from your location';
+
+  @override
+  String get campusMapUseCurrentLocation => 'Use one-time coarse location';
+
+  @override
+  String get campusMapManualOrigin => 'Choose a start manually';
+
+  @override
+  String get campusMapManualOriginRequired =>
+      'No map node matched the coarse location. Choose a start manually.';
+
+  @override
+  String get campusMapLocationFailed =>
+      'Location is unavailable. Choose a start manually.';
+
+  @override
+  String get campusMapSelectOrigin => 'Select a starting point';
+
+  @override
+  String get campusMapBuildingLabel => 'Destination building';
+
+  @override
+  String get campusMapBuildingHint =>
+      'For example: Xiansu Garden or Qianhu Library';
+
+  @override
+  String get campusMapClassroomLabel => 'Classroom or indoor place (optional)';
+
+  @override
+  String get campusMapClassroomHint =>
+      'For example: A101 or third-floor study area';
+
+  @override
+  String get campusMapBuildRoute => 'Build logical route';
+
+  @override
+  String get campusMapSelectBuilding =>
+      'Choose a building node from the map or suggestions.';
+
+  @override
+  String get campusMapRouteUnavailable =>
+      'The walking path between these nodes has not been verified, so distance and navigation are unavailable.';
+
+  @override
+  String get campusMapRouteTitle => 'Route';
+
+  @override
+  String campusMapEstimatedDistance(int meters) {
+    return 'Estimated distance: about $meters m';
+  }
+
+  @override
+  String get campusMapSchematicRouteWarning =>
+      'This route follows logical adjacency on the guide only. It has no verified distance or turn-by-turn directions; follow on-site paths and signs.';
+
+  @override
+  String campusMapClassroomArrival(String classroom) {
+    return 'After reaching the building, follow indoor signs to $classroom.';
+  }
+
+  @override
+  String get campusMapChatUnavailable =>
+      'Chat data for this node is not synced yet';
+
+  @override
+  String campusMapEnterChat(String name) {
+    return 'Enter $name chat';
+  }
+
+  @override
+  String get locationSpacesTitle => 'Nanchang University place chats';
+
+  @override
+  String get locationSpacesSubtitle =>
+      'Choose a place, or use a one-time coarse location match.';
+
+  @override
+  String get locationUseCurrent => 'Use location';
+
+  @override
+  String get locationPrivacyHint =>
+      'Only an approximately 100 m location is sent for matching and nothing is stored. Manual choice is always available.';
+
+  @override
+  String locationRecommendTitle(String name) {
+    return 'You are near $name';
+  }
+
+  @override
+  String get locationRecommendBody =>
+      'This is a one-time suggestion. Enter the place chat to take part in the current conversation; your online state expires after you leave.';
+
+  @override
+  String get locationEnterAction => 'Enter chat';
+
+  @override
+  String get locationJoinLabel => 'Enter';
+
+  @override
+  String get locationManualOnlyLabel => 'Manual';
+
+  @override
+  String get locationNoMatch =>
+      'No place matched. Choose a location manually below.';
+
+  @override
+  String get locationUnavailable =>
+      'Location is unavailable. Choose a place chat manually.';
+
+  @override
+  String get locationLoadFailed => 'Place chats could not load';
+
+  @override
+  String locationEnterFailed(String error) {
+    return 'Could not enter the place chat: $error';
+  }
+
+  @override
+  String locationMemberCount(int count) {
+    return '$count members';
+  }
+
+  @override
+  String locationOnlineCount(int count) {
+    return '$count online now';
+  }
+
+  @override
+  String get locationOnlineUnavailable => 'Online count unavailable';
+
+  @override
+  String get locationSpaceKind => 'Place chat';
+
+  @override
+  String get locationChatEmptyTitle => 'No messages here yet';
+
+  @override
+  String get locationChatEmptySubtitle =>
+      'There is nothing to join. Enter the place and take part in the current conversation.';
+
+  @override
+  String get locationComposerHint => 'Send a place message...';
+
+  @override
+  String get locationCreateChildTooltip => 'Create a small chat here';
+
+  @override
+  String locationCreateChildTitle(String name) {
+    return 'Create a small chat in $name';
+  }
+
+  @override
+  String get locationChildCreated => 'Small chat created';
+
+  @override
   String get spaceNameLabel => 'Name';
 
   @override
@@ -2185,7 +2195,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get spaceGroupEmptySubtitle =>
-      'It is now in Messages. Send the first note to bring the group to life.';
+      'Start a topic before discussing it with the group.';
 
   @override
   String get replyAction => 'Reply';
@@ -2206,7 +2216,53 @@ class AppLocalizationsEn extends AppLocalizations {
   String get channelComposerHint => 'Post an announcement...';
 
   @override
-  String get groupComposerHint => 'Send a group message...';
+  String get groupComposerHint => 'Discuss inside this topic...';
+
+  @override
+  String get groupTopicsTitle => 'Group topics';
+
+  @override
+  String get groupTopicsSubtitle =>
+      'There is no shared message stream. Open a topic to join its discussion.';
+
+  @override
+  String get startGroupTopic => 'Start a topic';
+
+  @override
+  String get groupTopicTitleHint => 'Describe what you want to discuss';
+
+  @override
+  String get groupTopicCreateHint => 'Every reply will stay inside this topic.';
+
+  @override
+  String get createTopicAction => 'Create topic';
+
+  @override
+  String get groupTopicEmptyTitle => 'No topics yet';
+
+  @override
+  String get groupTopicEmptySubtitle =>
+      'A group topic must be started before members can discuss it.';
+
+  @override
+  String get groupTopicReplyHint => 'Reply in this topic...';
+
+  @override
+  String get groupTopicNoRepliesTitle => 'Waiting for the first reply';
+
+  @override
+  String get groupTopicNoRepliesSubtitle =>
+      'Your reply will only appear in this topic.';
+
+  @override
+  String groupTopicStartedBy(String name) {
+    return 'Started by $name';
+  }
+
+  @override
+  String groupTopicReplyCount(int count) {
+    return '$count';
+  }
 
   @override
   String spaceFallbackDescription(int count, String kind) {
@@ -2352,7 +2408,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get replyAssistantUnavailable =>
-      'Xiaochang is not ready yet. You can still type directly.';
+      'Reply suggestions are unavailable. Enter a reply directly.';
 
   @override
   String closeConversationFailed(String error) {
@@ -2453,10 +2509,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readModeInherit => 'Inherit default';
 
   @override
-  String get audioCallMvp => 'Audio call MVP';
+  String get audioCallMvp => 'Audio call';
 
   @override
-  String get videoCallMvp => 'Video call MVP';
+  String get videoCallMvp => 'Video call';
 
   @override
   String get secretChatMvp => 'Secret chat MVP';
@@ -2465,7 +2521,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get closeConversationAction => 'End this conversation';
 
   @override
-  String get replyAssistantButton => 'Ask Xiaochang';
+  String get replyAssistantButton => 'Generate reply suggestion';
 
   @override
   String get mailFallbackTitle => 'Mail';
@@ -2475,7 +2531,8 @@ class AppLocalizationsEn extends AppLocalizations {
       'Async sending · no online, typing, or read status';
 
   @override
-  String get incomingRealtimeTitle => 'They want to chat now';
+  String get incomingRealtimeTitle =>
+      'Realtime conversation invitation received';
 
   @override
   String get incomingRealtimeSubtitle => 'You can choose whether to connect';
@@ -2618,7 +2675,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get noMessagesYet => 'No messages yet. Start the conversation.';
+  String get noMessagesYet => 'No messages';
 
   @override
   String get stopAction => 'Stop';
@@ -3012,7 +3069,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get socialPersonaPublished => 'Published · visible on this campus';
 
   @override
-  String get socialPersonaArchived => 'Archived · ordinary avatar is shown';
+  String get socialPersonaArchived =>
+      'Archived · default system Avatar is shown';
 
   @override
   String get socialPersonaRepresentationMode => 'Representation';
@@ -3125,7 +3183,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get socialPersonaPublish => 'Publish presentation';
 
   @override
-  String get socialPersonaArchive => 'Archive and restore ordinary avatar';
+  String get socialPersonaArchive => 'Archive and use default Avatar';
 
   @override
   String get socialPersonaRestore => 'Edit and publish again';
@@ -3144,7 +3202,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get socialPersonaPublishedToast => 'Role presentation published';
 
   @override
-  String get socialPersonaArchivedToast => 'Archived; ordinary avatar is shown';
+  String get socialPersonaArchivedToast =>
+      'Archived; default system Avatar is shown';
 
   @override
   String get socialPersonaPreviewRole => 'Role preview';
@@ -3220,6 +3279,88 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get socialPersonaAssetRevokeConfirmBody =>
       'It will stop being public immediately and enter remote cleanup. Conversation history is unchanged.';
+
+  @override
+  String get composerMoreTools => 'More tools';
+
+  @override
+  String get composerHideTools => 'Hide tools';
+
+  @override
+  String get composerSendTooltip => 'Send message';
+
+  @override
+  String get composerImageAction => 'Image';
+
+  @override
+  String get composerVoiceMessageAction => 'Voice message';
+
+  @override
+  String get dictationStartAction => 'Speech to text';
+
+  @override
+  String get dictationStopAction => 'Stop dictation';
+
+  @override
+  String get dictationListening =>
+      'Listening — recognized text appears in the input';
+
+  @override
+  String get dictationPermissionDenied =>
+      'Microphone permission is required for speech to text';
+
+  @override
+  String get dictationUnsupported =>
+      'This device does not support speech to text';
+
+  @override
+  String get dictationNetworkError =>
+      'The speech recognition service is unavailable';
+
+  @override
+  String get dictationUnavailable =>
+      'Speech to text is temporarily unavailable';
+
+  @override
+  String get groupToolRelay => 'Sign-up list';
+
+  @override
+  String get groupToolCollection => 'Group collection';
+
+  @override
+  String get groupToolPoll => 'Poll';
+
+  @override
+  String get groupToolRelayTemplate => '[Sign-up list]\nTopic:\nDeadline:';
+
+  @override
+  String get groupToolCollectionTemplate =>
+      '[Group collection]\nName:\nDetails:';
+
+  @override
+  String get groupToolPollTemplate => '[Poll]\nQuestion:\nOption 1:\nOption 2:';
+
+  @override
+  String get assistantToolFind => 'Find an item';
+
+  @override
+  String get assistantToolPublish => 'Publish an item';
+
+  @override
+  String get assistantToolEstimate => 'Price guidance';
+
+  @override
+  String get assistantToolFindPrompt => 'Help me find an item:';
+
+  @override
+  String get assistantToolPublishPrompt =>
+      'Help me publish an item using these details:';
+
+  @override
+  String get assistantToolEstimatePrompt =>
+      'Estimate a fair campus-market price for this item:';
+
+  @override
   String get postDiscoveryTitle => 'Campus discovery';
 
   @override
@@ -3358,4 +3499,178 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get postStartAction => 'Start a discussion';
+
+  @override
+  String get errandPublishTitle => 'Campus errands';
+
+  @override
+  String get errandPublishIntro =>
+      'Describe a pickup, purchase, queue, or printing task and classmates can offer to help. Errands expire after 24 hours by default; use public handoff points.';
+
+  @override
+  String get errandSubjectLabel => 'What needs doing?';
+
+  @override
+  String get errandSubjectHint =>
+      'For example: Pick up my printed handout from the library';
+
+  @override
+  String get errandSubjectRequired => 'Describe the errand';
+
+  @override
+  String get errandModeLabel => 'Errand type';
+
+  @override
+  String get errandServiceDirectionLabel => 'Service direction';
+
+  @override
+  String get errandServiceWanted => 'Need help';
+
+  @override
+  String get errandServiceOffer => 'Offer help';
+
+  @override
+  String get errandServiceWantedHint => 'I need a classmate to do this';
+
+  @override
+  String get errandServiceOfferHint => 'I can do this for a classmate';
+
+  @override
+  String get errandModePickup => 'Pickup';
+
+  @override
+  String get errandModeBuy => 'Buy for me';
+
+  @override
+  String get errandModeQueue => 'Queue';
+
+  @override
+  String get errandModePrint => 'Print/copy';
+
+  @override
+  String get errandModeReturn => 'Return/handoff';
+
+  @override
+  String get errandModeOther => 'Other';
+
+  @override
+  String get errandPickupLabel => 'Where should it be picked up?';
+
+  @override
+  String get errandPickupHint =>
+      'Use a gate, library, parcel desk, or another public point';
+
+  @override
+  String get errandDropoffLabel => 'Where should it be handed off?';
+
+  @override
+  String get errandDropoffHint => 'Choose a convenient public meeting point';
+
+  @override
+  String get errandTimeLabel => 'When would help be useful?';
+
+  @override
+  String get errandTimeHint =>
+      'For example: before 6 PM today, or after class tonight';
+
+  @override
+  String get errandRewardLabel => 'Offer (CNY)';
+
+  @override
+  String get errandRewardHint => 'Optional; leave blank to discuss first';
+
+  @override
+  String get errandValidForLabel => 'Keep active for';
+
+  @override
+  String get errandValidForDay => '24 hours';
+
+  @override
+  String get errandValidForThreeDays => '3 days';
+
+  @override
+  String get errandValidForWeek => '1 week';
+
+  @override
+  String get errandNotesLabel => 'Notes';
+
+  @override
+  String get errandNotesHint =>
+      'Quantity, size, or handoff details; avoid sensitive information';
+
+  @override
+  String get errandPublishAction => 'Publish errand';
+
+  @override
+  String get errandPublishSuccess =>
+      'Errand published; classmates can offer to help';
+
+  @override
+  String get errandPublishFailed => 'Could not publish the errand. Try again.';
+
+  @override
+  String get errandFeedTitle => 'Campus errands';
+
+  @override
+  String get errandFeedBody =>
+      'Nearby classmates are looking for pickups, purchases, and quick favors.';
+
+  @override
+  String get errandCreateAction => 'Post an errand';
+
+  @override
+  String get errandRespondAction => 'I can help';
+
+  @override
+  String get errandNeedServiceAction => 'I need this service';
+
+  @override
+  String get errandPickupShort => 'Pick up';
+
+  @override
+  String get errandDropoffShort => 'Drop off';
+
+  @override
+  String get errandTimeShort => 'When';
+
+  @override
+  String get errandBoardTitle => 'Campus errands';
+
+  @override
+  String get errandTabCampus => 'Campus';
+
+  @override
+  String get errandTabMine => 'My errands';
+
+  @override
+  String get errandCampusEmpty =>
+      'No classmates have posted an errand right now.';
+
+  @override
+  String get errandMineEmpty => 'You have no active errands.';
+
+  @override
+  String get errandFulfilAction => 'Completed';
+
+  @override
+  String get errandWithdrawAction => 'Withdraw';
+
+  @override
+  String get errandFulfilled => 'Errand marked as completed';
+
+  @override
+  String get errandWithdrawn => 'Errand withdrawn';
+
+  @override
+  String get errandLoadFailed => 'Could not load campus errands';
+
+  @override
+  String get errandExpiresLabel => 'Time-limited';
+
+  @override
+  String get errandRespondTitle => 'Reply to errand';
+
+  @override
+  String get errandRespondHint =>
+      'Explain how you can help, when you are free, and where to meet';
 }

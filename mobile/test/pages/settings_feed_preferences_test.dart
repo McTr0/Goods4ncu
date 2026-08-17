@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
+import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/pages/settings_page.dart';
 import 'package:goods4ncu_mobile/services/feed_feedback_service.dart';
 import 'package:goods4ncu_mobile/services/locale_service.dart';
@@ -19,6 +20,9 @@ class _FakeUserService extends UserService {
     },
     'payment_qr': <String, dynamic>{},
   };
+
+  @override
+  Future<SocialPersona?> getSocialPersona() async => null;
 }
 
 class _FakeFeedFeedbackService extends FeedFeedbackService {

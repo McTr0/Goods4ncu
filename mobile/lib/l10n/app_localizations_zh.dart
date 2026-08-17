@@ -12,10 +12,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get aiAssistantTab => 'AI助手';
 
   @override
-  String get aiError => '抱歉，出现了一些问题，请重试。';
+  String get aiError => '服务暂不可用，请重试。';
 
   @override
-  String get aiGreeting => '你好！我是续樟校园二手交易平台的智能助手。有什么我可以帮你的吗？';
+  String get aiGreeting => '续樟智能服务';
 
   @override
   String get aiWillAutoRecognize => 'AI将自动识别商品信息';
@@ -125,13 +125,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get createListingAiReady => 'AI 识别完成';
 
   @override
-  String get createListingAiRecognizing => '小昌正在识别...';
+  String get createListingAiRecognizing => '正在识别…';
 
   @override
-  String get createListingAiSubtitle => '拍照或上传图片，小昌会帮你先填标题、分类、品牌和成色；你只需要确认。';
+  String get createListingAiSubtitle => '上传图片后自动识别标题、分类、品牌和成色，发布前需要确认。';
 
   @override
-  String get createListingAiTitle => '先让小昌看一眼';
+  String get createListingAiTitle => '图片识别';
 
   @override
   String get createListingModeOffer => '出售';
@@ -140,22 +140,22 @@ class AppLocalizationsZh extends AppLocalizations {
   String get createListingModeWanted => '求购';
 
   @override
-  String get createWantedPanelTitle => '描述你想收什么';
+  String get createWantedPanelTitle => '求购信息';
 
   @override
-  String get createWantedPanelSubtitle => '写清预算、最低成色和你在意的细节；系统会帮你匹配同学正在出的物品。';
+  String get createWantedPanelSubtitle => '填写预算、最低成色和其他要求，用于匹配校园内的在售物品。';
 
   @override
   String get createListingBasicInfo => '商品基础信息';
 
   @override
-  String get createListingBasicInfoSubtitle => '这些信息会直接影响同学是否愿意点进来看。';
+  String get createListingBasicInfoSubtitle => '用于生成商品列表和详情信息。';
 
   @override
   String get createWantedBasicInfo => '收物基础信息';
 
   @override
-  String get createWantedBasicInfoSubtitle => '把需求说清楚，愿意出的同学才知道是否匹配。';
+  String get createWantedBasicInfoSubtitle => '请填写明确的求购条件。';
 
   @override
   String get createListingBrandHint => '例如：Apple、Casio、NCU';
@@ -176,13 +176,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get createListingConditionSection => '成色与瑕疵';
 
   @override
-  String get createListingConditionSubtitle => '把不完美说清楚，反而更容易成交。';
+  String get createListingConditionSubtitle => '请如实填写物品成色和瑕疵。';
 
   @override
   String get createWantedConditionSection => '最低要求';
 
   @override
-  String get createWantedConditionSubtitle => '这是你愿意接受的最低成色和补充要求。';
+  String get createWantedConditionSubtitle => '填写可接受的最低成色和补充要求。';
 
   @override
   String get createListingDefectHint => '例如：屏幕有轻微划痕';
@@ -206,7 +206,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get createListingDescriptionSection => '补充描述';
 
   @override
-  String get createListingDescriptionSubtitle => '可选，但越具体越省沟通成本。';
+  String get createListingDescriptionSubtitle => '选填，用于减少后续沟通。';
 
   @override
   String get createWantedDescriptionHint => '描述你想用它做什么、希望在哪里交接、哪些点不能接受...';
@@ -218,7 +218,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get createWantedDescriptionSection => '补充需求';
 
   @override
-  String get createWantedDescriptionSubtitle => '可选，但越具体越容易收到靠谱推荐。';
+  String get createWantedDescriptionSubtitle => '选填，用于提高匹配准确性。';
 
   @override
   String createListingMissingFields(String fields) {
@@ -247,13 +247,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get createListingProgressImage => '图片辅助识别';
 
   @override
-  String get createListingProgressSubtitle => '按这个节奏补齐，发布就不会乱。';
+  String get createListingProgressSubtitle => '请完成必填项。';
 
   @override
   String get createListingProgressTitle => '发布进度';
 
   @override
-  String get createListingReadyHint => '信息齐了，可以发布';
+  String get createListingReadyHint => '信息完整';
 
   @override
   String get createListingTitleHint => '例如：iPhone 13 Pro Max 256G';
@@ -464,7 +464,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get homeColdStartTitle => '暂无闲置或求购需求';
 
   @override
-  String get homeColdStartBody => '本校还没有人发布物品。你可以发布闲置或发布求购。';
+  String get homeColdStartBody => '本校暂无出售或求购信息。';
 
   @override
   String get homeColdStartAction => '发布';
@@ -476,7 +476,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get homeVoicesBody => '这些是同学们正在寻找的物品。';
 
   @override
-  String get homeFilterEmpty => '当前筛选下没有内容。你可以调整筛选，或直接发布。';
+  String get homeFilterEmpty => '当前筛选下暂无内容。';
 
   @override
   String get notFound => '未找到';
@@ -841,7 +841,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get adminTotpCodeHint => '来自身份验证器 App 的 6 位数字';
 
   @override
-  String get agentPlanPendingHeader => '待确认操作（小昌提出，需你确认后执行）';
+  String get agentPlanPendingHeader => '待确认操作';
 
   @override
   String get agentPlanConfirmAction => '确认执行';
@@ -867,106 +867,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get undoFailed => '撤销失败，请重试';
 
   @override
-  String get intentPageTitle => '发布出 / 收';
-
-  @override
-  String get intentComposerPrompt => '用一句话说明你想出什么或收什么；需要精确填写时可以打开完整商品表单。';
-
-  @override
-  String get intentComposerHint => '比如：宿舍要清空了，小冰箱能卖多少卖多少 / 想收一本高数教材，30 元以内';
-
-  @override
-  String get intentKindGoodsOffer => '想出东西';
-
-  @override
-  String get intentKindGoodsSeek => '想收东西';
-
-  @override
-  String get intentKindCompanion => '想找人一起';
-
-  @override
-  String get intentKindHelp => '想找人帮忙';
-
-  @override
-  String get intentKindActivity => '想约活动';
-
-  @override
-  String get intentPriceWhatever => '能卖多少卖多少';
-
-  @override
-  String get intentPriceFree => '免费送';
-
-  @override
-  String get intentPriceFlexible => '价格可谈';
-
-  @override
-  String get intentTimeFlexible => '时间都行';
-
-  @override
-  String get intentSubmit => '说出来';
-
-  @override
-  String get intentPhotoAction => '拍一张，一次全发';
-
-  @override
-  String get intentPhotoWorking => '正在看这张照片…';
-
-  @override
-  String get intentPhotoSplit => '识别出几件，确认一下哪些要发';
-
-  @override
-  String get intentPhotoNothing => '这张照片没认出东西，已按你写的记下';
-
-  @override
-  String get intentSaving => '正在保存…';
-
-  @override
-  String get intentSaved => '已记下，有合适的会告诉你';
-
-  @override
-  String get intentSavedNotListed => '已记下。没写价格，所以不会出现在商品栅格里，但一样会撮合';
-
-  @override
-  String get intentMineHeader => '我说过的';
-
-  @override
-  String get intentMineEmpty => '还没说过什么。上面写一句就行。';
-
-  @override
-  String get intentDraftBadge => '待你确认';
-
-  @override
-  String get intentConfirmDraft => '确认';
-
-  @override
-  String get intentNoMatchesYet => '暂时还没有合适的';
-
-  @override
-  String get intentFulfilAction => '已经解决了';
-
-  @override
-  String get intentWithdrawAction => '算了';
-
-  @override
-  String get intentFulfilled => '已标记为解决';
-
-  @override
-  String get intentWithdrawn => '已撤回';
-
-  @override
-  String get intentFeedHeader => '校园里的出与收';
-
-  @override
-  String get intentFeedEmpty => '现在还没有新的出售信息或求购需求。你可以先发布一条。';
-
-  @override
-  String get intentRespondAction => '我能帮';
+  String get intentRespondAction => '联系发布者';
 
   @override
   String get intentRespondTitle => '回应';
 
   @override
-  String get intentRespondHint => '说说你有什么、或者你能怎么帮';
+  String get intentRespondHint => '说明可提供的物品或相关信息';
 
   @override
   String get intentRespondSend => '发送';
@@ -990,22 +897,22 @@ class AppLocalizationsZh extends AppLocalizations {
   String get priceDiscoverySellerHint => '你最少愿意收多少';
 
   @override
-  String get priceDiscoverySubmit => '私下告诉小昌';
+  String get priceDiscoverySubmit => '提交报价';
 
   @override
-  String get priceDiscoveryWaiting => '已收到。等对方也说完就出结果——对方看不到你的数字。';
+  String get priceDiscoveryWaiting => '报价已提交。双方提交前，报价互不可见。';
 
   @override
-  String get priceDiscoveryNoDeal => '这次没谈拢。要不要直接聊聊？';
+  String get priceDiscoveryNoDeal => '双方报价暂未达成一致。';
 
   @override
-  String get priceDiscoveryAcceptInvite => '对方想用这个方式定价';
+  String get priceDiscoveryAcceptInvite => '收到价格协商邀请';
 
   @override
-  String get priceDiscoveryAgree => '好，就这样';
+  String get priceDiscoveryAgree => '确认';
 
   @override
-  String get priceDiscoveryPreferHaggle => '我想直接谈';
+  String get priceDiscoveryPreferHaggle => '改为直接协商';
 
   @override
   String get priceDiscoveryDeclined => '已改为直接沟通';
@@ -1014,79 +921,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get priceDiscoveryInvalid => '请填一个合理的价格';
 
   @override
-  String get agreementCardTitle => '说好的事';
-
-  @override
-  String get agreementSlotItem => '东西';
-
-  @override
-  String get agreementSlotPrice => '价格';
-
-  @override
-  String get agreementSlotTime => '时间';
-
-  @override
-  String get agreementSlotPlace => '地点';
-
-  @override
-  String get agreementSlotWho => '几个人';
-
-  @override
-  String get agreementSlotBring => '要带什么';
-
-  @override
-  String get agreementSlotConditions => '其他约定';
-
-  @override
-  String get agreementSuggestion => '小昌从聊天里读到的，要采纳吗？';
-
-  @override
-  String get agreementAdopt => '就这样';
-
-  @override
-  String get agreementWaitingOther => '等对方确认';
-
-  @override
-  String get agreementAgreed => '双方都确认了';
-
-  @override
-  String get agreementNotSet => '还没说';
-
-  @override
-  String get agreementSet => '填写';
-
-  @override
-  String get agreementSettle => '就这么定了';
-
-  @override
-  String get agreementSettled => '已定下';
-
-  @override
-  String get agreementStale => '这一项已经变了，请看最新的内容';
-
-  @override
-  String get handoffPromptTitle => '这次约定后来怎么样？';
-
-  @override
-  String get handoffHappened => '见到了，事情办成了';
-
-  @override
-  String get handoffMissed => '没见到';
-
-  @override
-  String get handoffOnTime => '对方准时';
-
-  @override
-  String get handoffLate => '对方迟到了';
-
-  @override
-  String get handoffThanks => '谢谢，已记下';
-
-  @override
-  String get handoffOnce => '只问一次，之后不能改';
-
-  @override
-  String get reputationNewcomer => '新同学，还没有记录';
+  String get reputationNewcomer => '暂无记录';
 
   @override
   String reputationSummary(int completed, int onTime) {
@@ -1096,11 +931,6 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String priceDiscoveryMatched(String price) {
     return '谈成了，成交价 ¥$price';
-  }
-
-  @override
-  String intentMatchCount(int count) {
-    return '找到 $count 个可能合适的';
   }
 
   @override
@@ -1286,7 +1116,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get cannotContactSeller => '无法联系卖家：缺少卖家信息';
 
   @override
-  String get itemAlreadyPurchased => '哎呀，该商品太火爆，已经被别人抢先一步啦！';
+  String get itemAlreadyPurchased => '该商品已被购买。';
 
   @override
   String get unknown => '未知';
@@ -1398,9 +1228,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get homePromptSubmitTooltip => '搜索';
 
   @override
-  String get homeActionFind => '找东西';
-
-  @override
   String get homeActionOffer => '发布闲置';
 
   @override
@@ -1422,22 +1249,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationLoadFailedTitle => '消息暂时没有加载出来';
 
   @override
-  String get conversationEmptyTitle => '还没有会话';
+  String get conversationEmptyTitle => '暂无会话';
 
   @override
-  String get conversationEmptySubtitle => '在「大家在找什么」里回应一个人，就有第一次对话了。';
+  String get conversationEmptySubtitle => '发起联系后，相关对话将显示在此处。';
 
   @override
   String get conversationEmptyAction => '发布出 / 收';
 
   @override
-  String get conversationEmptyAskAssistant => '问小昌（AI 助手）';
-
-  @override
-  String get conversationNextStepsTitle => '接下来可以';
-
-  @override
-  String get conversationNextStepsSubtitle => '再找一位同学、发布你的出 / 收，或让小昌帮你找到入口。';
+  String get conversationEmptyAskAssistant => '小昌';
 
   @override
   String get findClassmate => '找同学';
@@ -1538,19 +1359,27 @@ class AppLocalizationsZh extends AppLocalizations {
   String get assistantName => '小昌';
 
   @override
-  String get assistantSystemBadge => 'AI 助手';
+  String get assistantSystemBadge => '核心 Avatar';
 
   @override
-  String get assistantInboxSubtitle => '找货、估价、发布、议价，都可以从这里开始';
+  String get assistantInboxSubtitle => '商品搜索、估价、发布与议价';
 
   @override
-  String get assistantHeaderSubtitle => '你的续樟校园交易助手 · 重要决定会先征求你的确认';
+  String get assistantHeaderSubtitle => '个人交易辅助工具 · 重要操作需确认';
 
   @override
-  String get assistantHistoryLoadFailed => '历史消息暂时没有加载出来，你仍然可以继续询问小昌。';
+  String get assistantHistoryLoadFailed => '历史记录加载失败。';
 
   @override
-  String get assistantTyping => 'AI 正在输入...';
+  String get assistantTyping => '处理中…';
+
+  @override
+  String get relationshipSpacePokeAction => '拍一拍';
+
+  @override
+  String relationshipSpacePokeFeedback(String name) {
+    return '你拍了拍 $name';
+  }
 
   @override
   String recordingStatus(int seconds) {
@@ -1561,13 +1390,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get viewAction => '查看';
 
   @override
-  String get invitationFallbackTitle => '想和你实时聊聊';
+  String get invitationFallbackTitle => '实时对话邀请';
 
   @override
-  String get declineNow => '现在不方便';
+  String get declineNow => '拒绝';
 
   @override
-  String get connectNow => '接通';
+  String get connectNow => '接受';
 
   @override
   String get modeRealtime => '实时';
@@ -1588,7 +1417,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationStateActive => '本次会话已接通';
 
   @override
-  String get conversationStateDeclined => '这次没有接通';
+  String get conversationStateDeclined => '未建立连接';
 
   @override
   String get conversationStateCancelled => '邀请已取消';
@@ -1606,7 +1435,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationChooseSubtitle => '实时会话与留言都会在这里保持各自清晰的边界。';
 
   @override
-  String get contactModePromptTitle => '你想怎样联系？';
+  String get contactModePromptTitle => '选择联系方式';
+
+  @override
+  String get contactPageModeHint => '这是完整的联系页面。选择实时联系或留言，返回时仍会保留原页面上下文。';
+
+  @override
+  String get contactBackAction => '返回选择联系方式';
 
   @override
   String contactContextUser(String username) {
@@ -1622,19 +1457,19 @@ class AppLocalizationsZh extends AppLocalizations {
   String get contactFallbackUser => '这位同学';
 
   @override
-  String get contactModeRealtimeTitle => '现在聊';
+  String get contactModeRealtimeTitle => '实时对话';
 
   @override
   String get contactModeRealtimeDescription => '发起 10 分钟实时邀请，对方接通后开始本次会话';
 
   @override
-  String get contactModeMailTitle => '写封留言';
+  String get contactModeMailTitle => '留言';
 
   @override
   String get contactModeMailDescription => '直接发送，不显示在线、输入中和已读状态';
 
   @override
-  String get contactOpeningRequired => '请先写下你想说的话';
+  String get contactOpeningRequired => '请输入首条消息';
 
   @override
   String get contactMailSubjectRequired => '留言需要一个主题';
@@ -1655,10 +1490,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get contactMailExpectationLabel => '希望对方何时处理（可选）';
 
   @override
-  String get contactMailExpectationOrdinary => '有空时看';
+  String get contactMailExpectationOrdinary => '无时间要求';
 
   @override
-  String get contactMailExpectationToday => '希望今天看';
+  String get contactMailExpectationToday => '今日回复';
 
   @override
   String get contactMailBodyLabel => '正文';
@@ -1667,7 +1502,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get contactRealtimeOpeningLabel => '对方接通前会看到这句话';
 
   @override
-  String get contactMailBodyHint => '把问题和方便回复的时间一次说清楚…';
+  String get contactMailBodyHint => '请输入问题及方便回复的时间…';
 
   @override
   String get contactRealtimeOpeningHint => '你好，请问这件商品现在还在吗？';
@@ -1844,7 +1679,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationSectionDirect => '同学私聊';
 
   @override
-  String get conversationSectionSpaces => '校园群组与频道';
+  String get conversationSectionSpaces => '校园群聊';
 
   @override
   String get conversationSectionTools => '小昌';
@@ -1864,7 +1699,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationPeerFallback => '同学';
 
   @override
-  String get conversationThreadLoading => '正在打开';
+  String get conversationThreadLoading => '正在加载';
 
   @override
   String conversationThreadStats(int realtime, int mail, int count) {
@@ -1875,13 +1710,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationReconnect => '再联系';
 
   @override
-  String get conversationThreadLoadFailedTitle => '联系人线程暂时没加载出来';
+  String get conversationThreadLoadFailedTitle => '联系人会话加载失败';
 
   @override
-  String get conversationThreadEmptyTitle => '还没有可显示的沟通记录';
+  String get conversationThreadEmptyTitle => '暂无沟通记录';
 
   @override
-  String get conversationThreadEmptySubtitle => '再联系会创建一段新的实时聊天或留言。';
+  String get conversationThreadEmptySubtitle => '可发起新的实时对话或留言。';
 
   @override
   String get conversationMailThreadTitle => '留言线程';
@@ -2037,6 +1872,180 @@ class AppLocalizationsZh extends AppLocalizations {
   String get createChannel => '创建频道';
 
   @override
+  String get campusMapTitle => '校园地图';
+
+  @override
+  String get campusMapOpenTooltip => '打开校园地图';
+
+  @override
+  String get campusMapLogicalTitle => '南昌大学真实地图';
+
+  @override
+  String get campusMapEstimateBadge => '南北分区 · 分级标注';
+
+  @override
+  String get campusMapLogicalHint =>
+      '蓝色虚线是公开地图校界，前湖主校区与医学部分开勾勒。校门优先显示，其它地点随缩放逐级出现；校界外仅保留一圈道路。';
+
+  @override
+  String get campusMapZoomIn => '放大地图';
+
+  @override
+  String get campusMapZoomOut => '缩小地图';
+
+  @override
+  String get campusMapResetView => '回到当前校区';
+
+  @override
+  String get campusMapTogglePoints => '显示或隐藏地点标注';
+
+  @override
+  String get campusMapDirectoryTitle => '地点聊天室目录';
+
+  @override
+  String get campusMapPlannerTitle => '从当前位置规划';
+
+  @override
+  String get campusMapUseCurrentLocation => '用一次性粗定位确定起点';
+
+  @override
+  String get campusMapManualOrigin => '手动选择起点';
+
+  @override
+  String get campusMapManualOriginRequired => '粗定位没有匹配到地图节点，请手动选择起点。';
+
+  @override
+  String get campusMapLocationFailed => '定位暂不可用，请手动选择起点。';
+
+  @override
+  String get campusMapSelectOrigin => '请选择起点';
+
+  @override
+  String get campusMapBuildingLabel => '目的地建筑';
+
+  @override
+  String get campusMapBuildingHint => '例如：先骕园、前湖校区图书馆';
+
+  @override
+  String get campusMapClassroomLabel => '教室或室内位置（可选）';
+
+  @override
+  String get campusMapClassroomHint => '例如：A101、三楼自习区';
+
+  @override
+  String get campusMapBuildRoute => '生成逻辑路线';
+
+  @override
+  String get campusMapSelectBuilding => '请从地图或建议中选择一个建筑节点。';
+
+  @override
+  String get campusMapRouteUnavailable => '这些节点之间的步行路线尚未核验，暂不提供距离和导航。';
+
+  @override
+  String get campusMapRouteTitle => '路线';
+
+  @override
+  String campusMapEstimatedDistance(int meters) {
+    return '估算距离约 $meters 米';
+  }
+
+  @override
+  String get campusMapSchematicRouteWarning =>
+      '此路线仅按地图中的逻辑相邻关系生成，不含经核验的距离或逐路段指引，请以现场道路和导视为准。';
+
+  @override
+  String campusMapClassroomArrival(String classroom) {
+    return '到达建筑后，按楼内标识前往 $classroom。';
+  }
+
+  @override
+  String get campusMapChatUnavailable => '该节点的聊天室数据尚未同步';
+
+  @override
+  String campusMapEnterChat(String name) {
+    return '进入$name聊天室';
+  }
+
+  @override
+  String get locationSpacesTitle => '南昌大学地点聊天室';
+
+  @override
+  String get locationSpacesSubtitle => '选择地点，或用一次性粗粒度定位推荐附近聊天室。';
+
+  @override
+  String get locationUseCurrent => '定位进入';
+
+  @override
+  String get locationPrivacyHint => '只发送约 100 米粒度的位置用于匹配，不保存定位记录；也可以直接手动选择。';
+
+  @override
+  String locationRecommendTitle(String name) {
+    return '附近是 $name';
+  }
+
+  @override
+  String get locationRecommendBody => '这是一次性推荐。进入该地点聊天室即可参与当下交流；离开页面后在线状态会过期。';
+
+  @override
+  String get locationEnterAction => '进入聊天室';
+
+  @override
+  String get locationJoinLabel => '进入';
+
+  @override
+  String get locationManualOnlyLabel => '手动地点';
+
+  @override
+  String get locationNoMatch => '暂时没有匹配到地点，请从下方手动选择。';
+
+  @override
+  String get locationUnavailable => '定位不可用，请手动选择地点聊天室。';
+
+  @override
+  String get locationLoadFailed => '地点聊天室暂时没加载出来';
+
+  @override
+  String locationEnterFailed(String error) {
+    return '进入地点聊天室失败：$error';
+  }
+
+  @override
+  String locationMemberCount(int count) {
+    return '$count 位成员';
+  }
+
+  @override
+  String locationOnlineCount(int count) {
+    return '当前在线 $count 人';
+  }
+
+  @override
+  String get locationOnlineUnavailable => '在线人数暂不可用';
+
+  @override
+  String get locationSpaceKind => '地点聊天室';
+
+  @override
+  String get locationChatEmptyTitle => '这里暂时还没有消息';
+
+  @override
+  String get locationChatEmptySubtitle => '无需加入，进入这个地点时就可以参与当下的交流。';
+
+  @override
+  String get locationComposerHint => '发一条地点消息...';
+
+  @override
+  String get locationCreateChildTooltip => '在此地点创建小聊天室';
+
+  @override
+  String locationCreateChildTitle(String name) {
+    return '在 $name 下创建小聊天室';
+  }
+
+  @override
+  String get locationChildCreated => '小聊天室已创建';
+
+  @override
   String get spaceNameLabel => '名称';
 
   @override
@@ -2086,7 +2095,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get spaceChannelEmptySubtitle => '公告会出现在这里；频道成员可以阅读、反应和举报。';
 
   @override
-  String get spaceGroupEmptySubtitle => '现在它已经在消息列表里了。发第一句话，让这个群组真的活起来。';
+  String get spaceGroupEmptySubtitle => '先发起一个话题，再在话题下讨论。';
 
   @override
   String get replyAction => '回复';
@@ -2107,7 +2116,50 @@ class AppLocalizationsZh extends AppLocalizations {
   String get channelComposerHint => '发布一条公告...';
 
   @override
-  String get groupComposerHint => '发一条群消息...';
+  String get groupComposerHint => '在话题下讨论...';
+
+  @override
+  String get groupTopicsTitle => '群聊话题';
+
+  @override
+  String get groupTopicsSubtitle => '群聊不设公共消息流，选择一个话题进入讨论。';
+
+  @override
+  String get startGroupTopic => '发起话题';
+
+  @override
+  String get groupTopicTitleHint => '一句话说明想讨论什么';
+
+  @override
+  String get groupTopicCreateHint => '创建后，所有回复都会归在这个话题下。';
+
+  @override
+  String get createTopicAction => '创建话题';
+
+  @override
+  String get groupTopicEmptyTitle => '还没有话题';
+
+  @override
+  String get groupTopicEmptySubtitle => '群聊必须先发起话题，成员才能在话题下展开讨论。';
+
+  @override
+  String get groupTopicReplyHint => '在这个话题下回复...';
+
+  @override
+  String get groupTopicNoRepliesTitle => '等待第一条回复';
+
+  @override
+  String get groupTopicNoRepliesSubtitle => '你的回复只会出现在当前话题中。';
+
+  @override
+  String groupTopicStartedBy(String name) {
+    return '由 $name 发起';
+  }
+
+  @override
+  String groupTopicReplyCount(int count) {
+    return '$count 条';
+  }
 
   @override
   String spaceFallbackDescription(int count, String kind) {
@@ -2247,7 +2299,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get replyAssistantUnavailable => '小昌暂时没想好，你仍可以直接输入';
+  String get replyAssistantUnavailable => '回复建议暂不可用，可直接输入。';
 
   @override
   String closeConversationFailed(String error) {
@@ -2343,10 +2395,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get readModeInherit => '继承默认';
 
   @override
-  String get audioCallMvp => '语音通话 MVP';
+  String get audioCallMvp => '语音通话';
 
   @override
-  String get videoCallMvp => '视频通话 MVP';
+  String get videoCallMvp => '视频通话';
 
   @override
   String get secretChatMvp => '加密聊天 MVP';
@@ -2355,7 +2407,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get closeConversationAction => '结束本次沟通';
 
   @override
-  String get replyAssistantButton => '小昌帮我回';
+  String get replyAssistantButton => '生成回复建议';
 
   @override
   String get mailFallbackTitle => '留言';
@@ -2364,7 +2416,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mailProtocolSubtitle => '异步发送 · 不显示在线、输入中和已读状态';
 
   @override
-  String get incomingRealtimeTitle => '对方想现在聊聊';
+  String get incomingRealtimeTitle => '收到实时对话邀请';
 
   @override
   String get incomingRealtimeSubtitle => '你可以选择是否接通';
@@ -2502,7 +2554,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get noMessagesYet => '暂无消息，开始聊天吧';
+  String get noMessagesYet => '暂无消息';
 
   @override
   String get stopAction => '停止';
@@ -2878,7 +2930,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get socialPersonaPublished => '已发布 · 同校园可见';
 
   @override
-  String get socialPersonaArchived => '已归档 · 普通头像展示中';
+  String get socialPersonaArchived => '已归档 · 当前展示默认系统 Avatar';
 
   @override
   String get socialPersonaRepresentationMode => '呈现方式';
@@ -2989,7 +3041,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get socialPersonaPublish => '发布呈现';
 
   @override
-  String get socialPersonaArchive => '归档并恢复普通头像';
+  String get socialPersonaArchive => '归档并使用默认 Avatar';
 
   @override
   String get socialPersonaRestore => '重新编辑并发布';
@@ -3008,7 +3060,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get socialPersonaPublishedToast => '角色化呈现已发布';
 
   @override
-  String get socialPersonaArchivedToast => '已归档，恢复普通头像展示';
+  String get socialPersonaArchivedToast => '已归档，当前展示默认系统 Avatar';
 
   @override
   String get socialPersonaPreviewRole => '角色预览';
@@ -3080,6 +3132,80 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String get socialPersonaAssetRevokeConfirmBody =>
       '撤销后它会立即停止公开展示，并进入远端清理。历史沟通不会被修改。';
+
+  @override
+  String get composerMoreTools => '更多工具';
+
+  @override
+  String get composerHideTools => '收起工具';
+
+  @override
+  String get composerSendTooltip => '发送消息';
+
+  @override
+  String get composerImageAction => '图片';
+
+  @override
+  String get composerVoiceMessageAction => '语音消息';
+
+  @override
+  String get dictationStartAction => '语音转文字';
+
+  @override
+  String get dictationStopAction => '停止转写';
+
+  @override
+  String get dictationListening => '正在听写，识别结果会实时填入输入框';
+
+  @override
+  String get dictationPermissionDenied => '麦克风权限未开启，无法进行语音转文字';
+
+  @override
+  String get dictationUnsupported => '当前设备不支持语音转文字';
+
+  @override
+  String get dictationNetworkError => '语音识别服务暂时无法连接';
+
+  @override
+  String get dictationUnavailable => '语音转文字暂时不可用，请稍后重试';
+
+  @override
+  String get groupToolRelay => '接龙';
+
+  @override
+  String get groupToolCollection => '群收集';
+
+  @override
+  String get groupToolPoll => '投票';
+
+  @override
+  String get groupToolRelayTemplate => '【接龙】\n主题：\n截止时间：';
+
+  @override
+  String get groupToolCollectionTemplate => '【群收集】\n名称：\n说明：';
+
+  @override
+  String get groupToolPollTemplate => '【投票】\n问题：\n选项 1：\n选项 2：';
+
+  @override
+  String get assistantToolFind => '找商品';
+
+  @override
+  String get assistantToolPublish => '发布商品';
+
+  @override
+  String get assistantToolEstimate => '价格参考';
+
+  @override
+  String get assistantToolFindPrompt => '帮我找一件商品：';
+
+  @override
+  String get assistantToolPublishPrompt => '帮我根据这些信息发布商品：';
+
+  @override
+  String get assistantToolEstimatePrompt => '帮我参考校园市场估算这件商品的价格：';
+
+  @override
   String get postDiscoveryTitle => '校园发现';
 
   @override
@@ -3212,4 +3338,170 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get postStartAction => '发起讨论';
+
+  @override
+  String get errandPublishTitle => '校园待办';
+
+  @override
+  String get errandPublishIntro =>
+      '把取件、代买、排队、打印等小事说清楚，同学可以回应帮忙。默认 24 小时后过期；地点请写公共区域。';
+
+  @override
+  String get errandSubjectLabel => '要帮忙做什么？';
+
+  @override
+  String get errandSubjectHint => '例如：帮我从图书馆取一份打印材料';
+
+  @override
+  String get errandSubjectRequired => '请写下要帮忙完成的事情';
+
+  @override
+  String get errandModeLabel => '待办类型';
+
+  @override
+  String get errandServiceDirectionLabel => '服务方向';
+
+  @override
+  String get errandServiceWanted => '收服务';
+
+  @override
+  String get errandServiceOffer => '出服务';
+
+  @override
+  String get errandServiceWantedHint => '我需要同学帮我完成这件事';
+
+  @override
+  String get errandServiceOfferHint => '我可以替同学完成这件事';
+
+  @override
+  String get errandModePickup => '取件';
+
+  @override
+  String get errandModeBuy => '代买';
+
+  @override
+  String get errandModeQueue => '代排队';
+
+  @override
+  String get errandModePrint => '打印/复印';
+
+  @override
+  String get errandModeReturn => '送回/交接';
+
+  @override
+  String get errandModeOther => '其他';
+
+  @override
+  String get errandPickupLabel => '从哪里取？';
+
+  @override
+  String get errandPickupHint => '写校门、图书馆、驿站等公共地点';
+
+  @override
+  String get errandDropoffLabel => '送到哪里？';
+
+  @override
+  String get errandDropoffHint => '写方便交接的公共地点';
+
+  @override
+  String get errandTimeLabel => '什么时候方便？';
+
+  @override
+  String get errandTimeHint => '例如：今天 18:00 前，或今晚下课后';
+
+  @override
+  String get errandRewardLabel => '愿付报酬（元）';
+
+  @override
+  String get errandRewardHint => '选填，留空表示先沟通';
+
+  @override
+  String get errandValidForLabel => '需求有效期';
+
+  @override
+  String get errandValidForDay => '24 小时';
+
+  @override
+  String get errandValidForThreeDays => '3 天';
+
+  @override
+  String get errandValidForWeek => '1 周';
+
+  @override
+  String get errandNotesLabel => '补充说明';
+
+  @override
+  String get errandNotesHint => '数量、规格、联系方式等，别写敏感信息';
+
+  @override
+  String get errandPublishAction => '发布待办';
+
+  @override
+  String get errandPublishSuccess => '待办已发布，同学可以回应帮忙';
+
+  @override
+  String get errandPublishFailed => '待办发布失败，请稍后重试';
+
+  @override
+  String get errandFeedTitle => '校园待办';
+
+  @override
+  String get errandFeedBody => '附近同学正在寻找取件、代买和临时帮忙。';
+
+  @override
+  String get errandCreateAction => '发布待办';
+
+  @override
+  String get errandRespondAction => '我可以帮忙';
+
+  @override
+  String get errandNeedServiceAction => '我需要这项服务';
+
+  @override
+  String get errandPickupShort => '取';
+
+  @override
+  String get errandDropoffShort => '送';
+
+  @override
+  String get errandTimeShort => '时间';
+
+  @override
+  String get errandBoardTitle => '校园待办';
+
+  @override
+  String get errandTabCampus => '校园需求';
+
+  @override
+  String get errandTabMine => '我的待办';
+
+  @override
+  String get errandCampusEmpty => '暂时没有同学发布待办。';
+
+  @override
+  String get errandMineEmpty => '你还没有进行中的待办。';
+
+  @override
+  String get errandFulfilAction => '已完成';
+
+  @override
+  String get errandWithdrawAction => '撤回';
+
+  @override
+  String get errandFulfilled => '待办已标记为完成';
+
+  @override
+  String get errandWithdrawn => '待办已撤回';
+
+  @override
+  String get errandLoadFailed => '待办暂时没有加载出来';
+
+  @override
+  String get errandExpiresLabel => '限时需求';
+
+  @override
+  String get errandRespondTitle => '回应待办';
+
+  @override
+  String get errandRespondHint => '说明你能怎么帮、方便的时间和交接地点';
 }

@@ -107,13 +107,13 @@ abstract class AppLocalizations {
   /// No description provided for @aiError.
   ///
   /// In en, this message translates to:
-  /// **'Sorry, something went wrong. Please try again.'**
+  /// **'Service unavailable. Try again.'**
   String get aiError;
 
   /// No description provided for @aiGreeting.
   ///
   /// In en, this message translates to:
-  /// **'Hello! I\'m your campus secondhand trading assistant. How can I help you today?'**
+  /// **'Goods4ncu intelligent services'**
   String get aiGreeting;
 
   /// No description provided for @aiWillAutoRecognize.
@@ -329,43 +329,43 @@ abstract class AppLocalizations {
   /// No description provided for @createListingAiRecognizing.
   ///
   /// In en, this message translates to:
-  /// **'Assistant is recognizing...'**
+  /// **'Identifying…'**
   String get createListingAiRecognizing;
 
   /// No description provided for @createListingAiSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Take or upload a photo, and the assistant will draft the title, category, brand, and condition for you to confirm.'**
+  /// **'Upload an image to identify the title, category, brand, and condition. Confirmation is required before publishing.'**
   String get createListingAiSubtitle;
 
   /// No description provided for @createListingAiTitle.
   ///
   /// In en, this message translates to:
-  /// **'Let the assistant take a look first'**
+  /// **'Image recognition'**
   String get createListingAiTitle;
 
   /// No description provided for @createListingModeOffer.
   ///
   /// In en, this message translates to:
-  /// **'I am offering'**
+  /// **'Sell'**
   String get createListingModeOffer;
 
   /// No description provided for @createListingModeWanted.
   ///
   /// In en, this message translates to:
-  /// **'I am looking for'**
+  /// **'Request'**
   String get createListingModeWanted;
 
   /// No description provided for @createWantedPanelTitle.
   ///
   /// In en, this message translates to:
-  /// **'Describe what you want'**
+  /// **'Request details'**
   String get createWantedPanelTitle;
 
   /// No description provided for @createWantedPanelSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Add budget, minimum condition, and the details you care about. The system will match classmates\' active offers.'**
+  /// **'Enter a budget, minimum condition, and other requirements for campus listing matching.'**
   String get createWantedPanelSubtitle;
 
   /// No description provided for @createListingBasicInfo.
@@ -377,7 +377,7 @@ abstract class AppLocalizations {
   /// No description provided for @createListingBasicInfoSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'These details decide whether classmates will open the listing.'**
+  /// **'Used to generate the item list and detail view.'**
   String get createListingBasicInfoSubtitle;
 
   /// No description provided for @createWantedBasicInfo.
@@ -389,7 +389,7 @@ abstract class AppLocalizations {
   /// No description provided for @createWantedBasicInfoSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'A clear request helps classmates know whether their item matches.'**
+  /// **'Enter clear request criteria.'**
   String get createWantedBasicInfoSubtitle;
 
   /// No description provided for @createListingBrandHint.
@@ -431,7 +431,7 @@ abstract class AppLocalizations {
   /// No description provided for @createListingConditionSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Being clear about flaws makes the listing easier to trust.'**
+  /// **'Accurately describe the item\'s condition and defects.'**
   String get createListingConditionSubtitle;
 
   /// No description provided for @createWantedConditionSection.
@@ -443,7 +443,7 @@ abstract class AppLocalizations {
   /// No description provided for @createWantedConditionSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Set the lowest condition and notes you can accept.'**
+  /// **'Enter the minimum acceptable condition and requirements.'**
   String get createWantedConditionSubtitle;
 
   /// No description provided for @createListingDefectHint.
@@ -491,7 +491,7 @@ abstract class AppLocalizations {
   /// No description provided for @createListingDescriptionSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Optional, but concrete details reduce back-and-forth.'**
+  /// **'Optional. Used to reduce follow-up questions.'**
   String get createListingDescriptionSubtitle;
 
   /// No description provided for @createWantedDescriptionHint.
@@ -515,7 +515,7 @@ abstract class AppLocalizations {
   /// No description provided for @createWantedDescriptionSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Optional, but details help you get better recommendations.'**
+  /// **'Optional. Used to improve matching accuracy.'**
   String get createWantedDescriptionSubtitle;
 
   /// No description provided for @createListingMissingFields.
@@ -569,7 +569,7 @@ abstract class AppLocalizations {
   /// No description provided for @createListingProgressSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Follow this rhythm and the listing will stay tidy.'**
+  /// **'Complete the required fields.'**
   String get createListingProgressSubtitle;
 
   /// No description provided for @createListingProgressTitle.
@@ -581,7 +581,7 @@ abstract class AppLocalizations {
   /// No description provided for @createListingReadyHint.
   ///
   /// In en, this message translates to:
-  /// **'Everything is ready to publish'**
+  /// **'Information complete'**
   String get createListingReadyHint;
 
   /// No description provided for @createListingTitleHint.
@@ -995,7 +995,7 @@ abstract class AppLocalizations {
   /// No description provided for @homeColdStartBody.
   ///
   /// In en, this message translates to:
-  /// **'No items have been posted yet in this campus. You can post an offer or a request.'**
+  /// **'No offers or requests at this school.'**
   String get homeColdStartBody;
 
   /// No description provided for @homeColdStartAction.
@@ -1019,7 +1019,7 @@ abstract class AppLocalizations {
   /// No description provided for @homeFilterEmpty.
   ///
   /// In en, this message translates to:
-  /// **'No items match this filter. Try adjusting or posting a new listing.'**
+  /// **'No content under this filter.'**
   String get homeFilterEmpty;
 
   /// No description provided for @notFound.
@@ -1727,7 +1727,7 @@ abstract class AppLocalizations {
   /// No description provided for @agentPlanPendingHeader.
   ///
   /// In en, this message translates to:
-  /// **'Pending actions (proposed by assistant, run only after you confirm)'**
+  /// **'Pending actions'**
   String get agentPlanPendingHeader;
 
   /// No description provided for @agentPlanConfirmAction.
@@ -1772,196 +1772,10 @@ abstract class AppLocalizations {
   /// **'Undo failed, please try again'**
   String get undoFailed;
 
-  /// No description provided for @intentPageTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Offer / Wanted'**
-  String get intentPageTitle;
-
-  /// No description provided for @intentComposerPrompt.
-  ///
-  /// In en, this message translates to:
-  /// **'Describe what you are offering or looking for in one sentence; open the full listing form when you need precise fields.'**
-  String get intentComposerPrompt;
-
-  /// No description provided for @intentComposerHint.
-  ///
-  /// In en, this message translates to:
-  /// **'e.g. Clearing out my dorm, will take whatever for the mini fridge / Looking for a calculus textbook under ¥30'**
-  String get intentComposerHint;
-
-  /// No description provided for @intentKindGoodsOffer.
-  ///
-  /// In en, this message translates to:
-  /// **'Selling'**
-  String get intentKindGoodsOffer;
-
-  /// No description provided for @intentKindGoodsSeek.
-  ///
-  /// In en, this message translates to:
-  /// **'Looking for'**
-  String get intentKindGoodsSeek;
-
-  /// No description provided for @intentKindCompanion.
-  ///
-  /// In en, this message translates to:
-  /// **'Looking for company'**
-  String get intentKindCompanion;
-
-  /// No description provided for @intentKindHelp.
-  ///
-  /// In en, this message translates to:
-  /// **'Asking a favour'**
-  String get intentKindHelp;
-
-  /// No description provided for @intentKindActivity.
-  ///
-  /// In en, this message translates to:
-  /// **'Planning something'**
-  String get intentKindActivity;
-
-  /// No description provided for @intentPriceWhatever.
-  ///
-  /// In en, this message translates to:
-  /// **'Whatever you\'ll give me'**
-  String get intentPriceWhatever;
-
-  /// No description provided for @intentPriceFree.
-  ///
-  /// In en, this message translates to:
-  /// **'Giving it away'**
-  String get intentPriceFree;
-
-  /// No description provided for @intentPriceFlexible.
-  ///
-  /// In en, this message translates to:
-  /// **'Price open'**
-  String get intentPriceFlexible;
-
-  /// No description provided for @intentTimeFlexible.
-  ///
-  /// In en, this message translates to:
-  /// **'Any time'**
-  String get intentTimeFlexible;
-
-  /// No description provided for @intentSubmit.
-  ///
-  /// In en, this message translates to:
-  /// **'Post it'**
-  String get intentSubmit;
-
-  /// No description provided for @intentPhotoAction.
-  ///
-  /// In en, this message translates to:
-  /// **'One photo, everything at once'**
-  String get intentPhotoAction;
-
-  /// No description provided for @intentPhotoWorking.
-  ///
-  /// In en, this message translates to:
-  /// **'Reading the photo…'**
-  String get intentPhotoWorking;
-
-  /// No description provided for @intentPhotoSplit.
-  ///
-  /// In en, this message translates to:
-  /// **'Found a few — confirm which to post'**
-  String get intentPhotoSplit;
-
-  /// No description provided for @intentPhotoNothing.
-  ///
-  /// In en, this message translates to:
-  /// **'Nothing recognised — saved what you wrote'**
-  String get intentPhotoNothing;
-
-  /// No description provided for @intentSaving.
-  ///
-  /// In en, this message translates to:
-  /// **'Saving…'**
-  String get intentSaving;
-
-  /// No description provided for @intentSaved.
-  ///
-  /// In en, this message translates to:
-  /// **'Noted — you\'ll hear if something fits'**
-  String get intentSaved;
-
-  /// No description provided for @intentSavedNotListed.
-  ///
-  /// In en, this message translates to:
-  /// **'Noted. Without a price it won\'t appear in the browse grid, but it will still be matched'**
-  String get intentSavedNotListed;
-
-  /// No description provided for @intentMineHeader.
-  ///
-  /// In en, this message translates to:
-  /// **'What I\'ve said'**
-  String get intentMineHeader;
-
-  /// No description provided for @intentMineEmpty.
-  ///
-  /// In en, this message translates to:
-  /// **'Nothing yet. One sentence above is enough.'**
-  String get intentMineEmpty;
-
-  /// No description provided for @intentDraftBadge.
-  ///
-  /// In en, this message translates to:
-  /// **'Awaiting your confirmation'**
-  String get intentDraftBadge;
-
-  /// No description provided for @intentConfirmDraft.
-  ///
-  /// In en, this message translates to:
-  /// **'Confirm'**
-  String get intentConfirmDraft;
-
-  /// No description provided for @intentNoMatchesYet.
-  ///
-  /// In en, this message translates to:
-  /// **'Nothing fits yet'**
-  String get intentNoMatchesYet;
-
-  /// No description provided for @intentFulfilAction.
-  ///
-  /// In en, this message translates to:
-  /// **'Sorted'**
-  String get intentFulfilAction;
-
-  /// No description provided for @intentWithdrawAction.
-  ///
-  /// In en, this message translates to:
-  /// **'Never mind'**
-  String get intentWithdrawAction;
-
-  /// No description provided for @intentFulfilled.
-  ///
-  /// In en, this message translates to:
-  /// **'Marked as sorted'**
-  String get intentFulfilled;
-
-  /// No description provided for @intentWithdrawn.
-  ///
-  /// In en, this message translates to:
-  /// **'Withdrawn'**
-  String get intentWithdrawn;
-
-  /// No description provided for @intentFeedHeader.
-  ///
-  /// In en, this message translates to:
-  /// **'Offers and wants on campus'**
-  String get intentFeedHeader;
-
-  /// No description provided for @intentFeedEmpty.
-  ///
-  /// In en, this message translates to:
-  /// **'There are no new offers or wanted posts yet. You can publish the first one.'**
-  String get intentFeedEmpty;
-
   /// No description provided for @intentRespondAction.
   ///
   /// In en, this message translates to:
-  /// **'I can help'**
+  /// **'Contact publisher'**
   String get intentRespondAction;
 
   /// No description provided for @intentRespondTitle.
@@ -1973,7 +1787,7 @@ abstract class AppLocalizations {
   /// No description provided for @intentRespondHint.
   ///
   /// In en, this message translates to:
-  /// **'Say what you have, or how you can help'**
+  /// **'Describe the item or relevant information you can provide'**
   String get intentRespondHint;
 
   /// No description provided for @intentRespondSend.
@@ -1991,13 +1805,13 @@ abstract class AppLocalizations {
   /// No description provided for @priceDiscoveryTitle.
   ///
   /// In en, this message translates to:
-  /// **'Let the assistant settle it'**
+  /// **'Price negotiation'**
   String get priceDiscoveryTitle;
 
   /// No description provided for @priceDiscoveryStart.
   ///
   /// In en, this message translates to:
-  /// **'Settle by private limits'**
+  /// **'Start price negotiation'**
   String get priceDiscoveryStart;
 
   /// No description provided for @priceDiscoveryYourLimit.
@@ -2021,37 +1835,37 @@ abstract class AppLocalizations {
   /// No description provided for @priceDiscoverySubmit.
   ///
   /// In en, this message translates to:
-  /// **'Tell the assistant privately'**
+  /// **'Submit offer'**
   String get priceDiscoverySubmit;
 
   /// No description provided for @priceDiscoveryWaiting.
   ///
   /// In en, this message translates to:
-  /// **'Got it. The result comes once they\'ve answered too — they cannot see your number.'**
+  /// **'Offer submitted. Offers remain hidden until both parties submit.'**
   String get priceDiscoveryWaiting;
 
   /// No description provided for @priceDiscoveryNoDeal.
   ///
   /// In en, this message translates to:
-  /// **'It didn\'t work out this time. Want to just talk instead?'**
+  /// **'The submitted offers do not currently overlap.'**
   String get priceDiscoveryNoDeal;
 
   /// No description provided for @priceDiscoveryAcceptInvite.
   ///
   /// In en, this message translates to:
-  /// **'They\'d like to settle it this way'**
+  /// **'Price negotiation request received'**
   String get priceDiscoveryAcceptInvite;
 
   /// No description provided for @priceDiscoveryAgree.
   ///
   /// In en, this message translates to:
-  /// **'Alright'**
+  /// **'Confirm'**
   String get priceDiscoveryAgree;
 
   /// No description provided for @priceDiscoveryPreferHaggle.
   ///
   /// In en, this message translates to:
-  /// **'I\'d rather talk'**
+  /// **'Switch to direct negotiation'**
   String get priceDiscoveryPreferHaggle;
 
   /// No description provided for @priceDiscoveryDeclined.
@@ -2066,154 +1880,10 @@ abstract class AppLocalizations {
   /// **'Enter a sensible price'**
   String get priceDiscoveryInvalid;
 
-  /// No description provided for @agreementCardTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'What we agreed'**
-  String get agreementCardTitle;
-
-  /// No description provided for @agreementSlotItem.
-  ///
-  /// In en, this message translates to:
-  /// **'Item'**
-  String get agreementSlotItem;
-
-  /// No description provided for @agreementSlotPrice.
-  ///
-  /// In en, this message translates to:
-  /// **'Price'**
-  String get agreementSlotPrice;
-
-  /// No description provided for @agreementSlotTime.
-  ///
-  /// In en, this message translates to:
-  /// **'When'**
-  String get agreementSlotTime;
-
-  /// No description provided for @agreementSlotPlace.
-  ///
-  /// In en, this message translates to:
-  /// **'Where'**
-  String get agreementSlotPlace;
-
-  /// No description provided for @agreementSlotWho.
-  ///
-  /// In en, this message translates to:
-  /// **'Who'**
-  String get agreementSlotWho;
-
-  /// No description provided for @agreementSlotBring.
-  ///
-  /// In en, this message translates to:
-  /// **'Bring'**
-  String get agreementSlotBring;
-
-  /// No description provided for @agreementSlotConditions.
-  ///
-  /// In en, this message translates to:
-  /// **'Other terms'**
-  String get agreementSlotConditions;
-
-  /// No description provided for @agreementSuggestion.
-  ///
-  /// In en, this message translates to:
-  /// **'Read from the chat — adopt it?'**
-  String get agreementSuggestion;
-
-  /// No description provided for @agreementAdopt.
-  ///
-  /// In en, this message translates to:
-  /// **'Adopt'**
-  String get agreementAdopt;
-
-  /// No description provided for @agreementWaitingOther.
-  ///
-  /// In en, this message translates to:
-  /// **'Waiting for them'**
-  String get agreementWaitingOther;
-
-  /// No description provided for @agreementAgreed.
-  ///
-  /// In en, this message translates to:
-  /// **'Both agreed'**
-  String get agreementAgreed;
-
-  /// No description provided for @agreementNotSet.
-  ///
-  /// In en, this message translates to:
-  /// **'Not set'**
-  String get agreementNotSet;
-
-  /// No description provided for @agreementSet.
-  ///
-  /// In en, this message translates to:
-  /// **'Set'**
-  String get agreementSet;
-
-  /// No description provided for @agreementSettle.
-  ///
-  /// In en, this message translates to:
-  /// **'It\'s settled'**
-  String get agreementSettle;
-
-  /// No description provided for @agreementSettled.
-  ///
-  /// In en, this message translates to:
-  /// **'Settled'**
-  String get agreementSettled;
-
-  /// No description provided for @agreementStale.
-  ///
-  /// In en, this message translates to:
-  /// **'This changed — take a look'**
-  String get agreementStale;
-
-  /// No description provided for @handoffPromptTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'How did it go?'**
-  String get handoffPromptTitle;
-
-  /// No description provided for @handoffHappened.
-  ///
-  /// In en, this message translates to:
-  /// **'We met and it worked out'**
-  String get handoffHappened;
-
-  /// No description provided for @handoffMissed.
-  ///
-  /// In en, this message translates to:
-  /// **'It didn\'t happen'**
-  String get handoffMissed;
-
-  /// No description provided for @handoffOnTime.
-  ///
-  /// In en, this message translates to:
-  /// **'They were on time'**
-  String get handoffOnTime;
-
-  /// No description provided for @handoffLate.
-  ///
-  /// In en, this message translates to:
-  /// **'They were late'**
-  String get handoffLate;
-
-  /// No description provided for @handoffThanks.
-  ///
-  /// In en, this message translates to:
-  /// **'Thanks — noted'**
-  String get handoffThanks;
-
-  /// No description provided for @handoffOnce.
-  ///
-  /// In en, this message translates to:
-  /// **'Asked once, and it cannot be changed later'**
-  String get handoffOnce;
-
   /// No description provided for @reputationNewcomer.
   ///
   /// In en, this message translates to:
-  /// **'New here — no record yet'**
+  /// **'No record'**
   String get reputationNewcomer;
 
   /// Someone's record, stated as facts rather than a score
@@ -2227,12 +1897,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Agreed at ¥{price}'**
   String priceDiscoveryMatched(String price);
-
-  /// How many candidate matches an intent has
-  ///
-  /// In en, this message translates to:
-  /// **'{count} possible match(es)'**
-  String intentMatchCount(int count);
 
   /// No description provided for @agentPlanExecuted.
   ///
@@ -2783,20 +2447,14 @@ abstract class AppLocalizations {
   /// No description provided for @homePromptHint.
   ///
   /// In en, this message translates to:
-  /// **'Search items or requests, or ask Xiaochang'**
+  /// **'Search items or requests'**
   String get homePromptHint;
 
   /// No description provided for @homePromptSubmitTooltip.
   ///
   /// In en, this message translates to:
-  /// **'Ask Xiaochang'**
+  /// **'Search'**
   String get homePromptSubmitTooltip;
-
-  /// No description provided for @homeActionFind.
-  ///
-  /// In en, this message translates to:
-  /// **'Find'**
-  String get homeActionFind;
 
   /// No description provided for @homeActionOffer.
   ///
@@ -2843,13 +2501,13 @@ abstract class AppLocalizations {
   /// No description provided for @conversationEmptyTitle.
   ///
   /// In en, this message translates to:
-  /// **'No conversations yet'**
+  /// **'No conversations'**
   String get conversationEmptyTitle;
 
   /// No description provided for @conversationEmptySubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Answer someone in \"what people are looking for\" and you\'ll have your first conversation.'**
+  /// **'Conversations appear here after contact is initiated.'**
   String get conversationEmptySubtitle;
 
   /// No description provided for @conversationEmptyAction.
@@ -2861,20 +2519,8 @@ abstract class AppLocalizations {
   /// No description provided for @conversationEmptyAskAssistant.
   ///
   /// In en, this message translates to:
-  /// **'Ask Xiaochang (AI assistant)'**
+  /// **'Xiaochang'**
   String get conversationEmptyAskAssistant;
-
-  /// No description provided for @conversationNextStepsTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'What you can do next'**
-  String get conversationNextStepsTitle;
-
-  /// No description provided for @conversationNextStepsSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Find another classmate, post an offer or wanted request, or ask Xiaochang where to start.'**
-  String get conversationNextStepsSubtitle;
 
   /// No description provided for @findClassmate.
   ///
@@ -3051,32 +2697,44 @@ abstract class AppLocalizations {
   /// No description provided for @assistantSystemBadge.
   ///
   /// In en, this message translates to:
-  /// **'AI Assistant'**
+  /// **'Core Avatar'**
   String get assistantSystemBadge;
 
   /// No description provided for @assistantInboxSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Find items, price, publish, and negotiate from here'**
+  /// **'Item search, pricing, publishing, and negotiation'**
   String get assistantInboxSubtitle;
 
   /// No description provided for @assistantHeaderSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Your campus trading assistant · important decisions ask for your confirmation first'**
+  /// **'Personal transaction assistant · important actions require confirmation'**
   String get assistantHeaderSubtitle;
 
   /// No description provided for @assistantHistoryLoadFailed.
   ///
   /// In en, this message translates to:
-  /// **'History could not load. You can still keep asking Xiaochang.'**
+  /// **'History failed to load.'**
   String get assistantHistoryLoadFailed;
 
   /// No description provided for @assistantTyping.
   ///
   /// In en, this message translates to:
-  /// **'AI is typing...'**
+  /// **'Processing…'**
   String get assistantTyping;
+
+  /// No description provided for @relationshipSpacePokeAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Poke'**
+  String get relationshipSpacePokeAction;
+
+  /// No description provided for @relationshipSpacePokeFeedback.
+  ///
+  /// In en, this message translates to:
+  /// **'You poked {name}'**
+  String relationshipSpacePokeFeedback(String name);
 
   /// No description provided for @recordingStatus.
   ///
@@ -3093,19 +2751,19 @@ abstract class AppLocalizations {
   /// No description provided for @invitationFallbackTitle.
   ///
   /// In en, this message translates to:
-  /// **'Wants to chat with you now'**
+  /// **'Realtime conversation invitation'**
   String get invitationFallbackTitle;
 
   /// No description provided for @declineNow.
   ///
   /// In en, this message translates to:
-  /// **'Not now'**
+  /// **'Decline'**
   String get declineNow;
 
   /// No description provided for @connectNow.
   ///
   /// In en, this message translates to:
-  /// **'Connect'**
+  /// **'Accept'**
   String get connectNow;
 
   /// No description provided for @modeRealtime.
@@ -3147,7 +2805,7 @@ abstract class AppLocalizations {
   /// No description provided for @conversationStateDeclined.
   ///
   /// In en, this message translates to:
-  /// **'This time did not connect'**
+  /// **'Connection not established'**
   String get conversationStateDeclined;
 
   /// No description provided for @conversationStateCancelled.
@@ -3183,8 +2841,20 @@ abstract class AppLocalizations {
   /// No description provided for @contactModePromptTitle.
   ///
   /// In en, this message translates to:
-  /// **'How would you like to reach out?'**
+  /// **'Select contact method'**
   String get contactModePromptTitle;
+
+  /// No description provided for @contactPageModeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'This is a full contact page. Choose realtime contact or mail; going back preserves the previous page.'**
+  String get contactPageModeHint;
+
+  /// No description provided for @contactBackAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Back to contact methods'**
+  String get contactBackAction;
 
   /// No description provided for @contactContextUser.
   ///
@@ -3207,7 +2877,7 @@ abstract class AppLocalizations {
   /// No description provided for @contactModeRealtimeTitle.
   ///
   /// In en, this message translates to:
-  /// **'Chat now'**
+  /// **'Realtime conversation'**
   String get contactModeRealtimeTitle;
 
   /// No description provided for @contactModeRealtimeDescription.
@@ -3219,7 +2889,7 @@ abstract class AppLocalizations {
   /// No description provided for @contactModeMailTitle.
   ///
   /// In en, this message translates to:
-  /// **'Leave a message'**
+  /// **'Message'**
   String get contactModeMailTitle;
 
   /// No description provided for @contactModeMailDescription.
@@ -3231,7 +2901,7 @@ abstract class AppLocalizations {
   /// No description provided for @contactOpeningRequired.
   ///
   /// In en, this message translates to:
-  /// **'Please write what you want to say first.'**
+  /// **'Enter an opening message.'**
   String get contactOpeningRequired;
 
   /// No description provided for @contactMailSubjectRequired.
@@ -3273,13 +2943,13 @@ abstract class AppLocalizations {
   /// No description provided for @contactMailExpectationOrdinary.
   ///
   /// In en, this message translates to:
-  /// **'Whenever convenient'**
+  /// **'No time requirement'**
   String get contactMailExpectationOrdinary;
 
   /// No description provided for @contactMailExpectationToday.
   ///
   /// In en, this message translates to:
-  /// **'Hopefully today'**
+  /// **'Reply today'**
   String get contactMailExpectationToday;
 
   /// No description provided for @contactMailBodyLabel.
@@ -3297,7 +2967,7 @@ abstract class AppLocalizations {
   /// No description provided for @contactMailBodyHint.
   ///
   /// In en, this message translates to:
-  /// **'Share your question and when it is convenient to reply...'**
+  /// **'Enter your question and preferred reply time...'**
   String get contactMailBodyHint;
 
   /// No description provided for @contactRealtimeOpeningHint.
@@ -3633,7 +3303,7 @@ abstract class AppLocalizations {
   /// No description provided for @conversationSectionSpaces.
   ///
   /// In en, this message translates to:
-  /// **'Campus groups and channels'**
+  /// **'Campus group chats'**
   String get conversationSectionSpaces;
 
   /// No description provided for @conversationSectionTools.
@@ -3669,7 +3339,7 @@ abstract class AppLocalizations {
   /// No description provided for @conversationThreadLoading.
   ///
   /// In en, this message translates to:
-  /// **'Opening'**
+  /// **'Loading'**
   String get conversationThreadLoading;
 
   /// No description provided for @conversationThreadStats.
@@ -3687,19 +3357,19 @@ abstract class AppLocalizations {
   /// No description provided for @conversationThreadLoadFailedTitle.
   ///
   /// In en, this message translates to:
-  /// **'Contact thread could not load'**
+  /// **'Contact conversation failed to load'**
   String get conversationThreadLoadFailedTitle;
 
   /// No description provided for @conversationThreadEmptyTitle.
   ///
   /// In en, this message translates to:
-  /// **'No visible conversation history yet'**
+  /// **'No communication records'**
   String get conversationThreadEmptyTitle;
 
   /// No description provided for @conversationThreadEmptySubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Reconnect to start a new realtime chat or mail thread.'**
+  /// **'Start a new realtime conversation or message.'**
   String get conversationThreadEmptySubtitle;
 
   /// No description provided for @conversationMailThreadTitle.
@@ -3984,6 +3654,318 @@ abstract class AppLocalizations {
   /// **'Create channel'**
   String get createChannel;
 
+  /// No description provided for @campusMapTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Campus map'**
+  String get campusMapTitle;
+
+  /// No description provided for @campusMapOpenTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Open campus map'**
+  String get campusMapOpenTooltip;
+
+  /// No description provided for @campusMapLogicalTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Nanchang University real map'**
+  String get campusMapLogicalTitle;
+
+  /// No description provided for @campusMapEstimateBadge.
+  ///
+  /// In en, this message translates to:
+  /// **'North/south zones · progressive labels'**
+  String get campusMapEstimateBadge;
+
+  /// No description provided for @campusMapLogicalHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Blue dashed lines show public map boundaries, with the Qianhu main campus and medical campus outlined separately. Gates appear first, other places appear as you zoom, and only a narrow road buffer remains outside.'**
+  String get campusMapLogicalHint;
+
+  /// No description provided for @campusMapZoomIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Zoom in'**
+  String get campusMapZoomIn;
+
+  /// No description provided for @campusMapZoomOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Zoom out'**
+  String get campusMapZoomOut;
+
+  /// No description provided for @campusMapResetView.
+  ///
+  /// In en, this message translates to:
+  /// **'Recenter current campus'**
+  String get campusMapResetView;
+
+  /// No description provided for @campusMapTogglePoints.
+  ///
+  /// In en, this message translates to:
+  /// **'Show or hide place labels'**
+  String get campusMapTogglePoints;
+
+  /// No description provided for @campusMapDirectoryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Place chat directory'**
+  String get campusMapDirectoryTitle;
+
+  /// No description provided for @campusMapPlannerTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Plan from your location'**
+  String get campusMapPlannerTitle;
+
+  /// No description provided for @campusMapUseCurrentLocation.
+  ///
+  /// In en, this message translates to:
+  /// **'Use one-time coarse location'**
+  String get campusMapUseCurrentLocation;
+
+  /// No description provided for @campusMapManualOrigin.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a start manually'**
+  String get campusMapManualOrigin;
+
+  /// No description provided for @campusMapManualOriginRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'No map node matched the coarse location. Choose a start manually.'**
+  String get campusMapManualOriginRequired;
+
+  /// No description provided for @campusMapLocationFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Location is unavailable. Choose a start manually.'**
+  String get campusMapLocationFailed;
+
+  /// No description provided for @campusMapSelectOrigin.
+  ///
+  /// In en, this message translates to:
+  /// **'Select a starting point'**
+  String get campusMapSelectOrigin;
+
+  /// No description provided for @campusMapBuildingLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Destination building'**
+  String get campusMapBuildingLabel;
+
+  /// No description provided for @campusMapBuildingHint.
+  ///
+  /// In en, this message translates to:
+  /// **'For example: Xiansu Garden or Qianhu Library'**
+  String get campusMapBuildingHint;
+
+  /// No description provided for @campusMapClassroomLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Classroom or indoor place (optional)'**
+  String get campusMapClassroomLabel;
+
+  /// No description provided for @campusMapClassroomHint.
+  ///
+  /// In en, this message translates to:
+  /// **'For example: A101 or third-floor study area'**
+  String get campusMapClassroomHint;
+
+  /// No description provided for @campusMapBuildRoute.
+  ///
+  /// In en, this message translates to:
+  /// **'Build logical route'**
+  String get campusMapBuildRoute;
+
+  /// No description provided for @campusMapSelectBuilding.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a building node from the map or suggestions.'**
+  String get campusMapSelectBuilding;
+
+  /// No description provided for @campusMapRouteUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'The walking path between these nodes has not been verified, so distance and navigation are unavailable.'**
+  String get campusMapRouteUnavailable;
+
+  /// No description provided for @campusMapRouteTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Route'**
+  String get campusMapRouteTitle;
+
+  /// No description provided for @campusMapEstimatedDistance.
+  ///
+  /// In en, this message translates to:
+  /// **'Estimated distance: about {meters} m'**
+  String campusMapEstimatedDistance(int meters);
+
+  /// No description provided for @campusMapSchematicRouteWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'This route follows logical adjacency on the guide only. It has no verified distance or turn-by-turn directions; follow on-site paths and signs.'**
+  String get campusMapSchematicRouteWarning;
+
+  /// No description provided for @campusMapClassroomArrival.
+  ///
+  /// In en, this message translates to:
+  /// **'After reaching the building, follow indoor signs to {classroom}.'**
+  String campusMapClassroomArrival(String classroom);
+
+  /// No description provided for @campusMapChatUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat data for this node is not synced yet'**
+  String get campusMapChatUnavailable;
+
+  /// No description provided for @campusMapEnterChat.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter {name} chat'**
+  String campusMapEnterChat(String name);
+
+  /// No description provided for @locationSpacesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Nanchang University place chats'**
+  String get locationSpacesTitle;
+
+  /// No description provided for @locationSpacesSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a place, or use a one-time coarse location match.'**
+  String get locationSpacesSubtitle;
+
+  /// No description provided for @locationUseCurrent.
+  ///
+  /// In en, this message translates to:
+  /// **'Use location'**
+  String get locationUseCurrent;
+
+  /// No description provided for @locationPrivacyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Only an approximately 100 m location is sent for matching and nothing is stored. Manual choice is always available.'**
+  String get locationPrivacyHint;
+
+  /// No description provided for @locationRecommendTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'You are near {name}'**
+  String locationRecommendTitle(String name);
+
+  /// No description provided for @locationRecommendBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This is a one-time suggestion. Enter the place chat to take part in the current conversation; your online state expires after you leave.'**
+  String get locationRecommendBody;
+
+  /// No description provided for @locationEnterAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter chat'**
+  String get locationEnterAction;
+
+  /// No description provided for @locationJoinLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter'**
+  String get locationJoinLabel;
+
+  /// No description provided for @locationManualOnlyLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Manual'**
+  String get locationManualOnlyLabel;
+
+  /// No description provided for @locationNoMatch.
+  ///
+  /// In en, this message translates to:
+  /// **'No place matched. Choose a location manually below.'**
+  String get locationNoMatch;
+
+  /// No description provided for @locationUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Location is unavailable. Choose a place chat manually.'**
+  String get locationUnavailable;
+
+  /// No description provided for @locationLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Place chats could not load'**
+  String get locationLoadFailed;
+
+  /// No description provided for @locationEnterFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not enter the place chat: {error}'**
+  String locationEnterFailed(String error);
+
+  /// No description provided for @locationMemberCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} members'**
+  String locationMemberCount(int count);
+
+  /// No description provided for @locationOnlineCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} online now'**
+  String locationOnlineCount(int count);
+
+  /// No description provided for @locationOnlineUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Online count unavailable'**
+  String get locationOnlineUnavailable;
+
+  /// No description provided for @locationSpaceKind.
+  ///
+  /// In en, this message translates to:
+  /// **'Place chat'**
+  String get locationSpaceKind;
+
+  /// No description provided for @locationChatEmptyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'No messages here yet'**
+  String get locationChatEmptyTitle;
+
+  /// No description provided for @locationChatEmptySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'There is nothing to join. Enter the place and take part in the current conversation.'**
+  String get locationChatEmptySubtitle;
+
+  /// No description provided for @locationComposerHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Send a place message...'**
+  String get locationComposerHint;
+
+  /// No description provided for @locationCreateChildTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Create a small chat here'**
+  String get locationCreateChildTooltip;
+
+  /// No description provided for @locationCreateChildTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Create a small chat in {name}'**
+  String locationCreateChildTitle(String name);
+
+  /// No description provided for @locationChildCreated.
+  ///
+  /// In en, this message translates to:
+  /// **'Small chat created'**
+  String get locationChildCreated;
+
   /// No description provided for @spaceNameLabel.
   ///
   /// In en, this message translates to:
@@ -4077,7 +4059,7 @@ abstract class AppLocalizations {
   /// No description provided for @spaceGroupEmptySubtitle.
   ///
   /// In en, this message translates to:
-  /// **'It is now in Messages. Send the first note to bring the group to life.'**
+  /// **'Start a topic before discussing it with the group.'**
   String get spaceGroupEmptySubtitle;
 
   /// No description provided for @replyAction.
@@ -4113,8 +4095,86 @@ abstract class AppLocalizations {
   /// No description provided for @groupComposerHint.
   ///
   /// In en, this message translates to:
-  /// **'Send a group message...'**
+  /// **'Discuss inside this topic...'**
   String get groupComposerHint;
+
+  /// No description provided for @groupTopicsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Group topics'**
+  String get groupTopicsTitle;
+
+  /// No description provided for @groupTopicsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'There is no shared message stream. Open a topic to join its discussion.'**
+  String get groupTopicsSubtitle;
+
+  /// No description provided for @startGroupTopic.
+  ///
+  /// In en, this message translates to:
+  /// **'Start a topic'**
+  String get startGroupTopic;
+
+  /// No description provided for @groupTopicTitleHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Describe what you want to discuss'**
+  String get groupTopicTitleHint;
+
+  /// No description provided for @groupTopicCreateHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Every reply will stay inside this topic.'**
+  String get groupTopicCreateHint;
+
+  /// No description provided for @createTopicAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Create topic'**
+  String get createTopicAction;
+
+  /// No description provided for @groupTopicEmptyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'No topics yet'**
+  String get groupTopicEmptyTitle;
+
+  /// No description provided for @groupTopicEmptySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'A group topic must be started before members can discuss it.'**
+  String get groupTopicEmptySubtitle;
+
+  /// No description provided for @groupTopicReplyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Reply in this topic...'**
+  String get groupTopicReplyHint;
+
+  /// No description provided for @groupTopicNoRepliesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for the first reply'**
+  String get groupTopicNoRepliesTitle;
+
+  /// No description provided for @groupTopicNoRepliesSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Your reply will only appear in this topic.'**
+  String get groupTopicNoRepliesSubtitle;
+
+  /// No description provided for @groupTopicStartedBy.
+  ///
+  /// In en, this message translates to:
+  /// **'Started by {name}'**
+  String groupTopicStartedBy(String name);
+
+  /// No description provided for @groupTopicReplyCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count}'**
+  String groupTopicReplyCount(int count);
 
   /// No description provided for @spaceFallbackDescription.
   ///
@@ -4365,7 +4425,7 @@ abstract class AppLocalizations {
   /// No description provided for @replyAssistantUnavailable.
   ///
   /// In en, this message translates to:
-  /// **'Xiaochang is not ready yet. You can still type directly.'**
+  /// **'Reply suggestions are unavailable. Enter a reply directly.'**
   String get replyAssistantUnavailable;
 
   /// No description provided for @closeConversationFailed.
@@ -4533,13 +4593,13 @@ abstract class AppLocalizations {
   /// No description provided for @audioCallMvp.
   ///
   /// In en, this message translates to:
-  /// **'Audio call MVP'**
+  /// **'Audio call'**
   String get audioCallMvp;
 
   /// No description provided for @videoCallMvp.
   ///
   /// In en, this message translates to:
-  /// **'Video call MVP'**
+  /// **'Video call'**
   String get videoCallMvp;
 
   /// No description provided for @secretChatMvp.
@@ -4557,7 +4617,7 @@ abstract class AppLocalizations {
   /// No description provided for @replyAssistantButton.
   ///
   /// In en, this message translates to:
-  /// **'Ask Xiaochang'**
+  /// **'Generate reply suggestion'**
   String get replyAssistantButton;
 
   /// No description provided for @mailFallbackTitle.
@@ -4575,7 +4635,7 @@ abstract class AppLocalizations {
   /// No description provided for @incomingRealtimeTitle.
   ///
   /// In en, this message translates to:
-  /// **'They want to chat now'**
+  /// **'Realtime conversation invitation received'**
   String get incomingRealtimeTitle;
 
   /// No description provided for @incomingRealtimeSubtitle.
@@ -4827,7 +4887,7 @@ abstract class AppLocalizations {
   /// No description provided for @noMessagesYet.
   ///
   /// In en, this message translates to:
-  /// **'No messages yet. Start the conversation.'**
+  /// **'No messages'**
   String get noMessagesYet;
 
   /// No description provided for @stopAction.
@@ -5529,7 +5589,7 @@ abstract class AppLocalizations {
   /// No description provided for @socialPersonaArchived.
   ///
   /// In en, this message translates to:
-  /// **'Archived · ordinary avatar is shown'**
+  /// **'Archived · default system Avatar is shown'**
   String get socialPersonaArchived;
 
   /// No description provided for @socialPersonaRepresentationMode.
@@ -5751,7 +5811,7 @@ abstract class AppLocalizations {
   /// No description provided for @socialPersonaArchive.
   ///
   /// In en, this message translates to:
-  /// **'Archive and restore ordinary avatar'**
+  /// **'Archive and use default Avatar'**
   String get socialPersonaArchive;
 
   /// No description provided for @socialPersonaRestore.
@@ -5787,7 +5847,7 @@ abstract class AppLocalizations {
   /// No description provided for @socialPersonaArchivedToast.
   ///
   /// In en, this message translates to:
-  /// **'Archived; ordinary avatar is shown'**
+  /// **'Archived; default system Avatar is shown'**
   String get socialPersonaArchivedToast;
 
   /// No description provided for @socialPersonaPreviewRole.
@@ -5927,6 +5987,151 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'It will stop being public immediately and enter remote cleanup. Conversation history is unchanged.'**
   String get socialPersonaAssetRevokeConfirmBody;
+
+  /// No description provided for @composerMoreTools.
+  ///
+  /// In en, this message translates to:
+  /// **'More tools'**
+  String get composerMoreTools;
+
+  /// No description provided for @composerHideTools.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide tools'**
+  String get composerHideTools;
+
+  /// No description provided for @composerSendTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Send message'**
+  String get composerSendTooltip;
+
+  /// No description provided for @composerImageAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Image'**
+  String get composerImageAction;
+
+  /// No description provided for @composerVoiceMessageAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Voice message'**
+  String get composerVoiceMessageAction;
+
+  /// No description provided for @dictationStartAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Speech to text'**
+  String get dictationStartAction;
+
+  /// No description provided for @dictationStopAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop dictation'**
+  String get dictationStopAction;
+
+  /// No description provided for @dictationListening.
+  ///
+  /// In en, this message translates to:
+  /// **'Listening — recognized text appears in the input'**
+  String get dictationListening;
+
+  /// No description provided for @dictationPermissionDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'Microphone permission is required for speech to text'**
+  String get dictationPermissionDenied;
+
+  /// No description provided for @dictationUnsupported.
+  ///
+  /// In en, this message translates to:
+  /// **'This device does not support speech to text'**
+  String get dictationUnsupported;
+
+  /// No description provided for @dictationNetworkError.
+  ///
+  /// In en, this message translates to:
+  /// **'The speech recognition service is unavailable'**
+  String get dictationNetworkError;
+
+  /// No description provided for @dictationUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Speech to text is temporarily unavailable'**
+  String get dictationUnavailable;
+
+  /// No description provided for @groupToolRelay.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign-up list'**
+  String get groupToolRelay;
+
+  /// No description provided for @groupToolCollection.
+  ///
+  /// In en, this message translates to:
+  /// **'Group collection'**
+  String get groupToolCollection;
+
+  /// No description provided for @groupToolPoll.
+  ///
+  /// In en, this message translates to:
+  /// **'Poll'**
+  String get groupToolPoll;
+
+  /// No description provided for @groupToolRelayTemplate.
+  ///
+  /// In en, this message translates to:
+  /// **'[Sign-up list]\nTopic:\nDeadline:'**
+  String get groupToolRelayTemplate;
+
+  /// No description provided for @groupToolCollectionTemplate.
+  ///
+  /// In en, this message translates to:
+  /// **'[Group collection]\nName:\nDetails:'**
+  String get groupToolCollectionTemplate;
+
+  /// No description provided for @groupToolPollTemplate.
+  ///
+  /// In en, this message translates to:
+  /// **'[Poll]\nQuestion:\nOption 1:\nOption 2:'**
+  String get groupToolPollTemplate;
+
+  /// No description provided for @assistantToolFind.
+  ///
+  /// In en, this message translates to:
+  /// **'Find an item'**
+  String get assistantToolFind;
+
+  /// No description provided for @assistantToolPublish.
+  ///
+  /// In en, this message translates to:
+  /// **'Publish an item'**
+  String get assistantToolPublish;
+
+  /// No description provided for @assistantToolEstimate.
+  ///
+  /// In en, this message translates to:
+  /// **'Price guidance'**
+  String get assistantToolEstimate;
+
+  /// No description provided for @assistantToolFindPrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Help me find an item:'**
+  String get assistantToolFindPrompt;
+
+  /// No description provided for @assistantToolPublishPrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Help me publish an item using these details:'**
+  String get assistantToolPublishPrompt;
+
+  /// No description provided for @assistantToolEstimatePrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Estimate a fair campus-market price for this item:'**
+  String get assistantToolEstimatePrompt;
+
   /// No description provided for @postDiscoveryTitle.
   ///
   /// In en, this message translates to:
@@ -6190,6 +6395,336 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Start a discussion'**
   String get postStartAction;
+
+  /// No description provided for @errandPublishTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Campus errands'**
+  String get errandPublishTitle;
+
+  /// No description provided for @errandPublishIntro.
+  ///
+  /// In en, this message translates to:
+  /// **'Describe a pickup, purchase, queue, or printing task and classmates can offer to help. Errands expire after 24 hours by default; use public handoff points.'**
+  String get errandPublishIntro;
+
+  /// No description provided for @errandSubjectLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'What needs doing?'**
+  String get errandSubjectLabel;
+
+  /// No description provided for @errandSubjectHint.
+  ///
+  /// In en, this message translates to:
+  /// **'For example: Pick up my printed handout from the library'**
+  String get errandSubjectHint;
+
+  /// No description provided for @errandSubjectRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Describe the errand'**
+  String get errandSubjectRequired;
+
+  /// No description provided for @errandModeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Errand type'**
+  String get errandModeLabel;
+
+  /// No description provided for @errandServiceDirectionLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Service direction'**
+  String get errandServiceDirectionLabel;
+
+  /// No description provided for @errandServiceWanted.
+  ///
+  /// In en, this message translates to:
+  /// **'Need help'**
+  String get errandServiceWanted;
+
+  /// No description provided for @errandServiceOffer.
+  ///
+  /// In en, this message translates to:
+  /// **'Offer help'**
+  String get errandServiceOffer;
+
+  /// No description provided for @errandServiceWantedHint.
+  ///
+  /// In en, this message translates to:
+  /// **'I need a classmate to do this'**
+  String get errandServiceWantedHint;
+
+  /// No description provided for @errandServiceOfferHint.
+  ///
+  /// In en, this message translates to:
+  /// **'I can do this for a classmate'**
+  String get errandServiceOfferHint;
+
+  /// No description provided for @errandModePickup.
+  ///
+  /// In en, this message translates to:
+  /// **'Pickup'**
+  String get errandModePickup;
+
+  /// No description provided for @errandModeBuy.
+  ///
+  /// In en, this message translates to:
+  /// **'Buy for me'**
+  String get errandModeBuy;
+
+  /// No description provided for @errandModeQueue.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue'**
+  String get errandModeQueue;
+
+  /// No description provided for @errandModePrint.
+  ///
+  /// In en, this message translates to:
+  /// **'Print/copy'**
+  String get errandModePrint;
+
+  /// No description provided for @errandModeReturn.
+  ///
+  /// In en, this message translates to:
+  /// **'Return/handoff'**
+  String get errandModeReturn;
+
+  /// No description provided for @errandModeOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get errandModeOther;
+
+  /// No description provided for @errandPickupLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Where should it be picked up?'**
+  String get errandPickupLabel;
+
+  /// No description provided for @errandPickupHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Use a gate, library, parcel desk, or another public point'**
+  String get errandPickupHint;
+
+  /// No description provided for @errandDropoffLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Where should it be handed off?'**
+  String get errandDropoffLabel;
+
+  /// No description provided for @errandDropoffHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a convenient public meeting point'**
+  String get errandDropoffHint;
+
+  /// No description provided for @errandTimeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'When would help be useful?'**
+  String get errandTimeLabel;
+
+  /// No description provided for @errandTimeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'For example: before 6 PM today, or after class tonight'**
+  String get errandTimeHint;
+
+  /// No description provided for @errandRewardLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Offer (CNY)'**
+  String get errandRewardLabel;
+
+  /// No description provided for @errandRewardHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional; leave blank to discuss first'**
+  String get errandRewardHint;
+
+  /// No description provided for @errandValidForLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep active for'**
+  String get errandValidForLabel;
+
+  /// No description provided for @errandValidForDay.
+  ///
+  /// In en, this message translates to:
+  /// **'24 hours'**
+  String get errandValidForDay;
+
+  /// No description provided for @errandValidForThreeDays.
+  ///
+  /// In en, this message translates to:
+  /// **'3 days'**
+  String get errandValidForThreeDays;
+
+  /// No description provided for @errandValidForWeek.
+  ///
+  /// In en, this message translates to:
+  /// **'1 week'**
+  String get errandValidForWeek;
+
+  /// No description provided for @errandNotesLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Notes'**
+  String get errandNotesLabel;
+
+  /// No description provided for @errandNotesHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Quantity, size, or handoff details; avoid sensitive information'**
+  String get errandNotesHint;
+
+  /// No description provided for @errandPublishAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Publish errand'**
+  String get errandPublishAction;
+
+  /// No description provided for @errandPublishSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Errand published; classmates can offer to help'**
+  String get errandPublishSuccess;
+
+  /// No description provided for @errandPublishFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not publish the errand. Try again.'**
+  String get errandPublishFailed;
+
+  /// No description provided for @errandFeedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Campus errands'**
+  String get errandFeedTitle;
+
+  /// No description provided for @errandFeedBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Nearby classmates are looking for pickups, purchases, and quick favors.'**
+  String get errandFeedBody;
+
+  /// No description provided for @errandCreateAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Post an errand'**
+  String get errandCreateAction;
+
+  /// No description provided for @errandRespondAction.
+  ///
+  /// In en, this message translates to:
+  /// **'I can help'**
+  String get errandRespondAction;
+
+  /// No description provided for @errandNeedServiceAction.
+  ///
+  /// In en, this message translates to:
+  /// **'I need this service'**
+  String get errandNeedServiceAction;
+
+  /// No description provided for @errandPickupShort.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick up'**
+  String get errandPickupShort;
+
+  /// No description provided for @errandDropoffShort.
+  ///
+  /// In en, this message translates to:
+  /// **'Drop off'**
+  String get errandDropoffShort;
+
+  /// No description provided for @errandTimeShort.
+  ///
+  /// In en, this message translates to:
+  /// **'When'**
+  String get errandTimeShort;
+
+  /// No description provided for @errandBoardTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Campus errands'**
+  String get errandBoardTitle;
+
+  /// No description provided for @errandTabCampus.
+  ///
+  /// In en, this message translates to:
+  /// **'Campus'**
+  String get errandTabCampus;
+
+  /// No description provided for @errandTabMine.
+  ///
+  /// In en, this message translates to:
+  /// **'My errands'**
+  String get errandTabMine;
+
+  /// No description provided for @errandCampusEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No classmates have posted an errand right now.'**
+  String get errandCampusEmpty;
+
+  /// No description provided for @errandMineEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'You have no active errands.'**
+  String get errandMineEmpty;
+
+  /// No description provided for @errandFulfilAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed'**
+  String get errandFulfilAction;
+
+  /// No description provided for @errandWithdrawAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Withdraw'**
+  String get errandWithdrawAction;
+
+  /// No description provided for @errandFulfilled.
+  ///
+  /// In en, this message translates to:
+  /// **'Errand marked as completed'**
+  String get errandFulfilled;
+
+  /// No description provided for @errandWithdrawn.
+  ///
+  /// In en, this message translates to:
+  /// **'Errand withdrawn'**
+  String get errandWithdrawn;
+
+  /// No description provided for @errandLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load campus errands'**
+  String get errandLoadFailed;
+
+  /// No description provided for @errandExpiresLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Time-limited'**
+  String get errandExpiresLabel;
+
+  /// No description provided for @errandRespondTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reply to errand'**
+  String get errandRespondTitle;
+
+  /// No description provided for @errandRespondHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Explain how you can help, when you are free, and where to meet'**
+  String get errandRespondHint;
 }
 
 class _AppLocalizationsDelegate

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
+import 'social_persona_renderer.dart';
 
 /// A token-based preview for a user's role presentation.
 ///
@@ -99,73 +100,43 @@ class SocialPersonaPreviewCard extends StatelessWidget {
 }
 
 /// Role token used at list (24), profile (48), and card/space (160) scales.
-/// The rendering is deliberately static and never reflects online, typing,
-/// read, push, or background activity.
+///
+/// Deterministic character presentation with subtle local-only motion at
+/// appropriate sizes (>= 32) and static behavior under reduced motion.
+///
+/// Motion is local-only and NEVER reflects online, typing, read, push, or background activity.
+///
+/// Uses the [SocialPersonaRenderer] boundary and its safe code-drawn fallback.
 class SocialPersonaAvatar extends StatelessWidget {
   const SocialPersonaAvatar({
     super.key,
     required this.persona,
     this.size = 48,
     this.semanticLabel,
+    this.enableMotion,
+    this.motionCue = AvatarMotionCue.idle,
+    this.renderer,
   }) : assert(size > 0);
 
   final SocialPersona persona;
   final double size;
   final String? semanticLabel;
+  final bool? enableMotion;
+  final AvatarMotionCue motionCue;
+  final SocialPersonaRenderer? renderer;
 
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
-    final color = _personaAccent(context, persona.appearance.palette);
-    final radius = switch (persona.appearance.silhouette) {
-      'round' => size * 0.37,
-      'sharp' => size * 0.13,
-      _ => size * 0.24,
-    };
-    final accessory = switch (persona.appearance.accessory) {
-      'glasses' => Icons.visibility_outlined,
-      'headphones' => Icons.headphones_outlined,
-      'leaf' => Icons.eco_outlined,
-      _ => Icons.person_outline_rounded,
-    };
-    final accessorySize = (size * 0.21).clamp(7.0, 16.0).toDouble();
-    final accessoryInset = (size * 0.07).clamp(2.0, 6.0).toDouble();
-    final accessoryPadding = (size * 0.04).clamp(1.0, 3.0).toDouble();
-    final fallback = Stack(
-      alignment: Alignment.center,
-      children: [
-        Icon(Icons.face_rounded, size: size * 0.62, color: color),
-        Positioned(
-          right: accessoryInset,
-          bottom: accessoryInset,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: Theme.of(context).cardColor,
-              shape: BoxShape.circle,
-              border: Border.all(color: color.withValues(alpha: 0.28)),
-            ),
-            child: Padding(
-              padding: EdgeInsets.all(accessoryPadding),
-              child: Icon(accessory, size: accessorySize, color: color),
-            ),
-          ),
-        ),
-      ],
-    );
+    final spec = SocialPersonaRenderSpec.fromPersona(persona);
 
-    return Semantics(
-      label: semanticLabel ?? l.socialPersonaPreviewRole,
-      image: true,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.14),
-          borderRadius: BorderRadius.circular(radius),
-          border: Border.all(color: color.withValues(alpha: 0.42)),
-        ),
-        child: fallback,
-      ),
+    return SocialPersonaCharacterView(
+      spec: spec,
+      size: size,
+      enableMotion: enableMotion,
+      motionCue: motionCue,
+      renderer: renderer,
+      semanticLabel: semanticLabel ?? l.socialPersonaPreviewRole,
     );
   }
 }

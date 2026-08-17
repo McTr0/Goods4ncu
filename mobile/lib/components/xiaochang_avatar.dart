@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
 
-/// Lightweight, deterministic avatar representing the platform Agent "小昌" (Xiaochang).
+/// Lightweight personal core Avatar representing "小昌" (Xiaochang).
 ///
-/// This component presents the verifiable AI assistant identity across headers,
-/// tool actions, and system entries. It is strictly a static, lightweight skin
-/// for platform tool state — not a user persona (SocialPersona), nor a virtual pet.
+/// Xiaochang is the user's central entry into assisted marketplace tools. It is
+/// visually distinct from the public-facing `SocialPersona` shown to classmates.
 class XiaochangAvatar extends StatelessWidget {
   const XiaochangAvatar({
     super.key,
@@ -26,7 +25,7 @@ class XiaochangAvatar extends StatelessWidget {
     final l = AppLocalizations.of(context);
     final fallbackLabel = l != null
         ? '${l.assistantName} · ${l.assistantSystemBadge}'
-        : '小昌 · AI 助手';
+        : '小昌 · 核心 Avatar';
     final effectiveLabel = semanticLabel ?? fallbackLabel;
 
     final effectiveRadius = borderRadius ?? BorderRadius.circular(size * 0.24);

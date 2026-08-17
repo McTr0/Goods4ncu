@@ -189,7 +189,7 @@ class UserService extends BaseService {
     return _parseSocialPersonaEnvelope(response);
   }
 
-  /// Stop publishing the role presentation and return to the ordinary avatar.
+  /// Stop publishing the role presentation and return to the default system Avatar.
   /// POST /api/user/persona/archive
   Future<SocialPersona> archiveSocialPersona() async {
     final headers = await authHeaders();
@@ -324,7 +324,6 @@ class UserService extends BaseService {
   Future<Map<String, dynamic>> updateProfile({
     String? username,
     String? email,
-    String? avatarUrl,
     Map<String, bool?>? discoverability,
     Map<String, dynamic>? paymentQr,
   }) async {
@@ -332,7 +331,6 @@ class UserService extends BaseService {
     final body = <String, dynamic>{};
     if (username != null) body['username'] = username;
     if (email != null) body['email'] = email;
-    if (avatarUrl != null) body['avatar_url'] = avatarUrl;
     if (discoverability != null) {
       body['discoverability'] = {
         if (discoverability.containsKey('username'))

@@ -17,6 +17,37 @@ Widget _host(Widget child, {Locale locale = const Locale('zh')}) {
 }
 
 void main() {
+  testWidgets('stage places peer top-left and self bottom-right', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        locale: const Locale('zh'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: const Scaffold(
+          body: SizedBox(
+            width: 390,
+            height: 700,
+            child: RelationshipSpacePreview(
+              otherName: 'Alice',
+              stageMode: true,
+              stageContent: Center(child: Text('空间内消息')),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byKey(const Key('relationship-space-stage')), findsOneWidget);
+    expect(find.text('空间内消息'), findsOneWidget);
+    final peer = tester.getRect(find.text('Alice'));
+    final self = tester.getRect(find.text('我'));
+    expect(peer.left, lessThan(self.left));
+    expect(peer.top, lessThan(self.top));
+  });
+
   testWidgets(
     'shows a shared space with verifiable event and without presence claims',
     (tester) async {
@@ -79,6 +110,21 @@ void main() {
     expect(find.text('Shared space'), findsOneWidget);
     expect(find.text('Connected'), findsOneWidget);
     expect(find.text('Leave a message'), findsNothing);
+  });
+
+  testWidgets('poke is an explicit local-only interaction', (tester) async {
+    await tester.pumpWidget(
+      _host(const RelationshipSpacePreview(otherName: 'Alice')),
+    );
+
+    final poke = find.byKey(const Key('relationship-space-poke'));
+    expect(poke, findsOneWidget);
+    await tester.tap(poke);
+    await tester.pump();
+
+    expect(find.text('你拍了拍 Alice'), findsOneWidget);
+    expect(find.text('对方已收到'), findsNothing);
+    expect(find.text('对方已回应'), findsNothing);
   });
 
   testWidgets(
@@ -387,8 +433,8 @@ void main() {
 
     final avatars = find.byType(SocialPersonaAvatar);
     expect(avatars, findsNWidgets(2));
-    expect(tester.getSize(avatars.at(0)), const Size(160, 160));
-    expect(tester.getSize(avatars.at(1)), const Size(160, 160));
+    expect(tester.getSize(avatars.at(0)), const Size(120, 120));
+    expect(tester.getSize(avatars.at(1)), const Size(120, 120));
     expect(find.text('在线'), findsNothing);
     expect(find.text('已读'), findsNothing);
     expect(find.text('正在输入'), findsNothing);
@@ -421,7 +467,7 @@ void main() {
       ),
     );
 
-    expect(find.byType(SocialPersonaAvatar), findsNothing);
+    expect(find.byType(SocialPersonaAvatar), findsNWidgets(2));
     expect(find.text('已连接'), findsOneWidget);
   });
 

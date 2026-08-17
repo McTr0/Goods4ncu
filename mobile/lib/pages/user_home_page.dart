@@ -7,6 +7,7 @@ import '../components/content_report_dialog.dart';
 import '../components/payment_qr_image.dart';
 import '../components/price_tag.dart';
 import '../components/social_persona_card.dart';
+import '../components/user_avatar.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
@@ -16,7 +17,6 @@ import '../services/reputation_service.dart';
 import '../services/content_report_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
-import '../utils/platform_utils.dart';
 
 class UserHomePage extends StatefulWidget {
   const UserHomePage({
@@ -146,7 +146,7 @@ class _UserHomePageState extends State<UserHomePage> {
         return;
       }
       if (!mounted) return;
-      final conversation = await showContactConversationSheet(
+      final conversation = await openContactConversationPage(
         context: context,
         chatService: _chatService,
         recipientId: widget.userId,
@@ -274,7 +274,11 @@ class _UserHomePageState extends State<UserHomePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _ProfileHeader(profile: _profile!, onContact: _contactUser),
+              _ProfileHeader(
+                profile: _profile!,
+                persona: _persona,
+                onContact: _contactUser,
+              ),
               if (_persona != null) ...[
                 const SizedBox(height: AppTheme.sp12),
                 SocialPersonaPreviewCard(
@@ -307,16 +311,20 @@ class _UserHomePageState extends State<UserHomePage> {
 }
 
 class _ProfileHeader extends StatelessWidget {
-  const _ProfileHeader({required this.profile, required this.onContact});
+  const _ProfileHeader({
+    required this.profile,
+    this.persona,
+    required this.onContact,
+  });
 
   final Map<String, dynamic> profile;
+  final SocialPersona? persona;
   final VoidCallback onContact;
 
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     final username = profile['username']?.toString() ?? l.publicProfile;
-    final avatarUrl = profile['avatar_url']?.toString();
     final joinedAt = profile['joined_at']?.toString();
     final listingCount = (profile['listing_count'] as num?)?.toInt() ?? 0;
     return Card(
@@ -325,22 +333,11 @@ class _ProfileHeader extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            CircleAvatar(
-              radius: 38,
-              backgroundColor: AppTheme.primary.withValues(alpha: 0.14),
-              backgroundImage: avatarUrl != null && avatarUrl.isNotEmpty
-                  ? NetworkImage(resolveDisplayUrl(avatarUrl))
-                  : null,
-              child: avatarUrl == null || avatarUrl.isEmpty
-                  ? Text(
-                      username.isEmpty ? '?' : username[0].toUpperCase(),
-                      style: const TextStyle(
-                        color: AppTheme.primary,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 28,
-                      ),
-                    )
-                  : null,
+            UserAvatar(
+              name: username,
+              persona: persona,
+              size: 76,
+              semanticLabel: username,
             ),
             const SizedBox(width: AppTheme.sp16),
             Expanded(

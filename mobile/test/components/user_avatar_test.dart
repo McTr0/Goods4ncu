@@ -1,23 +1,65 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/components/social_persona_card.dart';
+import 'package:goods4ncu_mobile/components/social_persona_renderer.dart';
 import 'package:goods4ncu_mobile/components/user_avatar.dart';
+import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 
-import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
+class _SpyPersonaRenderer implements SocialPersonaRenderer {
+  SocialPersonaRenderSpec? lastSpec;
+  double? lastSize;
+  double? lastMotionProgress;
+  AvatarMotionCue? lastMotionCue;
+  bool? lastIsDark;
+  int callCount = 0;
+
+  @override
+  Widget buildCharacter(
+    BuildContext context, {
+    required SocialPersonaRenderSpec spec,
+    required double size,
+    required double motionProgress,
+    required AvatarMotionCue motionCue,
+    required bool isDark,
+    String? semanticLabel,
+  }) {
+    lastSpec = spec;
+    lastSize = size;
+    lastMotionProgress = motionProgress;
+    lastMotionCue = motionCue;
+    lastIsDark = isDark;
+    callCount++;
+    return SizedBox(
+      key: const ValueKey('spy_character'),
+      width: size,
+      height: size,
+    );
+  }
+}
 
 void main() {
-  Widget buildFrame(Widget child) {
+  Widget buildFrame(Widget child, {bool disableAnimations = false}) {
     return MaterialApp(
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
-      home: Scaffold(body: Center(child: child)),
+      home: Scaffold(
+        body: MediaQuery(
+          data: MediaQueryData(disableAnimations: disableAnimations),
+          child: Center(child: child),
+        ),
+      ),
     );
   }
 
   testWidgets(
-    'two different usernames produce distinct stable visual attributes',
+    'two different usernames produce distinct stable deterministic character specs',
     (tester) async {
+      final specAlice = SocialPersonaRenderSpec.fromName('alice');
+      final specBob = SocialPersonaRenderSpec.fromName('bob');
+
+      expect(specAlice, isNot(equals(specBob)));
+
       await tester.pumpWidget(
         buildFrame(
           const Row(
@@ -26,32 +68,37 @@ void main() {
               UserAvatar(name: 'bob', size: 48),
             ],
           ),
+          disableAnimations: true,
         ),
       );
       await tester.pumpAndSettle();
 
-      final containers = tester
-          .widgetList<Container>(find.byType(Container))
-          .toList();
-      expect(containers.length, greaterThanOrEqualTo(2));
+      final characterViews = find.byType(SocialPersonaCharacterView);
+      expect(characterViews, findsNWidgets(2));
+      final widgetAlice = tester.widget<SocialPersonaCharacterView>(
+        characterViews.at(0),
+      );
+      final widgetBob = tester.widget<SocialPersonaCharacterView>(
+        characterViews.at(1),
+      );
 
-      final decoAlice = containers[0].decoration as BoxDecoration?;
-      final decoBob = containers[1].decoration as BoxDecoration?;
-
-      expect(decoAlice?.color, isNotNull);
-      expect(decoBob?.color, isNotNull);
-      // alice and bob have different hashes, yielding different stable palette colors
-      expect(decoAlice?.color, isNot(equals(decoBob?.color)));
-
-      final icons = tester.widgetList<Icon>(find.byType(Icon)).toList();
-      expect(icons.length, greaterThanOrEqualTo(2));
-      expect(icons[0].color, isNot(equals(icons[1].color)));
+      expect(widgetAlice.spec.name, 'alice');
+      expect(widgetBob.spec.name, 'bob');
+      expect(widgetAlice.spec, isNot(equals(widgetBob.spec)));
     },
   );
 
   testWidgets(
-    'same username produces identical stable visual attributes across rebuilds',
+    'same username produces identical stable visual spec across rebuilds',
     (tester) async {
+      final spec1 = SocialPersonaRenderSpec.fromName('charlie');
+      final spec2 = SocialPersonaRenderSpec.fromName('charlie');
+      expect(spec1, equals(spec2));
+      expect(spec1.palette, equals(spec2.palette));
+      expect(spec1.silhouette, equals(spec2.silhouette));
+      expect(spec1.accessory, equals(spec2.accessory));
+      expect(spec1.outfit, equals(spec2.outfit));
+
       await tester.pumpWidget(
         buildFrame(
           const Row(
@@ -60,37 +107,48 @@ void main() {
               UserAvatar(name: 'charlie', size: 48),
             ],
           ),
+          disableAnimations: true,
         ),
       );
       await tester.pumpAndSettle();
 
-      final containers = tester
-          .widgetList<Container>(find.byType(Container))
-          .toList();
-      final deco1 = containers[0].decoration as BoxDecoration?;
-      final deco2 = containers[1].decoration as BoxDecoration?;
-      expect(deco1?.color, equals(deco2?.color));
+      final characterViews = find.byType(SocialPersonaCharacterView);
+      expect(characterViews, findsNWidgets(2));
+      final widget1 = tester.widget<SocialPersonaCharacterView>(
+        characterViews.at(0),
+      );
+      final widget2 = tester.widget<SocialPersonaCharacterView>(
+        characterViews.at(1),
+      );
+      expect(widget1.spec, equals(widget2.spec));
     },
   );
 
-  testWidgets('fallback uses one stable system outline across names', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      buildFrame(
-        const Row(
-          children: [
-            UserAvatar(name: 'alice'),
-            UserAvatar(name: 'bob'),
-          ],
+  testWidgets(
+    'fallback uses deterministic code-drawn character, never generic person icon or image',
+    (tester) async {
+      await tester.pumpWidget(
+        buildFrame(
+          const Row(
+            children: [
+              UserAvatar(name: 'alice'),
+              UserAvatar(name: 'bob'),
+            ],
+          ),
+          disableAnimations: true,
         ),
-      ),
-    );
-    final icons = tester.widgetList<Icon>(find.byType(Icon)).toList();
-    expect(icons, hasLength(2));
-    expect(icons[0].icon, Icons.person_outline_rounded);
-    expect(icons[1].icon, Icons.person_outline_rounded);
-  });
+      );
+      await tester.pumpAndSettle();
+
+      // Renders code-drawn CustomPaint canvas
+      expect(find.byType(CustomPaint), findsWidgets);
+
+      // Must NEVER render generic person icons or network image avatars
+      expect(find.byIcon(Icons.person), findsNothing);
+      expect(find.byIcon(Icons.person_outline_rounded), findsNothing);
+      expect(find.byType(Image), findsNothing);
+    },
+  );
 
   testWidgets('supports tokens 24, 48, 160 with semantics label', (
     tester,
@@ -103,20 +161,18 @@ void main() {
             size: size,
             semanticLabel: 'Tester Avatar',
           ),
+          disableAnimations: true,
         ),
       );
       await tester.pumpAndSettle();
 
-      final container = tester.widget<Container>(find.byType(Container).first);
-      expect(
-        container.constraints?.minWidth ?? container.constraints?.maxWidth,
-        size,
-      );
+      final avatarFinder = find.byType(UserAvatar);
+      expect(tester.getSize(avatarFinder), Size(size, size));
       expect(find.bySemanticsLabel('Tester Avatar'), findsOneWidget);
     }
   });
 
-  testWidgets('persona has priority over avatarUrl and fallback', (
+  testWidgets('persona has priority over default system fallback', (
     tester,
   ) async {
     const persona = SocialPersona(
@@ -137,12 +193,8 @@ void main() {
 
     await tester.pumpWidget(
       buildFrame(
-        UserAvatar(
-          name: 'u1',
-          persona: persona,
-          avatarUrl: 'https://example.com/avatar.jpg',
-          size: 48,
-        ),
+        const UserAvatar(name: 'u1', persona: persona, size: 48),
+        disableAnimations: true,
       ),
     );
     await tester.pumpAndSettle();
@@ -153,5 +205,52 @@ void main() {
       tester.getSize(find.byType(SocialPersonaAvatar)),
       const Size(48, 48),
     );
+  });
+
+  testWidgets('renderer boundary allows a custom character engine', (
+    tester,
+  ) async {
+    final spy = _SpyPersonaRenderer();
+    await tester.pumpWidget(
+      buildFrame(
+        UserAvatar(name: 'alice', size: 48, renderer: spy),
+        disableAnimations: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(spy.callCount, greaterThanOrEqualTo(1));
+    expect(spy.lastSpec?.name, 'alice');
+    expect(spy.lastSize, 48.0);
+    expect(spy.lastMotionProgress, 0.0);
+    expect(spy.lastMotionCue, AvatarMotionCue.idle);
+    expect(find.byKey(const ValueKey('spy_character')), findsOneWidget);
+  });
+
+  testWidgets('reduced motion mode forces static progress 0.0', (tester) async {
+    final spy = _SpyPersonaRenderer();
+    await tester.pumpWidget(
+      buildFrame(
+        UserAvatar(name: 'dave', size: 48, renderer: spy),
+        disableAnimations: true,
+      ),
+    );
+    await tester.pump();
+
+    expect(spy.lastMotionProgress, 0.0);
+  });
+
+  testWidgets('motion never adds status text claims in semantics', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildFrame(const UserAvatar(name: 'eve', size: 48)),
+    );
+
+    expect(find.textContaining('在线'), findsNothing);
+    expect(find.textContaining('已读'), findsNothing);
+    expect(find.textContaining('正在输入'), findsNothing);
+    expect(find.textContaining('online'), findsNothing);
+    expect(find.textContaining('typing'), findsNothing);
   });
 }

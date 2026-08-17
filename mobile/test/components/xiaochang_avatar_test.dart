@@ -17,18 +17,17 @@ Widget _host(Widget child, {Locale locale = const Locale('zh')}) {
 }
 
 void main() {
-  testWidgets(
-    'XiaochangAvatar renders with explicit AI Assistant semantic label',
-    (tester) async {
-      await tester.pumpWidget(_host(const XiaochangAvatar(size: 48)));
+  testWidgets('XiaochangAvatar renders as the personal core Avatar', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_host(const XiaochangAvatar(size: 48)));
 
-      expect(find.byType(XiaochangAvatar), findsOneWidget);
-      expect(find.byType(Image), findsOneWidget);
+    expect(find.byType(XiaochangAvatar), findsOneWidget);
+    expect(find.byType(Image), findsOneWidget);
 
-      final semantics = tester.getSemantics(find.byType(XiaochangAvatar));
-      expect(semantics.label, contains('小昌 · AI 助手'));
-    },
-  );
+    final semantics = tester.getSemantics(find.byType(XiaochangAvatar));
+    expect(semantics.label, contains('小昌 · 核心 Avatar'));
+  });
 
   testWidgets('XiaochangAvatar supports different token sizes 24, 48, 160', (
     tester,
@@ -60,7 +59,7 @@ void main() {
     );
 
     final semantics = tester.getSemantics(find.byType(XiaochangAvatar));
-    expect(semantics.label, contains('Xiaochang · AI Assistant'));
+    expect(semantics.label, contains('Xiaochang · Core Avatar'));
   });
 
   testWidgets(

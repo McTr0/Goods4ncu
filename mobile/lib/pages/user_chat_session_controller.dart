@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:record/record.dart';
 
 import '../services/ws_service.dart';
 import 'user_chat_media_sender.dart';
@@ -18,28 +17,18 @@ abstract class UserChatAudioRecorder {
   Future<void> dispose();
 }
 
-class DeviceUserChatAudioRecorder implements UserChatAudioRecorder {
-  DeviceUserChatAudioRecorder({AudioRecorder? recorder})
-    : _recorder = recorder ?? AudioRecorder();
-
-  final AudioRecorder _recorder;
+class DisabledUserChatAudioRecorder implements UserChatAudioRecorder {
+  @override
+  Future<bool> hasPermission() async => false;
 
   @override
-  Future<bool> hasPermission() => _recorder.hasPermission();
+  Future<void> start(String path) async {}
 
   @override
-  Future<void> start(String path) {
-    return _recorder.start(
-      const RecordConfig(encoder: AudioEncoder.opus),
-      path: path,
-    );
-  }
+  Future<String?> stop() async => null;
 
   @override
-  Future<String?> stop() => _recorder.stop();
-
-  @override
-  Future<void> dispose() => _recorder.dispose();
+  Future<void> dispose() async {}
 }
 
 abstract class UserChatNotificationSource {
@@ -67,7 +56,7 @@ class UserChatSessionController extends ChangeNotifier {
     UserChatNotificationSource? notificationSource,
     UserChatTempDirectoryPath? tempDirectoryPath,
   }) : _mediaSender = mediaSender ?? UserChatMediaSender(),
-       _audioRecorder = audioRecorder ?? DeviceUserChatAudioRecorder(),
+       _audioRecorder = audioRecorder ?? DisabledUserChatAudioRecorder(),
        _notificationSource =
            notificationSource ?? const WsUserChatNotificationSource(),
        _tempDirectoryPath =

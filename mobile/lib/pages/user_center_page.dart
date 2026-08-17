@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/api_service.dart';
+import '../components/user_avatar.dart';
+import '../models/models.dart';
 import '../services/admin_role_cache.dart';
 import '../services/token_storage.dart';
 import '../theme/app_theme.dart';
@@ -20,6 +22,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
   late final ApiService _apiService;
   String _username = '';
   String _createdAt = '';
+  SocialPersona? _persona;
   List<dynamic> _listings = [];
   bool _isLoading = true;
 
@@ -34,11 +37,18 @@ class _UserCenterPageState extends State<UserCenterPage> {
     try {
       final profile = await _apiService.getUserProfile();
       final listings = await _apiService.getUserListings();
+      SocialPersona? persona;
+      try {
+        persona = await _apiService.getSocialPersona();
+      } catch (_) {
+        // The default system Avatar remains available if persona loading fails.
+      }
 
       if (mounted) {
         setState(() {
           _username = profile['username'] ?? '';
           _createdAt = profile['created_at'] ?? '';
+          _persona = persona;
           _listings = listings['items'] ?? [];
           _isLoading = false;
         });
@@ -95,19 +105,11 @@ class _UserCenterPageState extends State<UserCenterPage> {
                       padding: const EdgeInsets.all(20),
                       child: Row(
                         children: [
-                          CircleAvatar(
-                            radius: 32,
-                            backgroundColor: AppTheme.primary,
-                            child: Text(
-                              _username.isNotEmpty
-                                  ? _username[0].toUpperCase()
-                                  : '?',
-                              style: const TextStyle(
-                                fontSize: 28,
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                          UserAvatar(
+                            name: _username,
+                            persona: _persona,
+                            size: 64,
+                            semanticLabel: _username,
                           ),
                           const SizedBox(width: 16),
                           Column(
