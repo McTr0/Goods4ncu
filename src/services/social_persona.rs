@@ -19,11 +19,12 @@ const SELF_DESCRIPTION_CODES: &[&str] = &[
     "reply_later",
     "tech_enthusiast",
 ];
-const APPEARANCE_KEYS: &[&str] = &["palette", "silhouette", "accessory", "outfit"];
+const APPEARANCE_KEYS: &[&str] = &["palette", "silhouette", "accessory", "outfit", "character"];
 const PALETTES: &[&str] = &["teal", "plum", "sun", "slate"];
 const SILHOUETTES: &[&str] = &["soft", "round", "sharp"];
 const ACCESSORIES: &[&str] = &["none", "glasses", "headphones", "leaf"];
 const OUTFITS: &[&str] = &["campus", "workwear", "casual", "lab"];
+const CHARACTERS: &[&str] = &["classic", "ncu_gugugaga", "ncu_doro"];
 
 /// The only persona choices exposed to clients.  These values are deliberately
 /// compiled into the server contract: a client can select a catalog token, but
@@ -171,6 +172,13 @@ impl SocialPersonaService {
         appearance.insert(
             "outfit".to_string(),
             OUTFITS.iter().map(|value| (*value).to_string()).collect(),
+        );
+        appearance.insert(
+            "character".to_string(),
+            CHARACTERS
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
         );
         SocialPersonaCatalogView {
             style_version: SOCIAL_PERSONA_STYLE_VERSION.to_string(),
@@ -923,6 +931,10 @@ fn normalize_appearance(value: Value) -> Result<Value, ApiError> {
         "outfit".to_string(),
         Value::String(read_token(&input, "outfit", OUTFITS, "campus")?),
     );
+    output.insert(
+        "character".to_string(),
+        Value::String(read_token(&input, "character", CHARACTERS, "classic")?),
+    );
     Ok(Value::Object(output))
 }
 
@@ -973,6 +985,7 @@ mod tests {
         assert_eq!(normalized.style_version, "v1");
         assert_eq!(normalized.appearance_config["silhouette"], "soft");
         assert_eq!(normalized.appearance_config["outfit"], "campus");
+        assert_eq!(normalized.appearance_config["character"], "classic");
     }
 
     #[test]
@@ -1001,6 +1014,14 @@ mod tests {
                 "lab".to_string()
             ]
         );
+        assert_eq!(
+            catalog.appearance["character"],
+            vec![
+                "classic".to_string(),
+                "ncu_gugugaga".to_string(),
+                "ncu_doro".to_string()
+            ]
+        );
         assert!(!catalog.appearance.contains_key("image_url"));
     }
 
@@ -1016,6 +1037,10 @@ mod tests {
 
         let mut invalid = input();
         invalid.appearance_config = json!({"palette": 1});
+        assert!(normalize_input(invalid).is_err());
+
+        let mut invalid = input();
+        invalid.appearance_config = json!({"character": "external_url"});
         assert!(normalize_input(invalid).is_err());
     }
 

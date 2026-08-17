@@ -101,8 +101,8 @@ class SocialPersonaPreviewCard extends StatelessWidget {
 
 /// Role token used at list (24), profile (48), and card/space (160) scales.
 ///
-/// Deterministic character presentation with subtle local-only motion at
-/// appropriate sizes (>= 32) and static behavior under reduced motion.
+/// Deterministic character presentation with subtle local-only motion in large
+/// previews and static behavior under reduced motion.
 ///
 /// Motion is local-only and NEVER reflects online, typing, read, push, or background activity.
 ///
@@ -190,6 +190,7 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
   late String _silhouette;
   late String _accessory;
   late String _outfit;
+  late String _character;
   late String _contactPosture;
   late Set<String> _selfDescriptions;
 
@@ -221,6 +222,11 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
       persona?.appearance.outfit,
       widget.catalog?.appearance['outfit'],
       'campus',
+    );
+    _character = _initialValue(
+      persona?.appearance.character,
+      widget.catalog?.appearance['character'],
+      'classic',
     );
     _contactPosture = _initialValue(
       persona?.contactPosture,
@@ -261,6 +267,7 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
       silhouette: _silhouette,
       accessory: _accessory,
       outfit: _outfit,
+      character: _character,
     ),
     selfDescriptions: _selfDescriptions.toList(growable: false),
     contactPosture: _contactPosture,
@@ -301,6 +308,35 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
                 const SizedBox(height: AppTheme.sp16),
                 SocialPersonaPreviewCard(persona: _previewPersona),
                 const SizedBox(height: AppTheme.sp16),
+                Text(
+                  l.socialPersonaCharacter,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: AppTheme.sp8),
+                Wrap(
+                  spacing: AppTheme.sp8,
+                  runSpacing: AppTheme.sp8,
+                  children:
+                      _catalogValues('character', const [
+                            'classic',
+                            'ncu_gugugaga',
+                            'ncu_doro',
+                          ])
+                          .map(
+                            (character) => _characterChoice(
+                              context,
+                              character: character,
+                              label: switch (character) {
+                                'ncu_gugugaga' =>
+                                  l.socialPersonaCharacterGugugaga,
+                                'ncu_doro' => l.socialPersonaCharacterDoro,
+                                _ => l.socialPersonaCharacterClassic,
+                              },
+                            ),
+                          )
+                          .toList(growable: false),
+                ),
+                const SizedBox(height: AppTheme.sp16),
                 _dropdown(
                   label: l.socialPersonaRepresentationMode,
                   value: _representationMode,
@@ -317,88 +353,90 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
                     () => _representationMode = value ?? _representationMode,
                   ),
                 ),
-                _dropdown(
-                  label: l.socialPersonaPalette,
-                  value: _palette,
-                  items: _localizedItems(
-                    _catalogValues('palette', const [
-                      'teal',
-                      'plum',
-                      'sun',
-                      'slate',
-                    ]),
-                    (value) => switch (value) {
-                      'teal' => l.socialPersonaPaletteTeal,
-                      'plum' => l.socialPersonaPalettePlum,
-                      'sun' => l.socialPersonaPaletteSun,
-                      'slate' => l.socialPersonaPaletteSlate,
-                      _ => value,
-                    },
+                if (_character == 'classic') ...[
+                  _dropdown(
+                    label: l.socialPersonaPalette,
+                    value: _palette,
+                    items: _localizedItems(
+                      _catalogValues('palette', const [
+                        'teal',
+                        'plum',
+                        'sun',
+                        'slate',
+                      ]),
+                      (value) => switch (value) {
+                        'teal' => l.socialPersonaPaletteTeal,
+                        'plum' => l.socialPersonaPalettePlum,
+                        'sun' => l.socialPersonaPaletteSun,
+                        'slate' => l.socialPersonaPaletteSlate,
+                        _ => value,
+                      },
+                    ),
+                    onChanged: (value) =>
+                        setState(() => _palette = value ?? _palette),
                   ),
-                  onChanged: (value) =>
-                      setState(() => _palette = value ?? _palette),
-                ),
-                _dropdown(
-                  label: l.socialPersonaSilhouette,
-                  value: _silhouette,
-                  items: _localizedItems(
-                    _catalogValues('silhouette', const [
-                      'soft',
-                      'round',
-                      'sharp',
-                    ]),
-                    (value) => switch (value) {
-                      'soft' => l.socialPersonaSilhouetteSoft,
-                      'round' => l.socialPersonaSilhouetteRound,
-                      'sharp' => l.socialPersonaSilhouetteSharp,
-                      _ => value,
-                    },
+                  _dropdown(
+                    label: l.socialPersonaSilhouette,
+                    value: _silhouette,
+                    items: _localizedItems(
+                      _catalogValues('silhouette', const [
+                        'soft',
+                        'round',
+                        'sharp',
+                      ]),
+                      (value) => switch (value) {
+                        'soft' => l.socialPersonaSilhouetteSoft,
+                        'round' => l.socialPersonaSilhouetteRound,
+                        'sharp' => l.socialPersonaSilhouetteSharp,
+                        _ => value,
+                      },
+                    ),
+                    onChanged: (value) =>
+                        setState(() => _silhouette = value ?? _silhouette),
                   ),
-                  onChanged: (value) =>
-                      setState(() => _silhouette = value ?? _silhouette),
-                ),
-                _dropdown(
-                  label: l.socialPersonaAccessory,
-                  value: _accessory,
-                  items: _localizedItems(
-                    _catalogValues('accessory', const [
-                      'none',
-                      'glasses',
-                      'headphones',
-                      'leaf',
-                    ]),
-                    (value) => switch (value) {
-                      'none' => l.socialPersonaAccessoryNone,
-                      'glasses' => l.socialPersonaAccessoryGlasses,
-                      'headphones' => l.socialPersonaAccessoryHeadphones,
-                      'leaf' => l.socialPersonaAccessoryLeaf,
-                      _ => value,
-                    },
+                  _dropdown(
+                    label: l.socialPersonaAccessory,
+                    value: _accessory,
+                    items: _localizedItems(
+                      _catalogValues('accessory', const [
+                        'none',
+                        'glasses',
+                        'headphones',
+                        'leaf',
+                      ]),
+                      (value) => switch (value) {
+                        'none' => l.socialPersonaAccessoryNone,
+                        'glasses' => l.socialPersonaAccessoryGlasses,
+                        'headphones' => l.socialPersonaAccessoryHeadphones,
+                        'leaf' => l.socialPersonaAccessoryLeaf,
+                        _ => value,
+                      },
+                    ),
+                    onChanged: (value) =>
+                        setState(() => _accessory = value ?? _accessory),
                   ),
-                  onChanged: (value) =>
-                      setState(() => _accessory = value ?? _accessory),
-                ),
-                _dropdown(
-                  label: l.socialPersonaOutfit,
-                  value: _outfit,
-                  items: _localizedItems(
-                    _catalogValues('outfit', const [
-                      'campus',
-                      'workwear',
-                      'casual',
-                      'lab',
-                    ]),
-                    (value) => switch (value) {
-                      'campus' => l.socialPersonaOutfitCampus,
-                      'workwear' => l.socialPersonaOutfitWorkwear,
-                      'casual' => l.socialPersonaOutfitCasual,
-                      'lab' => l.socialPersonaOutfitLab,
-                      _ => value,
-                    },
+                  _dropdown(
+                    label: l.socialPersonaOutfit,
+                    value: _outfit,
+                    items: _localizedItems(
+                      _catalogValues('outfit', const [
+                        'campus',
+                        'workwear',
+                        'casual',
+                        'lab',
+                      ]),
+                      (value) => switch (value) {
+                        'campus' => l.socialPersonaOutfitCampus,
+                        'workwear' => l.socialPersonaOutfitWorkwear,
+                        'casual' => l.socialPersonaOutfitCasual,
+                        'lab' => l.socialPersonaOutfitLab,
+                        _ => value,
+                      },
+                    ),
+                    onChanged: (value) =>
+                        setState(() => _outfit = value ?? _outfit),
                   ),
-                  onChanged: (value) =>
-                      setState(() => _outfit = value ?? _outfit),
-                ),
+                ],
                 const SizedBox(height: AppTheme.sp8),
                 Text(
                   l.socialPersonaContactPosture,
@@ -482,6 +520,7 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
                         'silhouette': _silhouette,
                         'accessory': _accessory,
                         'outfit': _outfit,
+                        'character': _character,
                       },
                       selfDescriptions: _selfDescriptions.toList(),
                       contactPosture: _contactPosture,
@@ -518,6 +557,70 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
             )
             .toList(growable: false),
         onChanged: onChanged,
+      ),
+    );
+  }
+
+  Widget _characterChoice(
+    BuildContext context, {
+    required String character,
+    required String label,
+  }) {
+    final selected = _character == character;
+    final colors = Theme.of(context).colorScheme;
+    final spec = SocialPersonaRenderSpec(
+      palette: _palette,
+      silhouette: _silhouette,
+      accessory: _accessory,
+      outfit: _outfit,
+      assetId: character == 'classic' ? null : character,
+    );
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: InkWell(
+        key: ValueKey('persona_character_$character'),
+        onTap: () => setState(() => _character = character),
+        borderRadius: BorderRadius.circular(16),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          width: 104,
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
+          decoration: BoxDecoration(
+            color: selected
+                ? colors.primaryContainer.withValues(alpha: 0.55)
+                : colors.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: selected ? colors.primary : colors.outlineVariant,
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SocialPersonaCharacterView(
+                spec: spec,
+                size: 64,
+                enableMotion: selected,
+                motionCue: selected
+                    ? AvatarMotionCue.selected
+                    : AvatarMotionCue.idle,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                maxLines: 2,
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

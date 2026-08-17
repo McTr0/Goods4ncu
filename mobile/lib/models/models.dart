@@ -1452,12 +1452,14 @@ class SocialPersonaAppearance {
     required this.silhouette,
     required this.accessory,
     required this.outfit,
+    this.character = 'classic',
   });
 
   final String palette;
   final String silhouette;
   final String accessory;
   final String outfit;
+  final String character;
 
   factory SocialPersonaAppearance.fromJson(Map<String, dynamic>? json) {
     return SocialPersonaAppearance(
@@ -1465,6 +1467,7 @@ class SocialPersonaAppearance {
       silhouette: json?['silhouette']?.toString() ?? 'soft',
       accessory: json?['accessory']?.toString() ?? 'none',
       outfit: json?['outfit']?.toString() ?? 'campus',
+      character: json?['character']?.toString() ?? 'classic',
     );
   }
 
@@ -1473,6 +1476,7 @@ class SocialPersonaAppearance {
     'silhouette': silhouette,
     'accessory': accessory,
     'outfit': outfit,
+    'character': character,
   };
 }
 

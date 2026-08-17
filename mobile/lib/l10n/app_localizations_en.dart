@@ -3082,6 +3082,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get socialPersonaRoleCharacter => 'Role character';
 
   @override
+  String get socialPersonaCharacter => 'Avatar character';
+
+  @override
+  String get socialPersonaCharacterClassic => 'Classic';
+
+  @override
+  String get socialPersonaCharacterGugugaga => 'NCU Gugugaga';
+
+  @override
+  String get socialPersonaCharacterDoro => 'NCU Doro';
+
+  @override
   String get socialPersonaPalette => 'Palette';
 
   @override

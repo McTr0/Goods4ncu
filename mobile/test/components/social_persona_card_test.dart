@@ -30,6 +30,42 @@ SocialPersona _persona() => const SocialPersona(
 );
 
 void main() {
+  testWidgets('editor lets the user select and save an NCU mascot', (
+    tester,
+  ) async {
+    SocialPersonaDraft? saved;
+    await tester.pumpWidget(
+      _host(
+        Builder(
+          builder: (context) => FilledButton(
+            onPressed: () async {
+              saved = await showSocialPersonaEditor(context, null);
+            },
+            child: const Text('打开角色编辑器'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('打开角色编辑器'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('南大咕咕嘎嘎'), findsOneWidget);
+    expect(find.text('南大 Doro'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('persona_character_ncu_doro')));
+    await tester.pump(const Duration(milliseconds: 220));
+    await tester.scrollUntilVisible(
+      find.text('保存草稿'),
+      300,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('保存草稿'));
+    await tester.pumpAndSettle();
+
+    expect(saved?.appearanceConfig['character'], 'ncu_doro');
+  });
+
   testWidgets(
     'preview renders explicit identity choices without attention claims',
     (tester) async {

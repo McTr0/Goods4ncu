@@ -36,6 +36,9 @@ class SocialPersonaRenderSpec {
       accessory: persona.appearance.accessory,
       outfit: persona.appearance.outfit,
       name: name ?? persona.userId ?? '',
+      assetId: persona.appearance.character == 'classic'
+          ? null
+          : persona.appearance.character,
     );
   }
 
@@ -713,12 +716,111 @@ class _SpriteAtlasPainter extends CustomPainter {
       oldDelegate.background != background;
 }
 
-const defaultPersonaRenderer = SpriteAtlasPersonaRenderer(
-  manifestAsset: 'assets/avatars/v1/sprout/manifest.json',
+/// Borderless, pre-compressed campus mascot renderer.
+///
+/// The 2.5D lighting is baked into a small transparent WebP. Runtime work is
+/// limited to decoding a size-bucketed texture and applying a local transform,
+/// which keeps the same implementation fast on Android, iOS, and Web.
+class CampusMascotPersonaRenderer implements SocialPersonaRenderer {
+  const CampusMascotPersonaRenderer({required this.fallback});
+
+  final SocialPersonaRenderer fallback;
+
+  static const _assets = <String, String>{
+    'ncu_gugugaga': 'assets/avatars/v1/ncu_mascots/gugugaga.webp',
+    'ncu_doro': 'assets/avatars/v1/ncu_mascots/doro.webp',
+  };
+
+  @override
+  Widget buildCharacter(
+    BuildContext context, {
+    required SocialPersonaRenderSpec spec,
+    required double size,
+    required double motionProgress,
+    required AvatarMotionCue motionCue,
+    required bool isDark,
+    String? semanticLabel,
+  }) {
+    final asset = _assets[spec.assetId];
+    if (asset == null) {
+      return fallback.buildCharacter(
+        context,
+        spec: spec,
+        size: size,
+        motionProgress: motionProgress,
+        motionCue: motionCue,
+        isDark: isDark,
+        semanticLabel: semanticLabel,
+      );
+    }
+
+    final wave = math.sin(motionProgress * 2 * math.pi);
+    final impulse = math.sin(motionProgress * math.pi);
+    final (offsetY, scale, rotation) = switch (motionCue) {
+      AvatarMotionCue.idle => (
+        wave * size * 0.018,
+        1 + wave * 0.008,
+        wave * 0.008,
+      ),
+      AvatarMotionCue.pressed => (0.0, 1 - impulse * 0.055, 0.0),
+      AvatarMotionCue.selected => (
+        -impulse * size * 0.055,
+        1 + impulse * 0.035,
+        wave * 0.012,
+      ),
+      AvatarMotionCue.published => (
+        -impulse * size * 0.075,
+        1 + impulse * 0.045,
+        wave * 0.018,
+      ),
+      AvatarMotionCue.confirmedByUser => (
+        -impulse * size * 0.045,
+        1 + impulse * 0.03,
+        -wave * 0.012,
+      ),
+    };
+    final cacheWidth = size <= 48 ? 96 : (size <= 160 ? 320 : 512);
+
+    Widget character = RepaintBoundary(
+      child: Transform.translate(
+        offset: Offset(0, offsetY),
+        child: Transform.rotate(
+          angle: rotation,
+          child: Transform.scale(
+            scale: scale,
+            child: Image.asset(
+              asset,
+              key: ValueKey('persona_asset_${spec.assetId}'),
+              width: size,
+              height: size,
+              cacheWidth: cacheWidth,
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.medium,
+              gaplessPlayback: true,
+              excludeFromSemantics: true,
+            ),
+          ),
+        ),
+      ),
+    );
+    if (semanticLabel case final label? when label.isNotEmpty) {
+      character = Semantics(label: label, image: true, child: character);
+    }
+    return SizedBox.square(dimension: size, child: character);
+  }
+}
+
+const defaultPersonaRenderer = CampusMascotPersonaRenderer(
+  fallback: SpriteAtlasPersonaRenderer(
+    manifestAsset: 'assets/avatars/v1/sprout/manifest.json',
+  ),
 );
 
-/// Widget that hosts a character spec with subtle local-only idle motion at appropriate sizes
-/// and static behavior under reduced motion.
+/// Widget that hosts a character spec with subtle local-only idle motion.
+///
+/// Default list-scale avatars stay static; 96px+ previews animate. A focused
+/// caller can explicitly opt a smaller avatar in, and reduced motion always
+/// wins.
 ///
 /// Motion is local-only and NEVER reflects online, read, typing, or background activity.
 class SocialPersonaCharacterView extends StatefulWidget {
@@ -764,7 +866,9 @@ class _SocialPersonaCharacterViewState extends State<SocialPersonaCharacterView>
     final media = MediaQuery.maybeOf(context);
     if (media?.disableAnimations == true) return false;
     if (widget.enableMotion == true) return true;
-    return true;
+    // Default list and message avatars stay static. Large profile/preview
+    // characters animate, while callers can opt a smaller focused avatar in.
+    return widget.size >= 96;
   }
 
   @override

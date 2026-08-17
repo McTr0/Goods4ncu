@@ -42,6 +42,7 @@ void main() {
           silhouette: 'sharp',
           accessory: 'headphones',
           outfit: 'workwear',
+          character: 'ncu_doro',
         ),
         selfDescriptions: [],
         contactPosture: 'leave_message',
@@ -54,7 +55,7 @@ void main() {
       expect(spec.accessory, 'headphones');
       expect(spec.outfit, 'workwear');
       expect(spec.name, 'user-42');
-      expect(spec.assetId, isNull);
+      expect(spec.assetId, 'ncu_doro');
     });
 
     test('default system character selects the versioned sprout asset', () {
@@ -144,6 +145,38 @@ void main() {
   });
 
   group('CodeDrawnPersonaRenderer & SocialPersonaCharacterView', () {
+    testWidgets(
+      'renders borderless campus mascot assets from character token',
+      (tester) async {
+        const spec = SocialPersonaRenderSpec(
+          palette: 'teal',
+          silhouette: 'soft',
+          accessory: 'none',
+          outfit: 'campus',
+          assetId: 'ncu_gugugaga',
+        );
+
+        await tester.pumpWidget(
+          const MaterialApp(
+            home: Scaffold(
+              body: SocialPersonaCharacterView(
+                spec: spec,
+                size: 160,
+                enableMotion: false,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const ValueKey('persona_asset_ncu_gugugaga')),
+          findsOneWidget,
+        );
+        expect(find.byType(Image), findsOneWidget);
+      },
+    );
+
     testWidgets('renders CustomPaint vector character for all silhouettes', (
       tester,
     ) async {
@@ -204,35 +237,34 @@ void main() {
       );
     });
 
-    testWidgets(
-      'interactive size (>=32) renders with idle motion when enabled',
-      (tester) async {
-        const spec = SocialPersonaRenderSpec(
-          palette: 'plum',
-          silhouette: 'round',
-          accessory: 'headphones',
-          outfit: 'lab',
-          name: 'interactive',
-        );
+    testWidgets('large character renders with idle motion when enabled', (
+      tester,
+    ) async {
+      const spec = SocialPersonaRenderSpec(
+        palette: 'plum',
+        silhouette: 'round',
+        accessory: 'headphones',
+        outfit: 'lab',
+        name: 'interactive',
+      );
 
-        await tester.pumpWidget(
-          const MaterialApp(
-            home: Scaffold(
-              body: Center(
-                child: SocialPersonaCharacterView(
-                  spec: spec,
-                  size: 48,
-                  enableMotion: true,
-                ),
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: SocialPersonaCharacterView(
+                spec: spec,
+                size: 160,
+                enableMotion: true,
               ),
             ),
           ),
-        );
+        ),
+      );
 
-        expect(find.byType(SocialPersonaCharacterView), findsOneWidget);
-        await tester.pump(const Duration(milliseconds: 500));
-        expect(tester.takeException(), isNull);
-      },
-    );
+      expect(find.byType(SocialPersonaCharacterView), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(tester.takeException(), isNull);
+    });
   });
 }

@@ -101,6 +101,7 @@ flutter:
     - assets/test_product_images/
     - assets/characters/
     - assets/avatars/v1/sprout/
+    - assets/avatars/v1/ncu_mascots/
 
   # To add more assets to your application, extend the assets section:
   #   - images/a_dot_burr.jpeg

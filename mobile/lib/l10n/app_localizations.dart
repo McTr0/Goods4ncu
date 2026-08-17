@@ -5610,6 +5610,30 @@ abstract class AppLocalizations {
   /// **'Role character'**
   String get socialPersonaRoleCharacter;
 
+  /// No description provided for @socialPersonaCharacter.
+  ///
+  /// In en, this message translates to:
+  /// **'Avatar character'**
+  String get socialPersonaCharacter;
+
+  /// No description provided for @socialPersonaCharacterClassic.
+  ///
+  /// In en, this message translates to:
+  /// **'Classic'**
+  String get socialPersonaCharacterClassic;
+
+  /// No description provided for @socialPersonaCharacterGugugaga.
+  ///
+  /// In en, this message translates to:
+  /// **'NCU Gugugaga'**
+  String get socialPersonaCharacterGugugaga;
+
+  /// No description provided for @socialPersonaCharacterDoro.
+  ///
+  /// In en, this message translates to:
+  /// **'NCU Doro'**
+  String get socialPersonaCharacterDoro;
+
   /// No description provided for @socialPersonaPalette.
   ///
   /// In en, this message translates to:
