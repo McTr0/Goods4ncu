@@ -2954,6 +2954,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get socialPersonaCharacterDoro => '南大 Doro';
 
   @override
+  String get socialPersonaCharacterPhoebeChupi => '南大菲比啾比';
+
+  @override
+  String get socialPersonaActionWave => '打招呼';
+
+  @override
+  String get socialPersonaActionCelebrate => '庆祝';
+
+  @override
+  String get socialPersonaActionThinking => '思考';
+
+  @override
   String get socialPersonaPalette => '主色';
 
   @override

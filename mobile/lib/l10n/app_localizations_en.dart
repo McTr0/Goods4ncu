@@ -3094,6 +3094,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get socialPersonaCharacterDoro => 'NCU Doro';
 
   @override
+  String get socialPersonaCharacterPhoebeChupi => 'NCU Phoebe Chupi';
+
+  @override
+  String get socialPersonaActionWave => 'Wave';
+
+  @override
+  String get socialPersonaActionCelebrate => 'Celebrate';
+
+  @override
+  String get socialPersonaActionThinking => 'Think';
+
+  @override
   String get socialPersonaPalette => 'Palette';
 
   @override

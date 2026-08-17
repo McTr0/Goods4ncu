@@ -96,6 +96,9 @@ void main() {
         3,
       );
       expect(AvatarMotionCue.confirmedByUser.manifestKey, 'confirmed_by_user');
+      expect(AvatarMotionCue.wave.manifestKey, 'wave');
+      expect(AvatarMotionCue.celebrate.manifestKey, 'celebrate');
+      expect(AvatarMotionCue.thinking.manifestKey, 'thinking');
     });
 
     test('rejects a sequence frame outside the declared grid', () {
@@ -117,6 +120,23 @@ void main() {
         }),
         throwsFormatException,
       );
+    });
+  });
+
+  group('AvatarActionController', () {
+    test('replays the same semantic action with a new revision', () {
+      final controller = AvatarActionController();
+      var notifications = 0;
+      controller.addListener(() => notifications += 1);
+
+      controller.play(AvatarMotionCue.wave);
+      final firstRevision = controller.revision;
+      controller.play(AvatarMotionCue.wave);
+
+      expect(controller.cue, AvatarMotionCue.wave);
+      expect(controller.revision, firstRevision + 1);
+      expect(notifications, 2);
+      controller.dispose();
     });
   });
 
@@ -176,6 +196,36 @@ void main() {
         expect(find.byType(Image), findsOneWidget);
       },
     );
+
+    testWidgets('renders Phoebe Chupi from the campus character catalog', (
+      tester,
+    ) async {
+      const spec = SocialPersonaRenderSpec(
+        palette: 'teal',
+        silhouette: 'soft',
+        accessory: 'none',
+        outfit: 'campus',
+        assetId: 'ncu_phoebe_chupi',
+      );
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: SocialPersonaCharacterView(
+              spec: spec,
+              size: 160,
+              enableMotion: false,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('persona_asset_ncu_phoebe_chupi')),
+        findsOneWidget,
+      );
+    });
 
     testWidgets('renders CustomPaint vector character for all silhouettes', (
       tester,

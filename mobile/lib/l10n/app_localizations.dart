@@ -5634,6 +5634,30 @@ abstract class AppLocalizations {
   /// **'NCU Doro'**
   String get socialPersonaCharacterDoro;
 
+  /// No description provided for @socialPersonaCharacterPhoebeChupi.
+  ///
+  /// In en, this message translates to:
+  /// **'NCU Phoebe Chupi'**
+  String get socialPersonaCharacterPhoebeChupi;
+
+  /// No description provided for @socialPersonaActionWave.
+  ///
+  /// In en, this message translates to:
+  /// **'Wave'**
+  String get socialPersonaActionWave;
+
+  /// No description provided for @socialPersonaActionCelebrate.
+  ///
+  /// In en, this message translates to:
+  /// **'Celebrate'**
+  String get socialPersonaActionCelebrate;
+
+  /// No description provided for @socialPersonaActionThinking.
+  ///
+  /// In en, this message translates to:
+  /// **'Think'**
+  String get socialPersonaActionThinking;
+
   /// No description provided for @socialPersonaPalette.
   ///
   /// In en, this message translates to:

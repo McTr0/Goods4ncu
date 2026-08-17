@@ -23,6 +23,7 @@ class UserAvatar extends StatelessWidget {
     this.semanticLabel,
     this.enableMotion,
     this.motionCue = AvatarMotionCue.idle,
+    this.motionRevision = 0,
     this.renderer,
   }) : assert(size > 0);
 
@@ -33,6 +34,7 @@ class UserAvatar extends StatelessWidget {
   final String? semanticLabel;
   final bool? enableMotion;
   final AvatarMotionCue motionCue;
+  final int motionRevision;
   final SocialPersonaRenderer? renderer;
 
   @override
@@ -49,6 +51,7 @@ class UserAvatar extends StatelessWidget {
         semanticLabel: effectiveLabel,
         enableMotion: enableMotion,
         motionCue: motionCue,
+        motionRevision: motionRevision,
         renderer: renderer,
       );
     }
@@ -60,6 +63,7 @@ class UserAvatar extends StatelessWidget {
       size: size,
       enableMotion: enableMotion,
       motionCue: motionCue,
+      motionRevision: motionRevision,
       renderer: renderer,
       semanticLabel: effectiveLabel,
     );

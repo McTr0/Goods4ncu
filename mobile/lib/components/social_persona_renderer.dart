@@ -121,7 +121,16 @@ class SocialPersonaRenderSpec {
 /// These cues describe the character's presentation or an explicit action by
 /// the current user. They must never be derived from online, read, typing, or
 /// inferred emotional state.
-enum AvatarMotionCue { idle, pressed, selected, published, confirmedByUser }
+enum AvatarMotionCue {
+  idle,
+  pressed,
+  selected,
+  published,
+  confirmedByUser,
+  wave,
+  celebrate,
+  thinking,
+}
 
 extension AvatarMotionCueContract on AvatarMotionCue {
   String get manifestKey => switch (this) {
@@ -130,6 +139,9 @@ extension AvatarMotionCueContract on AvatarMotionCue {
     AvatarMotionCue.selected => 'selected',
     AvatarMotionCue.published => 'published',
     AvatarMotionCue.confirmedByUser => 'confirmed_by_user',
+    AvatarMotionCue.wave => 'wave',
+    AvatarMotionCue.celebrate => 'celebrate',
+    AvatarMotionCue.thinking => 'thinking',
   };
 
   Duration get fallbackDuration => switch (this) {
@@ -138,9 +150,34 @@ extension AvatarMotionCueContract on AvatarMotionCue {
     AvatarMotionCue.selected => const Duration(milliseconds: 420),
     AvatarMotionCue.published => const Duration(milliseconds: 640),
     AvatarMotionCue.confirmedByUser => const Duration(milliseconds: 480),
+    AvatarMotionCue.wave => const Duration(milliseconds: 720),
+    AvatarMotionCue.celebrate => const Duration(milliseconds: 820),
+    AvatarMotionCue.thinking => const Duration(milliseconds: 1100),
   };
 
   bool get loops => this == AvatarMotionCue.idle;
+}
+
+/// Semantic command source for avatar interactions.
+///
+/// [revision] changes on every [play] call so callers can replay the same
+/// action without briefly switching through an unrelated state. Network
+/// presence and message attention must never drive this controller.
+class AvatarActionController extends ChangeNotifier {
+  AvatarActionController({AvatarMotionCue initialCue = AvatarMotionCue.idle})
+    : _cue = initialCue;
+
+  AvatarMotionCue _cue;
+  int _revision = 0;
+
+  AvatarMotionCue get cue => _cue;
+  int get revision => _revision;
+
+  void play(AvatarMotionCue cue) {
+    _cue = cue;
+    _revision += 1;
+    notifyListeners();
+  }
 }
 
 /// Color tokens tailored for character presentation in light and dark themes.
@@ -729,6 +766,7 @@ class CampusMascotPersonaRenderer implements SocialPersonaRenderer {
   static const _assets = <String, String>{
     'ncu_gugugaga': 'assets/avatars/v1/ncu_mascots/gugugaga.webp',
     'ncu_doro': 'assets/avatars/v1/ncu_mascots/doro.webp',
+    'ncu_phoebe_chupi': 'assets/avatars/v1/ncu_mascots/phoebe_chupi.webp',
   };
 
   @override
@@ -777,6 +815,21 @@ class CampusMascotPersonaRenderer implements SocialPersonaRenderer {
         -impulse * size * 0.045,
         1 + impulse * 0.03,
         -wave * 0.012,
+      ),
+      AvatarMotionCue.wave => (
+        -impulse * size * 0.035,
+        1 + impulse * 0.018,
+        wave * 0.055,
+      ),
+      AvatarMotionCue.celebrate => (
+        -impulse * size * 0.12,
+        1 + impulse * 0.06,
+        wave * 0.035,
+      ),
+      AvatarMotionCue.thinking => (
+        wave * size * 0.015,
+        1 + impulse * 0.012,
+        -0.035 + wave * 0.018,
       ),
     };
     final cacheWidth = size <= 48 ? 96 : (size <= 160 ? 320 : 512);
@@ -830,6 +883,7 @@ class SocialPersonaCharacterView extends StatefulWidget {
     required this.size,
     this.enableMotion,
     this.motionCue = AvatarMotionCue.idle,
+    this.motionRevision = 0,
     this.renderer,
     this.semanticLabel,
   }) : assert(size > 0);
@@ -838,6 +892,7 @@ class SocialPersonaCharacterView extends StatefulWidget {
   final double size;
   final bool? enableMotion;
   final AvatarMotionCue motionCue;
+  final int motionRevision;
   final SocialPersonaRenderer? renderer;
   final String? semanticLabel;
 
@@ -883,6 +938,7 @@ class _SocialPersonaCharacterViewState extends State<SocialPersonaCharacterView>
     _syncMotion(
       restart:
           oldWidget.motionCue != widget.motionCue ||
+          oldWidget.motionRevision != widget.motionRevision ||
           oldWidget.enableMotion != widget.enableMotion ||
           oldWidget.size != widget.size,
     );

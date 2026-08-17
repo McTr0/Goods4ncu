@@ -16,11 +16,15 @@ class SocialPersonaPreviewCard extends StatelessWidget {
     required this.persona,
     this.title,
     this.compact = false,
+    this.motionCue = AvatarMotionCue.idle,
+    this.motionRevision = 0,
   });
 
   final SocialPersona persona;
   final String? title;
   final bool compact;
+  final AvatarMotionCue motionCue;
+  final int motionRevision;
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +38,12 @@ class SocialPersonaPreviewCard extends StatelessWidget {
       children: [
         // Compact cards are used in profile-adjacent summaries (48); the
         // full role card gets the 160 token that is also used in a space.
-        SocialPersonaAvatar(persona: persona, size: compact ? 48 : 160),
+        SocialPersonaAvatar(
+          persona: persona,
+          size: compact ? 48 : 160,
+          motionCue: motionCue,
+          motionRevision: motionRevision,
+        ),
         SizedBox(width: compact ? AppTheme.sp12 : AppTheme.sp16),
         Expanded(
           child: Column(
@@ -115,6 +124,7 @@ class SocialPersonaAvatar extends StatelessWidget {
     this.semanticLabel,
     this.enableMotion,
     this.motionCue = AvatarMotionCue.idle,
+    this.motionRevision = 0,
     this.renderer,
   }) : assert(size > 0);
 
@@ -123,6 +133,7 @@ class SocialPersonaAvatar extends StatelessWidget {
   final String? semanticLabel;
   final bool? enableMotion;
   final AvatarMotionCue motionCue;
+  final int motionRevision;
   final SocialPersonaRenderer? renderer;
 
   @override
@@ -135,6 +146,7 @@ class SocialPersonaAvatar extends StatelessWidget {
       size: size,
       enableMotion: enableMotion,
       motionCue: motionCue,
+      motionRevision: motionRevision,
       renderer: renderer,
       semanticLabel: semanticLabel ?? l.socialPersonaPreviewRole,
     );
@@ -164,13 +176,32 @@ Future<SocialPersonaDraft?> showSocialPersonaEditor(
   SocialPersona? initial, {
   SocialPersonaCatalog? catalog,
 }) {
-  return showModalBottomSheet<SocialPersonaDraft>(
-    context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
-    builder: (_) =>
-        _SocialPersonaEditorSheet(initial: initial, catalog: catalog),
+  return Navigator.of(context, rootNavigator: true).push<SocialPersonaDraft>(
+    MaterialPageRoute(
+      builder: (_) =>
+          _SocialPersonaEditorPage(initial: initial, catalog: catalog),
+    ),
   );
+}
+
+class _SocialPersonaEditorPage extends StatelessWidget {
+  const _SocialPersonaEditorPage({required this.initial, this.catalog});
+
+  final SocialPersona? initial;
+  final SocialPersonaCatalog? catalog;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          initial == null ? l.socialPersonaCreate : l.socialPersonaEdit,
+        ),
+      ),
+      body: _SocialPersonaEditorSheet(initial: initial, catalog: catalog),
+    );
+  }
 }
 
 class _SocialPersonaEditorSheet extends StatefulWidget {
@@ -193,10 +224,12 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
   late String _character;
   late String _contactPosture;
   late Set<String> _selfDescriptions;
+  late AvatarActionController _previewActions;
 
   @override
   void initState() {
     super.initState();
+    _previewActions = AvatarActionController();
     final persona = widget.initial;
     _representationMode = _initialValue(
       persona?.representationMode,
@@ -225,8 +258,8 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
     );
     _character = _initialValue(
       persona?.appearance.character,
-      widget.catalog?.appearance['character'],
-      'classic',
+      _characterValues,
+      'ncu_gugugaga',
     );
     _contactPosture = _initialValue(
       persona?.contactPosture,
@@ -237,6 +270,21 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
     _selfDescriptions = {
       ...?persona?.selfDescriptions.where(allowedLabels.contains),
     };
+  }
+
+  @override
+  void dispose() {
+    _previewActions.dispose();
+    super.dispose();
+  }
+
+  List<String> get _characterValues {
+    final values = widget.catalog?.appearance['character'];
+    return (values == null || values.isEmpty
+            ? const ['ncu_gugugaga', 'ncu_doro', 'ncu_phoebe_chupi']
+            : values)
+        .where((value) => value != 'classic')
+        .toList(growable: false);
   }
 
   String _initialValue(
@@ -286,250 +334,280 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
           AppTheme.sp16,
           AppTheme.sp16 + bottom,
         ),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 760),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  widget.initial == null
-                      ? l.socialPersonaCreate
-                      : l.socialPersonaEdit,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 720),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    l.socialPersonaDescription,
+                    style: Theme.of(context).textTheme.bodyMedium,
                   ),
-                ),
-                const SizedBox(height: AppTheme.sp8),
-                Text(
-                  l.socialPersonaDescription,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                const SizedBox(height: AppTheme.sp16),
-                SocialPersonaPreviewCard(persona: _previewPersona),
-                const SizedBox(height: AppTheme.sp16),
-                Text(
-                  l.socialPersonaCharacter,
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-                const SizedBox(height: AppTheme.sp8),
-                Wrap(
-                  spacing: AppTheme.sp8,
-                  runSpacing: AppTheme.sp8,
-                  children:
-                      _catalogValues('character', const [
-                            'classic',
-                            'ncu_gugugaga',
-                            'ncu_doro',
-                          ])
-                          .map(
-                            (character) => _characterChoice(
-                              context,
-                              character: character,
-                              label: switch (character) {
-                                'ncu_gugugaga' =>
-                                  l.socialPersonaCharacterGugugaga,
-                                'ncu_doro' => l.socialPersonaCharacterDoro,
-                                _ => l.socialPersonaCharacterClassic,
-                              },
-                            ),
-                          )
-                          .toList(growable: false),
-                ),
-                const SizedBox(height: AppTheme.sp16),
-                _dropdown(
-                  label: l.socialPersonaRepresentationMode,
-                  value: _representationMode,
-                  items: _localizedItems(
-                    widget.catalog?.representationModes ??
-                        const ['trait_mapped', 'role_character'],
-                    (value) => switch (value) {
-                      'role_character' => l.socialPersonaRoleCharacter,
-                      'trait_mapped' => l.socialPersonaTraitMapped,
-                      _ => value,
-                    },
+                  const SizedBox(height: AppTheme.sp16),
+                  ListenableBuilder(
+                    listenable: _previewActions,
+                    builder: (context, _) => SocialPersonaPreviewCard(
+                      persona: _previewPersona,
+                      motionCue: _previewActions.cue,
+                      motionRevision: _previewActions.revision,
+                    ),
                   ),
-                  onChanged: (value) => setState(
-                    () => _representationMode = value ?? _representationMode,
+                  const SizedBox(height: AppTheme.sp8),
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: AppTheme.sp8,
+                    runSpacing: AppTheme.sp8,
+                    children: [
+                      ActionChip(
+                        avatar: const Icon(
+                          Icons.waving_hand_outlined,
+                          size: 18,
+                        ),
+                        label: Text(l.socialPersonaActionWave),
+                        onPressed: () =>
+                            _previewActions.play(AvatarMotionCue.wave),
+                      ),
+                      ActionChip(
+                        avatar: const Icon(
+                          Icons.celebration_outlined,
+                          size: 18,
+                        ),
+                        label: Text(l.socialPersonaActionCelebrate),
+                        onPressed: () =>
+                            _previewActions.play(AvatarMotionCue.celebrate),
+                      ),
+                      ActionChip(
+                        avatar: const Icon(Icons.psychology_outlined, size: 18),
+                        label: Text(l.socialPersonaActionThinking),
+                        onPressed: () =>
+                            _previewActions.play(AvatarMotionCue.thinking),
+                      ),
+                    ],
                   ),
-                ),
-                if (_character == 'classic') ...[
+                  const SizedBox(height: AppTheme.sp16),
+                  Text(
+                    l.socialPersonaCharacter,
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: AppTheme.sp8),
+                  Wrap(
+                    spacing: AppTheme.sp8,
+                    runSpacing: AppTheme.sp8,
+                    children: _characterValues
+                        .map(
+                          (character) => _characterChoice(
+                            context,
+                            character: character,
+                            label: switch (character) {
+                              'ncu_gugugaga' =>
+                                l.socialPersonaCharacterGugugaga,
+                              'ncu_doro' => l.socialPersonaCharacterDoro,
+                              'ncu_phoebe_chupi' =>
+                                l.socialPersonaCharacterPhoebeChupi,
+                              _ => l.socialPersonaCharacterClassic,
+                            },
+                          ),
+                        )
+                        .toList(growable: false),
+                  ),
+                  const SizedBox(height: AppTheme.sp16),
                   _dropdown(
-                    label: l.socialPersonaPalette,
-                    value: _palette,
+                    label: l.socialPersonaRepresentationMode,
+                    value: _representationMode,
                     items: _localizedItems(
-                      _catalogValues('palette', const [
-                        'teal',
-                        'plum',
-                        'sun',
-                        'slate',
-                      ]),
+                      widget.catalog?.representationModes ??
+                          const ['trait_mapped', 'role_character'],
                       (value) => switch (value) {
-                        'teal' => l.socialPersonaPaletteTeal,
-                        'plum' => l.socialPersonaPalettePlum,
-                        'sun' => l.socialPersonaPaletteSun,
-                        'slate' => l.socialPersonaPaletteSlate,
+                        'role_character' => l.socialPersonaRoleCharacter,
+                        'trait_mapped' => l.socialPersonaTraitMapped,
                         _ => value,
                       },
                     ),
-                    onChanged: (value) =>
-                        setState(() => _palette = value ?? _palette),
+                    onChanged: (value) => setState(
+                      () => _representationMode = value ?? _representationMode,
+                    ),
                   ),
+                  if (_character == 'classic') ...[
+                    _dropdown(
+                      label: l.socialPersonaPalette,
+                      value: _palette,
+                      items: _localizedItems(
+                        _catalogValues('palette', const [
+                          'teal',
+                          'plum',
+                          'sun',
+                          'slate',
+                        ]),
+                        (value) => switch (value) {
+                          'teal' => l.socialPersonaPaletteTeal,
+                          'plum' => l.socialPersonaPalettePlum,
+                          'sun' => l.socialPersonaPaletteSun,
+                          'slate' => l.socialPersonaPaletteSlate,
+                          _ => value,
+                        },
+                      ),
+                      onChanged: (value) =>
+                          setState(() => _palette = value ?? _palette),
+                    ),
+                    _dropdown(
+                      label: l.socialPersonaSilhouette,
+                      value: _silhouette,
+                      items: _localizedItems(
+                        _catalogValues('silhouette', const [
+                          'soft',
+                          'round',
+                          'sharp',
+                        ]),
+                        (value) => switch (value) {
+                          'soft' => l.socialPersonaSilhouetteSoft,
+                          'round' => l.socialPersonaSilhouetteRound,
+                          'sharp' => l.socialPersonaSilhouetteSharp,
+                          _ => value,
+                        },
+                      ),
+                      onChanged: (value) =>
+                          setState(() => _silhouette = value ?? _silhouette),
+                    ),
+                    _dropdown(
+                      label: l.socialPersonaAccessory,
+                      value: _accessory,
+                      items: _localizedItems(
+                        _catalogValues('accessory', const [
+                          'none',
+                          'glasses',
+                          'headphones',
+                          'leaf',
+                        ]),
+                        (value) => switch (value) {
+                          'none' => l.socialPersonaAccessoryNone,
+                          'glasses' => l.socialPersonaAccessoryGlasses,
+                          'headphones' => l.socialPersonaAccessoryHeadphones,
+                          'leaf' => l.socialPersonaAccessoryLeaf,
+                          _ => value,
+                        },
+                      ),
+                      onChanged: (value) =>
+                          setState(() => _accessory = value ?? _accessory),
+                    ),
+                    _dropdown(
+                      label: l.socialPersonaOutfit,
+                      value: _outfit,
+                      items: _localizedItems(
+                        _catalogValues('outfit', const [
+                          'campus',
+                          'workwear',
+                          'casual',
+                          'lab',
+                        ]),
+                        (value) => switch (value) {
+                          'campus' => l.socialPersonaOutfitCampus,
+                          'workwear' => l.socialPersonaOutfitWorkwear,
+                          'casual' => l.socialPersonaOutfitCasual,
+                          'lab' => l.socialPersonaOutfitLab,
+                          _ => value,
+                        },
+                      ),
+                      onChanged: (value) =>
+                          setState(() => _outfit = value ?? _outfit),
+                    ),
+                  ],
+                  const SizedBox(height: AppTheme.sp8),
+                  Text(
+                    l.socialPersonaContactPosture,
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: AppTheme.sp4),
                   _dropdown(
-                    label: l.socialPersonaSilhouette,
-                    value: _silhouette,
+                    label: l.socialPersonaContactPosture,
+                    value: _contactPosture,
                     items: _localizedItems(
-                      _catalogValues('silhouette', const [
-                        'soft',
-                        'round',
-                        'sharp',
-                      ]),
+                      widget.catalog?.contactPostures ??
+                          const [
+                            'leave_message',
+                            'connection_allowed',
+                            'busy',
+                            'later',
+                          ],
                       (value) => switch (value) {
-                        'soft' => l.socialPersonaSilhouetteSoft,
-                        'round' => l.socialPersonaSilhouetteRound,
-                        'sharp' => l.socialPersonaSilhouetteSharp,
+                        'leave_message' => l.socialPersonaLeaveMessage,
+                        'connection_allowed' =>
+                          l.socialPersonaConnectionAllowed,
+                        'busy' => l.socialPersonaBusy,
+                        'later' => l.socialPersonaLater,
                         _ => value,
                       },
                     ),
-                    onChanged: (value) =>
-                        setState(() => _silhouette = value ?? _silhouette),
-                  ),
-                  _dropdown(
-                    label: l.socialPersonaAccessory,
-                    value: _accessory,
-                    items: _localizedItems(
-                      _catalogValues('accessory', const [
-                        'none',
-                        'glasses',
-                        'headphones',
-                        'leaf',
-                      ]),
-                      (value) => switch (value) {
-                        'none' => l.socialPersonaAccessoryNone,
-                        'glasses' => l.socialPersonaAccessoryGlasses,
-                        'headphones' => l.socialPersonaAccessoryHeadphones,
-                        'leaf' => l.socialPersonaAccessoryLeaf,
-                        _ => value,
-                      },
+                    onChanged: (value) => setState(
+                      () => _contactPosture = value ?? _contactPosture,
                     ),
-                    onChanged: (value) =>
-                        setState(() => _accessory = value ?? _accessory),
                   ),
-                  _dropdown(
-                    label: l.socialPersonaOutfit,
-                    value: _outfit,
-                    items: _localizedItems(
-                      _catalogValues('outfit', const [
-                        'campus',
-                        'workwear',
-                        'casual',
-                        'lab',
-                      ]),
-                      (value) => switch (value) {
-                        'campus' => l.socialPersonaOutfitCampus,
-                        'workwear' => l.socialPersonaOutfitWorkwear,
-                        'casual' => l.socialPersonaOutfitCasual,
-                        'lab' => l.socialPersonaOutfitLab,
-                        _ => value,
-                      },
+                  const SizedBox(height: AppTheme.sp8),
+                  Text(
+                    l.socialPersonaLabels,
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: AppTheme.sp4),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: (widget.catalog?.selfDescriptions ?? _labelCodes)
+                        .map(
+                          (code) => FilterChip(
+                            label: Text(_labelForCode(l, code)),
+                            selected: _selfDescriptions.contains(code),
+                            onSelected: (selected) {
+                              if (selected &&
+                                  _selfDescriptions.length >= 3 &&
+                                  !_selfDescriptions.contains(code)) {
+                                return;
+                              }
+                              setState(() {
+                                if (selected) {
+                                  _selfDescriptions.add(code);
+                                } else {
+                                  _selfDescriptions.remove(code);
+                                }
+                              });
+                            },
+                          ),
+                        )
+                        .toList(growable: false),
+                  ),
+                  const SizedBox(height: AppTheme.sp4),
+                  Text(
+                    l.socialPersonaSelectHint,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppTheme.textSecondary,
                     ),
-                    onChanged: (value) =>
-                        setState(() => _outfit = value ?? _outfit),
+                  ),
+                  const SizedBox(height: AppTheme.sp16),
+                  FilledButton.icon(
+                    onPressed: () => Navigator.pop(
+                      context,
+                      SocialPersonaDraft(
+                        representationMode: _representationMode,
+                        styleVersion:
+                            widget.catalog?.styleVersion ??
+                            widget.initial?.styleVersion ??
+                            'v1',
+                        appearanceConfig: {
+                          'palette': _palette,
+                          'silhouette': _silhouette,
+                          'accessory': _accessory,
+                          'outfit': _outfit,
+                          'character': _character,
+                        },
+                        selfDescriptions: _selfDescriptions.toList(),
+                        contactPosture: _contactPosture,
+                      ),
+                    ),
+                    icon: const Icon(Icons.save_outlined),
+                    label: Text(l.socialPersonaSaveDraft),
                   ),
                 ],
-                const SizedBox(height: AppTheme.sp8),
-                Text(
-                  l.socialPersonaContactPosture,
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-                const SizedBox(height: AppTheme.sp4),
-                _dropdown(
-                  label: l.socialPersonaContactPosture,
-                  value: _contactPosture,
-                  items: _localizedItems(
-                    widget.catalog?.contactPostures ??
-                        const [
-                          'leave_message',
-                          'connection_allowed',
-                          'busy',
-                          'later',
-                        ],
-                    (value) => switch (value) {
-                      'leave_message' => l.socialPersonaLeaveMessage,
-                      'connection_allowed' => l.socialPersonaConnectionAllowed,
-                      'busy' => l.socialPersonaBusy,
-                      'later' => l.socialPersonaLater,
-                      _ => value,
-                    },
-                  ),
-                  onChanged: (value) => setState(
-                    () => _contactPosture = value ?? _contactPosture,
-                  ),
-                ),
-                const SizedBox(height: AppTheme.sp8),
-                Text(
-                  l.socialPersonaLabels,
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-                const SizedBox(height: AppTheme.sp4),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: (widget.catalog?.selfDescriptions ?? _labelCodes)
-                      .map(
-                        (code) => FilterChip(
-                          label: Text(_labelForCode(l, code)),
-                          selected: _selfDescriptions.contains(code),
-                          onSelected: (selected) {
-                            if (selected &&
-                                _selfDescriptions.length >= 3 &&
-                                !_selfDescriptions.contains(code)) {
-                              return;
-                            }
-                            setState(() {
-                              if (selected) {
-                                _selfDescriptions.add(code);
-                              } else {
-                                _selfDescriptions.remove(code);
-                              }
-                            });
-                          },
-                        ),
-                      )
-                      .toList(growable: false),
-                ),
-                const SizedBox(height: AppTheme.sp4),
-                Text(
-                  l.socialPersonaSelectHint,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: AppTheme.sp16),
-                FilledButton.icon(
-                  onPressed: () => Navigator.pop(
-                    context,
-                    SocialPersonaDraft(
-                      representationMode: _representationMode,
-                      styleVersion:
-                          widget.catalog?.styleVersion ??
-                          widget.initial?.styleVersion ??
-                          'v1',
-                      appearanceConfig: {
-                        'palette': _palette,
-                        'silhouette': _silhouette,
-                        'accessory': _accessory,
-                        'outfit': _outfit,
-                        'character': _character,
-                      },
-                      selfDescriptions: _selfDescriptions.toList(),
-                      contactPosture: _contactPosture,
-                    ),
-                  ),
-                  icon: const Icon(Icons.save_outlined),
-                  label: Text(l.socialPersonaSaveDraft),
-                ),
-              ],
+              ),
             ),
           ),
         ),
@@ -581,7 +659,10 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
       label: label,
       child: InkWell(
         key: ValueKey('persona_character_$character'),
-        onTap: () => setState(() => _character = character),
+        onTap: () {
+          setState(() => _character = character);
+          _previewActions.play(AvatarMotionCue.selected);
+        },
         borderRadius: BorderRadius.circular(16),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),

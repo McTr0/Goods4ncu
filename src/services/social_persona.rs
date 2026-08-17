@@ -24,7 +24,11 @@ const PALETTES: &[&str] = &["teal", "plum", "sun", "slate"];
 const SILHOUETTES: &[&str] = &["soft", "round", "sharp"];
 const ACCESSORIES: &[&str] = &["none", "glasses", "headphones", "leaf"];
 const OUTFITS: &[&str] = &["campus", "workwear", "casual", "lab"];
-const CHARACTERS: &[&str] = &["classic", "ncu_gugugaga", "ncu_doro"];
+// `classic` remains readable for personas created by older clients, but is no
+// longer advertised as a selectable character. New editors only offer the
+// campus character catalog below.
+const CHARACTERS: &[&str] = &["classic", "ncu_gugugaga", "ncu_doro", "ncu_phoebe_chupi"];
+const CATALOG_CHARACTERS: &[&str] = &["ncu_gugugaga", "ncu_doro", "ncu_phoebe_chupi"];
 
 /// The only persona choices exposed to clients.  These values are deliberately
 /// compiled into the server contract: a client can select a catalog token, but
@@ -175,7 +179,7 @@ impl SocialPersonaService {
         );
         appearance.insert(
             "character".to_string(),
-            CHARACTERS
+            CATALOG_CHARACTERS
                 .iter()
                 .map(|value| (*value).to_string())
                 .collect(),
@@ -1017,9 +1021,9 @@ mod tests {
         assert_eq!(
             catalog.appearance["character"],
             vec![
-                "classic".to_string(),
                 "ncu_gugugaga".to_string(),
-                "ncu_doro".to_string()
+                "ncu_doro".to_string(),
+                "ncu_phoebe_chupi".to_string()
             ]
         );
         assert!(!catalog.appearance.contains_key("image_url"));
