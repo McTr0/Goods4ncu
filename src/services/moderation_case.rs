@@ -1213,6 +1213,7 @@ pub async fn create_case_for_rejected_job(
             SELECT job.campus_id,
                    CASE
                        WHEN job.resource_type = 'listing_image' THEN listing.owner_id
+                       WHEN job.resource_type = 'post_image' THEN post.author_id
                        WHEN job.resource_type = 'chat_image' THEN message.sender
                        WHEN job.resource_type = 'avatar' THEN job.resource_id
                        WHEN job.resource_type = 'social_persona_asset' THEN persona_asset.user_id
@@ -1227,6 +1228,8 @@ pub async fn create_case_for_rejected_job(
             FROM moderation_jobs job
             LEFT JOIN inventory listing
               ON job.resource_type = 'listing_image' AND listing.id = job.resource_id
+            LEFT JOIN posts post
+              ON job.resource_type = 'post_image' AND post.id::text = job.resource_id
             LEFT JOIN chat_messages message
               ON job.resource_type = 'chat_image' AND message.id::text = job.resource_id
             LEFT JOIN social_persona_assets persona_asset
@@ -1381,6 +1384,17 @@ async fn update_resource_status(
             sqlx::query("UPDATE inventory SET images_moderation_status = $1 WHERE id = $2")
                 .bind(status)
                 .bind(resource_id)
+                .execute(&mut **tx)
+                .await
+                .map_err(db_error)?;
+        }
+        "post_image" => {
+            let post_id = resource_id.parse::<Uuid>().map_err(|_| {
+                ApiError::Internal(anyhow::anyhow!("invalid post image resource id"))
+            })?;
+            sqlx::query("UPDATE posts SET images_moderation_status = $1 WHERE id = $2")
+                .bind(status)
+                .bind(post_id)
                 .execute(&mut **tx)
                 .await
                 .map_err(db_error)?;

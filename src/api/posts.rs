@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::api::error::ApiError;
 use crate::api::session::{OptionalSession, VerifiedTenant};
-use crate::api::AppState;
+use crate::api::{normalize_platform_media_url, AppState};
 use crate::repositories::{ListingPostPreview, Post, PostFilter, PostReply, PostSort};
 use crate::services::campus::CampusService;
 use crate::services::post::{CreateDiscussion, EditDiscussion, PostService};
@@ -43,6 +43,7 @@ pub struct CreatePostRequest {
     pub category: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    pub cover_image_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -398,6 +399,8 @@ pub async fn create_post(
     tenant: VerifiedTenant,
     Json(payload): Json<CreatePostRequest>,
 ) -> Result<Json<PostDetail>, ApiError> {
+    let cover_image_url =
+        normalize_platform_media_url(&state, payload.cover_image_url, "cover_image_url")?;
     let post = post_service(&state)
         .create(CreateDiscussion {
             campus_id: tenant.campus_id,
@@ -406,6 +409,7 @@ pub async fn create_post(
             body: payload.body,
             category: payload.category,
             tags: payload.tags,
+            cover_image_url,
         })
         .await?;
     Ok(Json(detail_view(&state, post)))

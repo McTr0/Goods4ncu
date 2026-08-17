@@ -484,7 +484,10 @@ impl AppConfig {
         let moderation_image_enabled = read_non_empty_env("MODERATION_IMAGE_ENABLED")
             .and_then(|v| v.parse::<bool>().ok())
             .or_else(|| file.as_ref()?.moderation.image_enabled)
-            .unwrap_or(true);
+            // Development deployments do not have a moderation provider by
+            // default. Keep uploaded discussion covers visible there while
+            // preserving the fail-closed production default and validation.
+            .unwrap_or_else(running_in_production);
         let moderation_image_api_url = read_non_empty_env("MODERATION_IMAGE_API_URL")
             .or_else(|| file.as_ref()?.moderation.image_api_url.clone());
         let moderation_image_api_key = read_non_empty_env("MODERATION_IMAGE_API_KEY")

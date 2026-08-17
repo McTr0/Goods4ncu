@@ -589,6 +589,17 @@ pub(crate) async fn set_media_moderation_status(
                 .execute(&mut **tx)
                 .await?;
         }
+        "post_image" => {
+            if let Ok(post_id) = resource_id.parse::<uuid::Uuid>() {
+                sqlx::query("UPDATE posts SET images_moderation_status = $1 WHERE id = $2")
+                    .bind(status)
+                    .bind(post_id)
+                    .execute(&mut **tx)
+                    .await?;
+            } else {
+                tracing::warn!(resource_id, "invalid post_image resource id");
+            }
+        }
         "chat_image" => {
             if let Ok(message_id) = resource_id.parse::<i64>() {
                 sqlx::query("UPDATE chat_messages SET moderation_status = $1 WHERE id = $2")

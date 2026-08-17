@@ -25,6 +25,7 @@ pub struct CreateDiscussion {
     pub body: String,
     pub category: Option<String>,
     pub tags: Vec<String>,
+    pub cover_image_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -38,6 +39,7 @@ pub struct EditDiscussion {
 
 #[derive(Clone)]
 pub struct PostService {
+    pool: PgPool,
     repository: PostgresPostRepository,
     moderation: ModerationService,
 }
@@ -45,7 +47,8 @@ pub struct PostService {
 impl PostService {
     pub fn new(pool: PgPool, moderation: ModerationService) -> Self {
         Self {
-            repository: PostgresPostRepository::new(pool),
+            repository: PostgresPostRepository::new(pool.clone()),
+            pool,
             moderation,
         }
     }
@@ -105,8 +108,10 @@ impl PostService {
         let body = required_text(input.body, "body", MAX_POST_BODY_CHARS)?;
         let category = normalize_category(input.category)?;
         let tags = normalize_tags(input.tags)?;
+        let cover_image_url = normalize_cover_image_url(input.cover_image_url)?;
         self.ensure_text_allowed(&format!("{title}\n{body}\n{}", tags.join(" ")))?;
-        self.repository
+        let created = self
+            .repository
             .create_discussion(NewDiscussionPost {
                 campus_id: input.campus_id,
                 author_id: input.author_id,
@@ -114,8 +119,22 @@ impl PostService {
                 title,
                 body,
                 tags,
+                image_url: cover_image_url.clone(),
             })
-            .await
+            .await?;
+        if let Some(image_url) = cover_image_url {
+            self.moderation
+                .submit_image_job(
+                    &self.pool,
+                    input.campus_id,
+                    &created.id.to_string(),
+                    &image_url,
+                    "post_image",
+                )
+                .await
+                .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
+        }
+        self.get(input.campus_id, created.id).await
     }
 
     pub async fn update(
@@ -314,6 +333,19 @@ impl PostService {
             ))
         }
     }
+}
+
+fn normalize_cover_image_url(value: Option<String>) -> Result<Option<String>, ApiError> {
+    value
+        .map(|url| {
+            let url = url.trim().to_string();
+            if url.starts_with("http://") || url.starts_with("https://") {
+                Ok(url)
+            } else {
+                Err(ApiError::BadRequest("cover_image_url格式无效".to_string()))
+            }
+        })
+        .transpose()
 }
 
 fn required_text(value: String, field: &str, max_chars: usize) -> Result<String, ApiError> {

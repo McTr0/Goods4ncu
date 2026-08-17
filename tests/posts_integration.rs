@@ -47,6 +47,7 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 body: "把同类物品放在一起，标题写清楚楼栋和取货时间。".to_string(),
                 category: Some("campus-life".to_string()),
                 tags: vec!["毕业季".to_string(), "经验".to_string()],
+                cover_image_url: None,
             })
             .await
             .expect("create discussion");
@@ -58,6 +59,7 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 body: "用于验证跨主题引用会被拒绝。".to_string(),
                 category: None,
                 tags: vec![],
+                cover_image_url: None,
             })
             .await
             .expect("create second discussion");
@@ -165,6 +167,59 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
             .expect("filtered discussion list");
         assert_eq!(total, 1);
         assert_eq!(items[0].id, first.id);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn discussion_images_stay_private_until_moderation_approval() {
+    with_test_pool(|pool| async move {
+        let campus_id = campus(&pool).await;
+        let owner = user(&pool, "image-owner").await;
+        let service = PostService::new(pool.clone(), ModerationService::new_for_test(true));
+        let image_url = "https://cdn.example.test/campus-night-market.jpg";
+
+        let created = service
+            .create(CreateDiscussion {
+                campus_id,
+                author_id: owner,
+                title: "夜市摊位位置分享".to_string(),
+                body: "把今晚的摊位分布图放在封面，方便大家在首页先看到。".to_string(),
+                category: Some("campus-life".to_string()),
+                tags: vec!["夜市".to_string()],
+                cover_image_url: Some(image_url.to_string()),
+            })
+            .await
+            .expect("create discussion with image");
+
+        assert_eq!(created.cover_image_url, None, "pending media stays private");
+        let moderation_status: String =
+            sqlx::query_scalar("SELECT images_moderation_status FROM posts WHERE id = $1")
+                .bind(created.id)
+                .fetch_one(&pool)
+                .await
+                .expect("read post moderation status");
+        assert_eq!(moderation_status, "pending");
+        let queued_jobs: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM moderation_jobs
+             WHERE resource_type = 'post_image' AND resource_id = $1",
+        )
+        .bind(created.id.to_string())
+        .fetch_one(&pool)
+        .await
+        .expect("count post image jobs");
+        assert_eq!(queued_jobs, 1);
+
+        sqlx::query("UPDATE posts SET images_moderation_status = 'approved' WHERE id = $1")
+            .bind(created.id)
+            .execute(&pool)
+            .await
+            .expect("approve post image");
+        let approved = service
+            .get(campus_id, created.id)
+            .await
+            .expect("fetch approved post image");
+        assert_eq!(approved.cover_image_url.as_deref(), Some(image_url));
     })
     .await;
 }
@@ -330,6 +385,7 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 body: "本学期教材可以在校内交换。".to_string(),
                 category: Some("Books".to_string()),
                 tags: vec!["教材".to_string()],
+                cover_image_url: None,
             })
             .await
             .expect("relevant post");
@@ -341,6 +397,7 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 body: "周末一起打球。".to_string(),
                 category: Some("sports".to_string()),
                 tags: vec![],
+                cover_image_url: None,
             })
             .await
             .expect("unrelated post");
@@ -352,6 +409,7 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 body: "分享一条适合夜跑的路线。".to_string(),
                 category: Some("Sports".to_string()),
                 tags: vec![],
+                cover_image_url: None,
             })
             .await
             .expect("same category post");
@@ -363,6 +421,7 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 body: "这条不应出现在自己的 for_you 流。".to_string(),
                 category: Some("books".to_string()),
                 tags: vec![],
+                cover_image_url: None,
             })
             .await
             .expect("viewer post");

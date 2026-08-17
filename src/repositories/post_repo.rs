@@ -67,6 +67,7 @@ pub struct NewDiscussionPost {
     pub title: String,
     pub body: String,
     pub tags: Vec<String>,
+    pub image_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -199,9 +200,15 @@ impl PostgresPostRepository {
            author.id AS author_id, author.username AS author_username,
            CASE WHEN author.avatar_moderation_status = 'approved'
                 THEN author.avatar_url ELSE NULL END AS author_avatar_url,
-           CASE WHEN p.post_type = 'listing'
-                     AND listing.images_moderation_status = 'approved'
-                THEN listing.image_url ELSE NULL END AS cover_image_url,
+           CASE
+               WHEN p.post_type = 'listing'
+                    AND listing.images_moderation_status = 'approved'
+                   THEN listing.image_url
+               WHEN p.post_type = 'discussion'
+                    AND p.images_moderation_status = 'approved'
+                   THEN p.image_url
+               ELSE NULL
+           END AS cover_image_url,
            listing.content_revision AS listing_content_revision,
            listing.title AS listing_title,
            listing.category AS listing_category,
@@ -532,8 +539,12 @@ impl PostRepository for PostgresPostRepository {
     async fn create_discussion(&self, input: NewDiscussionPost) -> Result<Post, ApiError> {
         let id: Uuid = sqlx::query_scalar(
             "INSERT INTO posts (
-                 campus_id, author_id, post_type, category, title, body, tags
-             ) VALUES ($1, $2, 'discussion', $3, $4, $5, $6)
+                 campus_id, author_id, post_type, category, title, body, tags,
+                 image_url, images_moderation_status
+             ) VALUES (
+                 $1, $2, 'discussion', $3, $4, $5, $6, $7,
+                 CASE WHEN $7::text IS NULL THEN 'approved' ELSE 'pending' END
+             )
              RETURNING id",
         )
         .bind(input.campus_id)
@@ -542,6 +553,7 @@ impl PostRepository for PostgresPostRepository {
         .bind(&input.title)
         .bind(&input.body)
         .bind(serde_json::json!(input.tags))
+        .bind(input.image_url.as_deref())
         .fetch_one(&self.pool)
         .await
         .map_err(db_error)?;
