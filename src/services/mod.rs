@@ -22,6 +22,7 @@ pub mod hitl_expire;
 pub mod intent;
 pub mod interruption;
 pub mod listing_command;
+pub mod location_space;
 pub mod moderation;
 pub mod moderation_case;
 pub mod moderation_worker;

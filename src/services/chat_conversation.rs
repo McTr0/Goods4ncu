@@ -166,8 +166,6 @@ pub struct ChatThreadView {
     pub relationship_key: String,
     pub peer_user_id: String,
     pub peer_username: String,
-    /// Moderation-approved avatar URL for the peer (None if unmoderated or absent).
-    pub peer_avatar_url: Option<String>,
     pub latest_activity_at: String,
     pub latest_preview: Option<String>,
     pub conversation_count: i64,
@@ -1126,7 +1124,6 @@ impl ChatConversationService {
             )
             SELECT visible.peer_user_id,
                    COALESCE(peer.username, '') AS peer_username,
-                   MAX(CASE WHEN peer.avatar_moderation_status = 'approved' THEN peer.avatar_url ELSE NULL END) AS peer_avatar_url,
                    MAX(visible.last_activity_at) AS latest_activity_at,
                    MAX(visible.latest_preview) FILTER (WHERE visible.recency_rank = 1)
                        AS latest_preview,
@@ -1200,10 +1197,6 @@ impl ChatConversationService {
                     relationship_key: relationship_key(campus_id, user_id, &peer_user_id),
                     peer_user_id,
                     peer_username: row.get("peer_username"),
-                    peer_avatar_url: row
-                        .try_get::<Option<String>, _>("peer_avatar_url")
-                        .ok()
-                        .flatten(),
                     latest_activity_at: latest_activity_at.to_rfc3339(),
                     latest_preview: row.get("latest_preview"),
                     conversation_count: row.get("conversation_count"),

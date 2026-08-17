@@ -260,7 +260,6 @@ pub async fn list_threads(
     };
     let mut items = items;
     for item in &mut items {
-        item.peer_avatar_url = state.public_media_url(item.peer_avatar_url.take());
         if let Some(persona) = item.persona.as_mut() {
             crate::api::social_persona::decorate_public_persona_media(&state, persona);
         }
@@ -290,7 +289,6 @@ pub async fn get_thread(
                 .await?
         }
     };
-    detail.thread.peer_avatar_url = state.public_media_url(detail.thread.peer_avatar_url.take());
     if let Some(persona) = detail.thread.persona.as_mut() {
         crate::api::social_persona::decorate_public_persona_media(&state, persona);
     }

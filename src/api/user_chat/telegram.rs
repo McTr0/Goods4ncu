@@ -8,7 +8,11 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
+use crate::api::session::VerifiedTenant;
 use crate::api::{ws, AppState};
+use crate::services::location_space::{
+    LocationPresenceView, LocationRecommendation, LocationSpaceService, LocationSpaceTree,
+};
 
 use super::{authenticated_session, authenticated_user, moderate_text};
 
@@ -26,11 +30,30 @@ pub struct SpaceView {
     pub kind: String,
     pub name: String,
     pub description: Option<String>,
-    pub owner_id: String,
+    pub owner_id: Option<String>,
     pub my_role: String,
     pub member_count: i64,
+    pub online_count: i64,
+    pub is_location_space: bool,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RecommendLocationSpaceBody {
+    pub latitude: f64,
+    pub longitude: f64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateLocationChildBody {
+    pub name: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LocationPresenceBody {
+    pub active: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -206,8 +229,9 @@ pub async fn list_spaces(
 ) -> Result<Json<SpaceListResponse>, ApiError> {
     let session = authenticated_session(&state, &headers)?;
     let campus_id = crate::services::campus::CampusService::new(state.infra.db.clone())
-        .resolve_session_campus(&session.user_id, session.campus_id)
-        .await?;
+        .require_tenant_context_for_session(&session.user_id, session.campus_id)
+        .await?
+        .campus_id;
     let user_id = session.user_id;
     let kind = query
         .kind
@@ -220,6 +244,7 @@ pub async fn list_spaces(
          JOIN chat_space_members m ON m.space_id = s.id AND m.user_id = $1
          WHERE s.status = 'active'
            AND s.campus_id = $2
+           AND s.kind = 'group'
            AND m.role <> 'banned'
            AND ($3::TEXT IS NULL OR s.kind = $3)
          ORDER BY s.updated_at DESC
@@ -245,9 +270,104 @@ pub async fn get_space(
     headers: HeaderMap,
     Path(space_id): Path<Uuid>,
 ) -> Result<Json<SpaceView>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
-    ensure_space_member(&state, space_id, &user_id).await?;
+    let (user_id, campus_id) = verified_space_user(&state, &headers, space_id).await?;
+    ensure_space_chat_access(&state, campus_id, space_id, &user_id).await?;
     Ok(Json(load_space_view(&state, space_id, &user_id).await?))
+}
+
+pub async fn list_location_spaces(
+    State(state): State<AppState>,
+    tenant: VerifiedTenant,
+) -> Result<Json<LocationSpaceTree>, ApiError> {
+    let tree = LocationSpaceService::new(state.infra.db.clone())
+        .tree(tenant.campus_id, &tenant.session.user_id)
+        .await?;
+    Ok(Json(tree))
+}
+
+pub async fn recommend_location_space(
+    State(state): State<AppState>,
+    tenant: VerifiedTenant,
+    Json(body): Json<RecommendLocationSpaceBody>,
+) -> Result<Json<LocationRecommendation>, ApiError> {
+    let recommendation = LocationSpaceService::new(state.infra.db.clone())
+        .recommend(
+            tenant.campus_id,
+            &tenant.session.user_id,
+            body.latitude,
+            body.longitude,
+        )
+        .await?;
+    Ok(Json(recommendation))
+}
+
+pub async fn join_location_space(
+    State(state): State<AppState>,
+    tenant: VerifiedTenant,
+    Path(space_id): Path<Uuid>,
+) -> Result<Json<SpaceView>, ApiError> {
+    LocationSpaceService::new(state.infra.db.clone())
+        .join(tenant.campus_id, &tenant.session.user_id, space_id)
+        .await?;
+    Ok(Json(
+        load_space_view(&state, space_id, &tenant.session.user_id).await?,
+    ))
+}
+
+pub async fn get_location_presence(
+    State(state): State<AppState>,
+    tenant: VerifiedTenant,
+    Path(space_id): Path<Uuid>,
+) -> Result<Json<LocationPresenceView>, ApiError> {
+    let presence = LocationSpaceService::new(state.infra.db.clone())
+        .presence(tenant.campus_id, &tenant.session.user_id, space_id)
+        .await?;
+    Ok(Json(presence))
+}
+
+pub async fn heartbeat_location_presence(
+    State(state): State<AppState>,
+    tenant: VerifiedTenant,
+    Path(space_id): Path<Uuid>,
+    Json(body): Json<LocationPresenceBody>,
+) -> Result<Json<LocationPresenceView>, ApiError> {
+    let presence = LocationSpaceService::new(state.infra.db.clone())
+        .heartbeat_presence(
+            tenant.campus_id,
+            &tenant.session.user_id,
+            space_id,
+            body.active.unwrap_or(true),
+        )
+        .await?;
+    broadcast_location_presence_event(&state, tenant.campus_id, space_id, presence.online_count)
+        .await?;
+    Ok(Json(presence))
+}
+
+pub async fn create_location_child(
+    State(state): State<AppState>,
+    tenant: VerifiedTenant,
+    Path(parent_space_id): Path<Uuid>,
+    Json(body): Json<CreateLocationChildBody>,
+) -> Result<Json<SpaceView>, ApiError> {
+    let moderated = format!(
+        "{}\n{}",
+        body.name,
+        body.description.as_deref().unwrap_or_default()
+    );
+    moderate_text(&state, &moderated)?;
+    let space_id = LocationSpaceService::new(state.infra.db.clone())
+        .create_child(
+            tenant.campus_id,
+            &tenant.session.user_id,
+            parent_space_id,
+            &body.name,
+            body.description.as_deref(),
+        )
+        .await?;
+    Ok(Json(
+        load_space_view(&state, space_id, &tenant.session.user_id).await?,
+    ))
 }
 
 pub async fn add_space_member(
@@ -256,13 +376,9 @@ pub async fn add_space_member(
     Path(space_id): Path<Uuid>,
     Json(body): Json<AddSpaceMemberBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let (user_id, campus_id) = verified_space_user(&state, &headers, space_id).await?;
     ensure_space_admin(&state, space_id, &user_id).await?;
-    let campus_id = load_space_campus(&state, space_id).await?;
     let campus_service = crate::services::campus::CampusService::new(state.infra.db.clone());
-    campus_service
-        .require_verified_in_campus(&user_id, campus_id)
-        .await?;
     campus_service
         .require_verified_in_campus(&body.user_id, campus_id)
         .await?;
@@ -288,7 +404,7 @@ pub async fn remove_space_member(
     headers: HeaderMap,
     Path((space_id, target_user_id)): Path<(Uuid, String)>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
+    let (user_id, _) = verified_space_user(&state, &headers, space_id).await?;
     let my_role = ensure_space_member(&state, space_id, &user_id).await?;
     if user_id != target_user_id && !matches!(my_role.as_str(), "owner" | "admin") {
         return Err(ApiError::Forbidden);
@@ -309,12 +425,8 @@ pub async fn send_space_message(
     Path(space_id): Path<Uuid>,
     Json(body): Json<SendSpaceMessageBody>,
 ) -> Result<Json<SpaceMessageView>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
-    let role = ensure_space_member(&state, space_id, &user_id).await?;
-    let space_kind = load_space_kind(&state, space_id).await?;
-    if space_kind == "channel" && !matches!(role.as_str(), "owner" | "admin") {
-        return Err(ApiError::Forbidden);
-    }
+    let (user_id, campus_id) = verified_space_user(&state, &headers, space_id).await?;
+    ensure_space_chat_access(&state, campus_id, space_id, &user_id).await?;
     let content = body.content.trim();
     moderate_text(&state, content)?;
     if content.is_empty() || content.chars().count() > 4000 {
@@ -323,16 +435,24 @@ pub async fn send_space_message(
         ));
     }
     if let Some(reply_to) = body.reply_to_message_id {
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM chat_space_messages WHERE id = $1 AND space_id = $2)",
+        let is_root_topic: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                 SELECT 1
+                 FROM chat_space_messages
+                 WHERE id = $1
+                   AND space_id = $2
+                   AND reply_to_message_id IS NULL
+             )",
         )
         .bind(reply_to)
         .bind(space_id)
         .fetch_one(&state.infra.db)
         .await
         .map_err(db_error)?;
-        if !exists {
-            return Err(ApiError::BadRequest("引用的消息不属于当前空间".to_string()));
+        if !is_root_topic {
+            return Err(ApiError::BadRequest(
+                "回复必须归属当前群聊的根话题".to_string(),
+            ));
         }
     }
     let row = sqlx::query(
@@ -374,8 +494,8 @@ pub async fn list_space_messages(
     Path(space_id): Path<Uuid>,
     Query(query): Query<MessagePageQuery>,
 ) -> Result<Json<SpaceMessageListResponse>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
-    ensure_space_member(&state, space_id, &user_id).await?;
+    let (user_id, campus_id) = verified_space_user(&state, &headers, space_id).await?;
+    ensure_space_chat_access(&state, campus_id, space_id, &user_id).await?;
     let rows = sqlx::query(
         "SELECT m.id, m.space_id, m.sender_id, u.username AS sender_username,
                 m.content, m.reply_to_message_id, m.created_at
@@ -607,10 +727,7 @@ pub async fn list_secret_messages(
 fn normalize_space_kind(kind: &str) -> Result<&str, ApiError> {
     match kind.trim() {
         "group" => Ok("group"),
-        "channel" => Ok("channel"),
-        _ => Err(ApiError::BadRequest(
-            "空间类型必须是 group 或 channel".to_string(),
-        )),
+        _ => Err(ApiError::BadRequest("空间类型必须是 group".to_string())),
     }
 }
 
@@ -643,9 +760,19 @@ async fn load_space_view(
         "SELECT s.id, s.kind, s.name, s.description, s.owner_id,
                 m.role AS my_role,
                 (SELECT COUNT(*)::BIGINT FROM chat_space_members sm WHERE sm.space_id = s.id AND sm.role <> 'banned') AS member_count,
+                (SELECT COUNT(*)::BIGINT FROM chat_space_presence presence
+                  WHERE presence.space_id = s.id
+                    AND presence.expires_at > NOW()
+                    AND NOT EXISTS (
+                        SELECT 1 FROM chat_space_members banned
+                         WHERE banned.space_id = presence.space_id
+                           AND banned.user_id = presence.user_id
+                           AND banned.role = 'banned'
+                    )) AS online_count,
+                (s.origin IN ('campus_location', 'location_child')) AS is_location_space,
                 s.created_at, s.updated_at
          FROM chat_spaces s
-         JOIN chat_space_members m ON m.space_id = s.id AND m.user_id = $2
+         LEFT JOIN chat_space_members m ON m.space_id = s.id AND m.user_id = $2
          WHERE s.id = $1",
     )
     .bind(space_id)
@@ -660,8 +787,12 @@ async fn load_space_view(
         name: row.get("name"),
         description: row.get("description"),
         owner_id: row.get("owner_id"),
-        my_role: row.get("my_role"),
+        my_role: row
+            .get::<Option<String>, _>("my_role")
+            .unwrap_or_else(|| "visitor".to_string()),
         member_count: row.get("member_count"),
+        online_count: row.get("online_count"),
+        is_location_space: row.get("is_location_space"),
         created_at: row
             .get::<chrono::DateTime<chrono::Utc>, _>("created_at")
             .to_rfc3339(),
@@ -692,6 +823,29 @@ async fn ensure_space_member(
     }
 }
 
+async fn ensure_space_chat_access(
+    state: &AppState,
+    campus_id: Uuid,
+    space_id: Uuid,
+    user_id: &str,
+) -> Result<String, ApiError> {
+    if LocationSpaceService::new(state.infra.db.clone())
+        .has_transient_chat_access(campus_id, user_id, space_id)
+        .await?
+    {
+        let role = sqlx::query_scalar::<_, String>(
+            "SELECT role FROM chat_space_members WHERE space_id = $1 AND user_id = $2",
+        )
+        .bind(space_id)
+        .bind(user_id)
+        .fetch_optional(&state.infra.db)
+        .await
+        .map_err(db_error)?;
+        return Ok(role.unwrap_or_else(|| "visitor".to_string()));
+    }
+    ensure_space_member(state, space_id, user_id).await
+}
+
 async fn ensure_space_admin(
     state: &AppState,
     space_id: Uuid,
@@ -705,15 +859,6 @@ async fn ensure_space_admin(
     }
 }
 
-async fn load_space_kind(state: &AppState, space_id: Uuid) -> Result<String, ApiError> {
-    sqlx::query_scalar("SELECT kind FROM chat_spaces WHERE id = $1")
-        .bind(space_id)
-        .fetch_optional(&state.infra.db)
-        .await
-        .map_err(db_error)?
-        .ok_or(ApiError::NotFound)
-}
-
 async fn load_space_campus(state: &AppState, space_id: Uuid) -> Result<Uuid, ApiError> {
     sqlx::query_scalar("SELECT campus_id FROM chat_spaces WHERE id = $1")
         .bind(space_id)
@@ -723,13 +868,47 @@ async fn load_space_campus(state: &AppState, space_id: Uuid) -> Result<Uuid, Api
         .ok_or(ApiError::NotFound)
 }
 
+async fn verified_space_user(
+    state: &AppState,
+    headers: &HeaderMap,
+    space_id: Uuid,
+) -> Result<(String, Uuid), ApiError> {
+    let session = authenticated_session(state, headers)?;
+    let tenant = crate::services::campus::CampusService::new(state.infra.db.clone())
+        .require_tenant_context_for_session(&session.user_id, session.campus_id)
+        .await?;
+    if load_space_campus(state, space_id).await? != tenant.campus_id {
+        return Err(ApiError::CampusScopeMismatch);
+    }
+    Ok((session.user_id, tenant.campus_id))
+}
+
 async fn broadcast_space_event(
     state: &AppState,
     space_id: Uuid,
     event: &str,
 ) -> Result<(), ApiError> {
     let rows = sqlx::query(
-        "SELECT user_id FROM chat_space_members WHERE space_id = $1 AND role <> 'banned'",
+        "SELECT user_id
+           FROM chat_space_members
+          WHERE space_id = $1 AND role <> 'banned'
+         UNION
+         SELECT user_id
+           FROM chat_space_presence presence
+          WHERE presence.space_id = $1
+            AND presence.expires_at > NOW()
+            AND NOT EXISTS (
+                SELECT 1 FROM chat_space_members banned
+                 WHERE banned.space_id = presence.space_id
+                   AND banned.user_id = presence.user_id
+                   AND banned.role = 'banned'
+            )
+            AND EXISTS (
+                SELECT 1
+                  FROM chat_spaces location
+                 WHERE location.id = presence.space_id
+                   AND location.origin IN ('campus_location', 'location_child')
+            )",
     )
     .bind(space_id)
     .fetch_all(&state.infra.db)
@@ -742,6 +921,48 @@ async fn broadcast_space_event(
     .to_string();
     for row in rows {
         ws::broadcast_to_user(row.get::<String, _>("user_id").as_str(), &payload);
+    }
+    Ok(())
+}
+
+async fn broadcast_location_presence_event(
+    state: &AppState,
+    campus_id: Uuid,
+    space_id: Uuid,
+    online_count: i64,
+) -> Result<(), ApiError> {
+    let rows = sqlx::query(
+        "SELECT user_id
+           FROM chat_space_members
+          WHERE space_id = $1 AND role <> 'banned'
+         UNION
+         SELECT user_id
+           FROM chat_space_presence presence
+          WHERE presence.space_id = $1
+            AND presence.expires_at > NOW()
+            AND NOT EXISTS (
+                SELECT 1 FROM chat_space_members banned
+                 WHERE banned.space_id = presence.space_id
+                   AND banned.user_id = presence.user_id
+                   AND banned.role = 'banned'
+            )",
+    )
+    .bind(space_id)
+    .fetch_all(&state.infra.db)
+    .await
+    .map_err(db_error)?;
+    let payload = serde_json::json!({
+        "event": "space_presence_changed",
+        "space_id": space_id,
+        "online_count": online_count,
+    })
+    .to_string();
+    for row in rows {
+        ws::broadcast_to_user_in_campus(
+            row.get::<String, _>("user_id").as_str(),
+            campus_id,
+            &payload,
+        );
     }
     Ok(())
 }
@@ -862,4 +1083,16 @@ fn row_to_secret_message(row: sqlx::postgres::PgRow) -> SecretMessageView {
 
 fn db_error(error: sqlx::Error) -> ApiError {
     ApiError::Internal(anyhow::anyhow!(error))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_space_kind;
+
+    #[test]
+    fn only_group_spaces_can_be_created() {
+        assert_eq!(normalize_space_kind("group").unwrap(), "group");
+        assert!(normalize_space_kind("channel").is_err());
+        assert!(normalize_space_kind(" group ").is_ok());
+    }
 }
