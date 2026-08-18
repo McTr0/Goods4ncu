@@ -12,7 +12,11 @@ import '../services/sse_service.dart';
 import '../services/upload_service.dart';
 import '../services/ws_service.dart';
 import '../models/models.dart';
+import 'package:go_router/go_router.dart';
 import '../components/assistant_markdown.dart';
+import '../components/live2d/live2d_character_widget.dart';
+import '../components/live2d/live2d_controller.dart';
+import '../components/live2d/live2d_lipsync_driver.dart';
 import '../components/unified_message_composer.dart';
 import '../components/xiaochang_avatar.dart';
 import 'chat_page_media_sender.dart';
@@ -488,9 +492,15 @@ class _ChatPageState extends State<ChatPage> {
 
   StreamSubscription? _wsSubscription;
 
+  late final Live2DController _live2DController;
+  late final Live2DLipSyncDriver _lipSyncDriver;
+  bool _showLive2DStage = false;
+
   @override
   void initState() {
     super.initState();
+    _live2DController = Live2DController();
+    _lipSyncDriver = Live2DLipSyncDriver(controller: _live2DController);
     _apiService = widget.apiService ?? context.read<ApiService>();
     _chatService = widget.chatService ?? context.read<ChatService>();
     _ownsSseService = widget.sseService == null;
@@ -770,6 +780,8 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _lipSyncDriver.dispose();
+    _live2DController.dispose();
     _controller.dispose();
     _composerFocusNode.dispose();
     if (_ownsSseService) _sseService.dispose();
@@ -870,12 +882,15 @@ class _ChatPageState extends State<ChatPage> {
         return;
       }
 
+      _live2DController.setExpression(Live2DExpression.thinking);
       String fullReply = '';
       await for (final token in _sseService.stream) {
         if (!mounted) break;
         if (token.error != null) {
           throw Exception(token.error);
         }
+        _lipSyncDriver.feedStreamingChunk(token.token);
+        _live2DController.setExpression(Live2DExpression.happy);
         fullReply += token.token;
         setState(() {
           if (botMsgIndex < _messages.length) {
@@ -886,6 +901,8 @@ class _ChatPageState extends State<ChatPage> {
           }
         });
       }
+      _lipSyncDriver.onStreamComplete();
+      _live2DController.setExpression(Live2DExpression.idle);
 
       // Finalize the message (no longer partial).
       if (mounted && botMsgIndex < _messages.length) {
@@ -944,7 +961,44 @@ class _ChatPageState extends State<ChatPage> {
     final l = AppLocalizations.of(context)!;
     return Column(
       children: [
-        _AssistantHeader(embedded: widget.embedded),
+        _AssistantHeader(
+          embedded: widget.embedded,
+          isStageExpanded: _showLive2DStage,
+          onToggleStage: () {
+            setState(() => _showLive2DStage = !_showLive2DStage);
+          },
+        ),
+        if (_showLive2DStage)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF0FDF4),
+              border: Border(
+                bottom: BorderSide(
+                  color: const Color(0xFF0F766E).withValues(alpha: 0.15),
+                ),
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Live2DCharacterWidget(
+                  controller: _live2DController,
+                  size: 160,
+                ),
+                TextButton.icon(
+                  onPressed: () => context.push('/live2d-preview'),
+                  icon: const Icon(Icons.open_in_full_rounded, size: 14),
+                  label: const Text('全屏 2D 互动舞台', style: TextStyle(fontSize: 12)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF0F766E),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ],
+            ),
+          ),
         if (_historyError != null)
           Container(
             width: double.infinity,
@@ -1308,16 +1362,22 @@ class _HitlChip extends StatelessWidget {
 }
 
 class _AssistantHeader extends StatelessWidget {
-  const _AssistantHeader({required this.embedded});
+  const _AssistantHeader({
+    required this.embedded,
+    required this.isStageExpanded,
+    required this.onToggleStage,
+  });
 
   final bool embedded;
+  final bool isStageExpanded;
+  final VoidCallback onToggleStage;
 
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.fromLTRB(embedded ? 20 : 16, 14, 16, 12),
+      padding: EdgeInsets.fromLTRB(embedded ? 20 : 16, 12, 16, 12),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         border: Border(
@@ -1326,29 +1386,67 @@ class _AssistantHeader extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const XiaochangAvatar(size: 40),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  l.assistantName,
-                  style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
+          InkWell(
+            onTap: onToggleStage,
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const XiaochangAvatar(size: 40),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            l.assistantName,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            isStageExpanded
+                                ? Icons.keyboard_arrow_up_rounded
+                                : Icons.keyboard_arrow_down_rounded,
+                            size: 18,
+                            color: const Color(0xFF0F766E),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        l.assistantHeaderSubtitle,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                Text(
-                  l.assistantHeaderSubtitle,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF64748B),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
+          const Spacer(),
+          FilledButton.tonalIcon(
+            onPressed: () => context.push('/live2d-preview'),
+            icon: const Icon(Icons.face_retouching_natural_rounded, size: 16),
+            label: const Text(
+              '数字人互动',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+            ),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFE1F4EF),
+              foregroundColor: const Color(0xFF0F766E),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+          const SizedBox(width: 8),
           const _AgentStatusPill(),
         ],
       ),
