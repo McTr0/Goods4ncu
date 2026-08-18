@@ -35,7 +35,7 @@ class _Live2DPreviewPageState extends State<Live2DPreviewPage> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF0FDF4),
+      backgroundColor: const Color(0xFFFFFBF5),
       appBar: AppBar(
         title: const Text('小昌 · 2D 互动数字人'),
         backgroundColor: Colors.transparent,
@@ -91,7 +91,7 @@ class _Live2DPreviewPageState extends State<Live2DPreviewPage> {
                 decoration: BoxDecoration(
                   gradient: const RadialGradient(
                     colors: [
-                      Color(0xFFCCFBF1),
+                      Color(0xFFE1F4EF),
                       Colors.transparent,
                     ],
                     radius: 0.75,

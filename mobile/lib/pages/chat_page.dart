@@ -1253,8 +1253,8 @@ class _ChatPageState extends State<ChatPage> {
                 center: Alignment(0, -0.1),
                 radius: 0.85,
                 colors: [
-                  Color(0xFFCCFBF1),
-                  Color(0xFFF0FDF4),
+                  Color(0xFFE1F4EF),
+                  Color(0xFFFFFBF5),
                 ],
               ),
             ),

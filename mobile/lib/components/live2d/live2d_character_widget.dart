@@ -264,9 +264,9 @@ class _Live2DCanvasPainter extends CustomPainter {
     canvas.rotate(headAngle);
     canvas.scale(motionScaleX, motionScaleY * breathScaleY);
 
-    // Main Doro character body background
+    // Main Xiaochang character body background (Matches AppTheme mint & XiaochangAvatar)
     final bodyPaint = Paint()
-      ..color = const Color(0xFFE6F4EA)
+      ..color = const Color(0xFFE1F4EF)
       ..style = PaintingStyle.fill;
     final bodyRect = RRect.fromRectAndRadius(
       Rect.fromCenter(center: Offset.zero, width: size.width * 0.78, height: size.height * 0.78),
@@ -275,12 +275,12 @@ class _Live2DCanvasPainter extends CustomPainter {
     canvas.drawRRect(bodyRect, bodyPaint);
 
     final borderPaint = Paint()
-      ..color = const Color(0xFF0F766E).withValues(alpha: 0.35)
+      ..color = const Color(0xFF0F766E)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3.0;
     canvas.drawRRect(bodyRect, borderPaint);
 
-    // 4. Render Cute Doro Ears (Physical Bouncing)
+    // 4. Render Cute NCU Ears (Physical Bouncing)
     final earBlink = math.sin(animValue * 4 * math.pi) * 0.05;
     _drawEar(canvas, size, isLeft: true, earBlink: earBlink);
     _drawEar(canvas, size, isLeft: false, earBlink: earBlink);
@@ -291,7 +291,7 @@ class _Live2DCanvasPainter extends CustomPainter {
     // 6. Render Dynamic Lip-Sync Mouth
     _drawMouth(canvas, size, controller.mouthOpen);
 
-    // 7. Render Blushing Cheeks
+    // 7. Render Blushing Cheeks (AppTheme Warm Market Orange Accent)
     _drawCheeks(canvas, size);
 
     canvas.restore();
@@ -302,7 +302,7 @@ class _Live2DCanvasPainter extends CustomPainter {
       ..color = const Color(0xFF0F766E)
       ..style = PaintingStyle.fill;
     final innerEarPaint = Paint()
-      ..color = const Color(0xFFFFD1DC)
+      ..color = const Color(0xFFFFEDD5)
       ..style = PaintingStyle.fill;
 
     final dir = isLeft ? -1.0 : 1.0;
@@ -318,7 +318,7 @@ class _Live2DCanvasPainter extends CustomPainter {
 
     canvas.drawPath(earPath, earPaint);
 
-    // Inner pink ear
+    // Inner warm apricot ear (AppTheme.accentSoft)
     final innerEarPath = Path()
       ..moveTo(0, 0)
       ..lineTo(dir * size.width * 0.08, -size.height * 0.12)
@@ -334,7 +334,7 @@ class _Live2DCanvasPainter extends CustomPainter {
     final eyeRadius = size.width * 0.065;
     final eyeSpacing = size.width * 0.20;
 
-    final eyePaint = Paint()..color = const Color(0xFF1E293B);
+    final eyePaint = Paint()..color = const Color(0xFF134E4A);
     final pupilPaint = Paint()..color = Colors.white;
 
     for (final isLeft in [true, false]) {
@@ -344,7 +344,7 @@ class _Live2DCanvasPainter extends CustomPainter {
       if (isBlinking || controller.expression == Live2DExpression.shy) {
         // Closed / Happy Curved Eyes (^_^)
         final curvePaint = Paint()
-          ..color = const Color(0xFF1E293B)
+          ..color = const Color(0xFF134E4A)
           ..style = PaintingStyle.stroke
           ..strokeCap = StrokeCap.round
           ..strokeWidth = 3.5;
@@ -377,7 +377,7 @@ class _Live2DCanvasPainter extends CustomPainter {
         ..color = const Color(0xFF991B1B)
         ..style = PaintingStyle.fill;
       final tonguePaint = Paint()
-        ..color = const Color(0xFFF43F5E)
+        ..color = const Color(0xFFFB923C)
         ..style = PaintingStyle.fill;
 
       final mouthRect = RRect.fromRectAndRadius(
@@ -397,7 +397,7 @@ class _Live2DCanvasPainter extends CustomPainter {
     } else {
       // Gentle Smile (w)
       final smilePaint = Paint()
-        ..color = const Color(0xFF1E293B)
+        ..color = const Color(0xFF134E4A)
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round
         ..strokeWidth = 2.5;
@@ -413,7 +413,7 @@ class _Live2DCanvasPainter extends CustomPainter {
 
   void _drawCheeks(Canvas canvas, Size size) {
     final blushPaint = Paint()
-      ..color = const Color(0xFFFB7185).withValues(alpha: 0.45)
+      ..color = const Color(0xFFF97316).withValues(alpha: 0.32)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
 
     canvas.drawCircle(Offset(-size.width * 0.28, size.height * 0.06), size.width * 0.05, blushPaint);
