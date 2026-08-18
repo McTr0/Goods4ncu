@@ -1828,6 +1828,182 @@ class MessageAcknowledgement {
   }
 }
 
+enum AvatarInteractionAction {
+  wave,
+  poke,
+  highFive,
+  encourage;
+
+  String get wireName => switch (this) {
+    wave => 'wave',
+    poke => 'poke',
+    highFive => 'high_five',
+    encourage => 'encourage',
+  };
+
+  static AvatarInteractionAction? fromWire(String? value) => switch (value) {
+    'wave' => wave,
+    'poke' => poke,
+    'high_five' => highFive,
+    'encourage' => encourage,
+    _ => null,
+  };
+}
+
+enum AvatarInteractionPolicy {
+  reject,
+  receiveOnly,
+  light,
+  full;
+
+  String get wireName => switch (this) {
+    reject => 'reject',
+    receiveOnly => 'receive_only',
+    light => 'light',
+    full => 'full',
+  };
+
+  static AvatarInteractionPolicy? fromWire(String? value) => switch (value) {
+    'reject' => reject,
+    'receive_only' => receiveOnly,
+    'light' => light,
+    'full' => full,
+    _ => null,
+  };
+}
+
+enum AvatarInteractionOverridePolicy {
+  inherit,
+  reject,
+  receiveOnly,
+  light,
+  full;
+
+  String get wireName => switch (this) {
+    inherit => 'inherit',
+    reject => 'reject',
+    receiveOnly => 'receive_only',
+    light => 'light',
+    full => 'full',
+  };
+
+  static AvatarInteractionOverridePolicy fromWire(String? value) =>
+      switch (value) {
+        'reject' => reject,
+        'receive_only' => receiveOnly,
+        'light' => light,
+        'full' => full,
+        _ => inherit,
+      };
+}
+
+enum AvatarInteractionChoreography {
+  solo,
+  acknowledge,
+  reciprocal;
+
+  static AvatarInteractionChoreography? fromWire(String? value) =>
+      switch (value) {
+        'solo' => solo,
+        'acknowledge' => acknowledge,
+        'reciprocal' => reciprocal,
+        _ => null,
+      };
+}
+
+class AvatarInteractionPayload {
+  const AvatarInteractionPayload({
+    required this.schemaVersion,
+    required this.action,
+    required this.choreography,
+    required this.animationPackVersion,
+    required this.actorCharacter,
+    required this.recipientCharacter,
+  });
+
+  final int schemaVersion;
+  final AvatarInteractionAction action;
+  final AvatarInteractionChoreography choreography;
+  final int animationPackVersion;
+  final String actorCharacter;
+  final String recipientCharacter;
+
+  factory AvatarInteractionPayload.fromJson(Map<String, dynamic> json) {
+    final action = AvatarInteractionAction.fromWire(json['action']?.toString());
+    final choreography = AvatarInteractionChoreography.fromWire(
+      json['choreography']?.toString(),
+    );
+    if (action == null || choreography == null) {
+      throw const FormatException('Invalid avatar interaction payload');
+    }
+    return AvatarInteractionPayload(
+      schemaVersion: (json['schema_version'] as num?)?.toInt() ?? 1,
+      action: action,
+      choreography: choreography,
+      animationPackVersion:
+          (json['animation_pack_version'] as num?)?.toInt() ?? 1,
+      actorCharacter: json['actor_character']?.toString() ?? 'classic',
+      recipientCharacter: json['recipient_character']?.toString() ?? 'classic',
+    );
+  }
+}
+
+class AvatarInteractionPreferences {
+  const AvatarInteractionPreferences(this.policies);
+
+  final Map<AvatarInteractionAction, AvatarInteractionPolicy> policies;
+
+  factory AvatarInteractionPreferences.fromJson(Map<String, dynamic> json) {
+    final raw = json['policies'] as Map<String, dynamic>? ?? const {};
+    final policies = <AvatarInteractionAction, AvatarInteractionPolicy>{};
+    for (final entry in raw.entries) {
+      final action = AvatarInteractionAction.fromWire(entry.key);
+      final policy = AvatarInteractionPolicy.fromWire(entry.value?.toString());
+      if (action != null && policy != null) policies[action] = policy;
+    }
+    return AvatarInteractionPreferences(policies);
+  }
+}
+
+class AvatarInteractionContactPreferences {
+  const AvatarInteractionContactPreferences({
+    required this.peerUserId,
+    required this.policies,
+    required this.effectivePolicies,
+  });
+
+  final String peerUserId;
+  final Map<AvatarInteractionAction, AvatarInteractionOverridePolicy> policies;
+  final Map<AvatarInteractionAction, AvatarInteractionPolicy> effectivePolicies;
+
+  factory AvatarInteractionContactPreferences.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    final rawPolicies =
+        json['policies'] as Map<String, dynamic>? ?? const <String, dynamic>{};
+    final rawEffective =
+        json['effective_policies'] as Map<String, dynamic>? ??
+        const <String, dynamic>{};
+    final effectivePolicies =
+        <AvatarInteractionAction, AvatarInteractionPolicy>{};
+    for (final entry in rawEffective.entries) {
+      final action = AvatarInteractionAction.fromWire(entry.key);
+      final policy = AvatarInteractionPolicy.fromWire(entry.value?.toString());
+      if (action != null && policy != null) effectivePolicies[action] = policy;
+    }
+    return AvatarInteractionContactPreferences(
+      peerUserId: json['peer_user_id']?.toString() ?? '',
+      policies: {
+        for (final action in AvatarInteractionAction.values)
+          action: AvatarInteractionOverridePolicy.fromWire(
+            rawPolicies[action.wireName]?.toString(),
+          ),
+      },
+      effectivePolicies: effectivePolicies,
+    );
+  }
+}
+
 /// 私聊消息
 class ConversationMessage {
   final String id;
@@ -1857,6 +2033,7 @@ class ConversationMessage {
   final DateTime? editedAt;
   final String? clientMessageId;
   final String kind;
+  final AvatarInteractionPayload? interaction;
 
   ConversationMessage({
     required this.id,
@@ -1881,6 +2058,7 @@ class ConversationMessage {
     this.editedAt,
     this.clientMessageId,
     this.kind = 'message',
+    this.interaction,
   });
 
   factory ConversationMessage.fromJson(Map<String, dynamic> json) {
@@ -1931,6 +2109,11 @@ class ConversationMessage {
           : null,
       clientMessageId: json['client_message_id']?.toString(),
       kind: json['kind']?.toString() ?? 'message',
+      interaction: json['interaction'] is Map<String, dynamic>
+          ? AvatarInteractionPayload.fromJson(
+              json['interaction'] as Map<String, dynamic>,
+            )
+          : null,
     );
   }
 
@@ -1974,6 +2157,7 @@ class ConversationMessage {
     DateTime? editedAt,
     String? clientMessageId,
     String? kind,
+    AvatarInteractionPayload? interaction,
   }) {
     return ConversationMessage(
       id: id ?? this.id,
@@ -1998,6 +2182,7 @@ class ConversationMessage {
       editedAt: editedAt ?? this.editedAt,
       clientMessageId: clientMessageId ?? this.clientMessageId,
       kind: kind ?? this.kind,
+      interaction: interaction ?? this.interaction,
     );
   }
 }

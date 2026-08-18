@@ -45,6 +45,16 @@ class ConflictException implements Exception {
   String toString() => message;
 }
 
+class RateLimitException implements Exception {
+  final String message;
+  final Duration? retryAfter;
+
+  RateLimitException(this.message, {this.retryAfter});
+
+  @override
+  String toString() => message;
+}
+
 /// 网络不可达 / 超时
 class NetworkException implements Exception {
   final String message;
@@ -100,10 +110,12 @@ class BaseService {
     // --- Non-200: extract backend error message ---
     String serverMsg = '';
     String serverCode = '';
+    int? retryAfterSeconds;
     try {
       final body = jsonDecode(response.body);
       serverMsg = (body['error'] ?? body['message'])?.toString() ?? '';
       serverCode = body['code']?.toString() ?? '';
+      retryAfterSeconds = (body['retry_after_seconds'] as num?)?.toInt();
     } catch (_) {}
 
     if (serverCode == 'recent_authentication_required' ||
@@ -129,6 +141,15 @@ class BaseService {
       throw ConflictException(
         serverMsg.isNotEmpty ? serverMsg : '资源冲突',
         serverCode.isEmpty ? null : serverCode,
+      );
+    }
+    if (response.statusCode == 429) {
+      retryAfterSeconds ??= int.tryParse(response.headers['retry-after'] ?? '');
+      throw RateLimitException(
+        serverMsg.isNotEmpty ? serverMsg : '操作太频繁，请稍后再试',
+        retryAfter: retryAfterSeconds == null
+            ? null
+            : Duration(seconds: retryAfterSeconds),
       );
     }
     if (response.statusCode >= 500) {

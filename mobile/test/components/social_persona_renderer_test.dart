@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/components/social_persona_renderer.dart';
+import 'package:goods4ncu_mobile/components/open_rig_renderer.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 
 void main() {
@@ -99,6 +100,9 @@ void main() {
       expect(AvatarMotionCue.wave.manifestKey, 'wave');
       expect(AvatarMotionCue.celebrate.manifestKey, 'celebrate');
       expect(AvatarMotionCue.thinking.manifestKey, 'thinking');
+      expect(AvatarMotionCue.poke.manifestKey, 'poke');
+      expect(AvatarMotionCue.highFive.manifestKey, 'high_five');
+      expect(AvatarMotionCue.encourage.manifestKey, 'encourage');
     });
 
     test('rejects a sequence frame outside the declared grid', () {
@@ -120,6 +124,40 @@ void main() {
         }),
         throwsFormatException,
       );
+    });
+  });
+
+  group('OpenRigDefinition', () {
+    test('parses mesh bones and interpolates motion tracks', () {
+      final rig = OpenRigDefinition.fromJson({
+        'version': 1,
+        'id': 'test',
+        'texture': 'assets/test.png',
+        'grid': [8, 8],
+        'bones': [
+          {
+            'id': 'root',
+            'pivot': [0.5, 0.5],
+            'radius': 1.0,
+            'strength': 1.0,
+          },
+        ],
+        'motions': {
+          'wave': {
+            'tracks': {
+              'root': [
+                {'t': 0.0, 'tx': 0.0},
+                {'t': 1.0, 'tx': 0.2},
+              ],
+            },
+          },
+        },
+      });
+
+      expect(rig.columns, 8);
+      expect(rig.bones.single.influence(const Offset(0.5, 0.5)), 1);
+      final pose = rig.motionFor('wave')!.transformFor('root', 0.5);
+      expect(pose.translateX, closeTo(0.1, 0.0001));
     });
   });
 
@@ -190,10 +228,10 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(
-          find.byKey(const ValueKey('persona_asset_ncu_gugugaga')),
+          find.byKey(const ValueKey('persona_open_rig_ncu_gugugaga')),
           findsOneWidget,
         );
-        expect(find.byType(Image), findsOneWidget);
+        expect(find.byType(CustomPaint), findsWidgets);
       },
     );
 
@@ -222,7 +260,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.byKey(const ValueKey('persona_asset_ncu_phoebe_chupi')),
+        find.byKey(const ValueKey('persona_open_rig_ncu_phoebe_chupi')),
         findsOneWidget,
       );
     });

@@ -535,6 +535,122 @@ class ChatService extends BaseService {
     );
   }
 
+  Future<ConversationMessage> sendAvatarInteraction(
+    String conversationId,
+    AvatarInteractionAction action, {
+    String? clientInteractionId,
+  }) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse(
+        '$baseUrl/api/chat/conversations/$conversationId/avatar-interactions',
+      ),
+      headers,
+      jsonEncode({
+        'client_interaction_id': clientInteractionId ?? _uuid.v4(),
+        'action': action.wireName,
+      }),
+    );
+    return handleResponse(
+      response,
+      (data) => ConversationMessage.fromJson(data as Map<String, dynamic>),
+    );
+  }
+
+  Future<AvatarInteractionPreferences> getAvatarInteractionPreferences() async {
+    final headers = await authHeaders();
+    final response = await get(
+      Uri.parse('$baseUrl/api/chat/avatar-interactions/preferences'),
+      headers,
+    );
+    return handleResponse(
+      response,
+      (data) =>
+          AvatarInteractionPreferences.fromJson(data as Map<String, dynamic>),
+    );
+  }
+
+  Future<AvatarInteractionPreferences> setAvatarInteractionPreferences(
+    Map<AvatarInteractionAction, AvatarInteractionPolicy> policies,
+  ) async {
+    final headers = await authHeaders();
+    final response = await put(
+      Uri.parse('$baseUrl/api/chat/avatar-interactions/preferences'),
+      headers,
+      jsonEncode({
+        'policies': {
+          for (final entry in policies.entries)
+            entry.key.wireName: entry.value.wireName,
+        },
+      }),
+    );
+    return handleResponse(
+      response,
+      (data) =>
+          AvatarInteractionPreferences.fromJson(data as Map<String, dynamic>),
+    );
+  }
+
+  Future<AvatarInteractionContactPreferences>
+  getAvatarInteractionContactPreferences(String peerUserId) async {
+    final headers = await authHeaders();
+    final response = await get(
+      Uri.parse(
+        '$baseUrl/api/chat/contacts/$peerUserId/avatar-interaction-preferences',
+      ),
+      headers,
+    );
+    return handleResponse(
+      response,
+      (data) => AvatarInteractionContactPreferences.fromJson(
+        data as Map<String, dynamic>,
+      ),
+    );
+  }
+
+  Future<AvatarInteractionContactPreferences>
+  setAvatarInteractionContactPreferences(
+    String peerUserId,
+    Map<AvatarInteractionAction, AvatarInteractionOverridePolicy> policies,
+  ) async {
+    final headers = await authHeaders();
+    final response = await put(
+      Uri.parse(
+        '$baseUrl/api/chat/contacts/$peerUserId/avatar-interaction-preferences',
+      ),
+      headers,
+      jsonEncode({
+        'policies': {
+          for (final entry in policies.entries)
+            entry.key.wireName: entry.value.wireName,
+        },
+      }),
+    );
+    return handleResponse(
+      response,
+      (data) => AvatarInteractionContactPreferences.fromJson(
+        data as Map<String, dynamic>,
+      ),
+    );
+  }
+
+  Future<AvatarInteractionContactPreferences>
+  resetAvatarInteractionContactPreferences(String peerUserId) async {
+    final headers = await authHeaders();
+    final response = await delete(
+      Uri.parse(
+        '$baseUrl/api/chat/contacts/$peerUserId/avatar-interaction-preferences',
+      ),
+      headers,
+    );
+    return handleResponse(
+      response,
+      (data) => AvatarInteractionContactPreferences.fromJson(
+        data as Map<String, dynamic>,
+      ),
+    );
+  }
+
   Future<ConversationMessage> setMessageReaction(
     String messageId,
     String emoji,

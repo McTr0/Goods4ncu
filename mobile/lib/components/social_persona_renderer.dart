@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/models.dart';
+import 'open_rig_renderer.dart';
 
 /// Resolved specification for rendering a SocialPersona or default system character.
 class SocialPersonaRenderSpec {
@@ -130,6 +131,10 @@ enum AvatarMotionCue {
   wave,
   celebrate,
   thinking,
+  poke,
+  highFive,
+  encourage,
+  acknowledge,
 }
 
 extension AvatarMotionCueContract on AvatarMotionCue {
@@ -142,6 +147,10 @@ extension AvatarMotionCueContract on AvatarMotionCue {
     AvatarMotionCue.wave => 'wave',
     AvatarMotionCue.celebrate => 'celebrate',
     AvatarMotionCue.thinking => 'thinking',
+    AvatarMotionCue.poke => 'poke',
+    AvatarMotionCue.highFive => 'high_five',
+    AvatarMotionCue.encourage => 'encourage',
+    AvatarMotionCue.acknowledge => 'acknowledge',
   };
 
   Duration get fallbackDuration => switch (this) {
@@ -153,6 +162,10 @@ extension AvatarMotionCueContract on AvatarMotionCue {
     AvatarMotionCue.wave => const Duration(milliseconds: 720),
     AvatarMotionCue.celebrate => const Duration(milliseconds: 820),
     AvatarMotionCue.thinking => const Duration(milliseconds: 1100),
+    AvatarMotionCue.poke => const Duration(milliseconds: 760),
+    AvatarMotionCue.highFive => const Duration(milliseconds: 900),
+    AvatarMotionCue.encourage => const Duration(milliseconds: 1050),
+    AvatarMotionCue.acknowledge => const Duration(milliseconds: 680),
   };
 
   bool get loops => this == AvatarMotionCue.idle;
@@ -753,21 +766,16 @@ class _SpriteAtlasPainter extends CustomPainter {
       oldDelegate.background != background;
 }
 
-/// Borderless, pre-compressed campus mascot renderer.
+/// Borderless campus mascot renderer backed by the repository-owned open rig.
 ///
-/// The 2.5D lighting is baked into a small transparent WebP. Runtime work is
-/// limited to decoding a size-bucketed texture and applying a local transform,
-/// which keeps the same implementation fast on Android, iOS, and Web.
+/// A low-density mesh deforms a transparent PNG texture using JSON-authored
+/// bone influences and motion tracks. This keeps the runtime and asset format
+/// free of editor subscriptions while supporting Android, iOS and Web through
+/// Flutter's Canvas/Impeller stack.
 class CampusMascotPersonaRenderer implements SocialPersonaRenderer {
   const CampusMascotPersonaRenderer({required this.fallback});
 
   final SocialPersonaRenderer fallback;
-
-  static const _assets = <String, String>{
-    'ncu_gugugaga': 'assets/avatars/v1/ncu_mascots/gugugaga.webp',
-    'ncu_doro': 'assets/avatars/v1/ncu_mascots/doro.webp',
-    'ncu_phoebe_chupi': 'assets/avatars/v1/ncu_mascots/phoebe_chupi.webp',
-  };
 
   @override
   Widget buildCharacter(
@@ -779,8 +787,8 @@ class CampusMascotPersonaRenderer implements SocialPersonaRenderer {
     required bool isDark,
     String? semanticLabel,
   }) {
-    final asset = _assets[spec.assetId];
-    if (asset == null) {
+    final assetId = spec.assetId;
+    if (assetId == null || !OpenRigAssetCache.manifests.containsKey(assetId)) {
       return fallback.buildCharacter(
         context,
         spec: spec,
@@ -791,70 +799,21 @@ class CampusMascotPersonaRenderer implements SocialPersonaRenderer {
         semanticLabel: semanticLabel,
       );
     }
-
-    final wave = math.sin(motionProgress * 2 * math.pi);
-    final impulse = math.sin(motionProgress * math.pi);
-    final (offsetY, scale, rotation) = switch (motionCue) {
-      AvatarMotionCue.idle => (
-        wave * size * 0.018,
-        1 + wave * 0.008,
-        wave * 0.008,
-      ),
-      AvatarMotionCue.pressed => (0.0, 1 - impulse * 0.055, 0.0),
-      AvatarMotionCue.selected => (
-        -impulse * size * 0.055,
-        1 + impulse * 0.035,
-        wave * 0.012,
-      ),
-      AvatarMotionCue.published => (
-        -impulse * size * 0.075,
-        1 + impulse * 0.045,
-        wave * 0.018,
-      ),
-      AvatarMotionCue.confirmedByUser => (
-        -impulse * size * 0.045,
-        1 + impulse * 0.03,
-        -wave * 0.012,
-      ),
-      AvatarMotionCue.wave => (
-        -impulse * size * 0.035,
-        1 + impulse * 0.018,
-        wave * 0.055,
-      ),
-      AvatarMotionCue.celebrate => (
-        -impulse * size * 0.12,
-        1 + impulse * 0.06,
-        wave * 0.035,
-      ),
-      AvatarMotionCue.thinking => (
-        wave * size * 0.015,
-        1 + impulse * 0.012,
-        -0.035 + wave * 0.018,
-      ),
-    };
-    final cacheWidth = size <= 48 ? 96 : (size <= 160 ? 320 : 512);
-
-    Widget character = RepaintBoundary(
-      child: Transform.translate(
-        offset: Offset(0, offsetY),
-        child: Transform.rotate(
-          angle: rotation,
-          child: Transform.scale(
-            scale: scale,
-            child: Image.asset(
-              asset,
-              key: ValueKey('persona_asset_${spec.assetId}'),
-              width: size,
-              height: size,
-              cacheWidth: cacheWidth,
-              fit: BoxFit.contain,
-              filterQuality: FilterQuality.medium,
-              gaplessPlayback: true,
-              excludeFromSemantics: true,
-            ),
-          ),
-        ),
-      ),
+    final fallbackCharacter = fallback.buildCharacter(
+      context,
+      spec: spec,
+      size: size,
+      motionProgress: motionProgress,
+      motionCue: motionCue,
+      isDark: isDark,
+      semanticLabel: null,
+    );
+    Widget character = OpenRigCharacter(
+      characterId: assetId,
+      size: size,
+      motionKey: motionCue.manifestKey,
+      progress: motionProgress,
+      fallback: fallbackCharacter,
     );
     if (semanticLabel case final label? when label.isNotEmpty) {
       character = Semantics(label: label, image: true, child: character);

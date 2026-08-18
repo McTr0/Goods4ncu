@@ -101,7 +101,12 @@ flutter:
     - assets/test_product_images/
     - assets/characters/
     - assets/avatars/v1/sprout/
-    - assets/avatars/v1/ncu_mascots/
+    - assets/avatars/v2/open_rig/ncu_doro/
+    - assets/avatars/v2/open_rig/ncu_gugugaga/
+    - assets/avatars/v2/open_rig/ncu_phoebe_chupi/
+    - assets/live2d/doro/
+    - assets/live2d/doro/Doro.2048/
+    - assets/live2d/doro/Expressions/
 
   fonts:
     - family: NotoSansSCApp

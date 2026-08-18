@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../utils/platform_utils.dart';
+import '../models/models.dart';
 import 'token_storage.dart';
 import 'ws_channel.dart';
 
@@ -29,6 +30,7 @@ class WsNotification {
   final String? spaceId;
   final int? onlineCount;
   final DateTime? expiresAt;
+  final ConversationMessage? message;
 
   WsNotification({
     this.id,
@@ -47,6 +49,7 @@ class WsNotification {
     this.spaceId,
     this.onlineCount,
     this.expiresAt,
+    this.message,
   });
 
   factory WsNotification.fromJson(Map<String, dynamic> json) {
@@ -71,6 +74,15 @@ class WsNotification {
       expiresAt: json['expires_at'] == null
           ? null
           : DateTime.tryParse(json['expires_at'].toString()),
+      message:
+          (json['event'] ?? json['event_type']) == 'new_message' &&
+              json['message_id'] != null
+          ? ConversationMessage.fromJson({
+              ...json,
+              'id': json['message_id'],
+              'status': 'sent',
+            })
+          : null,
     );
   }
 }
@@ -171,7 +183,7 @@ class WsService {
       final notification = WsNotification.fromJson(json);
       _controller?.add(notification);
     } catch (e) {
-      debugPrint('WS message parse error: $e — data: $data');
+      debugPrint('WS message parse error: $e');
     }
   }
 

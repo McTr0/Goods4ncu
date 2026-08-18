@@ -32,6 +32,7 @@ import '../pages/create_post_page.dart';
 import '../pages/create_errand_page.dart';
 import '../pages/campus_errands_page.dart';
 import '../pages/campus_map_page.dart';
+import '../pages/live2d_preview_page.dart';
 import '../pages/publish_hub_page.dart';
 import '../services/token_storage.dart';
 import '../services/ws_service.dart';
@@ -144,6 +145,10 @@ final GoRouter appRouter = GoRouter(
         GoRoute(
           path: '/campus-map',
           builder: (context, state) => const CampusMapPage(),
+        ),
+        GoRoute(
+          path: '/live2d-preview',
+          builder: (context, state) => const Live2DPreviewPage(),
         ),
         GoRoute(
           path: '/orders/:id',
