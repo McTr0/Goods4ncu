@@ -127,15 +127,28 @@ class Live2DController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Display a temporary speech bubble above the character.
-  void showSpeechBubble(String text, {Duration duration = const Duration(milliseconds: 2500)}) {
+  /// Display a speech bubble above the character.
+  /// If [duration] is provided, the bubble will automatically hide after that duration.
+  /// If [duration] is null, the bubble remains visible until explicitly updated or cleared.
+  void showSpeechBubble(String text, {Duration? duration}) {
     _speechBubble = text;
     _speechBubbleTimer?.cancel();
-    _speechBubbleTimer = Timer(duration, () {
+    if (duration != null) {
+      _speechBubbleTimer = Timer(duration, () {
+        _speechBubble = null;
+        notifyListeners();
+      });
+    }
+    notifyListeners();
+  }
+
+  /// Clear any active speech bubble immediately.
+  void clearSpeechBubble() {
+    _speechBubbleTimer?.cancel();
+    if (_speechBubble != null) {
       _speechBubble = null;
       notifyListeners();
-    });
-    notifyListeners();
+    }
   }
 
   /// Start simulated lip-sync speech animation (for mock testing or demo).

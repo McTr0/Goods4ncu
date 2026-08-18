@@ -12,7 +12,6 @@ import '../services/sse_service.dart';
 import '../services/upload_service.dart';
 import '../services/ws_service.dart';
 import '../models/models.dart';
-import 'package:go_router/go_router.dart';
 import '../components/assistant_markdown.dart';
 import '../components/live2d/live2d_character_widget.dart';
 import '../components/live2d/live2d_controller.dart';
@@ -494,7 +493,6 @@ class _ChatPageState extends State<ChatPage> {
 
   late final Live2DController _live2DController;
   late final Live2DLipSyncDriver _lipSyncDriver;
-  bool _showLive2DStage = false;
 
   @override
   void initState() {
@@ -518,6 +516,7 @@ class _ChatPageState extends State<ChatPage> {
     if (!mounted) return;
     if (_messages.isEmpty) {
       final l = AppLocalizations.of(context)!;
+      _live2DController.showSpeechBubble(l.aiGreeting);
       setState(() {
         _messages.add(
           ChatMessage(
@@ -527,6 +526,12 @@ class _ChatPageState extends State<ChatPage> {
           ),
         );
       });
+    } else {
+      final lastBot = _messages.reversed.firstWhere(
+        (m) => m.sender == 'bot',
+        orElse: () => _messages.last,
+      );
+      _live2DController.showSpeechBubble(lastBot.content);
     }
     final initialPrompt = widget.initialPrompt?.trim();
     if (initialPrompt != null && initialPrompt.isNotEmpty) {
@@ -546,6 +551,13 @@ class _ChatPageState extends State<ChatPage> {
         _isLoadingHistory = false;
         _historyError = null;
       });
+      if (_messages.isNotEmpty) {
+        final lastBot = _messages.reversed.firstWhere(
+          (m) => m.sender == 'bot',
+          orElse: () => _messages.last,
+        );
+        _live2DController.showSpeechBubble(lastBot.content);
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -883,6 +895,7 @@ class _ChatPageState extends State<ChatPage> {
       }
 
       _live2DController.setExpression(Live2DExpression.thinking);
+      _live2DController.showSpeechBubble('小昌在思考中，正在检索校园记忆...');
       String fullReply = '';
       await for (final token in _sseService.stream) {
         if (!mounted) break;
@@ -892,6 +905,7 @@ class _ChatPageState extends State<ChatPage> {
         _lipSyncDriver.feedStreamingChunk(token.token);
         _live2DController.setExpression(Live2DExpression.happy);
         fullReply += token.token;
+        _live2DController.showSpeechBubble(fullReply);
         setState(() {
           if (botMsgIndex < _messages.length) {
             _messages[botMsgIndex] = _messages[botMsgIndex].copyWith(
@@ -903,6 +917,9 @@ class _ChatPageState extends State<ChatPage> {
       }
       _lipSyncDriver.onStreamComplete();
       _live2DController.setExpression(Live2DExpression.idle);
+      _live2DController.showSpeechBubble(
+        fullReply.isEmpty ? '小昌收到啦！随时为你服务~' : fullReply,
+      );
 
       // Finalize the message (no longer partial).
       if (mounted && botMsgIndex < _messages.length) {
@@ -956,49 +973,138 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  void _showHistorySheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.75,
+          minChildSize: 0.45,
+          maxChildSize: 0.95,
+          expand: false,
+          builder: (context, scrollController) {
+            return Column(
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        '📜 历史对话与智能记忆',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0F766E),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: _isLoadingHistory
+                      ? const Center(child: CircularProgressIndicator())
+                      : _messages.isEmpty
+                          ? const Center(
+                              child: Text(
+                                '暂无历史对话',
+                                style: TextStyle(color: Colors.grey),
+                              ),
+                            )
+                          : ListView.builder(
+                          controller: scrollController,
+                          padding: const EdgeInsets.all(16),
+                          itemCount: _messages.length,
+                          itemBuilder: (context, index) {
+                            final msg = _messages[index];
+                            return _ChatBubble(
+                              message: msg,
+                              isUser: msg.sender == 'user',
+                              hitlRequests: _hitlRequests,
+                              currentUserId: _currentUserId ?? '',
+                              apiService: _apiService,
+                              onHitlUpdated: _loadNegotiations,
+                            );
+                          },
+                        ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildQuickSuggestionChips() {
+    final chips = [
+      '🚲 校园二手车',
+      '📚 考研二手教材',
+      '🎒 闲置数码与iPad',
+      '📦 查我的校园订单',
+    ];
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: chips.map((prompt) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: ActionChip(
+              label: Text(
+                prompt,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF0F766E),
+                ),
+              ),
+              backgroundColor: Colors.white.withValues(alpha: 0.9),
+              side: BorderSide(
+                color: const Color(0xFF0F766E).withValues(alpha: 0.25),
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              onPressed: () {
+                _controller.text = prompt.replaceAll(RegExp(r'^[^\s]+\s*'), '');
+                _sendMessage();
+              },
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     return Column(
       children: [
-        _AssistantHeader(
-          embedded: widget.embedded,
-          isStageExpanded: _showLive2DStage,
-          onToggleStage: () {
-            setState(() => _showLive2DStage = !_showLive2DStage);
-          },
+        _AssistantDigitalHumanHeader(
+          onOpenHistory: _showHistorySheet,
         ),
-        if (_showLive2DStage)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF0FDF4),
-              border: Border(
-                bottom: BorderSide(
-                  color: const Color(0xFF0F766E).withValues(alpha: 0.15),
-                ),
-              ),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Live2DCharacterWidget(
-                  controller: _live2DController,
-                  size: 160,
-                ),
-                TextButton.icon(
-                  onPressed: () => context.push('/live2d-preview'),
-                  icon: const Icon(Icons.open_in_full_rounded, size: 14),
-                  label: const Text('全屏 2D 互动舞台', style: TextStyle(fontSize: 12)),
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF0F766E),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
-              ],
-            ),
-          ),
         if (_historyError != null)
           Container(
             width: double.infinity,
@@ -1009,8 +1115,7 @@ class _ChatPageState extends State<ChatPage> {
               style: const TextStyle(fontSize: 12, color: Color(0xFF765A16)),
             ),
           ),
-        // Pending agent action plans: the model proposed these writes, and
-        // nothing executes until the user confirms here.
+        // Pending agent action plans
         if (_agentPlans.isNotEmpty)
           Container(
             color: const Color(0xFFF1F5FF),
@@ -1064,9 +1169,7 @@ class _ChatPageState extends State<ChatPage> {
               ],
             ),
           ),
-        // Writes that already happened and are still reversible. Visually
-        // quieter than the pending-confirmation block above: nothing is being
-        // asked of the user, the action is simply still recoverable.
+        // Reversible writes undo strip
         if (_undoableActions.isNotEmpty)
           Container(
             color: const Color(0xFFF4F6F4),
@@ -1121,7 +1224,7 @@ class _ChatPageState extends State<ChatPage> {
               ],
             ),
           ),
-        // Negotiation cards strip at the top of chat
+        // Negotiation cards strip
         if (_hitlRequests.isNotEmpty)
           SizedBox(
             height: 60,
@@ -1141,79 +1244,90 @@ class _ChatPageState extends State<ChatPage> {
               },
             ),
           ),
-        if (_isLoadingHistory)
-          const Expanded(child: Center(child: CircularProgressIndicator()))
-        else
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _messages.length + (_isStreaming ? 1 : 0),
-              itemBuilder: (context, index) {
-                if (index == _messages.length && _isStreaming) {
-                  return Align(
-                    alignment: Alignment.centerLeft,
-                    child: Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const CircularProgressIndicator(strokeWidth: 2),
-                          const SizedBox(width: 8),
-                          Text(
-                            l.assistantTyping,
-                            style: const TextStyle(color: Colors.grey),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }
-                final msg = _messages[index];
-                final isUser = msg.sender == 'user';
-                return _ChatBubble(
-                  message: msg,
-                  isUser: isUser,
-                  hitlRequests: _hitlRequests,
-                  currentUserId: _currentUserId ?? '',
-                  apiService: _apiService,
-                  onHitlUpdated: _loadNegotiations,
-                );
-              },
+        // Main Digital Human Virtual Avatar Stage
+        Expanded(
+          child: Container(
+            width: double.infinity,
+            decoration: const BoxDecoration(
+              gradient: RadialGradient(
+                center: Alignment(0, -0.1),
+                radius: 0.85,
+                colors: [
+                  Color(0xFFCCFBF1),
+                  Color(0xFFF0FDF4),
+                ],
+              ),
+            ),
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const SizedBox(height: 10),
+                  // Live2D Character with dynamic speech bubble & tap physics
+                  Live2DCharacterWidget(
+                    controller: _live2DController,
+                    size: 260,
+                    showSpeechBubble: true,
+                    enableTouchTracking: true,
+                  ),
+                  const SizedBox(height: 18),
+                  // Quick suggestion chips
+                  _buildQuickSuggestionChips(),
+                  const SizedBox(height: 10),
+                ],
+              ),
             ),
           ),
-        UnifiedMessageComposer(
-          controller: _controller,
-          focusNode: _composerFocusNode,
-          hintText: l.typeMessage,
-          isSending: _isStreaming,
-          onSubmitted: (_) => _sendMessage(),
-          onSend: _sendMessage,
-          primaryActions: [
-            MessageComposerAction(
-              id: 'image',
-              icon: Icons.image_outlined,
-              label: l.composerImageAction,
-              onPressed: _pickImage,
-            ),
-          ],
-          expandedActions: [
-            MessageComposerAction(
-              id: 'assistant-find',
-              icon: Icons.search_rounded,
-              label: l.assistantToolFind,
-              onPressed: () => _applyAssistantPrompt(l.assistantToolFindPrompt),
-            ),
-            MessageComposerAction(
-              id: 'assistant-estimate',
-              icon: Icons.price_check_outlined,
-              label: l.assistantToolEstimate,
-              onPressed: () =>
-                  _applyAssistantPrompt(l.assistantToolEstimatePrompt),
-            ),
-          ],
-          contextContent: [
-            if (_selectedImageBytes != null) _buildSelectedImagePreview(l),
-          ],
+        ),
+        // Bottom Input Message Composer
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF0F766E).withValues(alpha: 0.08),
+                blurRadius: 16,
+                offset: const Offset(0, -4),
+              ),
+            ],
+          ),
+          child: UnifiedMessageComposer(
+            controller: _controller,
+            focusNode: _composerFocusNode,
+            hintText: '和小昌说说话，找好物、问跑腿...',
+            isSending: _isStreaming,
+            onSubmitted: (_) => _sendMessage(),
+            onSend: _sendMessage,
+            primaryActions: [
+              MessageComposerAction(
+                id: 'image',
+                icon: Icons.image_outlined,
+                label: l.composerImageAction,
+                onPressed: _pickImage,
+              ),
+            ],
+            expandedActions: [
+              MessageComposerAction(
+                id: 'assistant-find',
+                icon: Icons.search_rounded,
+                label: l.assistantToolFind,
+                onPressed: () => _applyAssistantPrompt(l.assistantToolFindPrompt),
+              ),
+              MessageComposerAction(
+                id: 'assistant-estimate',
+                icon: Icons.price_check_outlined,
+                label: l.assistantToolEstimate,
+                onPressed: () =>
+                    _applyAssistantPrompt(l.assistantToolEstimatePrompt),
+              ),
+            ],
+            contextContent: [
+              if (_selectedImageBytes != null) _buildSelectedImagePreview(l),
+            ],
+          ),
         ),
       ],
     );
@@ -1241,13 +1355,14 @@ class _ChatPageState extends State<ChatPage> {
             Positioned(
               right: 0,
               top: 0,
-              child: IconButton.filledTonal(
-                tooltip: l.deleteAction,
-                icon: const Icon(Icons.close_rounded, size: 18),
-                onPressed: () => setState(() {
-                  _selectedImage = null;
-                  _selectedImageBytes = null;
-                }),
+              child: IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: () {
+                  setState(() {
+                    _selectedImage = null;
+                    _selectedImageBytes = null;
+                  });
+                },
               ),
             ),
           ],
@@ -1257,50 +1372,72 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _showNegotiationCard(HitlRequest req) {
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      builder: (context) => Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Builder(
-              builder: (ctx) => Text(
-                AppLocalizations.of(ctx)!.negotiationDetails,
-                style: Theme.of(ctx).textTheme.titleLarge,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(AppLocalizations.of(context)!.listingLine(req.listingId)),
-            Text(
-              AppLocalizations.of(
-                context,
-              )!.buyerOfferLine(req.proposedPrice.toStringAsFixed(2)),
-            ),
-            Text(AppLocalizations.of(context)!.reasonLine(req.reason)),
-            Text(AppLocalizations.of(context)!.statusLine(req.status)),
-            if (req.counterPrice != null)
-              Text(
-                AppLocalizations.of(
-                  context,
-                )!.counterPriceLine(req.counterPrice!.toStringAsFixed(2)),
-              ),
-            const SizedBox(height: 16),
-            if (_currentUserId != null)
-              NegotiationCard(
-                request: req,
-                currentUserId: _currentUserId!,
-                apiService: _apiService,
-                onUpdated: () {
-                  Navigator.pop(context);
-                  _loadNegotiations();
-                },
-              )
-            else
-              Text(AppLocalizations.of(context)!.loading),
-          ],
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: NegotiationCard(
+            request: req,
+            currentUserId: _currentUserId ?? '',
+            apiService: _apiService,
+            onUpdated: _loadNegotiations,
+          ),
         ),
+      ),
+    );
+  }
+}
+
+class _AssistantDigitalHumanHeader extends StatelessWidget {
+  const _AssistantDigitalHumanHeader({required this.onOpenHistory});
+
+  final VoidCallback onOpenHistory;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(
+          bottom: BorderSide(color: Theme.of(context).dividerColor),
+        ),
+      ),
+      child: Row(
+        children: [
+          const XiaochangAvatar(size: 36),
+          const SizedBox(width: 10),
+          const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '小昌 · 智能数字人',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Text(
+                '实时语音动作 · 记忆增强 · 校园生活助理',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Color(0xFF64748B),
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
+          IconButton(
+            tooltip: '历史对话',
+            icon: const Icon(Icons.history_rounded, color: Color(0xFF0F766E)),
+            onPressed: onOpenHistory,
+          ),
+          const SizedBox(width: 4),
+          const _AgentStatusPill(),
+        ],
       ),
     );
   }
@@ -1356,99 +1493,6 @@ class _HitlChip extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _AssistantHeader extends StatelessWidget {
-  const _AssistantHeader({
-    required this.embedded,
-    required this.isStageExpanded,
-    required this.onToggleStage,
-  });
-
-  final bool embedded;
-  final bool isStageExpanded;
-  final VoidCallback onToggleStage;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
-    return Container(
-      width: double.infinity,
-      padding: EdgeInsets.fromLTRB(embedded ? 20 : 16, 12, 16, 12),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        border: Border(
-          bottom: BorderSide(color: Theme.of(context).dividerColor),
-        ),
-      ),
-      child: Row(
-        children: [
-          InkWell(
-            onTap: onToggleStage,
-            borderRadius: BorderRadius.circular(12),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const XiaochangAvatar(size: 40),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            l.assistantName,
-                            style: const TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            isStageExpanded
-                                ? Icons.keyboard_arrow_up_rounded
-                                : Icons.keyboard_arrow_down_rounded,
-                            size: 18,
-                            color: const Color(0xFF0F766E),
-                          ),
-                        ],
-                      ),
-                      Text(
-                        l.assistantHeaderSubtitle,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF64748B),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const Spacer(),
-          FilledButton.tonalIcon(
-            onPressed: () => context.push('/live2d-preview'),
-            icon: const Icon(Icons.face_retouching_natural_rounded, size: 16),
-            label: const Text(
-              '数字人互动',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-            ),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFE1F4EF),
-              foregroundColor: const Color(0xFF0F766E),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              visualDensity: VisualDensity.compact,
-            ),
-          ),
-          const SizedBox(width: 8),
-          const _AgentStatusPill(),
-        ],
       ),
     );
   }

@@ -247,16 +247,7 @@ class _CampusMapPageState extends State<CampusMapPage> {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(l.campusMapTitle),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.face_retouching_natural_rounded),
-            tooltip: '小昌数字人',
-            onPressed: () => context.push('/live2d-preview'),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: Text(l.campusMapTitle)),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null

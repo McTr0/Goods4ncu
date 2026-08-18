@@ -133,39 +133,45 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
   Widget _buildSpeechBubble(String text) {
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
-      duration: const Duration(milliseconds: 200),
+      duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutBack,
       builder: (context, val, child) {
         return Transform.scale(
           scale: val,
           alignment: Alignment.bottomCenter,
           child: Container(
-            constraints: BoxConstraints(maxWidth: widget.size * 1.1),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            constraints: BoxConstraints(
+              maxWidth: math.max(widget.size * 1.15, 260),
+              maxHeight: 160,
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.96),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(18),
               border: Border.all(
-                color: const Color(0xFF0F766E).withValues(alpha: 0.3),
+                color: const Color(0xFF0F766E).withValues(alpha: 0.35),
                 width: 1.5,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF0F766E).withValues(alpha: 0.12),
-                  blurRadius: 10,
+                  color: const Color(0xFF0F766E).withValues(alpha: 0.15),
+                  blurRadius: 14,
                   offset: const Offset(0, 4),
                 ),
               ],
             ),
-            child: Text(
-              text,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF134E4A),
-                height: 1.3,
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              child: Text(
+                text,
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF134E4A),
+                  height: 1.35,
+                ),
+                textAlign: TextAlign.center,
               ),
-              textAlign: TextAlign.center,
             ),
           ),
         );
