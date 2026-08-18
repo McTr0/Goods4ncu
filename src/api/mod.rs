@@ -1,7 +1,6 @@
 use crate::agents::router::IntentRouter;
 use crate::api::metrics::MetricsService;
 use crate::llm::LlmProvider;
-use crate::repositories;
 use crate::services::moderation::ModerationService;
 use crate::services::notification::NotificationService;
 use crate::services::order;
@@ -14,6 +13,7 @@ use axum::{
     Router,
 };
 pub mod admin;
+pub mod agent_memory;
 pub mod agent_plans;
 pub mod agent_runs;
 pub mod agreements;
@@ -388,7 +388,9 @@ impl MediaSigner {
 #[derive(Clone)]
 pub struct ApiAgents {
     pub llm_provider: Arc<dyn LlmProvider>,
+    #[allow(dead_code)]
     pub router: IntentRouter,
+    pub tri_tier_router: crate::agents::router::TriTierIntentRouter,
 }
 
 #[derive(Clone)]
@@ -396,17 +398,12 @@ pub struct AppState {
     pub secrets: ApiSecrets,
     pub infra: ApiInfrastructure,
     pub agents: ApiAgents,
-    // Repository layer (concrete types for now)
+    pub listing_repo: crate::repositories::PostgresListingRepository,
+    pub user_repo: crate::repositories::PostgresUserRepository,
+    pub chat_repo: crate::repositories::PostgresChatRepository,
+    pub auth_repo: crate::repositories::PostgresAuthRepository,
     #[allow(dead_code)]
-    pub listing_repo: repositories::PostgresListingRepository,
-    #[allow(dead_code)]
-    pub user_repo: repositories::PostgresUserRepository,
-    #[allow(dead_code)]
-    pub chat_repo: repositories::PostgresChatRepository,
-    #[allow(dead_code)]
-    pub auth_repo: repositories::PostgresAuthRepository,
-    #[allow(dead_code)]
-    pub order_repo: repositories::PostgresOrderRepository,
+    pub order_repo: crate::repositories::PostgresOrderRepository,
 }
 
 impl AppState {
@@ -778,6 +775,20 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .route("/api/auth/mfa/totp/confirm", post(mfa::totp_confirm))
         .route("/api/agent/plans", get(agent_plans::list_plans))
         .route("/api/agent/runs", get(agent_runs::list_runs))
+        .route(
+            "/api/agent/profile",
+            get(agent_memory::get_profile).put(agent_memory::update_profile),
+        )
+        .route(
+            "/api/agent/memories",
+            get(agent_memory::list_memories)
+                .post(agent_memory::create_memory)
+                .delete(agent_memory::clear_memories),
+        )
+        .route(
+            "/api/agent/memories/{id}",
+            axum::routing::delete(agent_memory::delete_memory),
+        )
         .route(
             "/api/agent/plans/{id}/confirm",
             post(agent_plans::confirm_plan),

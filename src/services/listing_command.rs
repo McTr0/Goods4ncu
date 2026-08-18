@@ -338,9 +338,9 @@ fn normalize_required_text(
 }
 
 fn normalize_price(value: f64) -> Result<f64, ApiError> {
-    if !value.is_finite() || !(0.0..=MAX_PRICE_CNY).contains(&value) {
+    if !value.is_finite() || value <= 0.0 || value > MAX_PRICE_CNY {
         return Err(ApiError::BadRequest(
-            "suggested_price_cny 必须在 0 到 10,000,000 元之间".to_string(),
+            "suggested_price_cny 必须大于 0 且在 10,000,000 元以内".to_string(),
         ));
     }
     let cents = (value * 100.0).round();

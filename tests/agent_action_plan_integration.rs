@@ -347,7 +347,16 @@ async fn action_plan_audit_records_safe_transitions_and_typed_terminal_outcome()
             "SELECT event_type, outcome_code
              FROM agent_action_audits
              WHERE plan_id = $1
-             ORDER BY created_at ASC, id ASC",
+             ORDER BY created_at ASC,
+                      CASE event_type
+                          WHEN 'proposal_created' THEN 1
+                          WHEN 'first_confirmation' THEN 2
+                          WHEN 'second_confirmation_requested' THEN 3
+                          WHEN 'execution_started' THEN 4
+                          WHEN 'execution_succeeded' THEN 5
+                          WHEN 'execution_failed' THEN 6
+                          ELSE 7
+                      END ASC",
         )
         .bind(plan.id)
         .fetch_all(&pool)

@@ -529,6 +529,11 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
                 goods4ncu::llm::gemini::GeminiProvider::new("test-key", 768)
                     .expect("gemini provider init"),
             ),
+            tri_tier_router: goods4ncu::agents::router::TriTierIntentRouter::new(
+                IntentRouter::new(vec![]),
+                None,
+                None,
+            ),
             router: IntentRouter::new(vec![]),
         },
         listing_repo: PostgresListingRepository::new(pool.clone()),

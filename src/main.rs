@@ -287,19 +287,12 @@ async fn main() -> Result<(), anyhow::Error> {
 
     // Multi-replica realtime: when REDIS_URL is configured, WS broadcasts
     // route through Redis pub/sub so any replica can deliver to the sockets it
-    // holds. Without it (or without the `redis` feature) delivery stays local.
+    // Holds. Without it (or without the `redis` feature) delivery stays local.
     #[cfg(feature = "redis")]
     let ws_fanout_handle = config
         .redis_url
         .clone()
         .map(|redis_url| tokio::spawn(services::ws_fanout::run(redis_url, shutdown.clone())));
-
-    // Build repository layer (concrete types - simpler than dyn traits for now)
-    let listing_repo = repositories::PostgresListingRepository::new(db_pool.clone());
-    let user_repo = repositories::PostgresUserRepository::new(db_pool.clone());
-    let chat_repo = repositories::PostgresChatRepository::new(db_pool.clone());
-    let auth_repo = repositories::PostgresAuthRepository::new(db_pool.clone());
-    let order_repo = repositories::PostgresOrderRepository::new(db_pool.clone());
 
     let token_denylist = services::token_denylist::TokenDenylist::new();
 
@@ -403,13 +396,18 @@ async fn main() -> Result<(), anyhow::Error> {
         },
         agents: api::ApiAgents {
             llm_provider: Arc::clone(&llm_provider),
+            tri_tier_router: crate::agents::router::TriTierIntentRouter::new(
+                router.clone(),
+                Some(db_pool.clone()),
+                Some(llm_provider.clone().embedding_generator()),
+            ),
             router,
         },
-        listing_repo,
-        user_repo,
-        chat_repo,
-        auth_repo,
-        order_repo,
+        listing_repo: repositories::PostgresListingRepository::new(db_pool.clone()),
+        user_repo: repositories::PostgresUserRepository::new(db_pool.clone()),
+        chat_repo: repositories::PostgresChatRepository::new(db_pool.clone()),
+        auth_repo: repositories::PostgresAuthRepository::new(db_pool.clone()),
+        order_repo: repositories::PostgresOrderRepository::new(db_pool.clone()),
     };
 
     let app = api::create_router(app_state, &config.cors_origins);

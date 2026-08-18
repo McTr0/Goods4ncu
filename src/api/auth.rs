@@ -1341,6 +1341,11 @@ mod tests {
                     crate::llm::gemini::GeminiProvider::new("test-key", 768)
                         .expect("gemini provider init"),
                 ),
+                tri_tier_router: crate::agents::router::TriTierIntentRouter::new(
+                    IntentRouter::new(vec![]),
+                    None,
+                    None,
+                ),
                 router: IntentRouter::new(vec![]),
             },
             listing_repo: crate::repositories::PostgresListingRepository::new(pool.clone()),
