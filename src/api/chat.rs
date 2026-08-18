@@ -449,9 +449,18 @@ pub(crate) async fn handle_chat(
     )
     .await?;
 
-    // Lightweight intent classification — blocked content and greetings short-circuit here.
-    let intent_result = state.agents.router.classify(&message);
-    tracing::debug!(intent = ?intent_result.intent.as_str(), confidence = %intent_result.confidence, "Router classification");
+    // Tri-tier intent classification — blocked content and greetings short-circuit here.
+    let intent_result = state
+        .agents
+        .tri_tier_router
+        .classify(&message, session_campus_id)
+        .await;
+    tracing::debug!(
+        intent = ?intent_result.intent.as_str(),
+        confidence = %intent_result.confidence,
+        tier = %intent_result.matched_tier,
+        "Router classification"
+    );
 
     if let Some(reply) = intent_result.direct_response(&message) {
         let run = begin_agent_run(
@@ -555,6 +564,7 @@ pub(crate) async fn handle_chat(
     let agent: Box<dyn MarketplaceAgent> = match state
         .agents
         .llm_provider
+        .clone()
         .create_marketplace_agent(
             &state.infra.db,
             state.infra.event_tx.clone(),
@@ -580,8 +590,26 @@ pub(crate) async fn handle_chat(
         }
     };
 
+    let memory_context = if let Some(campus_id) = session_campus_id {
+        let memory_svc =
+            crate::services::agent_memory::AgentMemoryService::new(state.infra.db.clone());
+        let embedder = state.agents.llm_provider.clone().embedding_generator();
+        memory_svc
+            .format_memory_context(&current_user_id, campus_id, &message, Some(&embedder))
+            .await
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let prompt_msg = if memory_context.is_empty() {
+        message.clone()
+    } else {
+        format!("{}\n\n{}", message, memory_context)
+    };
+
     let (reply, usage) = match agent
-        .prompt_with_history_with_usage(message.clone(), chat_history)
+        .prompt_with_history_with_usage(prompt_msg, chat_history)
         .await
     {
         Ok(reply) => reply,
@@ -594,6 +622,38 @@ pub(crate) async fn handle_chat(
             return Err(ApiError::Internal(anyhow::anyhow!(error)));
         }
     };
+
+    // Auto-record preference memory in background for future turns
+    if let Some(campus_id) = session_campus_id {
+        if matches!(
+            intent_result.intent,
+            crate::agents::router::Intent::Search
+                | crate::agents::router::Intent::Wanted
+                | crate::agents::router::Intent::Offer
+        ) {
+            let bg_db = state.infra.db.clone();
+            let bg_user_id = current_user_id.clone();
+            let bg_msg = message.clone();
+            let bg_embedder = state.agents.llm_provider.clone().embedding_generator();
+            tokio::spawn(async move {
+                let memory_svc = crate::services::agent_memory::AgentMemoryService::new(bg_db);
+                let note = format!("用户曾表达需求：{}", bg_msg);
+                let _ = memory_svc
+                    .add_memory(
+                        crate::services::agent_memory::CreateMemoryInput {
+                            user_id: &bg_user_id,
+                            campus_id,
+                            memory_type: "preference",
+                            content: &note,
+                            source_ref: Some("chat_turn"),
+                            confidence: 0.9,
+                        },
+                        Some(&bg_embedder),
+                    )
+                    .await;
+            });
+        }
+    }
 
     state.infra.metrics.record_llm_call();
     if let Some(run) = &run {
@@ -706,8 +766,17 @@ async fn handle_chat_stream_request(
     )
     .await?;
 
-    let intent_result = state.agents.router.classify(&message);
-    tracing::debug!(intent = ?intent_result.intent.as_str(), confidence = %intent_result.confidence, "SSE Router classification");
+    let intent_result = state
+        .agents
+        .tri_tier_router
+        .classify(&message, session_campus_id)
+        .await;
+    tracing::debug!(
+        intent = ?intent_result.intent.as_str(),
+        confidence = %intent_result.confidence,
+        tier = %intent_result.matched_tier,
+        "SSE Router classification"
+    );
 
     if let Some(reply) = intent_result.direct_response(&message) {
         let run = begin_agent_run(
@@ -796,6 +865,24 @@ async fn handle_chat_stream_request(
         return Err(ApiError::NotFound);
     }
 
+    let memory_context = if let Some(campus_id) = session_campus_id {
+        let memory_svc =
+            crate::services::agent_memory::AgentMemoryService::new(state.infra.db.clone());
+        let embedder = state.agents.llm_provider.clone().embedding_generator();
+        memory_svc
+            .format_memory_context(&current_user_id, campus_id, &message, Some(&embedder))
+            .await
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let prompt_msg = if memory_context.is_empty() {
+        message.clone()
+    } else {
+        format!("{}\n\n{}", message, memory_context)
+    };
+
     let provider_name = state.agents.llm_provider.name().to_string();
     let provider_model = state.agents.llm_provider.model().to_string();
     let run = begin_agent_run(
@@ -839,7 +926,7 @@ async fn handle_chat_stream_request(
         }
     };
 
-    let mut stream = agent.stream_chat(message.clone(), chat_history);
+    let mut stream = agent.stream_chat(prompt_msg, chat_history);
     let run_for_stream = run.clone();
     let reconciliation_tx = run.clone().map(schedule_agent_run_reconciliation);
     let persisted_conversation_id = conversation_id.clone();
