@@ -57,6 +57,7 @@
 | [产品设计](product-design.md) | 产品使命、出/收哲学、用户旅程、边界和成功指标 |
 | [信息模型](information-model.md) | 领域对象、状态机、事实边界、事件和多租户不变量 |
 | [Agent 系统设计](agent-system.md) | Agent 权限、ActionPlan、工具、RAG、安全和评估 |
+| [Agent-First 升级计划](agent-first-upgrade-plan.md) | 解决自主 ReAct、三级路由、分层记忆、主动目标与 MCP 的深度升级方案 |
 | [信任与安全](trust-safety.md) | 身份、审核、通信治理、收款码、隐私、申诉和审计 |
 | [生产架构](production-architecture.md) | 模块化单体、多校园、outbox、Redis、存储、SLO 和恢复 |
 | [新人导览](onboarding.md) | 面向新人的教材式项目入口和术语解释 |
