@@ -1,7 +1,6 @@
 use super::{
     AgentStreamChunk, AgentTokenUsage, CircuitBreaker, EmbeddingGenerator, EmbeddingModelMetadata,
-    MarketplaceAgent, NegotiateAgent, ReplyAssistant, LLM_CIRCUIT_BREAKER, NEGOTIATION_PREAMBLE,
-    PREAMBLE, REPLY_ASSISTANT_PREAMBLE,
+    MarketplaceAgent, ReplyAssistant, LLM_CIRCUIT_BREAKER, PREAMBLE, REPLY_ASSISTANT_PREAMBLE,
 };
 use crate::agents::models::Document;
 use crate::agents::tools::ToolContext;
@@ -148,16 +147,6 @@ impl super::LlmProvider for GeminiProvider {
         }
     }
 
-    async fn create_negotiate_agent(self: Arc<Self>) -> anyhow::Result<Box<dyn NegotiateAgent>> {
-        let agent = self
-            .client
-            .agent(&self.model)
-            .preamble(NEGOTIATION_PREAMBLE)
-            .build();
-
-        Ok(Box::new(GeminiNegotiateAgent(agent)))
-    }
-
     async fn create_reply_assistant(self: Arc<Self>) -> anyhow::Result<Box<dyn ReplyAssistant>> {
         let agent = self
             .client
@@ -246,7 +235,7 @@ impl MarketplaceAgent for GeminiMarketplaceAgent {
     ) -> Pin<Box<dyn Stream<Item = Result<AgentStreamChunk, anyhow::Error>> + Send>> {
         let h = history;
         let agent = self.0.clone();
-        let circuit_breaker = LLM_CIRCUIT_BREAKER.clone();
+        let circuit_breaker = Arc::clone(&LLM_CIRCUIT_BREAKER);
         Box::pin(::async_stream::try_stream! {
             // Check circuit breaker at stream start — fail fast before any LLM call.
             if circuit_breaker.is_open().await {
@@ -338,15 +327,6 @@ impl MarketplaceAgent for GeminiMarketplaceAgent {
                 circuit_breaker.record_success().await;
             }
         })
-    }
-}
-
-pub struct GeminiNegotiateAgent(Agent<gemini::completion::CompletionModel<reqwest::Client>>);
-
-#[async_trait]
-impl NegotiateAgent for GeminiNegotiateAgent {
-    async fn prompt(&self, msg: String) -> anyhow::Result<String> {
-        Ok(self.0.prompt(msg).await?)
     }
 }
 

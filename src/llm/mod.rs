@@ -6,7 +6,7 @@ use crate::services::BusinessEvent;
 use async_trait::async_trait;
 use futures::Stream;
 use rig::completion::Message;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -139,9 +139,8 @@ impl Default for CircuitBreaker {
     }
 }
 
-lazy_static::lazy_static! {
-    pub static ref LLM_CIRCUIT_BREAKER: Arc<CircuitBreaker> = Arc::new(CircuitBreaker::new());
-}
+pub static LLM_CIRCUIT_BREAKER: std::sync::LazyLock<Arc<CircuitBreaker>> =
+    std::sync::LazyLock::new(|| Arc::new(CircuitBreaker::new()));
 
 /// Provider-only embedding capability used by the durable projection worker.
 ///
@@ -155,7 +154,7 @@ pub trait EmbeddingGenerator: Send + Sync {
 /// Provider-reported completion usage.  A zero-valued provider response is
 /// treated as unavailable by `from_rig`; estimates are never substituted for
 /// provider facts in the AgentRun envelope.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentTokenUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -224,9 +223,6 @@ pub trait LlmProvider: Send + Sync {
         moderation: crate::services::moderation::ModerationService,
     ) -> anyhow::Result<Box<dyn MarketplaceAgent>>;
 
-    /// Create a negotiation agent.
-    async fn create_negotiate_agent(self: Arc<Self>) -> anyhow::Result<Box<dyn NegotiateAgent>>;
-
     /// Create a tool-free assistant that only drafts non-binding replies.
     async fn create_reply_assistant(self: Arc<Self>) -> anyhow::Result<Box<dyn ReplyAssistant>>;
 
@@ -267,12 +263,6 @@ pub trait MarketplaceAgent: Send + Sync {
     ) -> Pin<Box<dyn Stream<Item = Result<AgentStreamChunk, anyhow::Error>> + Send>>;
 }
 
-/// Marker trait for negotiation agents.
-#[async_trait]
-pub trait NegotiateAgent: Send + Sync {
-    async fn prompt(&self, msg: String) -> anyhow::Result<String>;
-}
-
 #[async_trait]
 pub trait ReplyAssistant: Send + Sync {
     async fn prompt(&self, msg: String) -> anyhow::Result<String>;
@@ -298,18 +288,6 @@ pub const PREAMBLE: &str = "\
 
 始终保持专业、友好、简洁，并明确区分你的知识库内容和用户实时输入。";
 
-/// Negotiation agent preamble.
-pub const NEGOTIATION_PREAMBLE: &str = "\
-你是一个专业的AI谈判助手，擅长在二手交易中帮助用户优化交易价格。
-
-你的职责是：
-1. 分析卖家和买家的出价，找出共同点
-2. 提出合理的中间价建议
-3. 解释你的谈判逻辑
-4. 逐步引导双方达成共识
-
-记住：始终以友好的方式沟通，帮助双方达成公平交易。";
-
 pub const REPLY_ASSISTANT_PREAMBLE: &str = r#"
 你是校园二手交易中的回复草稿助手。你没有任何工具，也不能执行搜索、下单、付款、议价或修改数据。
 
@@ -334,12 +312,6 @@ mod tests {
     }
 
     #[test]
-    fn test_negotiation_preamble_is_not_empty() {
-        assert!(!NEGOTIATION_PREAMBLE.is_empty());
-        assert!(NEGOTIATION_PREAMBLE.contains("AI谈判助手"));
-    }
-
-    #[test]
     fn test_preamble_contains_core_behavior_guidelines() {
         // Verify preamble contains key behavior instructions
         assert!(PREAMBLE.contains("create_listing"));
@@ -348,18 +320,11 @@ mod tests {
     }
 
     #[test]
-    fn test_negotiation_preamble_contains_pricing_guidance() {
-        assert!(NEGOTIATION_PREAMBLE.contains("优化交易价格"));
-        assert!(NEGOTIATION_PREAMBLE.contains("中间价建议"));
-    }
-
-    #[test]
     fn test_llm_provider_trait_objects_compile() {
         // Verify trait bounds are satisfied (this is a compile-time check)
         fn assert_send_sync<T: Send + Sync>() {}
         // These are marker traits but we verify the bounds compile
         assert_send_sync::<Box<dyn MarketplaceAgent>>();
-        assert_send_sync::<Box<dyn NegotiateAgent>>();
         assert_send_sync::<Box<dyn ReplyAssistant>>();
     }
 }
