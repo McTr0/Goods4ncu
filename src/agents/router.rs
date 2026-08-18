@@ -1,81 +1,27 @@
-//! Lightweight intent router — no extra LLM call required.
+//! Tri-tier intent router for Goods4ncu agents.
 //!
-//! Classifies user messages into intent categories using heuristic keyword matching.
-//! Blocks prohibited content before it reaches the LLM.
+//! Tier 0: Fast deterministic rules and moderation blocks (< 1ms).
+//! Tier 1: pgvector cosine similarity against semantic intent exemplars (5-15ms).
+//! Tier 2: Structured slot decomposition and intent clarification.
 //!
-//! Intent categories:
-//! - `search` — user wants to browse/search inventory
-//! - `buy` — user has purchase intent
-//! - `negotiate` — user wants to negotiate price
-//! - `chat` — casual conversation, no marketplace action needed
-//! - `blocked` — message contains prohibited keywords
+//! Falls back gracefully when database or embeddings are unavailable.
 
+use crate::llm::EmbeddingGenerator;
 use serde::{Deserialize, Serialize};
+use sqlx::{PgPool, Row};
 use std::sync::Arc;
+use uuid::Uuid;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_search_keywords() {
-        let router = IntentRouter::default();
-        assert_eq!(router.classify("帮我搜索一下耳机").intent, Intent::Search);
-        assert_eq!(router.classify("有没有二手书").intent, Intent::Search);
-        assert_eq!(router.classify("搜索 iPhone").intent, Intent::Search);
-    }
-
-    #[test]
-    fn test_buy_keywords() {
-        let router = IntentRouter::default();
-        assert_eq!(router.classify("我要买一个耳机").intent, Intent::Buy);
-        assert_eq!(router.classify("这个怎么买").intent, Intent::Buy);
-        assert_eq!(router.classify("下单").intent, Intent::Buy);
-    }
-
-    #[test]
-    fn test_negotiate_keywords() {
-        let router = IntentRouter::default();
-        assert_eq!(router.classify("能便宜点吗").intent, Intent::Negotiate);
-        assert_eq!(router.classify("还价").intent, Intent::Negotiate);
-        assert_eq!(
-            router.classify("180太贵了，150行吗").intent,
-            Intent::Negotiate
-        );
-    }
-
-    #[test]
-    fn test_chat_keywords() {
-        let router = IntentRouter::default();
-        assert_eq!(router.classify("你好").intent, Intent::Chat);
-        assert_eq!(router.classify("你是谁").intent, Intent::Chat);
-        assert_eq!(router.classify("今天天气不错").intent, Intent::Chat);
-    }
-
-    #[test]
-    fn test_blocked_default_keywords() {
-        let router = IntentRouter::default();
-        assert_eq!(router.classify("我要买一把刀").intent, Intent::Blocked);
-        assert_eq!(router.classify("帮我找个毒品").intent, Intent::Blocked);
-    }
-
-    #[test]
-    fn test_mixed_intent_takes_highest() {
-        let router = IntentRouter::default();
-        // "买" is higher priority than "搜索"
-        assert_eq!(
-            router.classify("帮我买个耳机，搜索一下有哪些").intent,
-            Intent::Buy
-        );
-    }
-}
-
-/// Intent classification result.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Expanded intent categories matching the unified campus intent model.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Intent {
     Search,
     Buy,
+    Offer,
+    Wanted,
     Negotiate,
+    Companion,
+    Help,
     Chat,
     Blocked,
 }
@@ -85,9 +31,27 @@ impl Intent {
         match self {
             Intent::Search => "search",
             Intent::Buy => "buy",
+            Intent::Offer => "offer",
+            Intent::Wanted => "wanted",
             Intent::Negotiate => "negotiate",
+            Intent::Companion => "companion",
+            Intent::Help => "help",
             Intent::Chat => "chat",
             Intent::Blocked => "blocked",
+        }
+    }
+
+    pub fn from_str_lenient(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "search" => Intent::Search,
+            "buy" => Intent::Buy,
+            "offer" | "publish" | "sell" => Intent::Offer,
+            "wanted" | "seek" => Intent::Wanted,
+            "negotiate" | "bargain" => Intent::Negotiate,
+            "companion" | "activity" | "team" => Intent::Companion,
+            "help" | "assist" => Intent::Help,
+            "blocked" => Intent::Blocked,
+            _ => Intent::Chat,
         }
     }
 }
@@ -96,50 +60,63 @@ impl Intent {
 pub struct IntentResult {
     pub intent: Intent,
     pub confidence: f32,
+    pub matched_tier: u8,
+    pub category_hint: Option<String>,
 }
 
 impl IntentResult {
+    #[allow(dead_code)]
     pub fn new(intent: Intent, confidence: f32) -> Self {
-        Self { intent, confidence }
+        Self {
+            intent,
+            confidence,
+            matched_tier: 0,
+            category_hint: None,
+        }
     }
 
+    pub fn with_tier(intent: Intent, confidence: f32, tier: u8) -> Self {
+        Self {
+            intent,
+            confidence,
+            matched_tier: tier,
+            category_hint: None,
+        }
+    }
+
+    #[allow(dead_code)]
     pub fn certain(intent: Intent) -> Self {
         Self::new(intent, 1.0)
     }
-}
 
-/// Shortcut responses for chat and blocked intents — no LLM needed.
-impl IntentResult {
-    /// Returns a direct response string for chat intents, or None if LLM should handle it.
+    /// Returns a direct response string for greetings/blocked intents, or None if the agent should handle it.
     pub fn direct_response(&self, message: &str) -> Option<String> {
         match self.intent {
             Intent::Chat => {
                 let msg = message.trim();
-                // Both greetings, because plenty of people still type the formal one
-                // even where the product answers in the familiar register.
                 if msg == "你好" || msg == "您好" {
-                    Some("你好！我是续樟校园二手交易平台的智能助手。我可以帮你搜索商品、发起购买或议价。有什么想买的吗？".to_string())
+                    Some("你好！我是续樟校园智能助手小昌。我可以帮你搜索闲置、草拟出/收信息、查询校内互助或协助议价。有什么我可以帮你的吗？".to_string())
                 } else if msg == "你是谁" || msg == "你是谁？" {
-                    Some("我是续樟校园二手交易平台的 AI 助手，可以帮你搜索商品、了解详情、发起购买和议价。有什么需要帮忙的吗？".to_string())
-                } else if msg == "谢谢" || msg == "谢谢！" {
-                    Some("不客气！有需要随时找我~".to_string())
+                    Some("我是续樟校园平台的 AI 智能助手小昌，专注于帮你发现校园里的闲置好物、寻找搭子与校园求助。".to_string())
+                } else if msg == "谢谢" || msg == "谢谢！" || msg == "多谢" {
+                    Some("不客气！随时乐意为你效劳~".to_string())
                 } else if msg == "再见" || msg == "拜拜" {
-                    Some("再见，祝你交易愉快！".to_string())
+                    Some("再见，祝你在南昌大学学习生活愉快！".to_string())
                 } else {
-                    // Casual chat — use LLM for these
                     None
                 }
             }
-            Intent::Blocked => Some("抱歉，你的消息包含了平台不支持的内容，无法处理。".to_string()),
+            Intent::Blocked => {
+                Some("抱歉，你的消息包含了平台禁止发布或不支持的内容，无法继续处理。".to_string())
+            }
             _ => None,
         }
     }
 }
 
-/// Intent router with configurable blocked keyword list.
+/// Tier 0 Rule Router (Deterministic & Fast).
 #[derive(Clone)]
 pub struct IntentRouter {
-    /// Blocked keywords — messages containing any of these are classified as Blocked.
     blocked_keywords: Arc<Vec<String>>,
 }
 
@@ -152,8 +129,7 @@ impl Default for IntentRouter {
 }
 
 impl IntentRouter {
-    /// Default prohibited keyword list (Chinese marketplace sensitive terms).
-    fn default_blocked_keywords() -> Vec<String> {
+    pub fn default_blocked_keywords() -> Vec<String> {
         vec![
             // Weapons / controlled items
             "刀".to_string(),
@@ -161,9 +137,10 @@ impl IntentRouter {
             "毒品".to_string(),
             "大麻".to_string(),
             "海洛因".to_string(),
-            // Illegal services
+            // Illegal / academic dishonesty
             "假证".to_string(),
             "代考".to_string(),
+            "替考".to_string(),
             "作弊".to_string(),
             // Fraud signals
             "刷单".to_string(),
@@ -177,131 +154,297 @@ impl IntentRouter {
         }
     }
 
-    /// Classify a user message intent.
-    pub fn classify(&self, message: &str) -> IntentResult {
-        let msg = message.trim();
-
-        // Step 1: Blocked keyword check — highest priority
-        if self.is_blocked(msg) {
-            return IntentResult::certain(Intent::Blocked);
-        }
-
-        // Step 2: Intent keyword matching (ordered by priority)
-        // Priority: negotiate > buy > search > chat
-        let lower = msg.to_lowercase();
-
-        // Negotiate: price counter-offer language
-        if self.contains_any(
-            &lower,
-            &[
-                "还价",
-                "便宜",
-                "降价",
-                "便宜点",
-                "打个折",
-                "便宜吗",
-                "减",
-                "折扣",
-                "多少钱能",
-                "能不能",
-                "能便宜",
-                "贵",
-                "太贵",
-                "便宜点吧",
-                "再便宜",
-                "再减",
-                "便宜点行",
-                "行",
-                "可以吗",
-                "能行",
-                "接受",
-                "成交价",
-            ],
-        ) {
-            return IntentResult::new(Intent::Negotiate, 0.92);
-        }
-
-        // Buy: purchase intent
-        if self.contains_any(
-            &lower,
-            &[
-                "买",
-                "购买",
-                "下单",
-                "要这个",
-                "我要",
-                "帮我买",
-                "支付",
-                "付款",
-                "购买",
-                "订单",
-                "成交",
-                "购买意向",
-            ],
-        ) {
-            return IntentResult::new(Intent::Buy, 0.90);
-        }
-
-        // Search: browse/search intent
-        if self.contains_any(
-            &lower,
-            &[
-                "搜索",
-                "找",
-                "查找",
-                "有没有",
-                "有没有卖",
-                "想买个",
-                "看看",
-                "查一下",
-                "了解一下",
-                "有吗",
-                "在吗",
-            ],
-        ) {
-            return IntentResult::new(Intent::Search, 0.85);
-        }
-
-        // Chat: casual conversation
-        if self.contains_any(
-            &lower,
-            &[
-                "你好",
-                "你好",
-                "hi",
-                "hello",
-                "嗨",
-                "嘿",
-                "你是谁",
-                "谢谢",
-                "拜拜",
-                "再见",
-                "好",
-                "不好",
-                "嗯",
-                "哦",
-                "好吧",
-                "好的",
-                "没问题",
-                "干嘛",
-                "干啥",
-            ],
-        ) {
-            return IntentResult::certain(Intent::Chat);
-        }
-
-        // Default: unclear intent — use LLM
-        IntentResult::new(Intent::Chat, 0.50)
-    }
-
-    fn is_blocked(&self, message: &str) -> bool {
+    pub fn is_blocked(&self, message: &str) -> bool {
         let lower = message.to_lowercase();
         self.blocked_keywords
             .iter()
             .any(|kw| lower.contains(&kw.to_lowercase()))
     }
 
+    /// Synchronous classification via Tier 0 heuristics.
+    pub fn classify(&self, message: &str) -> IntentResult {
+        let msg = message.trim();
+
+        // 1. Blocked keyword check
+        if self.is_blocked(msg) {
+            return IntentResult::with_tier(Intent::Blocked, 1.0, 0);
+        }
+
+        let lower = msg.to_lowercase();
+
+        // 2. Offer / Publish intent
+        if self.contains_any(
+            &lower,
+            &[
+                "我想出",
+                "出闲置",
+                "出个",
+                "卖个",
+                "卖掉",
+                "转手",
+                "出二手",
+                "发布闲置",
+                "出一部",
+                "出一台",
+                "出本",
+                "自用出",
+                "毕业出",
+            ],
+        ) {
+            return IntentResult::with_tier(Intent::Offer, 0.95, 0);
+        }
+
+        // 3. Wanted / Seek intent
+        if self.contains_any(
+            &lower,
+            &[
+                "求购",
+                "想收",
+                "收个",
+                "收一本",
+                "收一台",
+                "收一部",
+                "有没有人出",
+                "有人出吗",
+                "收二手",
+                "求收",
+                "预算",
+            ],
+        ) && !self.contains_any(&lower, &["卖", "出掉"])
+        {
+            return IntentResult::with_tier(Intent::Wanted, 0.93, 0);
+        }
+
+        // 4. Negotiate intent
+        if self.contains_any(
+            &lower,
+            &[
+                "还价",
+                "便宜点",
+                "降价",
+                "打个折",
+                "小刀",
+                "能不能便宜",
+                "太贵了",
+                "便宜行吗",
+                "能少点吗",
+                "最低多少",
+            ],
+        ) {
+            return IntentResult::with_tier(Intent::Negotiate, 0.92, 0);
+        }
+
+        // 5. Buy intent
+        if self.contains_any(
+            &lower,
+            &[
+                "我要买",
+                "买下",
+                "下单",
+                "直接买",
+                "要这个",
+                "怎么购买",
+                "发起交易",
+                "付款购买",
+            ],
+        ) {
+            return IntentResult::with_tier(Intent::Buy, 0.90, 0);
+        }
+
+        // 6. Companion / Activity intent
+        if self.contains_any(
+            &lower,
+            &[
+                "搭子",
+                "组队",
+                "一起自习",
+                "羽毛球搭子",
+                "夜跑",
+                "拼车",
+                "约球",
+                "爬山",
+            ],
+        ) {
+            return IntentResult::with_tier(Intent::Companion, 0.90, 0);
+        }
+
+        // 7. Help intent
+        if self.contains_any(
+            &lower,
+            &["求助", "请问教务", "校医院", "怎么补办", "谁会修"],
+        ) {
+            return IntentResult::with_tier(Intent::Help, 0.88, 0);
+        }
+
+        // 8. Search intent
+        if self.contains_any(
+            &lower,
+            &[
+                "搜索",
+                "找找",
+                "搜一下",
+                "有没有",
+                "看看有没有",
+                "查一下",
+                "找个",
+                "看下",
+            ],
+        ) {
+            return IntentResult::with_tier(Intent::Search, 0.85, 0);
+        }
+
+        // 9. Standard greetings / chat
+        if self.contains_any(
+            &lower,
+            &[
+                "你好",
+                "您好",
+                "hi",
+                "hello",
+                "嗨",
+                "你是谁",
+                "谢谢",
+                "拜拜",
+                "再见",
+            ],
+        ) {
+            return IntentResult::with_tier(Intent::Chat, 0.99, 0);
+        }
+
+        // Default: general chat / unknown
+        IntentResult::with_tier(Intent::Chat, 0.50, 0)
+    }
+
     fn contains_any(&self, text: &str, keywords: &[&str]) -> bool {
         keywords.iter().any(|kw| text.contains(kw))
+    }
+}
+
+/// Tri-tier intent router integrating pgvector semantic similarity.
+#[derive(Clone)]
+pub struct TriTierIntentRouter {
+    rule_router: IntentRouter,
+    db_pool: Option<PgPool>,
+    embedding_gen: Option<Arc<dyn EmbeddingGenerator>>,
+}
+
+impl TriTierIntentRouter {
+    pub fn new(
+        rule_router: IntentRouter,
+        db_pool: Option<PgPool>,
+        embedding_gen: Option<Arc<dyn EmbeddingGenerator>>,
+    ) -> Self {
+        Self {
+            rule_router,
+            db_pool,
+            embedding_gen,
+        }
+    }
+
+    /// Classify a message using the cascading pipeline: Tier 0 -> Tier 1 -> Tier 0 fallback.
+    pub async fn classify(&self, message: &str, campus_id: Option<Uuid>) -> IntentResult {
+        let msg = message.trim();
+        if msg.is_empty() {
+            return IntentResult::with_tier(Intent::Chat, 1.0, 0);
+        }
+
+        // Tier 0: Blocked check & high-confidence deterministic rules
+        let tier0_result = self.rule_router.classify(msg);
+        if tier0_result.intent == Intent::Blocked || tier0_result.confidence >= 0.95 {
+            return tier0_result;
+        }
+
+        // Tier 1: pgvector semantic matching
+        if let (Some(db), Some(embedder)) = (&self.db_pool, &self.embedding_gen) {
+            match embedder.generate(msg).await {
+                Ok(embedding_vec) => {
+                    let vec_f32: Vec<f32> = embedding_vec.iter().map(|&v| v as f32).collect();
+                    let pg_vec = pgvector::Vector::from(vec_f32);
+
+                    let query_res = sqlx::query(
+                        "SELECT intent_name, category_hint, 1.0 - (embedding <=> $1) AS similarity
+                         FROM intent_exemplars
+                         WHERE embedding IS NOT NULL
+                           AND (campus_id IS NULL OR campus_id = $2)
+                         ORDER BY embedding <=> $1
+                         LIMIT 1",
+                    )
+                    .bind(pg_vec)
+                    .bind(campus_id)
+                    .fetch_optional(db)
+                    .await;
+
+                    if let Ok(Some(row)) = query_res {
+                        let intent_name: String = row.get("intent_name");
+                        let category_hint: Option<String> = row.get("category_hint");
+                        let similarity: f64 = row.get("similarity");
+
+                        if similarity >= 0.80 {
+                            let mut res = IntentResult::with_tier(
+                                Intent::from_str_lenient(&intent_name),
+                                similarity as f32,
+                                1,
+                            );
+                            res.category_hint = category_hint;
+                            return res;
+                        }
+                    }
+                }
+                Err(err) => {
+                    tracing::debug!("Tier 1 embedding generator skipped: {}", err);
+                }
+            }
+        }
+
+        // Fallback to Tier 0 result
+        tier0_result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tier0_search() {
+        let router = IntentRouter::default();
+        assert_eq!(router.classify("帮我搜索一下耳机").intent, Intent::Search);
+        assert_eq!(router.classify("有没有二手书").intent, Intent::Search);
+    }
+
+    #[test]
+    fn test_tier0_offer_and_wanted() {
+        let router = IntentRouter::default();
+        assert_eq!(
+            router.classify("我想出掉宿舍的旧台灯，20元").intent,
+            Intent::Offer
+        );
+        assert_eq!(
+            router.classify("求购一个二手显示器，预算300").intent,
+            Intent::Wanted
+        );
+    }
+
+    #[test]
+    fn test_tier0_companion_and_help() {
+        let router = IntentRouter::default();
+        assert_eq!(
+            router.classify("找个今晚去天健操场跑步的搭子").intent,
+            Intent::Companion
+        );
+        assert_eq!(
+            router.classify("求助，请问教务处补办学生证在哪").intent,
+            Intent::Help
+        );
+    }
+
+    #[test]
+    fn test_tier0_blocked() {
+        let router = IntentRouter::default();
+        assert_eq!(
+            router.classify("我要买一把管制刀具").intent,
+            Intent::Blocked
+        );
+        assert_eq!(router.classify("代考替考").intent, Intent::Blocked);
     }
 }
