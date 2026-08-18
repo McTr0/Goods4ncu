@@ -33,6 +33,7 @@ lazy_static = "1.4"
 moka = { version = "0.12", features = ["sync", "future"] }
 async-trait = "0.1"
 async-stream = "0.3"
+aho-corasick = "1.1"
 regex = "1.10"
 base64 = "0.22.1"
 sha1 = "0.10"

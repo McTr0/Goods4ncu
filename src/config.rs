@@ -201,7 +201,9 @@ impl fmt::Debug for AppConfig {
             .field("max_keyword_len", &self.max_keyword_len)
             .field("price_tolerance", &self.price_tolerance)
             .field("categories", &self.categories)
-            .field("blocked_keywords", &self.blocked_keywords)
+            // Policy terms are operational secrets. Expose only their count
+            // so diagnostics cannot leak the active moderation vocabulary.
+            .field("blocked_keyword_count", &self.blocked_keywords.len())
             .field("moderation_image_enabled", &self.moderation_image_enabled)
             .field(
                 "moderation_image_api_key",

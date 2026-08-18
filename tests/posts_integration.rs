@@ -2,6 +2,7 @@
 //! inventory-to-post projection.
 
 use goods4ncu::api::error::ApiError;
+use goods4ncu::config::AppConfig;
 use goods4ncu::repositories::{PostFilter, PostSort};
 use goods4ncu::services::feed::{FeedFeedbackAction, FeedResourceType, FeedService};
 use goods4ncu::services::moderation::ModerationService;
@@ -29,6 +30,50 @@ async fn user(pool: &sqlx::PgPool, tag: &str) -> String {
 
 fn service(pool: &sqlx::PgPool) -> PostService {
     PostService::new(pool.clone(), ModerationService::new_for_test(false))
+}
+
+#[tokio::test]
+async fn discussion_policy_rejection_happens_before_persistence() {
+    with_test_pool(|pool| async move {
+        let campus_id = campus(&pool).await;
+        let owner = user(&pool, "policy-owner").await;
+        let mut config = AppConfig::test_defaults();
+        config.blocked_keywords = vec!["campuspolicytoken".to_string()];
+        config.moderation_image_enabled = false;
+        let service = PostService::new(pool.clone(), ModerationService::new(&config));
+        let before: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM posts WHERE campus_id = $1 AND author_id = $2",
+        )
+        .bind(campus_id)
+        .bind(&owner)
+        .fetch_one(&pool)
+        .await
+        .expect("count posts before policy rejection");
+
+        let result = service
+            .create(CreateDiscussion {
+                campus_id,
+                author_id: owner.clone(),
+                title: "campusp0licytoken".to_string(),
+                body: "用于验证发布入口在写库前执行统一审查。".to_string(),
+                category: Some("campus-life".to_string()),
+                tags: vec![],
+                cover_image_url: None,
+            })
+            .await;
+        assert!(matches!(result, Err(ApiError::ContentViolation(_))));
+
+        let after: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM posts WHERE campus_id = $1 AND author_id = $2",
+        )
+        .bind(campus_id)
+        .bind(&owner)
+        .fetch_one(&pool)
+        .await
+        .expect("count posts after policy rejection");
+        assert_eq!(after, before, "rejected discussion must not be persisted");
+    })
+    .await;
 }
 
 #[tokio::test]

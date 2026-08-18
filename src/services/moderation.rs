@@ -9,7 +9,17 @@
 //! policy-sensitive words should stay configurable through `BLOCKED_KEYWORDS`
 //! instead of being hard-coded in source.
 
+use std::{
+    collections::HashSet,
+    env,
+    fs::File,
+    io::{BufRead, BufReader},
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
 use crate::config::AppConfig;
+use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -91,6 +101,13 @@ struct BuiltinTextRule {
 }
 
 const BUILTIN_TEXT_RULES: &[BuiltinTextRule] = &[
+    // High-confidence network-circumvention tool names. These remain built in
+    // as a fail-safe; deployments should maintain broader political policy in
+    // external lexicons.
+    BuiltinTextRule {
+        code: ModerationCode::BlockedKeyword,
+        phrase: "shadowsocks",
+    },
     // Illegal or controlled goods and services.
     BuiltinTextRule {
         code: ModerationCode::IllegalGoods,
@@ -338,10 +355,12 @@ pub struct ImageModerationJob {
 /// Content moderation service.
 #[derive(Clone)]
 pub struct ModerationService {
-    /// Blocked keywords loaded from config.
-    blocked_keywords: Vec<String>,
-    /// Normalized blocked keywords for obfuscation-resistant matching.
-    normalized_blocked_keywords: Vec<String>,
+    /// Compiled multi-pattern matcher for normalized policy terms. Keeping the
+    /// terms out of this struct also prevents accidental Debug/log exposure.
+    blocked_keyword_matcher: Option<Arc<AhoCorasick>>,
+    /// Single-character policies only match the complete normalized input to
+    /// prevent a one-character rule from suppressing normal Chinese prose.
+    exact_short_blocked_keywords: Arc<HashSet<String>>,
     /// Pre-built contact-info regexes.
     phone_re: Regex,
     /// Mainland China resident ID number pattern.
@@ -394,16 +413,19 @@ impl ModerationService {
         let email_re = Regex::new(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
             .expect("valid email regex");
         let url_re = Regex::new(r"https?://[^\s　]+").expect("valid url regex");
-        let normalized_blocked_keywords = config
-            .blocked_keywords
-            .iter()
-            .map(|keyword| normalize_for_moderation(keyword))
-            .filter(|keyword| !keyword.is_empty())
-            .collect();
+        let mut blocked_keywords = config.blocked_keywords.clone();
+        blocked_keywords.extend(load_external_policy_keywords());
+        let (blocked_keyword_matcher, exact_short_blocked_keywords, keyword_count) =
+            build_policy_matcher(blocked_keywords);
+
+        tracing::info!(
+            keyword_count,
+            "content moderation policy matcher initialized"
+        );
 
         Self {
-            blocked_keywords: config.blocked_keywords.clone(),
-            normalized_blocked_keywords,
+            blocked_keyword_matcher,
+            exact_short_blocked_keywords: Arc::new(exact_short_blocked_keywords),
             phone_re,
             id_card_re,
             bank_card_re,
@@ -425,30 +447,31 @@ impl ModerationService {
         }
 
         let normalized = normalize_for_moderation(text);
+        let policy_normalized = normalize_policy_evasion(&normalized);
 
-        // 1. Operator-configured blocked keywords. Match both raw lowercase
-        // text and normalized text so "毒 品" and full-width variants are
-        // treated the same as "毒品".
-        let lower = text.to_lowercase();
-        for (index, kw) in self.blocked_keywords.iter().enumerate() {
-            let normalized_kw = self
-                .normalized_blocked_keywords
-                .get(index)
-                .map(String::as_str)
-                .unwrap_or_default();
-            if lower.contains(&kw.to_lowercase())
-                || (!normalized_kw.is_empty() && normalized.contains(normalized_kw))
-            {
-                tracing::debug!(keyword = %kw, "blocked keyword detected");
-                return ModerationResult::rejected(ModerationCode::BlockedKeyword);
-            }
+        // 1. Operator-configured blocked keywords. The matcher runs against a
+        // separator-free, full-width-normalized view, making common evasion
+        // attempts equivalent without ever logging the matched policy term.
+        let blocked_by_policy = self
+            .blocked_keyword_matcher
+            .as_ref()
+            .is_some_and(|matcher| {
+                matcher.is_match(&normalized)
+                    || (policy_normalized != normalized && matcher.is_match(&policy_normalized))
+            })
+            || self.exact_short_blocked_keywords.contains(&normalized);
+        if blocked_by_policy {
+            tracing::debug!("blocked keyword detected");
+            return ModerationResult::rejected(ModerationCode::BlockedKeyword);
         }
 
         // 2. Built-in mainland marketplace safety rules. These are deliberately
         // broad, high-risk categories; more local policy terms belong in config.
         for rule in BUILTIN_TEXT_RULES {
             let normalized_phrase = normalize_for_moderation(rule.phrase);
-            if normalized.contains(&normalized_phrase) {
+            if normalized.contains(&normalized_phrase)
+                || policy_normalized.contains(&normalized_phrase)
+            {
                 tracing::debug!(
                     code = rule.code.label(),
                     phrase = rule.phrase,
@@ -459,15 +482,15 @@ impl ModerationService {
         }
 
         // 3. Personal information and contact info.
-        if self.id_card_re.is_match(text) {
+        if self.id_card_re.is_match(&normalized) {
             tracing::debug!("mainland id card number detected");
             return ModerationResult::rejected(ModerationCode::PersonalInfo);
         }
-        if self.bank_card_re.is_match(text) {
+        if self.bank_card_re.is_match(&normalized) {
             tracing::debug!("bank card number detected");
             return ModerationResult::rejected(ModerationCode::PersonalInfo);
         }
-        if self.phone_re.is_match(text) {
+        if self.phone_re.is_match(&normalized) {
             tracing::debug!("phone number detected");
             return ModerationResult::rejected(ModerationCode::ContactInfo);
         }
@@ -674,11 +697,141 @@ pub(crate) async fn set_media_moderation_status(
     Ok(())
 }
 
+const POLICY_FILE_ENV: &str = "MODERATION_BLOCKED_KEYWORDS_FILE";
+const POLICY_FILES_ENV: &str = "MODERATION_BLOCKED_KEYWORDS_FILES";
+const MAX_POLICY_TERMS: usize = 1_000_000;
+const MAX_POLICY_TERM_CHARS: usize = 256;
+
+/// Load deployment-specific moderation vocabulary without putting the corpus
+/// in application config, logs, or source control. A configured but unreadable
+/// file fails startup: silently running with a missing political policy would
+/// be less safe than refusing to serve content.
+fn load_external_policy_keywords() -> Vec<String> {
+    let mut paths = Vec::new();
+    if let Some(path) = env::var_os(POLICY_FILE_ENV).filter(|value| !value.is_empty()) {
+        paths.push(PathBuf::from(path));
+    }
+    if let Some(value) = env::var_os(POLICY_FILES_ENV).filter(|value| !value.is_empty()) {
+        paths.extend(
+            value
+                .to_string_lossy()
+                .split(',')
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from),
+        );
+    }
+
+    let mut keywords = Vec::new();
+    for path in paths {
+        let remaining = MAX_POLICY_TERMS.saturating_sub(keywords.len());
+        if remaining == 0 {
+            panic!("moderation policy contains more than {MAX_POLICY_TERMS} terms");
+        }
+        let loaded = load_policy_keyword_file(&path, remaining).unwrap_or_else(|error| {
+            panic!("failed to load configured moderation policy file: {error}")
+        });
+        keywords.extend(loaded);
+    }
+    keywords
+}
+
+fn load_policy_keyword_file(path: &Path, limit: usize) -> Result<Vec<String>, String> {
+    let file = File::open(path).map_err(|_| "file is unavailable".to_string())?;
+    let mut keywords = Vec::new();
+    for line in BufReader::new(file).lines() {
+        let line = line.map_err(|_| "file contains unreadable data".to_string())?;
+        let keyword = line.trim().trim_start_matches('\u{feff}');
+        if keyword.is_empty() || keyword.starts_with('#') {
+            continue;
+        }
+        if keyword.chars().count() > MAX_POLICY_TERM_CHARS {
+            return Err(format!(
+                "a term exceeds the {MAX_POLICY_TERM_CHARS}-character limit"
+            ));
+        }
+        if keywords.len() >= limit {
+            return Err(format!("policy exceeds the {MAX_POLICY_TERMS}-term limit"));
+        }
+        keywords.push(keyword.to_owned());
+    }
+    Ok(keywords)
+}
+
+fn build_policy_matcher(
+    keywords: Vec<String>,
+) -> (Option<Arc<AhoCorasick>>, HashSet<String>, usize) {
+    let normalized: HashSet<String> = keywords
+        .into_iter()
+        .map(|keyword| normalize_for_moderation(&keyword))
+        .filter(|keyword| !keyword.is_empty())
+        .collect();
+
+    let mut exact_short = HashSet::new();
+    let mut patterns = Vec::with_capacity(normalized.len());
+    for keyword in normalized {
+        if keyword.chars().count() == 1 {
+            exact_short.insert(keyword);
+        } else {
+            patterns.push(keyword);
+        }
+    }
+    // Stable ordering makes startup memory and matcher construction
+    // deterministic across runs even though de-duplication uses a HashSet.
+    patterns.sort_unstable();
+    let matcher = if patterns.is_empty() {
+        None
+    } else {
+        Some(Arc::new(
+            AhoCorasickBuilder::new()
+                .match_kind(MatchKind::LeftmostFirst)
+                .build(&patterns)
+                .expect("normalized moderation policy is valid"),
+        ))
+    };
+    let count = patterns.len() + exact_short.len();
+    (matcher, exact_short, count)
+}
+
 fn normalize_for_moderation(text: &str) -> String {
     text.chars()
         .filter_map(normalize_char_for_moderation)
         .collect::<String>()
         .to_lowercase()
+}
+
+/// Canonicalize common digit substitutions only inside Latin tokens. Numeric
+/// identifiers and prices remain untouched, while policy terms written with
+/// substitutions such as `0` for `o` cannot bypass the matcher.
+fn normalize_policy_evasion(normalized: &str) -> String {
+    let chars: Vec<char> = normalized.chars().collect();
+    chars
+        .iter()
+        .enumerate()
+        .map(|(index, ch)| {
+            let adjacent_to_latin = index
+                .checked_sub(1)
+                .and_then(|previous| chars.get(previous))
+                .is_some_and(|value| value.is_ascii_alphabetic())
+                || chars
+                    .get(index + 1)
+                    .is_some_and(|value| value.is_ascii_alphabetic());
+            if !adjacent_to_latin {
+                return *ch;
+            }
+            match ch {
+                '0' => 'o',
+                '1' => 'i',
+                '3' => 'e',
+                '4' => 'a',
+                '5' => 's',
+                '7' => 't',
+                '8' => 'b',
+                '9' => 'g',
+                _ => *ch,
+            }
+        })
+        .collect()
 }
 
 fn normalize_char_for_moderation(ch: char) -> Option<char> {
@@ -804,7 +957,10 @@ mod tests {
 
     #[test]
     fn test_check_text_normalizes_obfuscated_keywords() {
-        let svc = ModerationService::new(&make_config(vec!["违禁测试词".into()]));
+        let svc = ModerationService::new(&make_config(vec![
+            "违禁测试词".into(),
+            "campuspolicytoken".into(),
+        ]));
 
         let r = svc.check_text("违 禁　测-试_词");
         assert!(!r.passed);
@@ -812,6 +968,120 @@ mod tests {
 
         let r2 = svc.check_text("ＶＩＰ 会员卡，正常转让");
         assert!(r2.passed);
+
+        let latin_evasion = svc.check_text("campusp0licytoken");
+        assert!(!latin_evasion.passed);
+        assert_eq!(latin_evasion.code, ModerationCode::BlockedKeyword);
+    }
+
+    #[test]
+    fn test_policy_matcher_deduplicates_and_handles_short_rules_safely() {
+        let (matcher, exact_short, count) = build_policy_matcher(vec![
+            "校政测试短语".into(),
+            "校 政 测试短语".into(),
+            "危".into(),
+        ]);
+
+        assert_eq!(count, 2);
+        assert!(matcher
+            .as_ref()
+            .is_some_and(|matcher| matcher.is_match("请勿传播校政测试短语")));
+        assert!(exact_short.contains("危"));
+        assert!(!matcher
+            .as_ref()
+            .is_some_and(|matcher| matcher.is_match("危险品")));
+    }
+
+    #[test]
+    fn test_load_policy_keyword_file_enforces_safe_shape() {
+        let path = std::env::temp_dir().join(format!(
+            "goods4ncu-moderation-policy-{}.txt",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, "\u{feff}校政测试短语\n# comment\n\n另一测试规则\n")
+            .expect("write temporary policy");
+
+        let loaded = load_policy_keyword_file(&path, 10).expect("load temporary policy");
+        std::fs::remove_file(&path).expect("remove temporary policy");
+
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0], "校政测试短语");
+        assert_eq!(loaded[1], "另一测试规则");
+    }
+
+    /// Runs only when explicitly requested with local dataset paths. The test
+    /// reports aggregate policy quality and never emits terms or case text.
+    #[test]
+    #[ignore = "requires the local sensitive moderation dataset"]
+    fn audit_local_political_dataset_without_exposing_samples() {
+        let lexicon_paths = std::env::var("MODERATION_AUDIT_LEXICONS")
+            .ok()
+            .map(|value| {
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|path| !path.is_empty())
+                    .map(PathBuf::from)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|paths| !paths.is_empty())
+            .or_else(|| {
+                std::env::var_os("MODERATION_AUDIT_LEXICON").map(|path| vec![PathBuf::from(path)])
+            })
+            .expect("MODERATION_AUDIT_LEXICON(S) is required");
+        let suite_path =
+            std::env::var_os("MODERATION_AUDIT_SUITE").expect("MODERATION_AUDIT_SUITE is required");
+
+        let mut keywords = Vec::new();
+        for path in lexicon_paths {
+            let remaining = MAX_POLICY_TERMS.saturating_sub(keywords.len());
+            keywords.extend(load_policy_keyword_file(&path, remaining).expect("load audit policy"));
+        }
+        let mut config = make_config(keywords);
+        config.moderation_image_enabled = false;
+        let service = ModerationService::new(&config);
+        let raw = std::fs::read_to_string(suite_path).expect("read audit suite");
+        let cases: serde_json::Value = serde_json::from_str(&raw).expect("parse audit suite");
+        let cases = cases.as_array().expect("audit suite must be a JSON array");
+
+        let mut expected_blocked = 0usize;
+        let mut blocked_detected = 0usize;
+        let mut expected_allowed = 0usize;
+        let mut allowed_passed = 0usize;
+        let mut missed_case_ids = Vec::new();
+        for case in cases {
+            let expected = case
+                .get("expected_label")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let text = case
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let passed = service.check_text(text).passed;
+            if expected == "blocked" {
+                expected_blocked += 1;
+                blocked_detected += usize::from(!passed);
+                if passed {
+                    missed_case_ids.push(
+                        case.get("id")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("unknown"),
+                    );
+                }
+            } else {
+                expected_allowed += 1;
+                allowed_passed += usize::from(passed);
+            }
+        }
+
+        eprintln!(
+            "moderation audit aggregate: blocked={blocked_detected}/{expected_blocked}, allowed={allowed_passed}/{expected_allowed}, missed_ids={missed_case_ids:?}"
+        );
+        assert_eq!(
+            blocked_detected, expected_blocked,
+            "strict-policy recall regressed"
+        );
     }
 
     #[test]
@@ -881,6 +1151,10 @@ mod tests {
         // Invalid phone (starts with 2, too short)
         let r3 = svc.check_text("电话：2123456789");
         assert!(r3.passed);
+
+        let obfuscated = svc.check_text("联系电话：１ ３ ８-１２３４-５６７８");
+        assert!(!obfuscated.passed);
+        assert_eq!(obfuscated.code, ModerationCode::ContactInfo);
     }
 
     #[test]

@@ -62,6 +62,9 @@ config/good4ncu.toml
 # === Misc ===
 *.log
 uploads/
+# Local moderation corpora can contain sensitive material and must never be
+# included in source-control history.
+sensitive_data_archive/
 
 # === Claude Code ===
 .claude/
