@@ -18,7 +18,8 @@ class XiaochangAvatar extends StatelessWidget {
   final String? semanticLabel;
   final BorderRadius? borderRadius;
 
-  static const String assetPath = 'assets/characters/xiaochang.png';
+  static const String assetPath = 'assets/live2d/doro/icon.png';
+  static const String fallbackAssetPath = 'assets/characters/xiaochang.png';
 
   @override
   Widget build(BuildContext context) {
@@ -52,8 +53,14 @@ class XiaochangAvatar extends StatelessWidget {
             width: size,
             height: size,
             fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) =>
-                _FallbackIcon(size: size),
+            errorBuilder: (context, error, stackTrace) => Image.asset(
+              fallbackAssetPath,
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) =>
+                  _FallbackIcon(size: size),
+            ),
           ),
         ),
       ),
