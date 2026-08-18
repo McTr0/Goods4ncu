@@ -2,12 +2,15 @@
 
 use goods4ncu::api::error::ApiError;
 use goods4ncu::services::chat_conversation::{
-    AcknowledgementKind, ChatConversationService, ConversationDecision, ConversationMode,
-    ConversationState, CreateConversationInput, MailExpectation, SendConversationMessageInput,
-    StructuredQuoteInput, StructuredQuoteKind,
+    AcknowledgementKind, AvatarInteractionAction, AvatarInteractionChoreography,
+    AvatarInteractionOverridePolicy, ChatConversationService, ConversationDecision,
+    ConversationMode, ConversationState, CreateConversationInput, MailExpectation,
+    SendAvatarInteractionInput, SendConversationMessageInput, StructuredQuoteInput,
+    StructuredQuoteKind,
 };
 use goods4ncu::test_infra::with_test_pool;
 use sqlx::Row;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 async fn insert_user(pool: &sqlx::PgPool, id: &str, username: &str) {
@@ -1066,6 +1069,168 @@ async fn direct_conversation_rejects_cross_campus_participants() {
         .await
         .unwrap();
         assert_eq!(count, 0);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn avatar_interactions_apply_preferences_idempotency_and_rate_limits() {
+    with_test_pool(|pool| async move {
+        insert_user(&pool, "avatar-a", "avatar-alice").await;
+        insert_user(&pool, "avatar-b", "avatar-bob").await;
+        let service = ChatConversationService::new(pool.clone());
+        let conversation_id = create_active_realtime(&service, "avatar-a", "avatar-b").await;
+
+        let client_interaction_id = Uuid::new_v4();
+        let sent = service
+            .send_avatar_interaction(SendAvatarInteractionInput {
+                client_interaction_id,
+                conversation_id,
+                sender_id: "avatar-a".to_string(),
+                action: AvatarInteractionAction::Wave,
+            })
+            .await
+            .unwrap();
+        assert_eq!(sent.kind, "avatar_interaction");
+        assert!(!sent.can_react);
+        assert_eq!(
+            sent.interaction.as_ref().unwrap().choreography,
+            AvatarInteractionChoreography::Acknowledge
+        );
+
+        let retried = service
+            .send_avatar_interaction(SendAvatarInteractionInput {
+                client_interaction_id,
+                conversation_id,
+                sender_id: "avatar-a".to_string(),
+                action: AvatarInteractionAction::Wave,
+            })
+            .await
+            .unwrap();
+        assert_eq!(retried.id, sent.id);
+
+        let limited = service
+            .send_avatar_interaction(SendAvatarInteractionInput {
+                client_interaction_id: Uuid::new_v4(),
+                conversation_id,
+                sender_id: "avatar-a".to_string(),
+                action: AvatarInteractionAction::Poke,
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(limited, ApiError::RateLimited { .. }));
+
+        sqlx::query(
+            "UPDATE chat_messages SET timestamp = NOW() - INTERVAL '11 minutes'
+             WHERE id = $1",
+        )
+        .bind(sent.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let full_overrides = BTreeMap::from([
+            (
+                AvatarInteractionAction::Wave,
+                AvatarInteractionOverridePolicy::Full,
+            ),
+            (
+                AvatarInteractionAction::Poke,
+                AvatarInteractionOverridePolicy::Inherit,
+            ),
+            (
+                AvatarInteractionAction::HighFive,
+                AvatarInteractionOverridePolicy::Inherit,
+            ),
+            (
+                AvatarInteractionAction::Encourage,
+                AvatarInteractionOverridePolicy::Inherit,
+            ),
+        ]);
+        service
+            .set_avatar_interaction_contact_preferences(
+                "avatar-b",
+                "avatar-a",
+                Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap(),
+                full_overrides,
+            )
+            .await
+            .unwrap();
+        let reciprocal = service
+            .send_avatar_interaction(SendAvatarInteractionInput {
+                client_interaction_id: Uuid::new_v4(),
+                conversation_id,
+                sender_id: "avatar-a".to_string(),
+                action: AvatarInteractionAction::Wave,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            reciprocal.interaction.as_ref().unwrap().choreography,
+            AvatarInteractionChoreography::Reciprocal
+        );
+
+        sqlx::query(
+            "UPDATE chat_messages SET timestamp = NOW() - INTERVAL '11 minutes'
+             WHERE id = $1",
+        )
+        .bind(reciprocal.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let reject_overrides = BTreeMap::from([
+            (
+                AvatarInteractionAction::Wave,
+                AvatarInteractionOverridePolicy::Reject,
+            ),
+            (
+                AvatarInteractionAction::Poke,
+                AvatarInteractionOverridePolicy::Inherit,
+            ),
+            (
+                AvatarInteractionAction::HighFive,
+                AvatarInteractionOverridePolicy::Inherit,
+            ),
+            (
+                AvatarInteractionAction::Encourage,
+                AvatarInteractionOverridePolicy::Inherit,
+            ),
+        ]);
+        service
+            .set_avatar_interaction_contact_preferences(
+                "avatar-b",
+                "avatar-a",
+                Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap(),
+                reject_overrides,
+            )
+            .await
+            .unwrap();
+        let rejected = service
+            .send_avatar_interaction(SendAvatarInteractionInput {
+                client_interaction_id: Uuid::new_v4(),
+                conversation_id,
+                sender_id: "avatar-a".to_string(),
+                action: AvatarInteractionAction::Wave,
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            rejected,
+            ApiError::CodedConflict {
+                code: "interaction_unavailable",
+                ..
+            }
+        ));
+
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM chat_messages
+             WHERE direct_conversation_id = $1 AND kind = 'avatar_interaction'",
+        )
+        .bind(conversation_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 2);
     })
     .await;
 }

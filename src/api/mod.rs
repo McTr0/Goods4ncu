@@ -1065,6 +1065,10 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             "/api/chat/conversations/{id}/messages",
             get(user_chat::get_conversation_messages).post(user_chat::send_conversation_message),
         )
+        .route(
+            "/api/chat/conversations/{id}/avatar-interactions",
+            post(user_chat::send_avatar_interaction),
+        )
         .route("/api/chat/messages/{id}", patch(user_chat::edit_message))
         .route(
             "/api/chat/messages/{id}/reaction",
@@ -1104,12 +1108,23 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             get(user_chat::get_connection_preferences).put(user_chat::set_connection_preferences),
         )
         .route(
+            "/api/chat/avatar-interactions/preferences",
+            get(user_chat::get_avatar_interaction_preferences)
+                .put(user_chat::set_avatar_interaction_preferences),
+        )
+        .route(
             "/api/chat/contacts",
             get(user_chat::list_contact_permissions),
         )
         .route(
             "/api/chat/contacts/{peer_user_id}",
             put(user_chat::set_contact_permission).delete(user_chat::delete_contact_permission),
+        )
+        .route(
+            "/api/chat/contacts/{peer_user_id}/avatar-interaction-preferences",
+            get(user_chat::get_avatar_interaction_contact_preferences)
+                .put(user_chat::set_avatar_interaction_contact_preferences)
+                .delete(user_chat::delete_avatar_interaction_contact_preferences),
         )
         .route(
             "/api/chat/spaces",

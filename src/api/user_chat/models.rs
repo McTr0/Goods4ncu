@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 use crate::services::chat_conversation::{
-    AcknowledgementKind, ChatSharedObjectView, ChatThreadDetail, ChatThreadView,
+    AcknowledgementKind, AvatarInteractionAction, AvatarInteractionOverridePolicy,
+    AvatarInteractionPolicy, ChatSharedObjectView, ChatThreadDetail, ChatThreadView,
     ConversationDecision, ConversationMessageRecord, ConversationMode, ConversationView,
     MailExpectation, RelationshipSpaceConnectionView, RelationshipSpaceEventView,
     RelationshipSpacePinView, RelationshipSpaceSharedObjectView, RelationshipSpaceView,
@@ -129,6 +131,22 @@ pub struct SendMessageBody {
     pub audio_base64: Option<String>,
     pub image_url: Option<String>,
     pub audio_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AvatarInteractionPreferencesBody {
+    pub policies: BTreeMap<AvatarInteractionAction, AvatarInteractionPolicy>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AvatarInteractionContactPreferencesBody {
+    pub policies: BTreeMap<AvatarInteractionAction, AvatarInteractionOverridePolicy>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SendAvatarInteractionBody {
+    pub client_interaction_id: Uuid,
+    pub action: AvatarInteractionAction,
 }
 
 #[derive(Debug, Deserialize)]

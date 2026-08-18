@@ -2,6 +2,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{FromRow, PgPool, Postgres, Row, Transaction};
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
@@ -14,6 +15,10 @@ pub const ACK_TTL_MINUTES: i64 = 5;
 pub const ACTIVE_IDLE_HOURS: i64 = 24;
 pub const DAILY_CONVERSATION_LIMIT: i64 = 20;
 pub const SAME_RECIPIENT_DAILY_LIMIT: i64 = 3;
+pub const AVATAR_INTERACTION_COOLDOWN_SECONDS: i64 = 3;
+pub const AVATAR_INTERACTION_WINDOW_MINUTES: i64 = 10;
+pub const AVATAR_INTERACTION_WINDOW_LIMIT: i64 = 20;
+pub const AVATAR_INTERACTION_ANIMATION_PACK_VERSION: i32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -324,6 +329,253 @@ pub struct SendConversationMessageInput {
     pub audio_url: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AvatarInteractionAction {
+    Wave,
+    Poke,
+    HighFive,
+    Encourage,
+}
+
+impl AvatarInteractionAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Wave => "wave",
+            Self::Poke => "poke",
+            Self::HighFive => "high_five",
+            Self::Encourage => "encourage",
+        }
+    }
+
+    fn all() -> [Self; 4] {
+        [Self::Wave, Self::Poke, Self::HighFive, Self::Encourage]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AvatarInteractionPolicy {
+    Reject,
+    ReceiveOnly,
+    Light,
+    Full,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AvatarInteractionOverridePolicy {
+    Inherit,
+    Reject,
+    ReceiveOnly,
+    Light,
+    Full,
+}
+
+impl AvatarInteractionOverridePolicy {
+    fn explicit(self) -> Option<AvatarInteractionPolicy> {
+        match self {
+            Self::Inherit => None,
+            Self::Reject => Some(AvatarInteractionPolicy::Reject),
+            Self::ReceiveOnly => Some(AvatarInteractionPolicy::ReceiveOnly),
+            Self::Light => Some(AvatarInteractionPolicy::Light),
+            Self::Full => Some(AvatarInteractionPolicy::Full),
+        }
+    }
+}
+
+impl AvatarInteractionPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Reject => "reject",
+            Self::ReceiveOnly => "receive_only",
+            Self::Light => "light",
+            Self::Full => "full",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, ApiError> {
+        match value {
+            "reject" => Ok(Self::Reject),
+            "receive_only" => Ok(Self::ReceiveOnly),
+            "light" => Ok(Self::Light),
+            "full" => Ok(Self::Full),
+            _ => Err(ApiError::BadRequest(
+                "互动策略必须为 reject、receive_only、light 或 full".to_string(),
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AvatarInteractionChoreography {
+    Solo,
+    Acknowledge,
+    Reciprocal,
+}
+
+impl From<AvatarInteractionPolicy> for AvatarInteractionChoreography {
+    fn from(value: AvatarInteractionPolicy) -> Self {
+        match value {
+            AvatarInteractionPolicy::ReceiveOnly | AvatarInteractionPolicy::Reject => Self::Solo,
+            AvatarInteractionPolicy::Light => Self::Acknowledge,
+            AvatarInteractionPolicy::Full => Self::Reciprocal,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvatarInteractionPayload {
+    pub schema_version: i32,
+    pub action: AvatarInteractionAction,
+    pub choreography: AvatarInteractionChoreography,
+    pub animation_pack_version: i32,
+    pub actor_character: String,
+    pub recipient_character: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SendAvatarInteractionInput {
+    pub client_interaction_id: Uuid,
+    pub conversation_id: Uuid,
+    pub sender_id: String,
+    pub action: AvatarInteractionAction,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AvatarInteractionPreferencesView {
+    pub policies: BTreeMap<AvatarInteractionAction, AvatarInteractionPolicy>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AvatarInteractionContactPreferencesView {
+    pub peer_user_id: String,
+    pub policies: BTreeMap<AvatarInteractionAction, AvatarInteractionOverridePolicy>,
+    pub effective_policies: BTreeMap<AvatarInteractionAction, AvatarInteractionPolicy>,
+}
+
+fn default_avatar_interaction_policies(
+) -> BTreeMap<AvatarInteractionAction, AvatarInteractionPolicy> {
+    BTreeMap::from([
+        (
+            AvatarInteractionAction::Wave,
+            AvatarInteractionPolicy::Light,
+        ),
+        (
+            AvatarInteractionAction::Poke,
+            AvatarInteractionPolicy::ReceiveOnly,
+        ),
+        (
+            AvatarInteractionAction::HighFive,
+            AvatarInteractionPolicy::Light,
+        ),
+        (
+            AvatarInteractionAction::Encourage,
+            AvatarInteractionPolicy::Light,
+        ),
+    ])
+}
+
+fn avatar_interaction_action_from_key(value: &str) -> Result<AvatarInteractionAction, ApiError> {
+    match value {
+        "wave" => Ok(AvatarInteractionAction::Wave),
+        "poke" => Ok(AvatarInteractionAction::Poke),
+        "high_five" => Ok(AvatarInteractionAction::HighFive),
+        "encourage" => Ok(AvatarInteractionAction::Encourage),
+        _ => Err(ApiError::BadRequest(format!("未知角色互动动作: {value}"))),
+    }
+}
+
+fn parse_avatar_interaction_policies(
+    value: Option<Value>,
+) -> Result<BTreeMap<AvatarInteractionAction, AvatarInteractionPolicy>, ApiError> {
+    let mut policies = default_avatar_interaction_policies();
+    let Some(value) = value else {
+        return Ok(policies);
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| ApiError::BadRequest("互动策略必须是对象".to_string()))?;
+    for (action, policy) in object {
+        let action = avatar_interaction_action_from_key(action)?;
+        let policy = policy
+            .as_str()
+            .ok_or_else(|| ApiError::BadRequest("互动策略必须是字符串".to_string()))?;
+        policies.insert(action, AvatarInteractionPolicy::parse(policy)?);
+    }
+    Ok(policies)
+}
+
+fn parse_avatar_interaction_overrides(
+    value: Option<Value>,
+) -> Result<BTreeMap<AvatarInteractionAction, AvatarInteractionOverridePolicy>, ApiError> {
+    let mut policies = BTreeMap::from(
+        AvatarInteractionAction::all()
+            .map(|action| (action, AvatarInteractionOverridePolicy::Inherit)),
+    );
+    let Some(value) = value else {
+        return Ok(policies);
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| ApiError::BadRequest("联系人互动策略必须是对象".to_string()))?;
+    for (action, policy) in object {
+        let action = avatar_interaction_action_from_key(action)?;
+        let policy = policy
+            .as_str()
+            .ok_or_else(|| ApiError::BadRequest("联系人互动策略必须是字符串".to_string()))?;
+        let policy = match policy {
+            "inherit" => AvatarInteractionOverridePolicy::Inherit,
+            "reject" => AvatarInteractionOverridePolicy::Reject,
+            "receive_only" => AvatarInteractionOverridePolicy::ReceiveOnly,
+            "light" => AvatarInteractionOverridePolicy::Light,
+            "full" => AvatarInteractionOverridePolicy::Full,
+            _ => {
+                return Err(ApiError::BadRequest(
+                    "联系人互动策略必须为 inherit、reject、receive_only、light 或 full".to_string(),
+                ));
+            }
+        };
+        policies.insert(action, policy);
+    }
+    Ok(policies)
+}
+
+fn avatar_interaction_policies_json(
+    policies: &BTreeMap<AvatarInteractionAction, AvatarInteractionPolicy>,
+) -> Value {
+    Value::Object(
+        policies
+            .iter()
+            .map(|(action, policy)| {
+                (
+                    action.as_str().to_string(),
+                    Value::String(policy.as_str().to_string()),
+                )
+            })
+            .collect(),
+    )
+}
+
+fn avatar_interaction_overrides_json(
+    policies: &BTreeMap<AvatarInteractionAction, AvatarInteractionOverridePolicy>,
+) -> Value {
+    Value::Object(
+        policies
+            .iter()
+            .filter_map(|(action, policy)| {
+                policy.explicit().map(|policy| {
+                    (
+                        action.as_str().to_string(),
+                        Value::String(policy.as_str().to_string()),
+                    )
+                })
+            })
+            .collect(),
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SharedObjectKind {
@@ -484,12 +736,14 @@ pub struct ConversationMessageRecord {
     pub audio_url: Option<String>,
     pub status: String,
     pub kind: String,
+    pub interaction: Option<AvatarInteractionPayload>,
     pub edited_at: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]
 struct ConversationRow {
     id: Uuid,
+    campus_id: Uuid,
     mode: String,
     state: String,
     initiator_id: String,
@@ -510,6 +764,7 @@ struct ConversationRow {
 
 struct DirectMessageContext {
     other_user_id: String,
+    kind: String,
 }
 
 impl ConversationRow {
@@ -828,6 +1083,7 @@ impl ChatConversationService {
                         None,
                         None,
                         None,
+                        None,
                     )
                     .await?;
                     let now = Utc::now();
@@ -948,6 +1204,7 @@ impl ChatConversationService {
             &input.recipient_id,
             &input.content,
             "opening",
+            None,
             None,
             None,
             None,
@@ -1762,6 +2019,9 @@ impl ChatConversationService {
         user_id: &str,
     ) -> Result<RelationshipSpacePinView, ApiError> {
         let context = load_visible_direct_message_context(&self.pool, message_id, user_id).await?;
+        if context.kind == "avatar_interaction" {
+            return Err(ApiError::Conflict("message_is_immutable".to_string()));
+        }
         if pair_is_blocked_pool(&self.pool, user_id, &context.other_user_id).await? {
             return Err(ApiError::Conflict("conversation_unavailable".to_string()));
         }
@@ -1820,7 +2080,10 @@ impl ChatConversationService {
         message_id: i64,
         user_id: &str,
     ) -> Result<Option<RelationshipSpacePinView>, ApiError> {
-        load_visible_direct_message_context(&self.pool, message_id, user_id).await?;
+        let context = load_visible_direct_message_context(&self.pool, message_id, user_id).await?;
+        if context.kind == "avatar_interaction" {
+            return Err(ApiError::Conflict("message_is_immutable".to_string()));
+        }
         let existing = sqlx::query(
             "SELECT id, message_id, conversation_id, user_id, created_at
              FROM chat_relationship_pins
@@ -2368,6 +2631,7 @@ impl ChatConversationService {
             input.audio_data.as_deref(),
             input.image_url.as_deref(),
             input.audio_url.as_deref(),
+            None,
         )
         .await?;
         let now = Utc::now();
@@ -2382,6 +2646,265 @@ impl ChatConversationService {
         )
         .bind(now)
         .bind(idle_expires_at)
+        .bind(input.conversation_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        tx.commit().await.map_err(commit_error)?;
+        let mut message = inserted;
+        enrich_message_for_user(&self.pool, &input.sender_id, &mut message).await?;
+        Ok(message)
+    }
+
+    pub async fn get_avatar_interaction_preferences(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+    ) -> Result<AvatarInteractionPreferencesView, ApiError> {
+        let value = sqlx::query_scalar::<_, Value>(
+            "SELECT policies FROM avatar_interaction_preferences
+             WHERE user_id = $1 AND campus_id = $2",
+        )
+        .bind(user_id)
+        .bind(campus_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_error)?;
+        Ok(AvatarInteractionPreferencesView {
+            policies: parse_avatar_interaction_policies(value)?,
+        })
+    }
+
+    pub async fn set_avatar_interaction_preferences(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+        policies: BTreeMap<AvatarInteractionAction, AvatarInteractionPolicy>,
+    ) -> Result<AvatarInteractionPreferencesView, ApiError> {
+        if policies.len() != AvatarInteractionAction::all().len()
+            || AvatarInteractionAction::all()
+                .iter()
+                .any(|action| !policies.contains_key(action))
+        {
+            return Err(ApiError::BadRequest(
+                "必须为四种角色互动分别设置策略".to_string(),
+            ));
+        }
+        let value = avatar_interaction_policies_json(&policies);
+        sqlx::query(
+            "INSERT INTO avatar_interaction_preferences
+                (user_id, campus_id, policies)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (user_id, campus_id) DO UPDATE
+             SET policies = EXCLUDED.policies, updated_at = NOW()",
+        )
+        .bind(user_id)
+        .bind(campus_id)
+        .bind(value)
+        .execute(&self.pool)
+        .await
+        .map_err(db_error)?;
+        Ok(AvatarInteractionPreferencesView { policies })
+    }
+
+    pub async fn get_avatar_interaction_contact_preferences(
+        &self,
+        user_id: &str,
+        peer_user_id: &str,
+        campus_id: Uuid,
+    ) -> Result<AvatarInteractionContactPreferencesView, ApiError> {
+        if user_id == peer_user_id {
+            return Err(ApiError::BadRequest(
+                "不能为自己设置联系人互动策略".to_string(),
+            ));
+        }
+        let global = self
+            .get_avatar_interaction_preferences(user_id, campus_id)
+            .await?
+            .policies;
+        let value = sqlx::query_scalar::<_, Value>(
+            "SELECT policies FROM avatar_interaction_contact_overrides
+             WHERE user_id = $1 AND peer_user_id = $2 AND campus_id = $3",
+        )
+        .bind(user_id)
+        .bind(peer_user_id)
+        .bind(campus_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_error)?;
+        let policies = parse_avatar_interaction_overrides(value)?;
+        let effective_policies = AvatarInteractionAction::all()
+            .into_iter()
+            .map(|action| {
+                let policy = policies
+                    .get(&action)
+                    .and_then(|value| value.explicit())
+                    .or_else(|| global.get(&action).copied())
+                    .unwrap_or(AvatarInteractionPolicy::ReceiveOnly);
+                (action, policy)
+            })
+            .collect();
+        Ok(AvatarInteractionContactPreferencesView {
+            peer_user_id: peer_user_id.to_string(),
+            policies,
+            effective_policies,
+        })
+    }
+
+    pub async fn set_avatar_interaction_contact_preferences(
+        &self,
+        user_id: &str,
+        peer_user_id: &str,
+        campus_id: Uuid,
+        policies: BTreeMap<AvatarInteractionAction, AvatarInteractionOverridePolicy>,
+    ) -> Result<AvatarInteractionContactPreferencesView, ApiError> {
+        if policies.len() != AvatarInteractionAction::all().len()
+            || AvatarInteractionAction::all()
+                .iter()
+                .any(|action| !policies.contains_key(action))
+        {
+            return Err(ApiError::BadRequest(
+                "必须为四种联系人互动分别设置策略".to_string(),
+            ));
+        }
+        if user_id == peer_user_id {
+            return Err(ApiError::BadRequest(
+                "不能为自己设置联系人互动策略".to_string(),
+            ));
+        }
+        let value = avatar_interaction_overrides_json(&policies);
+        sqlx::query(
+            "INSERT INTO avatar_interaction_contact_overrides
+                (user_id, peer_user_id, campus_id, policies)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (user_id, peer_user_id, campus_id) DO UPDATE
+             SET policies = EXCLUDED.policies, updated_at = NOW()",
+        )
+        .bind(user_id)
+        .bind(peer_user_id)
+        .bind(campus_id)
+        .bind(value)
+        .execute(&self.pool)
+        .await
+        .map_err(db_error)?;
+        self.get_avatar_interaction_contact_preferences(user_id, peer_user_id, campus_id)
+            .await
+    }
+
+    pub async fn delete_avatar_interaction_contact_preferences(
+        &self,
+        user_id: &str,
+        peer_user_id: &str,
+        campus_id: Uuid,
+    ) -> Result<AvatarInteractionContactPreferencesView, ApiError> {
+        sqlx::query(
+            "DELETE FROM avatar_interaction_contact_overrides
+             WHERE user_id = $1 AND peer_user_id = $2 AND campus_id = $3",
+        )
+        .bind(user_id)
+        .bind(peer_user_id)
+        .bind(campus_id)
+        .execute(&self.pool)
+        .await
+        .map_err(db_error)?;
+        self.get_avatar_interaction_contact_preferences(user_id, peer_user_id, campus_id)
+            .await
+    }
+
+    pub async fn send_avatar_interaction(
+        &self,
+        input: SendAvatarInteractionInput,
+    ) -> Result<ConversationMessageRecord, ApiError> {
+        let mut tx = self.begin().await?;
+        let mut row = load_conversation_for_update(&mut tx, input.conversation_id).await?;
+        expire_if_due(&mut tx, &mut row).await?;
+        row.ensure_participant(&input.sender_id)?;
+        let other_user_id = row.other_user_id(&input.sender_id)?.to_string();
+        if pair_is_blocked(&mut tx, &input.sender_id, &other_user_id).await? {
+            return Err(ApiError::CodedConflict {
+                code: "interaction_unavailable",
+                message: "角色互动暂不可用".to_string(),
+            });
+        }
+        if row.mode()? != ConversationMode::Realtime || row.state()? != ConversationState::Active {
+            return Err(ApiError::CodedConflict {
+                code: "interaction_unavailable",
+                message: "仅当前实时连接可发起角色互动".to_string(),
+            });
+        }
+
+        if let Some(existing) =
+            find_message_by_client_id(&mut tx, &input.sender_id, input.client_interaction_id)
+                .await?
+        {
+            tx.commit().await.map_err(commit_error)?;
+            let mut message = existing;
+            enrich_message_for_user(&self.pool, &input.sender_id, &mut message).await?;
+            return Ok(message);
+        }
+
+        let policy = effective_avatar_interaction_policy(
+            &mut tx,
+            &other_user_id,
+            &input.sender_id,
+            row.campus_id,
+            input.action,
+        )
+        .await?;
+        if policy == AvatarInteractionPolicy::Reject {
+            return Err(ApiError::CodedConflict {
+                code: "interaction_unavailable",
+                message: "角色互动暂不可用".to_string(),
+            });
+        }
+
+        enforce_avatar_interaction_rate_limit(
+            &mut tx,
+            input.conversation_id,
+            &input.sender_id,
+            &other_user_id,
+        )
+        .await?;
+
+        let actor_character =
+            published_persona_character(&mut tx, &input.sender_id, row.campus_id).await?;
+        let recipient_character =
+            published_persona_character(&mut tx, &other_user_id, row.campus_id).await?;
+        let payload = AvatarInteractionPayload {
+            schema_version: 1,
+            action: input.action,
+            choreography: policy.into(),
+            animation_pack_version: AVATAR_INTERACTION_ANIMATION_PACK_VERSION,
+            actor_character,
+            recipient_character,
+        };
+        let inserted = insert_message(
+            &mut tx,
+            input.conversation_id,
+            input.client_interaction_id,
+            row.listing_id.as_deref(),
+            &input.sender_id,
+            &other_user_id,
+            "角色互动",
+            "avatar_interaction",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(&payload),
+        )
+        .await?;
+        let now = Utc::now();
+        sqlx::query(
+            "UPDATE chat_conversations
+             SET last_activity_at = $1, updated_at = $1,
+                 idle_expires_at = $2, version = version + 1
+             WHERE id = $3",
+        )
+        .bind(now)
+        .bind(now + Duration::hours(ACTIVE_IDLE_HOURS))
         .bind(input.conversation_id)
         .execute(&mut *tx)
         .await
@@ -2417,7 +2940,8 @@ impl ChatConversationService {
         .map_err(db_error)?;
         let rows = sqlx::query(
             "SELECT id, client_message_id, sender, content, reply_to_message_id, timestamp,
-                    image_data, audio_data, image_url, audio_url, status, kind, edited_at,
+                    image_data, audio_data, image_url, audio_url, status, kind,
+                    interaction_payload, edited_at,
                     quote_kind, quote_ref_id, quote_snapshot
              FROM chat_messages
              WHERE direct_conversation_id = $1
@@ -2493,7 +3017,8 @@ impl ChatConversationService {
             "UPDATE chat_messages SET content = $1, edited_at = NOW()
              WHERE id = $2
              RETURNING id, client_message_id, sender, content, reply_to_message_id, timestamp,
-                       image_data, audio_data, image_url, audio_url, status, kind, edited_at,
+                       image_data, audio_data, image_url, audio_url, status, kind,
+                       interaction_payload, edited_at,
                        quote_kind, quote_ref_id, quote_snapshot",
         )
         .bind(content)
@@ -2851,7 +3376,7 @@ fn validate_create_input(input: &CreateConversationInput) -> Result<(), ApiError
 
 async fn load_conversation(pool: &PgPool, id: Uuid) -> Result<ConversationRow, ApiError> {
     sqlx::query_as::<_, ConversationRow>(
-        "SELECT id, mode, state, initiator_id, recipient_id, listing_id, subject,
+        "SELECT id, campus_id, mode, state, initiator_id, recipient_id, listing_id, subject,
                 mail_expectation,
                 invite_expires_at, ack_expires_at, idle_expires_at, established_at,
                 closed_at, close_reason, version, created_at, updated_at
@@ -2869,7 +3394,7 @@ async fn load_conversation_for_update(
     id: Uuid,
 ) -> Result<ConversationRow, ApiError> {
     sqlx::query_as::<_, ConversationRow>(
-        "SELECT id, mode, state, initiator_id, recipient_id, listing_id, subject,
+        "SELECT id, campus_id, mode, state, initiator_id, recipient_id, listing_id, subject,
                 mail_expectation,
                 invite_expires_at, ack_expires_at, idle_expires_at, established_at,
                 closed_at, close_reason, version, created_at, updated_at
@@ -2890,7 +3415,7 @@ async fn find_live_realtime(
     campus_id: Uuid,
 ) -> Result<Option<ConversationRow>, ApiError> {
     sqlx::query_as::<_, ConversationRow>(
-        "SELECT id, mode, state, initiator_id, recipient_id, listing_id, subject,
+        "SELECT id, campus_id, mode, state, initiator_id, recipient_id, listing_id, subject,
                 mail_expectation,
                 invite_expires_at, ack_expires_at, idle_expires_at, established_at,
                 closed_at, close_reason, version, created_at, updated_at
@@ -2950,6 +3475,106 @@ async fn pair_is_blocked(
     .fetch_one(&mut **tx)
     .await
     .map_err(db_error)
+}
+
+async fn effective_avatar_interaction_policy(
+    tx: &mut Transaction<'_, Postgres>,
+    recipient_id: &str,
+    sender_id: &str,
+    campus_id: Uuid,
+    action: AvatarInteractionAction,
+) -> Result<AvatarInteractionPolicy, ApiError> {
+    let global = sqlx::query_scalar::<_, Value>(
+        "SELECT policies FROM avatar_interaction_preferences
+         WHERE user_id = $1 AND campus_id = $2",
+    )
+    .bind(recipient_id)
+    .bind(campus_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(db_error)?;
+    let global = parse_avatar_interaction_policies(global)?;
+    let override_value = sqlx::query_scalar::<_, Value>(
+        "SELECT policies FROM avatar_interaction_contact_overrides
+         WHERE user_id = $1 AND peer_user_id = $2 AND campus_id = $3",
+    )
+    .bind(recipient_id)
+    .bind(sender_id)
+    .bind(campus_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(db_error)?;
+    let overrides = parse_avatar_interaction_overrides(override_value)?;
+    Ok(overrides
+        .get(&action)
+        .and_then(|value| value.explicit())
+        .or_else(|| global.get(&action).copied())
+        .unwrap_or(AvatarInteractionPolicy::ReceiveOnly))
+}
+
+async fn enforce_avatar_interaction_rate_limit(
+    tx: &mut Transaction<'_, Postgres>,
+    conversation_id: Uuid,
+    sender_id: &str,
+    recipient_id: &str,
+) -> Result<(), ApiError> {
+    let in_cooldown: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM chat_messages
+            WHERE direct_conversation_id = $1
+              AND sender = $2
+              AND kind = 'avatar_interaction'
+              AND timestamp > NOW() - make_interval(secs => $3::double precision)
+         )",
+    )
+    .bind(conversation_id)
+    .bind(sender_id)
+    .bind(AVATAR_INTERACTION_COOLDOWN_SECONDS as f64)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(db_error)?;
+    if in_cooldown {
+        return Err(ApiError::RateLimited {
+            retry_after_seconds: AVATAR_INTERACTION_COOLDOWN_SECONDS as u64,
+        });
+    }
+    let recent_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM chat_messages
+         WHERE sender = $1 AND receiver = $2
+           AND kind = 'avatar_interaction'
+           AND timestamp > NOW() - make_interval(mins => $3::integer)",
+    )
+    .bind(sender_id)
+    .bind(recipient_id)
+    .bind(AVATAR_INTERACTION_WINDOW_MINUTES as i32)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(db_error)?;
+    if recent_count >= AVATAR_INTERACTION_WINDOW_LIMIT {
+        return Err(ApiError::RateLimited {
+            retry_after_seconds: 60,
+        });
+    }
+    Ok(())
+}
+
+async fn published_persona_character(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: &str,
+    campus_id: Uuid,
+) -> Result<String, ApiError> {
+    let character = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT appearance_config ->> 'character'
+         FROM social_personas
+         WHERE user_id = $1 AND campus_id = $2 AND status = 'published'",
+    )
+    .bind(user_id)
+    .bind(campus_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(db_error)?
+    .flatten();
+    Ok(character.unwrap_or_else(|| "classic".to_string()))
 }
 
 /// Decide whether a realtime invite may interrupt the recipient.
@@ -3161,6 +3786,7 @@ async fn ensure_reply_target(
         "SELECT EXISTS(
             SELECT 1 FROM chat_messages
             WHERE id = $1 AND direct_conversation_id = $2
+              AND kind IN ('opening', 'message')
          )",
     )
     .bind(reply_to_message_id)
@@ -3181,7 +3807,7 @@ async fn load_visible_direct_message_context(
     user_id: &str,
 ) -> Result<DirectMessageContext, ApiError> {
     let row = sqlx::query(
-        "SELECT cm.direct_conversation_id, c.initiator_id, c.recipient_id
+        "SELECT cm.direct_conversation_id, cm.kind, c.initiator_id, c.recipient_id
          FROM chat_messages cm
          JOIN chat_conversations c ON c.id = cm.direct_conversation_id
          WHERE cm.id = $1
@@ -3205,7 +3831,10 @@ async fn load_visible_direct_message_context(
     } else {
         return Err(ApiError::Forbidden);
     };
-    Ok(DirectMessageContext { other_user_id })
+    Ok(DirectMessageContext {
+        other_user_id,
+        kind: row.get("kind"),
+    })
 }
 
 async fn load_acknowledgement_target(
@@ -3214,7 +3843,7 @@ async fn load_acknowledgement_target(
     user_id: &str,
 ) -> Result<(), ApiError> {
     let row = sqlx::query(
-        "SELECT cm.sender, cm.receiver, c.initiator_id, c.recipient_id
+        "SELECT cm.sender, cm.receiver, cm.kind, c.initiator_id, c.recipient_id
          FROM chat_messages cm
          JOIN chat_conversations c ON c.id = cm.direct_conversation_id
          WHERE cm.id = $1
@@ -3235,6 +3864,9 @@ async fn load_acknowledgement_target(
     let recipient_id: String = row.get("recipient_id");
     if user_id != initiator_id && user_id != recipient_id {
         return Err(ApiError::Forbidden);
+    }
+    if row.get::<String, _>("kind") == "avatar_interaction" {
+        return Err(ApiError::Conflict("message_is_immutable".to_string()));
     }
     // Only the message receiver can intentionally acknowledge it.  A sender
     // can observe the public acknowledgement but cannot manufacture one.
@@ -3272,7 +3904,7 @@ async fn load_message_by_id_for_user(
     let row = sqlx::query(
         "SELECT id, client_message_id, direct_conversation_id, sender, content,
                 reply_to_message_id, timestamp, image_data, audio_data,
-                image_url, audio_url, status, kind, edited_at,
+                image_url, audio_url, status, kind, interaction_payload, edited_at,
                 quote_kind, quote_ref_id, quote_snapshot
          FROM chat_messages
          WHERE id = $1
@@ -3666,16 +4298,18 @@ async fn insert_message(
     audio_data: Option<&str>,
     image_url: Option<&str>,
     audio_url: Option<&str>,
+    interaction: Option<&AvatarInteractionPayload>,
 ) -> Result<ConversationMessageRecord, ApiError> {
     let row = sqlx::query(
         "INSERT INTO chat_messages (
             conversation_id, direct_conversation_id, client_message_id, listing_id,
             sender, receiver, is_agent, content, kind, reply_to_message_id,
             quote_kind, quote_ref_id, quote_snapshot,
-            image_data, audio_data, image_url, audio_url, status
-         ) VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8, $9, $10, $11, COALESCE($12, '{}'::jsonb), $13, $14, $15, $16, 'sent')
+            image_data, audio_data, image_url, audio_url, interaction_payload, status
+         ) VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8, $9, $10, $11, COALESCE($12, '{}'::jsonb), $13, $14, $15, $16, $17, 'sent')
          RETURNING id, client_message_id, sender, content, reply_to_message_id, timestamp,
-                   image_data, audio_data, image_url, audio_url, status, kind, edited_at,
+                   image_data, audio_data, image_url, audio_url, status, kind,
+                   interaction_payload, edited_at,
                    quote_kind, quote_ref_id, quote_snapshot",
     )
     .bind(conversation_id.to_string())
@@ -3694,6 +4328,7 @@ async fn insert_message(
     .bind(audio_data)
     .bind(image_url)
     .bind(audio_url)
+    .bind(interaction.map(|value| json!(value)))
     .fetch_one(&mut **tx)
     .await
     .map_err(db_error)?;
@@ -3708,7 +4343,8 @@ async fn find_message_by_client_id(
     let row = sqlx::query(
         "SELECT id, client_message_id, direct_conversation_id, sender, content,
                 reply_to_message_id, timestamp,
-                image_data, audio_data, image_url, audio_url, status, kind, edited_at,
+                image_data, audio_data, image_url, audio_url, status, kind,
+                interaction_payload, edited_at,
                 quote_kind, quote_ref_id, quote_snapshot
          FROM chat_messages WHERE sender = $1 AND client_message_id = $2",
     )
@@ -3739,6 +4375,12 @@ fn row_to_message(row: sqlx::postgres::PgRow, conversation_id: Uuid) -> Conversa
             ref_id,
             snapshot: quote_snapshot,
         });
+    let interaction = row
+        .try_get::<Option<Value>, _>("interaction_payload")
+        .ok()
+        .flatten()
+        .and_then(|value| serde_json::from_value(value).ok());
+    let kind: String = row.get("kind");
     ConversationMessageRecord {
         id: row.get("id"),
         client_message_id: client_message_id.map(|value| value.to_string()),
@@ -3752,7 +4394,7 @@ fn row_to_message(row: sqlx::postgres::PgRow, conversation_id: Uuid) -> Conversa
         acknowledgements: Vec::new(),
         hidden_for_me: false,
         can_hide: true,
-        can_react: true,
+        can_react: kind != "avatar_interaction",
         can_report: true,
         timestamp: timestamp.to_rfc3339(),
         image_data: row.get("image_data"),
@@ -3760,7 +4402,8 @@ fn row_to_message(row: sqlx::postgres::PgRow, conversation_id: Uuid) -> Conversa
         image_url: row.get("image_url"),
         audio_url: row.get("audio_url"),
         status,
-        kind: row.get("kind"),
+        kind,
+        interaction,
         edited_at: edited_at.map(|value| value.to_rfc3339()),
     }
 }
@@ -3949,5 +4592,75 @@ mod tests {
         for status in ["delivered", "read", "pending", "unknown"] {
             assert_eq!(normalize_message_status(status), "sent");
         }
+    }
+
+    #[test]
+    fn avatar_interaction_defaults_are_conservative() {
+        let policies = parse_avatar_interaction_policies(None).unwrap();
+        assert_eq!(
+            policies[&AvatarInteractionAction::Wave],
+            AvatarInteractionPolicy::Light
+        );
+        assert_eq!(
+            policies[&AvatarInteractionAction::Poke],
+            AvatarInteractionPolicy::ReceiveOnly
+        );
+        assert_eq!(
+            policies[&AvatarInteractionAction::HighFive],
+            AvatarInteractionPolicy::Light
+        );
+        assert_eq!(
+            policies[&AvatarInteractionAction::Encourage],
+            AvatarInteractionPolicy::Light
+        );
+    }
+
+    #[test]
+    fn avatar_interaction_overrides_keep_inherit_distinct() {
+        let overrides = parse_avatar_interaction_overrides(Some(json!({
+            "wave": "full",
+            "poke": "inherit"
+        })))
+        .unwrap();
+        assert_eq!(
+            overrides[&AvatarInteractionAction::Wave],
+            AvatarInteractionOverridePolicy::Full
+        );
+        assert_eq!(
+            overrides[&AvatarInteractionAction::Poke],
+            AvatarInteractionOverridePolicy::Inherit
+        );
+        assert_eq!(
+            overrides[&AvatarInteractionAction::Encourage],
+            AvatarInteractionOverridePolicy::Inherit
+        );
+    }
+
+    #[test]
+    fn avatar_interaction_policy_maps_only_to_presentation_choreography() {
+        assert_eq!(
+            AvatarInteractionChoreography::from(AvatarInteractionPolicy::ReceiveOnly),
+            AvatarInteractionChoreography::Solo
+        );
+        assert_eq!(
+            AvatarInteractionChoreography::from(AvatarInteractionPolicy::Light),
+            AvatarInteractionChoreography::Acknowledge
+        );
+        assert_eq!(
+            AvatarInteractionChoreography::from(AvatarInteractionPolicy::Full),
+            AvatarInteractionChoreography::Reciprocal
+        );
+    }
+
+    #[test]
+    fn avatar_interaction_policy_rejects_unknown_values() {
+        assert!(parse_avatar_interaction_policies(Some(json!({
+            "wave": "auto_send"
+        })))
+        .is_err());
+        assert!(parse_avatar_interaction_policies(Some(json!({
+            "hug": "light"
+        })))
+        .is_err());
     }
 }

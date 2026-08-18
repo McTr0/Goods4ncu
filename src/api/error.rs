@@ -1,4 +1,4 @@
-use axum::http::StatusCode;
+use axum::http::{header::RETRY_AFTER, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
@@ -71,6 +71,9 @@ pub enum ApiError {
 
     #[error("请求过于频繁，请稍后再试")]
     RateLimitExceeded,
+
+    #[error("请求过于频繁，请在 {retry_after_seconds} 秒后再试")]
+    RateLimited { retry_after_seconds: u64 },
 
     #[error("内容包含违规信息: {0}")]
     ContentViolation(String),
@@ -154,6 +157,11 @@ impl IntoResponse for ApiError {
                 "rate_limited",
                 "请求过于频繁，请稍后再试".to_string(),
             ),
+            ApiError::RateLimited { .. } => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limited",
+                "请求过于频繁，请稍后再试".to_string(),
+            ),
             ApiError::ContentViolation(msg) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "content_violation",
@@ -174,7 +182,23 @@ impl IntoResponse for ApiError {
                 )
             }
         };
-        (status, Json(error_payload(code, &msg, &trace_id))).into_response()
+        let mut payload = error_payload(code, &msg, &trace_id);
+        let retry_after = match self {
+            ApiError::RateLimited {
+                retry_after_seconds,
+            } => Some(retry_after_seconds),
+            _ => None,
+        };
+        if let (Some(retry_after), Some(object)) = (retry_after, payload.as_object_mut()) {
+            object.insert("retry_after_seconds".to_string(), json!(retry_after));
+        }
+        let mut response = (status, Json(payload)).into_response();
+        if let Some(retry_after) = retry_after {
+            if let Ok(value) = HeaderValue::from_str(&retry_after.to_string()) {
+                response.headers_mut().insert(RETRY_AFTER, value);
+            }
+        }
+        response
     }
 }
 
@@ -209,6 +233,9 @@ mod tests {
             } => format!("冲突: {}", message),
             ApiError::NotImplemented(ref m) => m.clone(),
             ApiError::RateLimitExceeded => "请求过于频繁，请稍后再试".to_string(),
+            ApiError::RateLimited {
+                retry_after_seconds,
+            } => format!("请求过于频繁，请在 {retry_after_seconds} 秒后再试"),
             ApiError::ContentViolation(ref m) => format!("内容包含违规信息: {}", m),
             ApiError::ServiceUnavailable(_) => "服务暂时不可用".to_string(),
             ApiError::Internal(_) => "服务器内部错误".to_string(),

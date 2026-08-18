@@ -1,5 +1,6 @@
 //! User-to-user conversations with short-lived realtime handshakes and mail threads.
 
+mod avatar_interaction;
 mod connection;
 mod message;
 mod models;
@@ -7,6 +8,14 @@ mod reply;
 mod shared_object;
 mod telegram;
 
+pub use avatar_interaction::{
+    delete_contact_preferences as delete_avatar_interaction_contact_preferences,
+    get_contact_preferences as get_avatar_interaction_contact_preferences,
+    get_preferences as get_avatar_interaction_preferences,
+    send_interaction as send_avatar_interaction,
+    set_contact_preferences as set_avatar_interaction_contact_preferences,
+    set_preferences as set_avatar_interaction_preferences,
+};
 pub use connection::{
     acknowledge_conversation, archive_conversation, block_user, close_conversation,
     create_conversation, delete_contact_permission, get_connection_preferences, get_conversation,
