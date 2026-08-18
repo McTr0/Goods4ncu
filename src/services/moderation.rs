@@ -472,11 +472,7 @@ impl ModerationService {
             if normalized.contains(&normalized_phrase)
                 || policy_normalized.contains(&normalized_phrase)
             {
-                tracing::debug!(
-                    code = rule.code.label(),
-                    phrase = rule.phrase,
-                    "builtin moderation rule detected"
-                );
+                tracing::debug!(code = rule.code.label(), "builtin moderation rule detected");
                 return ModerationResult::rejected(rule.code);
             }
         }
