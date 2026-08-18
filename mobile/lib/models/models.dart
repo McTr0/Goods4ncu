@@ -1452,7 +1452,7 @@ class SocialPersonaAppearance {
     required this.silhouette,
     required this.accessory,
     required this.outfit,
-    this.character = 'classic',
+    this.character = 'ncu_doro',
   });
 
   final String palette;
@@ -1467,7 +1467,7 @@ class SocialPersonaAppearance {
       silhouette: json?['silhouette']?.toString() ?? 'soft',
       accessory: json?['accessory']?.toString() ?? 'none',
       outfit: json?['outfit']?.toString() ?? 'campus',
-      character: json?['character']?.toString() ?? 'classic',
+      character: json?['character']?.toString() ?? 'ncu_doro',
     );
   }
 

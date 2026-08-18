@@ -31,15 +31,16 @@ class SocialPersonaRenderSpec {
     SocialPersona persona, {
     String? name,
   }) {
+    final character = persona.appearance.character;
     return SocialPersonaRenderSpec(
       palette: persona.appearance.palette,
       silhouette: persona.appearance.silhouette,
       accessory: persona.appearance.accessory,
       outfit: persona.appearance.outfit,
       name: name ?? persona.userId ?? '',
-      assetId: persona.appearance.character == 'classic'
-          ? null
-          : persona.appearance.character,
+      assetId: character == 'classic' || character.isEmpty
+          ? 'ncu_doro'
+          : character,
     );
   }
 
@@ -53,7 +54,7 @@ class SocialPersonaRenderSpec {
         accessory: 'none',
         outfit: 'campus',
         name: '',
-        assetId: 'sprout',
+        assetId: 'ncu_doro',
       );
     }
     final hash = _stableHash(trimmed);
@@ -87,7 +88,7 @@ class SocialPersonaRenderSpec {
       accessory: accessories[accIdx],
       outfit: outfits[outIdx],
       name: trimmed,
-      assetId: 'sprout',
+      assetId: 'ncu_doro',
     );
   }
 
@@ -933,32 +934,35 @@ class _SocialPersonaCharacterViewState extends State<SocialPersonaCharacterView>
     final renderer = widget.renderer ?? defaultPersonaRenderer;
     final shouldAnimate = _shouldAnimate(context);
 
-    if (!shouldAnimate) {
-      return renderer.buildCharacter(
-        context,
-        spec: widget.spec,
-        size: widget.size,
-        motionProgress: 0.0,
-        motionCue: widget.motionCue,
-        isDark: isDark,
-        semanticLabel: widget.semanticLabel,
-      );
-    }
+    final result = shouldAnimate
+        ? AnimatedBuilder(
+            animation: _controller,
+            builder: (context, _) {
+              return renderer.buildCharacter(
+                context,
+                spec: widget.spec,
+                size: widget.size,
+                motionProgress: _controller.value,
+                motionCue: widget.motionCue,
+                isDark: isDark,
+                semanticLabel: null,
+              );
+            },
+          )
+        : renderer.buildCharacter(
+            context,
+            spec: widget.spec,
+            size: widget.size,
+            motionProgress: 0.0,
+            motionCue: widget.motionCue,
+            isDark: isDark,
+            semanticLabel: null,
+          );
 
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) {
-        return renderer.buildCharacter(
-          context,
-          spec: widget.spec,
-          size: widget.size,
-          motionProgress: _controller.value,
-          motionCue: widget.motionCue,
-          isDark: isDark,
-          semanticLabel: widget.semanticLabel,
-        );
-      },
-    );
+    if (widget.semanticLabel case final label? when label.isNotEmpty) {
+      return Semantics(label: label, image: true, child: result);
+    }
+    return result;
   }
 }
 

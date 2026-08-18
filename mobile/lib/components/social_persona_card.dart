@@ -259,7 +259,7 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
     _character = _initialValue(
       persona?.appearance.character,
       _characterValues,
-      'ncu_gugugaga',
+      'ncu_doro',
     );
     _contactPosture = _initialValue(
       persona?.contactPosture,
@@ -281,7 +281,7 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
   List<String> get _characterValues {
     final values = widget.catalog?.appearance['character'];
     return (values == null || values.isEmpty
-            ? const ['ncu_gugugaga', 'ncu_doro', 'ncu_phoebe_chupi']
+            ? const ['ncu_doro', 'ncu_gugugaga', 'ncu_phoebe_chupi']
             : values)
         .where((value) => value != 'classic')
         .toList(growable: false);
