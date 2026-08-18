@@ -66,5 +66,11 @@ uploads/
 # included in source-control history.
 sensitive_data_archive/
 
-# === Claude Code ===
+# === Claude Code / Agents ===
 .claude/
+.gemini/
+.antigravity/
+
+# === Local Model & Raw Asset Scratchpads ===
+Doro/
+

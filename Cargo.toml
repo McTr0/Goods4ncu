@@ -28,8 +28,7 @@ tower-http = { version = "0.6", features = ["fs", "cors", "limit", "timeout"] }
 argon2 = "0.5.3"
 jsonwebtoken = { version = "10.3.0", default-features = false, features = ["rust_crypto"] }
 rand = "0.10.0"
-dashmap = "5.5"
-lazy_static = "1.4"
+dashmap = "6.1"
 moka = { version = "0.12", features = ["sync", "future"] }
 async-trait = "0.1"
 async-stream = "0.3"
