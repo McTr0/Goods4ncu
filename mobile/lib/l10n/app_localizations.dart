@@ -6330,6 +6330,156 @@ abstract class AppLocalizations {
   /// **'Publish'**
   String get postPublishAction;
 
+  /// No description provided for @postKindDiscussion.
+  ///
+  /// In en, this message translates to:
+  /// **'Discussion'**
+  String get postKindDiscussion;
+
+  /// No description provided for @postKindMutualAid.
+  ///
+  /// In en, this message translates to:
+  /// **'Mutual aid'**
+  String get postKindMutualAid;
+
+  /// No description provided for @postMutualAidWanted.
+  ///
+  /// In en, this message translates to:
+  /// **'Need help'**
+  String get postMutualAidWanted;
+
+  /// No description provided for @postMutualAidOffer.
+  ///
+  /// In en, this message translates to:
+  /// **'Can help'**
+  String get postMutualAidOffer;
+
+  /// No description provided for @postMutualAidMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Help type'**
+  String get postMutualAidMode;
+
+  /// No description provided for @postMutualAidModePickup.
+  ///
+  /// In en, this message translates to:
+  /// **'Pickup'**
+  String get postMutualAidModePickup;
+
+  /// No description provided for @postMutualAidModeBuy.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase'**
+  String get postMutualAidModeBuy;
+
+  /// No description provided for @postMutualAidModeQueue.
+  ///
+  /// In en, this message translates to:
+  /// **'Queueing'**
+  String get postMutualAidModeQueue;
+
+  /// No description provided for @postMutualAidModePrint.
+  ///
+  /// In en, this message translates to:
+  /// **'Printing'**
+  String get postMutualAidModePrint;
+
+  /// No description provided for @postMutualAidModeReturn.
+  ///
+  /// In en, this message translates to:
+  /// **'Return'**
+  String get postMutualAidModeReturn;
+
+  /// No description provided for @postMutualAidModeOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get postMutualAidModeOther;
+
+  /// No description provided for @postMutualAidPickup.
+  ///
+  /// In en, this message translates to:
+  /// **'Pickup location'**
+  String get postMutualAidPickup;
+
+  /// No description provided for @postMutualAidDropoff.
+  ///
+  /// In en, this message translates to:
+  /// **'Handoff location'**
+  String get postMutualAidDropoff;
+
+  /// No description provided for @postMutualAidTime.
+  ///
+  /// In en, this message translates to:
+  /// **'Time details'**
+  String get postMutualAidTime;
+
+  /// No description provided for @postMutualAidReward.
+  ///
+  /// In en, this message translates to:
+  /// **'Reward (yuan)'**
+  String get postMutualAidReward;
+
+  /// No description provided for @postMutualAidRewardInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a reward from 0 to 100,000 yuan'**
+  String get postMutualAidRewardInvalid;
+
+  /// No description provided for @postMutualAidValidity.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep open for'**
+  String get postMutualAidValidity;
+
+  /// No description provided for @postMutualAidOneDay.
+  ///
+  /// In en, this message translates to:
+  /// **'1 day'**
+  String get postMutualAidOneDay;
+
+  /// No description provided for @postMutualAidThreeDays.
+  ///
+  /// In en, this message translates to:
+  /// **'3 days'**
+  String get postMutualAidThreeDays;
+
+  /// No description provided for @postMutualAidSevenDays.
+  ///
+  /// In en, this message translates to:
+  /// **'7 days'**
+  String get postMutualAidSevenDays;
+
+  /// No description provided for @postResolutionOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get postResolutionOpen;
+
+  /// No description provided for @postResolutionResolved.
+  ///
+  /// In en, this message translates to:
+  /// **'Resolved'**
+  String get postResolutionResolved;
+
+  /// No description provided for @postResolutionClosed.
+  ///
+  /// In en, this message translates to:
+  /// **'Closed'**
+  String get postResolutionClosed;
+
+  /// No description provided for @postResolutionUpdate.
+  ///
+  /// In en, this message translates to:
+  /// **'Update mutual-aid status'**
+  String get postResolutionUpdate;
+
+  /// No description provided for @postMutualAidNotes.
+  ///
+  /// In en, this message translates to:
+  /// **'Additional details'**
+  String get postMutualAidNotes;
+
   /// No description provided for @postPublishFailed.
   ///
   /// In en, this message translates to:
@@ -6443,336 +6593,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Start a discussion'**
   String get postStartAction;
-
-  /// No description provided for @errandPublishTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Campus errands'**
-  String get errandPublishTitle;
-
-  /// No description provided for @errandPublishIntro.
-  ///
-  /// In en, this message translates to:
-  /// **'Describe a pickup, purchase, queue, or printing task and classmates can offer to help. Errands expire after 24 hours by default; use public handoff points.'**
-  String get errandPublishIntro;
-
-  /// No description provided for @errandSubjectLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'What needs doing?'**
-  String get errandSubjectLabel;
-
-  /// No description provided for @errandSubjectHint.
-  ///
-  /// In en, this message translates to:
-  /// **'For example: Pick up my printed handout from the library'**
-  String get errandSubjectHint;
-
-  /// No description provided for @errandSubjectRequired.
-  ///
-  /// In en, this message translates to:
-  /// **'Describe the errand'**
-  String get errandSubjectRequired;
-
-  /// No description provided for @errandModeLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Errand type'**
-  String get errandModeLabel;
-
-  /// No description provided for @errandServiceDirectionLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Service direction'**
-  String get errandServiceDirectionLabel;
-
-  /// No description provided for @errandServiceWanted.
-  ///
-  /// In en, this message translates to:
-  /// **'Need help'**
-  String get errandServiceWanted;
-
-  /// No description provided for @errandServiceOffer.
-  ///
-  /// In en, this message translates to:
-  /// **'Offer help'**
-  String get errandServiceOffer;
-
-  /// No description provided for @errandServiceWantedHint.
-  ///
-  /// In en, this message translates to:
-  /// **'I need a classmate to do this'**
-  String get errandServiceWantedHint;
-
-  /// No description provided for @errandServiceOfferHint.
-  ///
-  /// In en, this message translates to:
-  /// **'I can do this for a classmate'**
-  String get errandServiceOfferHint;
-
-  /// No description provided for @errandModePickup.
-  ///
-  /// In en, this message translates to:
-  /// **'Pickup'**
-  String get errandModePickup;
-
-  /// No description provided for @errandModeBuy.
-  ///
-  /// In en, this message translates to:
-  /// **'Buy for me'**
-  String get errandModeBuy;
-
-  /// No description provided for @errandModeQueue.
-  ///
-  /// In en, this message translates to:
-  /// **'Queue'**
-  String get errandModeQueue;
-
-  /// No description provided for @errandModePrint.
-  ///
-  /// In en, this message translates to:
-  /// **'Print/copy'**
-  String get errandModePrint;
-
-  /// No description provided for @errandModeReturn.
-  ///
-  /// In en, this message translates to:
-  /// **'Return/handoff'**
-  String get errandModeReturn;
-
-  /// No description provided for @errandModeOther.
-  ///
-  /// In en, this message translates to:
-  /// **'Other'**
-  String get errandModeOther;
-
-  /// No description provided for @errandPickupLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Where should it be picked up?'**
-  String get errandPickupLabel;
-
-  /// No description provided for @errandPickupHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Use a gate, library, parcel desk, or another public point'**
-  String get errandPickupHint;
-
-  /// No description provided for @errandDropoffLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Where should it be handed off?'**
-  String get errandDropoffLabel;
-
-  /// No description provided for @errandDropoffHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Choose a convenient public meeting point'**
-  String get errandDropoffHint;
-
-  /// No description provided for @errandTimeLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'When would help be useful?'**
-  String get errandTimeLabel;
-
-  /// No description provided for @errandTimeHint.
-  ///
-  /// In en, this message translates to:
-  /// **'For example: before 6 PM today, or after class tonight'**
-  String get errandTimeHint;
-
-  /// No description provided for @errandRewardLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Offer (CNY)'**
-  String get errandRewardLabel;
-
-  /// No description provided for @errandRewardHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Optional; leave blank to discuss first'**
-  String get errandRewardHint;
-
-  /// No description provided for @errandValidForLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Keep active for'**
-  String get errandValidForLabel;
-
-  /// No description provided for @errandValidForDay.
-  ///
-  /// In en, this message translates to:
-  /// **'24 hours'**
-  String get errandValidForDay;
-
-  /// No description provided for @errandValidForThreeDays.
-  ///
-  /// In en, this message translates to:
-  /// **'3 days'**
-  String get errandValidForThreeDays;
-
-  /// No description provided for @errandValidForWeek.
-  ///
-  /// In en, this message translates to:
-  /// **'1 week'**
-  String get errandValidForWeek;
-
-  /// No description provided for @errandNotesLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Notes'**
-  String get errandNotesLabel;
-
-  /// No description provided for @errandNotesHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Quantity, size, or handoff details; avoid sensitive information'**
-  String get errandNotesHint;
-
-  /// No description provided for @errandPublishAction.
-  ///
-  /// In en, this message translates to:
-  /// **'Publish errand'**
-  String get errandPublishAction;
-
-  /// No description provided for @errandPublishSuccess.
-  ///
-  /// In en, this message translates to:
-  /// **'Errand published; classmates can offer to help'**
-  String get errandPublishSuccess;
-
-  /// No description provided for @errandPublishFailed.
-  ///
-  /// In en, this message translates to:
-  /// **'Could not publish the errand. Try again.'**
-  String get errandPublishFailed;
-
-  /// No description provided for @errandFeedTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Campus errands'**
-  String get errandFeedTitle;
-
-  /// No description provided for @errandFeedBody.
-  ///
-  /// In en, this message translates to:
-  /// **'Nearby classmates are looking for pickups, purchases, and quick favors.'**
-  String get errandFeedBody;
-
-  /// No description provided for @errandCreateAction.
-  ///
-  /// In en, this message translates to:
-  /// **'Post an errand'**
-  String get errandCreateAction;
-
-  /// No description provided for @errandRespondAction.
-  ///
-  /// In en, this message translates to:
-  /// **'I can help'**
-  String get errandRespondAction;
-
-  /// No description provided for @errandNeedServiceAction.
-  ///
-  /// In en, this message translates to:
-  /// **'I need this service'**
-  String get errandNeedServiceAction;
-
-  /// No description provided for @errandPickupShort.
-  ///
-  /// In en, this message translates to:
-  /// **'Pick up'**
-  String get errandPickupShort;
-
-  /// No description provided for @errandDropoffShort.
-  ///
-  /// In en, this message translates to:
-  /// **'Drop off'**
-  String get errandDropoffShort;
-
-  /// No description provided for @errandTimeShort.
-  ///
-  /// In en, this message translates to:
-  /// **'When'**
-  String get errandTimeShort;
-
-  /// No description provided for @errandBoardTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Campus errands'**
-  String get errandBoardTitle;
-
-  /// No description provided for @errandTabCampus.
-  ///
-  /// In en, this message translates to:
-  /// **'Campus'**
-  String get errandTabCampus;
-
-  /// No description provided for @errandTabMine.
-  ///
-  /// In en, this message translates to:
-  /// **'My errands'**
-  String get errandTabMine;
-
-  /// No description provided for @errandCampusEmpty.
-  ///
-  /// In en, this message translates to:
-  /// **'No classmates have posted an errand right now.'**
-  String get errandCampusEmpty;
-
-  /// No description provided for @errandMineEmpty.
-  ///
-  /// In en, this message translates to:
-  /// **'You have no active errands.'**
-  String get errandMineEmpty;
-
-  /// No description provided for @errandFulfilAction.
-  ///
-  /// In en, this message translates to:
-  /// **'Completed'**
-  String get errandFulfilAction;
-
-  /// No description provided for @errandWithdrawAction.
-  ///
-  /// In en, this message translates to:
-  /// **'Withdraw'**
-  String get errandWithdrawAction;
-
-  /// No description provided for @errandFulfilled.
-  ///
-  /// In en, this message translates to:
-  /// **'Errand marked as completed'**
-  String get errandFulfilled;
-
-  /// No description provided for @errandWithdrawn.
-  ///
-  /// In en, this message translates to:
-  /// **'Errand withdrawn'**
-  String get errandWithdrawn;
-
-  /// No description provided for @errandLoadFailed.
-  ///
-  /// In en, this message translates to:
-  /// **'Could not load campus errands'**
-  String get errandLoadFailed;
-
-  /// No description provided for @errandExpiresLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Time-limited'**
-  String get errandExpiresLabel;
-
-  /// No description provided for @errandRespondTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Reply to errand'**
-  String get errandRespondTitle;
-
-  /// No description provided for @errandRespondHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Explain how you can help, when you are free, and where to meet'**
-  String get errandRespondHint;
 }
 
 class _AppLocalizationsDelegate

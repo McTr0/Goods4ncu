@@ -3462,6 +3462,82 @@ class AppLocalizationsEn extends AppLocalizations {
   String get postPublishAction => 'Publish';
 
   @override
+  String get postKindDiscussion => 'Discussion';
+
+  @override
+  String get postKindMutualAid => 'Mutual aid';
+
+  @override
+  String get postMutualAidWanted => 'Need help';
+
+  @override
+  String get postMutualAidOffer => 'Can help';
+
+  @override
+  String get postMutualAidMode => 'Help type';
+
+  @override
+  String get postMutualAidModePickup => 'Pickup';
+
+  @override
+  String get postMutualAidModeBuy => 'Purchase';
+
+  @override
+  String get postMutualAidModeQueue => 'Queueing';
+
+  @override
+  String get postMutualAidModePrint => 'Printing';
+
+  @override
+  String get postMutualAidModeReturn => 'Return';
+
+  @override
+  String get postMutualAidModeOther => 'Other';
+
+  @override
+  String get postMutualAidPickup => 'Pickup location';
+
+  @override
+  String get postMutualAidDropoff => 'Handoff location';
+
+  @override
+  String get postMutualAidTime => 'Time details';
+
+  @override
+  String get postMutualAidReward => 'Reward (yuan)';
+
+  @override
+  String get postMutualAidRewardInvalid =>
+      'Enter a reward from 0 to 100,000 yuan';
+
+  @override
+  String get postMutualAidValidity => 'Keep open for';
+
+  @override
+  String get postMutualAidOneDay => '1 day';
+
+  @override
+  String get postMutualAidThreeDays => '3 days';
+
+  @override
+  String get postMutualAidSevenDays => '7 days';
+
+  @override
+  String get postResolutionOpen => 'Open';
+
+  @override
+  String get postResolutionResolved => 'Resolved';
+
+  @override
+  String get postResolutionClosed => 'Closed';
+
+  @override
+  String get postResolutionUpdate => 'Update mutual-aid status';
+
+  @override
+  String get postMutualAidNotes => 'Additional details';
+
+  @override
   String get postPublishFailed =>
       'Could not publish the discussion. Try again.';
 
@@ -3523,178 +3599,4 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get postStartAction => 'Start a discussion';
-
-  @override
-  String get errandPublishTitle => 'Campus errands';
-
-  @override
-  String get errandPublishIntro =>
-      'Describe a pickup, purchase, queue, or printing task and classmates can offer to help. Errands expire after 24 hours by default; use public handoff points.';
-
-  @override
-  String get errandSubjectLabel => 'What needs doing?';
-
-  @override
-  String get errandSubjectHint =>
-      'For example: Pick up my printed handout from the library';
-
-  @override
-  String get errandSubjectRequired => 'Describe the errand';
-
-  @override
-  String get errandModeLabel => 'Errand type';
-
-  @override
-  String get errandServiceDirectionLabel => 'Service direction';
-
-  @override
-  String get errandServiceWanted => 'Need help';
-
-  @override
-  String get errandServiceOffer => 'Offer help';
-
-  @override
-  String get errandServiceWantedHint => 'I need a classmate to do this';
-
-  @override
-  String get errandServiceOfferHint => 'I can do this for a classmate';
-
-  @override
-  String get errandModePickup => 'Pickup';
-
-  @override
-  String get errandModeBuy => 'Buy for me';
-
-  @override
-  String get errandModeQueue => 'Queue';
-
-  @override
-  String get errandModePrint => 'Print/copy';
-
-  @override
-  String get errandModeReturn => 'Return/handoff';
-
-  @override
-  String get errandModeOther => 'Other';
-
-  @override
-  String get errandPickupLabel => 'Where should it be picked up?';
-
-  @override
-  String get errandPickupHint =>
-      'Use a gate, library, parcel desk, or another public point';
-
-  @override
-  String get errandDropoffLabel => 'Where should it be handed off?';
-
-  @override
-  String get errandDropoffHint => 'Choose a convenient public meeting point';
-
-  @override
-  String get errandTimeLabel => 'When would help be useful?';
-
-  @override
-  String get errandTimeHint =>
-      'For example: before 6 PM today, or after class tonight';
-
-  @override
-  String get errandRewardLabel => 'Offer (CNY)';
-
-  @override
-  String get errandRewardHint => 'Optional; leave blank to discuss first';
-
-  @override
-  String get errandValidForLabel => 'Keep active for';
-
-  @override
-  String get errandValidForDay => '24 hours';
-
-  @override
-  String get errandValidForThreeDays => '3 days';
-
-  @override
-  String get errandValidForWeek => '1 week';
-
-  @override
-  String get errandNotesLabel => 'Notes';
-
-  @override
-  String get errandNotesHint =>
-      'Quantity, size, or handoff details; avoid sensitive information';
-
-  @override
-  String get errandPublishAction => 'Publish errand';
-
-  @override
-  String get errandPublishSuccess =>
-      'Errand published; classmates can offer to help';
-
-  @override
-  String get errandPublishFailed => 'Could not publish the errand. Try again.';
-
-  @override
-  String get errandFeedTitle => 'Campus errands';
-
-  @override
-  String get errandFeedBody =>
-      'Nearby classmates are looking for pickups, purchases, and quick favors.';
-
-  @override
-  String get errandCreateAction => 'Post an errand';
-
-  @override
-  String get errandRespondAction => 'I can help';
-
-  @override
-  String get errandNeedServiceAction => 'I need this service';
-
-  @override
-  String get errandPickupShort => 'Pick up';
-
-  @override
-  String get errandDropoffShort => 'Drop off';
-
-  @override
-  String get errandTimeShort => 'When';
-
-  @override
-  String get errandBoardTitle => 'Campus errands';
-
-  @override
-  String get errandTabCampus => 'Campus';
-
-  @override
-  String get errandTabMine => 'My errands';
-
-  @override
-  String get errandCampusEmpty =>
-      'No classmates have posted an errand right now.';
-
-  @override
-  String get errandMineEmpty => 'You have no active errands.';
-
-  @override
-  String get errandFulfilAction => 'Completed';
-
-  @override
-  String get errandWithdrawAction => 'Withdraw';
-
-  @override
-  String get errandFulfilled => 'Errand marked as completed';
-
-  @override
-  String get errandWithdrawn => 'Errand withdrawn';
-
-  @override
-  String get errandLoadFailed => 'Could not load campus errands';
-
-  @override
-  String get errandExpiresLabel => 'Time-limited';
-
-  @override
-  String get errandRespondTitle => 'Reply to errand';
-
-  @override
-  String get errandRespondHint =>
-      'Explain how you can help, when you are free, and where to meet';
 }

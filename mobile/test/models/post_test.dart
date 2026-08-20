@@ -64,6 +64,30 @@ void main() {
     expect(reply.author.username, 'lee');
   });
 
+  test('parses mutual-aid lifecycle and author capability', () {
+    final post = CampusPost.fromJson({
+      'id': 'mutual-1',
+      'post_type': 'discussion',
+      'post_kind': 'mutual_aid',
+      'title': 'Pickup help',
+      'author': {'id': 'user-1', 'username': 'mira'},
+      'reply_count': 0,
+      'status': 'active',
+      'is_locked': false,
+      'resolution_status': 'resolved',
+      'can_update_resolution': true,
+      'mutual_aid_metadata': {
+        'service_direction': 'wanted',
+        'service_mode': 'pickup',
+      },
+    });
+
+    expect(post.postKind, 'mutual_aid');
+    expect(post.resolutionStatus, 'resolved');
+    expect(post.canUpdateResolution, isTrue);
+    expect(post.mutualAidMetadata['service_mode'], 'pickup');
+  });
+
   test('parses a server listing preview and ranking explanation', () {
     final post = CampusPost.fromJson({
       'id': 'post-listing-1',

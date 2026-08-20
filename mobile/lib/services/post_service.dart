@@ -98,6 +98,8 @@ class PostService extends BaseService {
     String? category,
     List<String> tags = const [],
     String? coverImageUrl,
+    String postKind = 'discussion',
+    Map<String, dynamic> mutualAidMetadata = const {},
   }) async {
     final headers = await authHeaders();
     final response = await post(
@@ -110,6 +112,8 @@ class PostService extends BaseService {
           'category': category.trim(),
         if (coverImageUrl != null && coverImageUrl.trim().isNotEmpty)
           'cover_image_url': coverImageUrl.trim(),
+        'post_kind': postKind,
+        'mutual_aid_metadata': mutualAidMetadata,
         'tags': tags
             .map((tag) => tag.trim())
             .where((tag) => tag.isNotEmpty)
@@ -154,6 +158,8 @@ class PostService extends BaseService {
     String? category,
     List<String>? tags,
     bool? locked,
+    String? postKind,
+    Map<String, dynamic>? mutualAidMetadata,
   }) async {
     final headers = await authHeaders();
     final response = await put(
@@ -165,6 +171,8 @@ class PostService extends BaseService {
         if (category != null) 'category': category.trim(),
         'tags': ?tags,
         'locked': ?locked,
+        'post_kind': ?postKind,
+        'mutual_aid_metadata': ?mutualAidMetadata,
       }),
     );
     return handleResponse(
@@ -172,6 +180,22 @@ class PostService extends BaseService {
       (data) => CampusPost.fromJson(
         Map<String, dynamic>.from((data as Map)['post'] ?? data),
       ),
+    );
+  }
+
+  Future<CampusPost> updateResolution(
+    String id,
+    String resolutionStatus,
+  ) async {
+    final headers = await authHeaders();
+    final response = await patch(
+      Uri.parse('$baseUrl/api/posts/${Uri.encodeComponent(id)}/resolution'),
+      headers,
+      jsonEncode({'resolution_status': resolutionStatus}),
+    );
+    return handleResponse(
+      response,
+      (data) => CampusPost.fromJson(Map<String, dynamic>.from(data as Map)),
     );
   }
 

@@ -2,58 +2,34 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../l10n/app_localizations.dart';
-import '../models/models.dart';
-import '../services/intent_service.dart';
-import '../services/listing_service.dart';
-import '../services/recommendation_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
-import '../components/intent_respond_dialog.dart';
-import '../components/price_tag.dart';
 import '../components/feed_feedback_menu.dart';
 import '../services/feed_feedback_service.dart';
 import '../models/post.dart';
 import '../services/post_service.dart';
 import '../components/post_discovery_card.dart';
-import '../router/publish_navigation.dart';
 
 class HomePage extends StatefulWidget {
-  final RecommendationService? recommendationService;
-  final ListingService? listingService;
-  final IntentService? intentService;
   final FeedFeedbackService? feedbackService;
   final PostService? postService;
 
-  const HomePage({
-    super.key,
-    this.recommendationService,
-    this.listingService,
-    this.intentService,
-    this.feedbackService,
-    this.postService,
-  });
+  const HomePage({super.key, this.feedbackService, this.postService});
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
-  late final RecommendationService _recommendationService;
-  ListingService? _listingService;
-  late final IntentService _intentService;
   late final FeedFeedbackService _feedbackService;
-  PostService? _postService;
+  late final PostService _postService;
   final _promptController = TextEditingController();
   final _promptFocus = FocusNode();
 
-  // Recommendation state
-  List<Listing> _recommendedListings = [];
   List<CampusPost> _posts = [];
-  bool _usingPosts = false;
   bool _recommendationLoading = true;
   bool _feedHasMore = true;
   bool _feedLoading = false;
-  String _directionFilter = 'all';
   String _postTypeFilter = 'all';
   String _postSort = 'for_you';
   String? _searchQuery;
@@ -62,43 +38,13 @@ class _HomePageState extends State<HomePage> {
   bool _postFeedRetryReset = false;
   int _feedRequestEpoch = 0;
 
-  /// Legacy campus requests that are not represented by the listing grid.
-  /// They remain a homepage fallback while the standard publish flow writes
-  /// offer/wanted listings directly.
-  List<UserIntent> _voices = const [];
-  List<UserIntent> _errands = const [];
-  String? _errandLoadError;
-
   @override
   void initState() {
     super.initState();
-    _recommendationService =
-        widget.recommendationService ?? context.read<RecommendationService>();
-    _listingService = _resolveListingService();
-    _intentService = widget.intentService ?? context.read<IntentService>();
     _feedbackService =
         widget.feedbackService ?? context.read<FeedFeedbackService>();
-    _postService = _resolvePostService();
+    _postService = widget.postService ?? context.read<PostService>();
     _loadRecommendations();
-    _loadErrands();
-  }
-
-  ListingService? _resolveListingService() {
-    if (widget.listingService != null) return widget.listingService;
-    try {
-      return context.read<ListingService>();
-    } catch (_) {
-      return null;
-    }
-  }
-
-  PostService? _resolvePostService() {
-    if (widget.postService != null) return widget.postService;
-    try {
-      return context.read<PostService>();
-    } catch (_) {
-      return null;
-    }
   }
 
   Future<void> _loadRecommendations({bool reset = true}) async {
@@ -112,94 +58,33 @@ class _HomePageState extends State<HomePage> {
       });
     }
     try {
-      final postService = _postService;
-      if (postService != null) {
-        try {
-          final response = await postService.getPosts(
-            limit: 20,
-            offset: reset ? 0 : _posts.length,
-            postType: switch (_postTypeFilter) {
-              'offer' || 'wanted' => 'listing',
-              _ => _postTypeFilter,
-            },
-            direction: switch (_postTypeFilter) {
-              'offer' || 'wanted' => _postTypeFilter,
-              _ => null,
-            },
-            search: _searchQuery,
-            sort: _postSort,
-          );
-          if (!mounted || requestEpoch != _feedRequestEpoch) return;
-          setState(() {
-            if (reset) {
-              _posts = response.items;
-            } else {
-              _posts = [..._posts, ...response.items];
-            }
-            _recommendedListings = [];
-            _usingPosts = true;
-            _feedHasMore = _posts.length < response.total;
-            _recommendationLoading = false;
-            _feedLoading = false;
-            _loadError = null;
-            _postFeedError = null;
-            _postFeedRetryReset = false;
-          });
-          return;
-        } catch (error) {
-          if (!mounted || requestEpoch != _feedRequestEpoch) return;
-          debugPrint('Unified posts feed unavailable: $error');
-          setState(() {
-            _usingPosts = true;
-            _recommendationLoading = false;
-            _feedLoading = false;
-            _postFeedError = error.toString();
-            _postFeedRetryReset = reset;
-            if (reset && _feedIsEmpty) _loadError = error.toString();
-          });
-          return;
-        }
-      }
-      var recommendations = await _recommendationService.getRecommendationFeed(
+      final response = await _postService.getPosts(
         limit: 20,
-        offset: reset ? 0 : _recommendedListings.length,
-        direction: _directionFilter,
+        offset: reset ? 0 : _posts.length,
+        postType: switch (_postTypeFilter) {
+          'offer' || 'wanted' => 'listing',
+          _ => _postTypeFilter,
+        },
+        direction: switch (_postTypeFilter) {
+          'offer' || 'wanted' => _postTypeFilter,
+          _ => null,
+        },
+        search: _searchQuery,
+        sort: _postSort,
       );
       if (!mounted || requestEpoch != _feedRequestEpoch) return;
-
-      // Deterministic campus fallback if recommendation feed is empty
-      if (recommendations.isEmpty && reset && _listingService != null) {
-        final fallbackResponse = await _listingService!.getListings(
-          limit: 20,
-          offset: 0,
-          direction: _directionFilter,
-          allowAnonymousFallback: false,
-        );
-        if (!mounted || requestEpoch != _feedRequestEpoch) return;
-        recommendations = fallbackResponse.items;
-      }
-
-      if (mounted) {
-        setState(() {
-          if (reset) {
-            _recommendedListings = recommendations;
-            _posts = [];
-          } else {
-            _recommendedListings.addAll(recommendations);
-          }
-          _usingPosts = false;
-          _feedHasMore = recommendations.length == 20;
-          _recommendationLoading = false;
-          _feedLoading = false;
-          _loadError = null;
-          _postFeedError = null;
-          _postFeedRetryReset = false;
-        });
-      }
-      if (_recommendedListings.isEmpty && _posts.isEmpty) await _loadVoices();
+      setState(() {
+        _posts = reset ? response.items : [..._posts, ...response.items];
+        _feedHasMore = _posts.length < response.total;
+        _recommendationLoading = false;
+        _feedLoading = false;
+        _loadError = null;
+        _postFeedError = null;
+        _postFeedRetryReset = false;
+      });
     } catch (error, stackTrace) {
       if (!mounted || requestEpoch != _feedRequestEpoch) return;
-      debugPrint('Failed to load recommendation feed: $error');
+      debugPrint('Failed to load unified post feed: $error');
       debugPrintStack(stackTrace: stackTrace);
       if (mounted) {
         setState(() {
@@ -209,68 +94,6 @@ class _HomePageState extends State<HomePage> {
         });
       }
     }
-  }
-
-  Future<void> _loadVoices() async {
-    try {
-      final voices = await _intentService.campusFeed(limit: 8);
-      if (mounted) {
-        setState(
-          () => _voices = voices
-              .where(
-                (intent) =>
-                    intent.kind == IntentKind.goodsOffer ||
-                    intent.kind == IntentKind.goodsSeek,
-              )
-              .toList(),
-        );
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _loadErrands() async {
-    try {
-      final errands = await _intentService.campusFeed(
-        kind: IntentKind.help,
-        limit: 8,
-      );
-      if (mounted) {
-        setState(() {
-          _errands = errands;
-          _errandLoadError = null;
-        });
-      }
-    } catch (error) {
-      if (mounted) setState(() => _errandLoadError = error.toString());
-    }
-  }
-
-  Future<void> _respond(UserIntent intent) async {
-    if (await respondToIntentFlow(context, _intentService, intent)) {
-      if (intent.kind == IntentKind.help) {
-        await _loadErrands();
-      } else {
-        await _loadVoices();
-      }
-    }
-  }
-
-  void _removeVoice(UserIntent intent) {
-    if (!mounted) return;
-    setState(() => _voices.removeWhere((item) => item.id == intent.id));
-  }
-
-  void _removeErrand(UserIntent intent) {
-    if (!mounted) return;
-    setState(() => _errands.removeWhere((item) => item.id == intent.id));
-  }
-
-  void _removeListing(Listing listing) {
-    if (!mounted) return;
-    setState(
-      () => _recommendedListings.removeWhere((item) => item.id == listing.id),
-    );
-    if (_recommendedListings.isEmpty) _loadVoices();
   }
 
   void _removePost(CampusPost post) {
@@ -286,7 +109,7 @@ class _HomePageState extends State<HomePage> {
     context.push(location);
   }
 
-  bool get _feedIsEmpty => _posts.isEmpty && _recommendedListings.isEmpty;
+  bool get _feedIsEmpty => _posts.isEmpty;
 
   @override
   void dispose() {
@@ -303,7 +126,6 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _searchQuery = normalized;
       _posts = [];
-      _recommendedListings = [];
       _feedHasMore = true;
     });
     _loadRecommendations(reset: true);
@@ -315,40 +137,6 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildDirectionSection() {
-    if (_usingPosts) {
-      return Padding(
-        padding: EdgeInsets.fromLTRB(
-          MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
-              ? AppTheme.sp24
-              : AppTheme.sp16,
-          AppTheme.sp14,
-          MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
-              ? AppTheme.sp24
-              : AppTheme.sp16,
-          AppTheme.sp8,
-        ),
-        child: _PostSectionTitle(
-          selectedType: _postTypeFilter,
-          selectedSort: _postSort,
-          onTypeChanged: (value) {
-            if (_postTypeFilter == value) return;
-            setState(() {
-              _postTypeFilter = value;
-              _feedHasMore = true;
-            });
-            _loadRecommendations(reset: true);
-          },
-          onSortChanged: (value) {
-            if (_postSort == value) return;
-            setState(() {
-              _postSort = value;
-              _feedHasMore = true;
-            });
-            _loadRecommendations(reset: true);
-          },
-        ),
-      );
-    }
     return Padding(
       padding: EdgeInsets.fromLTRB(
         MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
@@ -360,32 +148,25 @@ class _HomePageState extends State<HomePage> {
             : AppTheme.sp16,
         AppTheme.sp8,
       ),
-      child: _SectionTitle(
-        selectedDirection: _directionFilter,
-        onDirectionChanged: (direction) {
-          if (_directionFilter == direction) return;
+      child: _PostSectionTitle(
+        selectedType: _postTypeFilter,
+        selectedSort: _postSort,
+        onTypeChanged: (value) {
+          if (_postTypeFilter == value) return;
           setState(() {
-            _directionFilter = direction;
-            _recommendedListings = [];
+            _postTypeFilter = value;
             _feedHasMore = true;
           });
           _loadRecommendations(reset: true);
         },
-      ),
-    );
-  }
-
-  Widget _buildErrandSliver() {
-    return SliverToBoxAdapter(
-      child: _ErrandRail(
-        errands: _errands,
-        onRespond: _respond,
-        onFeedbackApplied: _removeErrand,
-        feedbackService: _feedbackService,
-        onCreate: () => context.push(PublishNavigation.errand),
-        onOpenBoard: () => context.push('/errands'),
-        loadError: _errandLoadError,
-        onRetry: _loadErrands,
+        onSortChanged: (value) {
+          if (_postSort == value) return;
+          setState(() {
+            _postSort = value;
+            _feedHasMore = true;
+          });
+          _loadRecommendations(reset: true);
+        },
       ),
     );
   }
@@ -435,7 +216,6 @@ class _HomePageState extends State<HomePage> {
               onClear: _clearSearch,
             ),
           ),
-          _buildErrandSliver(),
           const SliverFillRemaining(
             hasScrollBody: false,
             child: _HomeLoadingState(),
@@ -457,7 +237,6 @@ class _HomePageState extends State<HomePage> {
                 onClear: _clearSearch,
               ),
             ),
-            _buildErrandSliver(),
             SliverFillRemaining(
               hasScrollBody: false,
               child: _HomeErrorState(
@@ -482,39 +261,14 @@ class _HomePageState extends State<HomePage> {
                 onClear: _clearSearch,
               ),
             ),
-            _buildErrandSliver(),
             SliverToBoxAdapter(child: _buildDirectionSection()),
-            if (_voices.isNotEmpty && _directionFilter == 'all' && !_usingPosts)
-              SliverToBoxAdapter(
-                child: _WhatPeopleWant(
-                  voices: _voices,
-                  onRespond: _respond,
-                  feedbackService: _feedbackService,
-                  onFeedbackApplied: _removeVoice,
-                ),
-              )
-            else if (_usingPosts)
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: _PostEmptyState(
-                  showCreateAction:
-                      _postTypeFilter == 'all' ||
-                      _postTypeFilter == 'discussion',
-                ),
-              )
-            else
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: _HomeEmptyState(
-                  isColdStart: _directionFilter == 'all',
-                  onOffer: () => context.push(
-                    PublishNavigation.listing(direction: 'offer'),
-                  ),
-                  onWanted: () => context.push(
-                    PublishNavigation.listing(direction: 'wanted'),
-                  ),
-                ),
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: _PostEmptyState(
+                showCreateAction:
+                    _postTypeFilter == 'all' || _postTypeFilter == 'discussion',
               ),
+            ),
           ],
         ),
       );
@@ -544,93 +298,32 @@ class _HomePageState extends State<HomePage> {
                 onClear: _clearSearch,
               ),
             ),
-            _buildErrandSliver(),
             SliverToBoxAdapter(child: _buildDirectionSection()),
-            if (_usingPosts && _recommendationLoading)
+            if (_recommendationLoading)
               const SliverToBoxAdapter(child: LinearProgressIndicator()),
-            if (_usingPosts)
-              SliverToBoxAdapter(
-                child: _PostMasonryGrid(
-                  posts: _posts,
-                  onTap: _openPost,
-                  loadingMore: _feedLoading,
-                  loadError: _postFeedError,
-                  onRetry: () {
-                    final reset = _postFeedRetryReset;
-                    setState(() {
-                      if (!reset) _feedLoading = true;
-                      _postFeedError = null;
-                    });
-                    _loadRecommendations(reset: reset);
-                  },
-                  feedbackMenuBuilder: (post) => FeedFeedbackMenu(
-                    service: _feedbackService,
-                    resourceType: FeedResourceType.post,
-                    resourceId: post.id,
-                    compact: true,
-                    onApplied: (_) => _removePost(post),
-                  ),
-                ),
-              )
-            else
-              SliverPadding(
-                padding: EdgeInsets.fromLTRB(
-                  MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
-                      ? AppTheme.sp24
-                      : AppTheme.sp16,
-                  AppTheme.sp4,
-                  MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop
-                      ? AppTheme.sp24
-                      : AppTheme.sp16,
-                  AppTheme.sp24,
-                ),
-                sliver: SliverLayoutBuilder(
-                  builder: (context, constraints) {
-                    final desktop = constraints.crossAxisExtent >= 820;
-                    final textScale = MediaQuery.textScalerOf(
-                      context,
-                    ).scale(1).clamp(1.0, 2.0);
-                    final baseAspectRatio = desktop ? 0.76 : 0.60;
-                    return SliverGrid(
-                      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                        maxCrossAxisExtent: desktop ? 300 : 320,
-                        childAspectRatio:
-                            baseAspectRatio / (1 + (textScale - 1) * 0.75),
-                        crossAxisSpacing: desktop ? 18 : 14,
-                        mainAxisSpacing: desktop ? 18 : 14,
-                      ),
-                      delegate: SliverChildBuilderDelegate(
-                        (context, i) {
-                          if (i >= _recommendedListings.length) {
-                            return const Center(
-                              child: Padding(
-                                padding: EdgeInsets.all(16),
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              ),
-                            );
-                          }
-                          final listing = _recommendedListings[i];
-                          return ListingCard(
-                            listing: listing,
-                            onTap: () => context.push('/listing/${listing.id}'),
-                            feedbackMenu: FeedFeedbackMenu(
-                              service: _feedbackService,
-                              resourceType: FeedResourceType.listing,
-                              resourceId: listing.id,
-                              onApplied: (_) => _removeListing(listing),
-                            ),
-                          );
-                        },
-                        childCount:
-                            _recommendedListings.length +
-                            (_feedHasMore ? 1 : 0),
-                      ),
-                    );
-                  },
+            SliverToBoxAdapter(
+              child: _PostMasonryGrid(
+                posts: _posts,
+                onTap: _openPost,
+                loadingMore: _feedLoading,
+                loadError: _postFeedError,
+                onRetry: () {
+                  final reset = _postFeedRetryReset;
+                  setState(() {
+                    if (!reset) _feedLoading = true;
+                    _postFeedError = null;
+                  });
+                  _loadRecommendations(reset: reset);
+                },
+                feedbackMenuBuilder: (post) => FeedFeedbackMenu(
+                  service: _feedbackService,
+                  resourceType: FeedResourceType.post,
+                  resourceId: post.id,
+                  compact: true,
+                  onApplied: (_) => _removePost(post),
                 ),
               ),
+            ),
           ],
         ),
       ),
@@ -1037,89 +730,6 @@ class _HomeTaskHeader extends StatelessWidget {
   }
 }
 
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({
-    required this.selectedDirection,
-    required this.onDirectionChanged,
-  });
-
-  final String selectedDirection;
-  final ValueChanged<String> onDirectionChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
-    final scheme = Theme.of(context).colorScheme;
-    final desktop = MediaQuery.sizeOf(context).width >= AppBreakpoints.desktop;
-    return Wrap(
-      spacing: AppTheme.sp12,
-      runSpacing: 10,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      alignment: desktop ? WrapAlignment.spaceBetween : WrapAlignment.start,
-      children: [
-        ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: desktop ? 620 : double.infinity,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                l.homeSectionTitle,
-                style: TextStyle(
-                  color: scheme.onSurface,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.3,
-                ),
-              ),
-              const SizedBox(height: AppTheme.sp2),
-              Text(
-                l.homeSectionSubtitle,
-                style: TextStyle(
-                  color: scheme.onSurfaceVariant,
-                  fontSize: 12,
-                  height: 1.3,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        ),
-        SegmentedButton<String>(
-          showSelectedIcon: false,
-          segments: [
-            ButtonSegment(
-              value: 'all',
-              label: Text(l.listingDirectionAll, softWrap: false),
-            ),
-            ButtonSegment(
-              value: 'offer',
-              label: Text(l.listingDirectionOffer, softWrap: false),
-            ),
-            ButtonSegment(
-              value: 'wanted',
-              label: Text(l.listingDirectionWanted, softWrap: false),
-            ),
-          ],
-          selected: {selectedDirection},
-          onSelectionChanged: (values) => onDirectionChanged(values.first),
-          style: ButtonStyle(
-            padding: WidgetStateProperty.all(
-              const EdgeInsets.symmetric(horizontal: AppTheme.sp14),
-            ),
-            visualDensity: VisualDensity.standard,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            textStyle: WidgetStateProperty.all(
-              const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _HomeLoadingState extends StatelessWidget {
   const _HomeLoadingState();
 
@@ -1201,488 +811,6 @@ class _HomeErrorState extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _HomeEmptyState extends StatelessWidget {
-  final bool isColdStart;
-  final VoidCallback onOffer;
-  final VoidCallback onWanted;
-
-  const _HomeEmptyState({
-    required this.isColdStart,
-    required this.onOffer,
-    required this.onWanted,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final dark = theme.brightness == Brightness.dark;
-    final l = AppLocalizations.of(context)!;
-
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppTheme.sp24),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 560),
-          padding: const EdgeInsets.all(AppTheme.sp24),
-          decoration: BoxDecoration(
-            color: scheme.surface,
-            borderRadius: BorderRadius.circular(AppTheme.radius2xl),
-            border: Border.all(color: scheme.outlineVariant),
-            boxShadow: dark ? const [] : AppTheme.softShadow,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: scheme.secondaryContainer,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  isColdStart
-                      ? Icons.inventory_2_outlined
-                      : Icons.search_off_outlined,
-                  size: 28,
-                  color: scheme.onSecondaryContainer,
-                ),
-              ),
-              const SizedBox(height: AppTheme.sp16),
-              if (isColdStart)
-                Text(
-                  l.homeColdStartTitle,
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 16,
-                  ),
-                ),
-              if (isColdStart) const SizedBox(height: AppTheme.sp8),
-              Text(
-                isColdStart ? l.homeColdStartBody : l.homeFilterEmpty,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: isColdStart ? FontWeight.w400 : FontWeight.w600,
-                  color: scheme.onSurfaceVariant,
-                  height: 1.4,
-                ),
-              ),
-              if (isColdStart) ...[
-                const SizedBox(height: AppTheme.sp20),
-                Wrap(
-                  spacing: AppTheme.sp12,
-                  runSpacing: AppTheme.sp8,
-                  alignment: WrapAlignment.center,
-                  children: [
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(140, 42),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(
-                            AppTheme.radiusLg,
-                          ),
-                        ),
-                        textStyle: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      onPressed: onOffer,
-                      icon: const Icon(Icons.north_east_rounded, size: 18),
-                      label: Text(l.homeActionOffer),
-                    ),
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(140, 42),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(
-                            AppTheme.radiusLg,
-                          ),
-                        ),
-                        textStyle: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      onPressed: onWanted,
-                      icon: const Icon(Icons.south_west_rounded, size: 18),
-                      label: Text(l.homeActionWanted),
-                    ),
-                  ],
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ErrandRail extends StatelessWidget {
-  const _ErrandRail({
-    required this.errands,
-    required this.onRespond,
-    required this.onFeedbackApplied,
-    required this.feedbackService,
-    required this.onCreate,
-    required this.onOpenBoard,
-    required this.loadError,
-    required this.onRetry,
-  });
-
-  final List<UserIntent> errands;
-  final void Function(UserIntent) onRespond;
-  final void Function(UserIntent) onFeedbackApplied;
-  final FeedFeedbackService feedbackService;
-  final VoidCallback onCreate;
-  final VoidCallback onOpenBoard;
-  final String? loadError;
-  final VoidCallback onRetry;
-
-  String _modeLabel(AppLocalizations l, String? mode) => switch (mode) {
-    'pickup' => l.errandModePickup,
-    'buy' => l.errandModeBuy,
-    'queue' => l.errandModeQueue,
-    'print' => l.errandModePrint,
-    'return' => l.errandModeReturn,
-    _ => l.errandModeOther,
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppTheme.sp16,
-        AppTheme.sp12,
-        AppTheme.sp16,
-        AppTheme.sp8,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      l.errandFeedTitle,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: AppTheme.sp4),
-                    Text(
-                      l.errandFeedBody,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                key: const ValueKey('home-open-errands'),
-                tooltip: l.errandBoardTitle,
-                onPressed: onOpenBoard,
-                icon: const Icon(Icons.view_list_outlined),
-              ),
-              IconButton.filledTonal(
-                key: const ValueKey('home-create-errand'),
-                tooltip: l.errandCreateAction,
-                onPressed: onCreate,
-                icon: const Icon(Icons.add_task_rounded),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppTheme.sp8),
-          if (errands.isEmpty && loadError != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: AppTheme.sp8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      l.errandLoadFailed,
-                      style: TextStyle(
-                        color: theme.colorScheme.error,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                  TextButton.icon(
-                    onPressed: onRetry,
-                    icon: const Icon(Icons.refresh_rounded, size: 17),
-                    label: Text(l.retry),
-                  ),
-                ],
-              ),
-            )
-          else if (errands.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: AppTheme.sp8),
-              child: Text(
-                l.errandCampusEmpty,
-                style: TextStyle(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontSize: 13,
-                ),
-              ),
-            ),
-          ...errands.map(
-            (intent) => _ErrandCard(
-              intent: intent,
-              modeLabel: _modeLabel(l, intent.slots.serviceMode),
-              onRespond: () => onRespond(intent),
-              feedbackMenu: FeedFeedbackMenu(
-                service: feedbackService,
-                resourceType: FeedResourceType.intent,
-                resourceId: intent.id,
-                compact: true,
-                onApplied: (_) => onFeedbackApplied(intent),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ErrandCard extends StatelessWidget {
-  const _ErrandCard({
-    required this.intent,
-    required this.modeLabel,
-    required this.onRespond,
-    required this.feedbackMenu,
-  });
-
-  final UserIntent intent;
-  final String modeLabel;
-  final VoidCallback onRespond;
-  final Widget feedbackMenu;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
-    final theme = Theme.of(context);
-    final pickup = intent.slots.pickupPlace?.trim();
-    final dropoff = intent.slots.dropoffPlace?.trim();
-    final time = intent.slots.time?.hint?.trim();
-    final reward = intent.slots.price?.cents;
-    return Card(
-      margin: const EdgeInsets.only(bottom: AppTheme.sp8),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppTheme.sp14,
-          AppTheme.sp12,
-          AppTheme.sp8,
-          AppTheme.sp12,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    intent.slots.subject?.trim().isNotEmpty == true
-                        ? intent.slots.subject!.trim()
-                        : intent.rawInput,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                feedbackMenu,
-              ],
-            ),
-            const SizedBox(height: AppTheme.sp8),
-            Wrap(
-              spacing: AppTheme.sp6,
-              runSpacing: AppTheme.sp6,
-              children: [
-                Chip(
-                  avatar: Icon(
-                    intent.slots.isServiceOffer
-                        ? Icons.north_east_rounded
-                        : Icons.south_west_rounded,
-                    size: 16,
-                  ),
-                  label: Text(
-                    intent.slots.isServiceOffer
-                        ? l.errandServiceOffer
-                        : l.errandServiceWanted,
-                  ),
-                  visualDensity: VisualDensity.compact,
-                ),
-                Chip(
-                  avatar: const Icon(Icons.add_task_rounded, size: 16),
-                  label: Text(modeLabel),
-                  visualDensity: VisualDensity.compact,
-                ),
-                if (reward != null && reward > 0)
-                  Chip(
-                    avatar: const Icon(Icons.payments_outlined, size: 16),
-                    label: Text('${(reward / 100).toStringAsFixed(0)} 元'),
-                    visualDensity: VisualDensity.compact,
-                  ),
-              ],
-            ),
-            if ((pickup?.isNotEmpty == true) || (dropoff?.isNotEmpty == true))
-              Padding(
-                padding: const EdgeInsets.only(top: AppTheme.sp4),
-                child: Text(
-                  [
-                    if (pickup?.isNotEmpty == true)
-                      '${l.errandPickupShort} $pickup',
-                    if (dropoff?.isNotEmpty == true)
-                      '${l.errandDropoffShort} $dropoff',
-                  ].join('  ·  '),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            if (time?.isNotEmpty == true)
-              Padding(
-                padding: const EdgeInsets.only(top: AppTheme.sp4),
-                child: Text(
-                  '${l.errandTimeShort} $time',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            const SizedBox(height: AppTheme.sp8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.tonalIcon(
-                key: ValueKey('errand-respond-${intent.id}'),
-                onPressed: onRespond,
-                icon: const Icon(Icons.handshake_outlined, size: 18),
-                label: Text(
-                  intent.slots.isServiceOffer
-                      ? l.errandNeedServiceAction
-                      : l.errandRespondAction,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _WhatPeopleWant extends StatelessWidget {
-  const _WhatPeopleWant({
-    required this.voices,
-    required this.onRespond,
-    required this.feedbackService,
-    required this.onFeedbackApplied,
-  });
-
-  final List<UserIntent> voices;
-  final void Function(UserIntent) onRespond;
-  final FeedFeedbackService feedbackService;
-  final void Function(UserIntent) onFeedbackApplied;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppTheme.sp16,
-        AppTheme.sp8,
-        AppTheme.sp16,
-        AppTheme.sp24,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            l.homeVoicesTitle,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: AppTheme.sp4),
-          Text(
-            l.homeVoicesBody,
-            style: TextStyle(
-              fontSize: 13,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: AppTheme.sp12),
-          ...voices.map(
-            (intent) => Card(
-              margin: const EdgeInsets.only(bottom: AppTheme.sp8),
-              child: ListTile(
-                title: Text(
-                  intent.rawInput,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 14),
-                ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    FeedFeedbackMenu(
-                      service: feedbackService,
-                      resourceType: FeedResourceType.intent,
-                      resourceId: intent.id,
-                      compact: true,
-                      onApplied: (_) => onFeedbackApplied(intent),
-                    ),
-                    const SizedBox(width: AppTheme.sp4),
-                    FilledButton.tonal(
-                      onPressed: () => onRespond(intent),
-                      child: Text(l.intentRespondAction),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: AppTheme.sp8),
-          Center(
-            child: OutlinedButton(
-              onPressed: () => context.push('/create'),
-              child: Text(l.homeColdStartAction),
-            ),
-          ),
-        ],
       ),
     );
   }

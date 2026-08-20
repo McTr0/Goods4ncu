@@ -126,6 +126,34 @@ class PostDiscoveryCard extends StatelessWidget {
                         ),
                       ),
                     ],
+                    if (post.postKind == 'mutual_aid') ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 5,
+                        runSpacing: 5,
+                        children: [
+                          Chip(
+                            label: Text(switch (post.resolutionStatus) {
+                              'resolved' => l.postResolutionResolved,
+                              'closed' => l.postResolutionClosed,
+                              _ => l.postResolutionOpen,
+                            }),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          if (post.mutualAidMetadata['service_direction'] !=
+                              null)
+                            Chip(
+                              label: Text(
+                                post.mutualAidMetadata['service_direction'] ==
+                                        'offer'
+                                    ? l.postMutualAidOffer
+                                    : l.postMutualAidWanted,
+                              ),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                        ],
+                      ),
+                    ],
                     if (listing != null) ...[
                       const SizedBox(height: 8),
                       PriceTag(

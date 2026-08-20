@@ -29,8 +29,6 @@ import '../services/admin_role_cache.dart';
 import '../pages/trust_page.dart';
 import '../pages/post_detail_page.dart';
 import '../pages/create_post_page.dart';
-import '../pages/create_errand_page.dart';
-import '../pages/campus_errands_page.dart';
 import '../pages/campus_map_page.dart';
 import '../pages/live2d_preview_page.dart';
 import '../pages/publish_hub_page.dart';
@@ -137,10 +135,6 @@ final GoRouter appRouter = GoRouter(
             final id = state.pathParameters['id']!;
             return PostDetailPage(postId: id);
           },
-        ),
-        GoRoute(
-          path: '/errands',
-          builder: (context, state) => const CampusErrandsPage(),
         ),
         GoRoute(
           path: '/campus-map',
@@ -263,13 +257,6 @@ final GoRouter appRouter = GoRouter(
           ),
         ),
         GoRoute(
-          path: PublishNavigation.errand,
-          pageBuilder: (context, state) => NoTransitionPage(
-            key: state.pageKey,
-            child: const CreateErrandPage(),
-          ),
-        ),
-        GoRoute(
           path: PublishNavigation.listingPath,
           pageBuilder: (context, state) {
             final direction = state.uri.queryParameters['direction'];
@@ -348,7 +335,6 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
 
   int _tabIndexForLocation(String location) {
     if (location == '/') return 0;
-    if (location == '/errands') return 0;
     if (location == '/conversations' ||
         location == '/campus-map' ||
         location.startsWith('/user-chat/') ||

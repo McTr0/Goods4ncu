@@ -36,8 +36,8 @@ Widget _app(
     body: Center(
       child: FeedFeedbackMenu(
         service: service,
-        resourceType: FeedResourceType.intent,
-        resourceId: 'intent-1',
+        resourceType: FeedResourceType.post,
+        resourceId: 'post-1',
         onApplied: onApplied,
       ),
     ),

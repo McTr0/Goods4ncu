@@ -6,7 +6,6 @@ import 'base_service.dart';
 
 enum FeedResourceType {
   listing('listing'),
-  intent('intent'),
   post('post');
 
   const FeedResourceType(this.wire);

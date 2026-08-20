@@ -35,13 +35,6 @@ class PublishHubPage extends StatelessWidget {
         color: AppTheme.info,
         location: PublishNavigation.listing(direction: 'wanted'),
       ),
-      _PublishChoice(
-        choiceKey: const ValueKey('publish-choice-errand'),
-        title: l.errandPublishTitle,
-        icon: Icons.directions_run_rounded,
-        color: AppTheme.warning,
-        location: PublishNavigation.errand,
-      ),
     ];
 
     return Scaffold(

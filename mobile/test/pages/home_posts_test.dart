@@ -2,13 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
-import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/models/post.dart';
 import 'package:goods4ncu_mobile/pages/home_page.dart';
 import 'package:goods4ncu_mobile/services/feed_feedback_service.dart';
-import 'package:goods4ncu_mobile/services/intent_service.dart';
 import 'package:goods4ncu_mobile/services/post_service.dart';
-import 'package:goods4ncu_mobile/services/recommendation_service.dart';
 import 'package:goods4ncu_mobile/theme/app_theme.dart';
 
 class _FakePostService extends PostService {
@@ -98,98 +95,17 @@ class _FailingPostService extends PostService {
   }
 }
 
-class _UnexpectedRecommendationService extends RecommendationService {
-  bool called = false;
-
-  @override
-  Future<List<Listing>> getRecommendationFeed({
-    int limit = 20,
-    int offset = 0,
-    String direction = 'all',
-  }) async {
-    called = true;
-    return const [];
-  }
-}
-
-class _EmptyIntentService extends IntentService {
-  @override
-  Future<List<UserIntent>> campusFeed({
-    IntentKind? kind,
-    int limit = 30,
-  }) async => const [];
-}
-
-class _ErrandIntentService extends IntentService {
-  @override
-  Future<List<UserIntent>> campusFeed({
-    IntentKind? kind,
-    int limit = 30,
-  }) async {
-    if (kind != IntentKind.help) return const [];
-    return [
-      UserIntent.fromJson({
-        'id': 'errand-home-1',
-        'kind': 'help',
-        'raw_input': '帮我取打印材料',
-        'slots': {
-          'subject': '取打印材料',
-          'service_mode': 'print',
-          'pickup_place': '前湖校区图书馆',
-          'dropoff_place': '修贤广场',
-          'time': {'kind': 'flexible', 'hint': '今天 18:00 前'},
-          'price': {'kind': 'exact', 'cents': 1200},
-        },
-        'status': 'active',
-      }),
-    ];
-  }
-}
-
-Widget _app({
-  required PostService posts,
-  required RecommendationService legacy,
-  IntentService? intents,
-}) {
+Widget _app({required PostService posts}) {
   return MaterialApp(
     theme: AppTheme.light,
     locale: const Locale('en'),
     localizationsDelegates: AppLocalizations.localizationsDelegates,
     supportedLocales: AppLocalizations.supportedLocales,
-    home: HomePage(
-      postService: posts,
-      recommendationService: legacy,
-      intentService: intents ?? _EmptyIntentService(),
-      feedbackService: FeedFeedbackService(),
-    ),
+    home: HomePage(postService: posts, feedbackService: FeedFeedbackService()),
   );
 }
 
 void main() {
-  testWidgets('shows structured campus errands above the post feed', (
-    tester,
-  ) async {
-    final posts = _FakePostService(
-      const PostsResponse(items: [], total: 0, limit: 20, offset: 0),
-    );
-    await tester.pumpWidget(
-      _app(
-        posts: posts,
-        legacy: _UnexpectedRecommendationService(),
-        intents: _ErrandIntentService(),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('Campus errands'), findsOneWidget);
-    expect(find.text('Pick up 前湖校区图书馆  ·  Drop off 修贤广场'), findsOneWidget);
-    expect(find.text(r'12 元'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('errand-respond-errand-home-1')),
-      findsOneWidget,
-    );
-  });
-
   testWidgets('renders successful unified post results as discovery cards', (
     tester,
   ) async {
@@ -213,15 +129,12 @@ void main() {
         offset: 0,
       ),
     );
-    final legacy = _UnexpectedRecommendationService();
-
-    await tester.pumpWidget(_app(posts: posts, legacy: legacy));
+    await tester.pumpWidget(_app(posts: posts));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('post-card-post-1')), findsOneWidget);
     expect(find.byKey(const ValueKey('post-cover-post-1')), findsOneWidget);
     expect(find.text('Where can I print tonight?'), findsOneWidget);
-    expect(legacy.called, isFalse);
   });
 
   testWidgets('keeps an empty successful response in unified post mode', (
@@ -230,32 +143,20 @@ void main() {
     final posts = _FakePostService(
       const PostsResponse(items: [], total: 0, limit: 20, offset: 0),
     );
-    final legacy = _UnexpectedRecommendationService();
-
-    await tester.pumpWidget(_app(posts: posts, legacy: legacy));
+    await tester.pumpWidget(_app(posts: posts));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('post-filter-all')), findsOneWidget);
     expect(find.byKey(const ValueKey('home-create-post')), findsNothing);
     expect(posts.calls, 1);
-    expect(legacy.called, isFalse);
   });
 
-  testWidgets(
-    'does not hide a failed post feed behind the legacy listing feed',
-    (tester) async {
-      final legacy = _UnexpectedRecommendationService();
+  testWidgets('shows a unified-feed error when posts fail', (tester) async {
+    await tester.pumpWidget(_app(posts: _FailingPostService()));
+    await tester.pumpAndSettle();
 
-      await tester.pumpWidget(
-        _app(posts: _FailingPostService(), legacy: legacy),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.text('Could not load right now'), findsOneWidget);
-      expect(find.text('Campus errands'), findsOneWidget);
-      expect(legacy.called, isFalse);
-    },
-  );
+    expect(find.text('Could not load right now'), findsOneWidget);
+  });
 
   testWidgets('shows price from a server listing preview in a post card', (
     tester,
@@ -291,9 +192,7 @@ void main() {
       ),
     );
 
-    await tester.pumpWidget(
-      _app(posts: posts, legacy: _UnexpectedRecommendationService()),
-    );
+    await tester.pumpWidget(_app(posts: posts));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('25.00'), findsOneWidget);
@@ -344,8 +243,6 @@ void main() {
           path: '/',
           builder: (context, state) => HomePage(
             postService: posts,
-            recommendationService: _UnexpectedRecommendationService(),
-            intentService: _EmptyIntentService(),
             feedbackService: FeedFeedbackService(),
           ),
         ),
@@ -398,9 +295,7 @@ void main() {
       ),
     );
 
-    await tester.pumpWidget(
-      _app(posts: posts, legacy: _UnexpectedRecommendationService()),
-    );
+    await tester.pumpWidget(_app(posts: posts));
     await tester.pumpAndSettle();
 
     await tester.enterText(
@@ -427,9 +322,7 @@ void main() {
       const PostsResponse(items: [], total: 0, limit: 20, offset: 0),
     );
 
-    await tester.pumpWidget(
-      _app(posts: posts, legacy: _UnexpectedRecommendationService()),
-    );
+    await tester.pumpWidget(_app(posts: posts));
     await tester.pumpAndSettle();
 
     expect(find.text('All'), findsOneWidget);
@@ -448,9 +341,7 @@ void main() {
     tester,
   ) async {
     final posts = _PagingPostService();
-    final legacy = _UnexpectedRecommendationService();
-
-    await tester.pumpWidget(_app(posts: posts, legacy: legacy));
+    await tester.pumpWidget(_app(posts: posts));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('post-card-post-0')), findsOneWidget);
 
@@ -464,7 +355,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('post-feed-retry')), findsOneWidget);
     expect(find.byKey(const ValueKey('post-card-post-0')), findsOneWidget);
-    expect(legacy.called, isFalse);
 
     await tester.tap(find.byKey(const ValueKey('post-feed-retry')));
     await tester.pumpAndSettle();

@@ -37,11 +37,7 @@ class _IntentRespondDialogState extends State<IntentRespondDialog> {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     return AlertDialog(
-      title: Text(
-        widget.intent.kind == IntentKind.help
-            ? l.errandRespondTitle
-            : l.intentRespondTitle,
-      ),
+      title: Text(l.intentRespondTitle),
       // Scrollable: an AlertDialog's content is not, and on a short screen with
       // the keyboard up this column does not fit.
       content: SingleChildScrollView(
@@ -62,9 +58,7 @@ class _IntentRespondDialogState extends State<IntentRespondDialog> {
               maxLines: 3,
               minLines: 2,
               decoration: InputDecoration(
-                hintText: widget.intent.kind == IntentKind.help
-                    ? l.errandRespondHint
-                    : l.intentRespondHint,
+                hintText: l.intentRespondHint,
                 border: const OutlineInputBorder(),
               ),
             ),

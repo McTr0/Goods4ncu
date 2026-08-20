@@ -36,6 +36,8 @@ class _FakePostService extends PostService {
     String? category,
     List<String> tags = const [],
     String? coverImageUrl,
+    String postKind = 'discussion',
+    Map<String, dynamic> mutualAidMetadata = const {},
   }) async {
     this.coverImageUrl = coverImageUrl;
     return CampusPost.fromJson({
@@ -182,7 +184,9 @@ void main() {
       find.byKey(const ValueKey('post-body-field')),
       'A useful campus update.',
     );
-    await tester.ensureVisible(find.byKey(const ValueKey('post-publish-action')));
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('post-publish-action')),
+    );
     await tester.tap(find.byKey(const ValueKey('post-publish-action')));
     await tester.pumpAndSettle();
 

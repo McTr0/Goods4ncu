@@ -41,11 +41,15 @@ class CampusPost {
   const CampusPost({
     required this.id,
     required this.postType,
+    this.postKind = 'discussion',
     required this.title,
     required this.author,
     required this.replyCount,
     required this.status,
     required this.isLocked,
+    this.mutualAidMetadata = const {},
+    this.resolutionStatus = 'open',
+    this.canUpdateResolution = false,
     required this.createdAt,
     required this.updatedAt,
     required this.lastActivityAt,
@@ -63,6 +67,7 @@ class CampusPost {
 
   final String id;
   final PostType postType;
+  final String postKind;
   final String? category;
   final String title;
   final String? body;
@@ -74,6 +79,9 @@ class CampusPost {
   final int replyCount;
   final String status;
   final bool isLocked;
+  final Map<String, dynamic> mutualAidMetadata;
+  final String resolutionStatus;
+  final bool canUpdateResolution;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final DateTime? lastActivityAt;
@@ -101,6 +109,7 @@ class CampusPost {
   CampusPost copyWith({
     String? id,
     PostType? postType,
+    String? postKind,
     String? category,
     String? title,
     String? body,
@@ -112,6 +121,9 @@ class CampusPost {
     int? replyCount,
     String? status,
     bool? isLocked,
+    Map<String, dynamic>? mutualAidMetadata,
+    String? resolutionStatus,
+    bool? canUpdateResolution,
     DateTime? createdAt,
     DateTime? updatedAt,
     DateTime? lastActivityAt,
@@ -123,6 +135,7 @@ class CampusPost {
     return CampusPost(
       id: id ?? this.id,
       postType: postType ?? this.postType,
+      postKind: postKind ?? this.postKind,
       category: category ?? this.category,
       title: title ?? this.title,
       body: body ?? this.body,
@@ -134,6 +147,9 @@ class CampusPost {
       replyCount: replyCount ?? this.replyCount,
       status: status ?? this.status,
       isLocked: isLocked ?? this.isLocked,
+      mutualAidMetadata: mutualAidMetadata ?? this.mutualAidMetadata,
+      resolutionStatus: resolutionStatus ?? this.resolutionStatus,
+      canUpdateResolution: canUpdateResolution ?? this.canUpdateResolution,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       lastActivityAt: lastActivityAt ?? this.lastActivityAt,
@@ -152,6 +168,7 @@ class CampusPost {
     return CampusPost(
       id: json['id']?.toString() ?? '',
       postType: PostType.fromWire(json['post_type']),
+      postKind: json['post_kind']?.toString() ?? 'discussion',
       category: _nullableString(json['category']),
       title: json['title']?.toString() ?? '',
       body: _nullableString(json['body']),
@@ -167,6 +184,11 @@ class CampusPost {
       replyCount: (json['reply_count'] as num?)?.toInt() ?? 0,
       status: json['status']?.toString() ?? 'active',
       isLocked: json['is_locked'] == true,
+      mutualAidMetadata: json['mutual_aid_metadata'] is Map
+          ? Map<String, dynamic>.from(json['mutual_aid_metadata'] as Map)
+          : const {},
+      resolutionStatus: json['resolution_status']?.toString() ?? 'open',
+      canUpdateResolution: json['can_update_resolution'] == true,
       createdAt: _dateTime(json['created_at']),
       updatedAt: _dateTime(json['updated_at']),
       lastActivityAt: _dateTime(json['last_activity_at']),
@@ -185,6 +207,7 @@ class CampusPost {
     return CampusPost(
       id: 'listing-${listing.id}',
       postType: PostType.listing,
+      postKind: 'discussion',
       category: listing.category,
       title: listing.title,
       bodyExcerpt: listing.description,

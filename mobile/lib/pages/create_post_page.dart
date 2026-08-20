@@ -10,6 +10,7 @@ import '../services/post_service.dart';
 import '../services/upload_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
+import '../utils/mutual_aid_utils.dart';
 
 class PickedPostImage {
   const PickedPostImage({
@@ -47,11 +48,20 @@ class _CreatePostPageState extends State<CreatePostPage> {
   final _bodyController = TextEditingController();
   final _categoryController = TextEditingController();
   final _tagsController = TextEditingController();
+  final _pickupController = TextEditingController();
+  final _dropoffController = TextEditingController();
+  final _timeController = TextEditingController();
+  final _rewardController = TextEditingController();
+  final _notesController = TextEditingController();
   late final PostService _postService;
   late final UploadService _uploadService;
   final ImagePicker _nativeImagePicker = ImagePicker();
   PickedPostImage? _coverImage;
   bool _submitting = false;
+  bool _mutualAid = false;
+  String _serviceDirection = 'wanted';
+  String _serviceMode = 'other';
+  int _validForDays = 1;
 
   @override
   void initState() {
@@ -66,6 +76,11 @@ class _CreatePostPageState extends State<CreatePostPage> {
     _bodyController.dispose();
     _categoryController.dispose();
     _tagsController.dispose();
+    _pickupController.dispose();
+    _dropoffController.dispose();
+    _timeController.dispose();
+    _rewardController.dispose();
+    _notesController.dispose();
     super.dispose();
   }
 
@@ -93,6 +108,28 @@ class _CreatePostPageState extends State<CreatePostPage> {
             .take(5)
             .toList(growable: false),
         coverImageUrl: coverImageUrl,
+        postKind: _mutualAid ? 'mutual_aid' : 'discussion',
+        mutualAidMetadata: _mutualAid
+            ? {
+                'service_direction': _serviceDirection,
+                'service_mode': _serviceMode,
+                if (_pickupController.text.trim().isNotEmpty)
+                  'pickup_place': _pickupController.text.trim(),
+                if (_dropoffController.text.trim().isNotEmpty)
+                  'dropoff_place': _dropoffController.text.trim(),
+                if (_timeController.text.trim().isNotEmpty)
+                  'time_hint': _timeController.text.trim(),
+                if (int.tryParse(_rewardController.text.trim()) != null)
+                  'reward_cents':
+                      int.parse(_rewardController.text.trim()) * 100,
+                if (_notesController.text.trim().isNotEmpty)
+                  'notes': _notesController.text.trim(),
+                'valid_until': DateTime.now()
+                    .toUtc()
+                    .add(Duration(days: _validForDays))
+                    .toIso8601String(),
+              }
+            : const {},
       );
       if (!mounted) return;
       context.go('/posts/${post.id}');
@@ -184,6 +221,132 @@ class _CreatePostPageState extends State<CreatePostPage> {
                   ),
                 ),
                 const SizedBox(height: AppTheme.sp20),
+                SegmentedButton<bool>(
+                  key: const ValueKey('post-kind-toggle'),
+                  showSelectedIcon: false,
+                  segments: [
+                    ButtonSegment(
+                      value: false,
+                      label: Text(l.postKindDiscussion),
+                    ),
+                    ButtonSegment(
+                      value: true,
+                      label: Text(l.postKindMutualAid),
+                    ),
+                  ],
+                  selected: {_mutualAid},
+                  onSelectionChanged: _submitting
+                      ? null
+                      : (values) => setState(() => _mutualAid = values.first),
+                ),
+                if (_mutualAid) ...[
+                  const SizedBox(height: AppTheme.sp14),
+                  SegmentedButton<String>(
+                    segments: [
+                      ButtonSegment(
+                        value: 'wanted',
+                        label: Text(l.postMutualAidWanted),
+                      ),
+                      ButtonSegment(
+                        value: 'offer',
+                        label: Text(l.postMutualAidOffer),
+                      ),
+                    ],
+                    selected: {_serviceDirection},
+                    onSelectionChanged: (values) =>
+                        setState(() => _serviceDirection = values.first),
+                  ),
+                  const SizedBox(height: AppTheme.sp12),
+                  DropdownButtonFormField<String>(
+                    initialValue: _serviceMode,
+                    decoration: InputDecoration(labelText: l.postMutualAidMode),
+                    items: [
+                      for (final mode in [
+                        'pickup',
+                        'buy',
+                        'queue',
+                        'print',
+                        'return',
+                        'other',
+                      ])
+                        DropdownMenuItem(
+                          value: mode,
+                          child: Text(mutualAidModeLabel(l, mode)),
+                        ),
+                    ],
+                    onChanged: (value) =>
+                        setState(() => _serviceMode = value ?? 'other'),
+                  ),
+                  const SizedBox(height: AppTheme.sp12),
+                  TextFormField(
+                    controller: _pickupController,
+                    maxLength: 120,
+                    decoration: InputDecoration(
+                      labelText: l.postMutualAidPickup,
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.sp12),
+                  TextFormField(
+                    controller: _dropoffController,
+                    maxLength: 120,
+                    decoration: InputDecoration(
+                      labelText: l.postMutualAidDropoff,
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.sp12),
+                  TextFormField(
+                    controller: _timeController,
+                    maxLength: 120,
+                    decoration: InputDecoration(labelText: l.postMutualAidTime),
+                  ),
+                  const SizedBox(height: AppTheme.sp12),
+                  TextFormField(
+                    controller: _rewardController,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: l.postMutualAidReward,
+                    ),
+                    validator: (value) {
+                      final raw = (value ?? '').trim();
+                      if (raw.isEmpty) return null;
+                      final yuan = int.tryParse(raw);
+                      return yuan == null || yuan < 0 || yuan > 100000
+                          ? l.postMutualAidRewardInvalid
+                          : null;
+                    },
+                  ),
+                  const SizedBox(height: AppTheme.sp12),
+                  DropdownButtonFormField<int>(
+                    initialValue: _validForDays,
+                    decoration: InputDecoration(
+                      labelText: l.postMutualAidValidity,
+                    ),
+                    items: [
+                      DropdownMenuItem(
+                        value: 1,
+                        child: Text(l.postMutualAidOneDay),
+                      ),
+                      DropdownMenuItem(
+                        value: 3,
+                        child: Text(l.postMutualAidThreeDays),
+                      ),
+                      DropdownMenuItem(
+                        value: 7,
+                        child: Text(l.postMutualAidSevenDays),
+                      ),
+                    ],
+                    onChanged: (value) =>
+                        setState(() => _validForDays = value ?? 1),
+                  ),
+                  const SizedBox(height: AppTheme.sp12),
+                  TextFormField(
+                    controller: _notesController,
+                    maxLength: 120,
+                    decoration: InputDecoration(
+                      labelText: l.postMutualAidNotes,
+                    ),
+                  ),
+                ],
                 if (_coverImage == null)
                   OutlinedButton.icon(
                     key: const ValueKey('post-pick-cover-action'),

@@ -3305,6 +3305,81 @@ class AppLocalizationsZh extends AppLocalizations {
   String get postPublishAction => '发布';
 
   @override
+  String get postKindDiscussion => '普通讨论';
+
+  @override
+  String get postKindMutualAid => '互助服务';
+
+  @override
+  String get postMutualAidWanted => '需要帮忙';
+
+  @override
+  String get postMutualAidOffer => '可以帮忙';
+
+  @override
+  String get postMutualAidMode => '互助类型';
+
+  @override
+  String get postMutualAidModePickup => '代取';
+
+  @override
+  String get postMutualAidModeBuy => '代买';
+
+  @override
+  String get postMutualAidModeQueue => '排队';
+
+  @override
+  String get postMutualAidModePrint => '打印';
+
+  @override
+  String get postMutualAidModeReturn => '归还';
+
+  @override
+  String get postMutualAidModeOther => '其他';
+
+  @override
+  String get postMutualAidPickup => '取件地点';
+
+  @override
+  String get postMutualAidDropoff => '交接地点';
+
+  @override
+  String get postMutualAidTime => '时间说明';
+
+  @override
+  String get postMutualAidReward => '报酬（元）';
+
+  @override
+  String get postMutualAidRewardInvalid => '报酬需为 0 到 100000 元的整数';
+
+  @override
+  String get postMutualAidValidity => '有效期';
+
+  @override
+  String get postMutualAidOneDay => '1 天';
+
+  @override
+  String get postMutualAidThreeDays => '3 天';
+
+  @override
+  String get postMutualAidSevenDays => '7 天';
+
+  @override
+  String get postResolutionOpen => '开放';
+
+  @override
+  String get postResolutionResolved => '已解决';
+
+  @override
+  String get postResolutionClosed => '已关闭';
+
+  @override
+  String get postResolutionUpdate => '更新互助状态';
+
+  @override
+  String get postMutualAidNotes => '补充说明';
+
+  @override
   String get postPublishFailed => '讨论发布失败，请稍后重试。';
 
   @override
@@ -3362,170 +3437,4 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get postStartAction => '发起讨论';
-
-  @override
-  String get errandPublishTitle => '校园待办';
-
-  @override
-  String get errandPublishIntro =>
-      '把取件、代买、排队、打印等小事说清楚，同学可以回应帮忙。默认 24 小时后过期；地点请写公共区域。';
-
-  @override
-  String get errandSubjectLabel => '要帮忙做什么？';
-
-  @override
-  String get errandSubjectHint => '例如：帮我从图书馆取一份打印材料';
-
-  @override
-  String get errandSubjectRequired => '请写下要帮忙完成的事情';
-
-  @override
-  String get errandModeLabel => '待办类型';
-
-  @override
-  String get errandServiceDirectionLabel => '服务方向';
-
-  @override
-  String get errandServiceWanted => '收服务';
-
-  @override
-  String get errandServiceOffer => '出服务';
-
-  @override
-  String get errandServiceWantedHint => '我需要同学帮我完成这件事';
-
-  @override
-  String get errandServiceOfferHint => '我可以替同学完成这件事';
-
-  @override
-  String get errandModePickup => '取件';
-
-  @override
-  String get errandModeBuy => '代买';
-
-  @override
-  String get errandModeQueue => '代排队';
-
-  @override
-  String get errandModePrint => '打印/复印';
-
-  @override
-  String get errandModeReturn => '送回/交接';
-
-  @override
-  String get errandModeOther => '其他';
-
-  @override
-  String get errandPickupLabel => '从哪里取？';
-
-  @override
-  String get errandPickupHint => '写校门、图书馆、驿站等公共地点';
-
-  @override
-  String get errandDropoffLabel => '送到哪里？';
-
-  @override
-  String get errandDropoffHint => '写方便交接的公共地点';
-
-  @override
-  String get errandTimeLabel => '什么时候方便？';
-
-  @override
-  String get errandTimeHint => '例如：今天 18:00 前，或今晚下课后';
-
-  @override
-  String get errandRewardLabel => '愿付报酬（元）';
-
-  @override
-  String get errandRewardHint => '选填，留空表示先沟通';
-
-  @override
-  String get errandValidForLabel => '需求有效期';
-
-  @override
-  String get errandValidForDay => '24 小时';
-
-  @override
-  String get errandValidForThreeDays => '3 天';
-
-  @override
-  String get errandValidForWeek => '1 周';
-
-  @override
-  String get errandNotesLabel => '补充说明';
-
-  @override
-  String get errandNotesHint => '数量、规格、联系方式等，别写敏感信息';
-
-  @override
-  String get errandPublishAction => '发布待办';
-
-  @override
-  String get errandPublishSuccess => '待办已发布，同学可以回应帮忙';
-
-  @override
-  String get errandPublishFailed => '待办发布失败，请稍后重试';
-
-  @override
-  String get errandFeedTitle => '校园待办';
-
-  @override
-  String get errandFeedBody => '附近同学正在寻找取件、代买和临时帮忙。';
-
-  @override
-  String get errandCreateAction => '发布待办';
-
-  @override
-  String get errandRespondAction => '我可以帮忙';
-
-  @override
-  String get errandNeedServiceAction => '我需要这项服务';
-
-  @override
-  String get errandPickupShort => '取';
-
-  @override
-  String get errandDropoffShort => '送';
-
-  @override
-  String get errandTimeShort => '时间';
-
-  @override
-  String get errandBoardTitle => '校园待办';
-
-  @override
-  String get errandTabCampus => '校园需求';
-
-  @override
-  String get errandTabMine => '我的待办';
-
-  @override
-  String get errandCampusEmpty => '暂时没有同学发布待办。';
-
-  @override
-  String get errandMineEmpty => '你还没有进行中的待办。';
-
-  @override
-  String get errandFulfilAction => '已完成';
-
-  @override
-  String get errandWithdrawAction => '撤回';
-
-  @override
-  String get errandFulfilled => '待办已标记为完成';
-
-  @override
-  String get errandWithdrawn => '待办已撤回';
-
-  @override
-  String get errandLoadFailed => '待办暂时没有加载出来';
-
-  @override
-  String get errandExpiresLabel => '限时需求';
-
-  @override
-  String get errandRespondTitle => '回应待办';
-
-  @override
-  String get errandRespondHint => '说明你能怎么帮、方便的时间和交接地点';
 }

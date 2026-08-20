@@ -12,6 +12,7 @@ import '../services/listing_service.dart';
 import '../services/post_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
+import '../utils/mutual_aid_utils.dart';
 import '../utils/platform_utils.dart';
 
 class PostDetailPage extends StatefulWidget {
@@ -245,6 +246,20 @@ class _PostDetailPageState extends State<PostDetailPage> {
     }
   }
 
+  Future<void> _setResolution(String value) async {
+    final post = _post;
+    if (post == null || post.postKind != 'mutual_aid') return;
+    try {
+      final updated = await _postService.updateResolution(post.id, value);
+      if (mounted) setState(() => _post = updated);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
@@ -350,7 +365,11 @@ class _PostDetailPageState extends State<PostDetailPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (!widget.omitOriginalPost) ...[
-          _ThreadPostCard(post: post, listing: _listing),
+          _ThreadPostCard(
+            post: post,
+            listing: _listing,
+            onSetResolution: _setResolution,
+          ),
           const SizedBox(height: AppTheme.sp16),
         ],
         Row(
@@ -410,10 +429,15 @@ class _PostDetailPageState extends State<PostDetailPage> {
 }
 
 class _ThreadPostCard extends StatelessWidget {
-  const _ThreadPostCard({required this.post, required this.listing});
+  const _ThreadPostCard({
+    required this.post,
+    required this.listing,
+    required this.onSetResolution,
+  });
 
   final CampusPost post;
   final Listing? listing;
+  final ValueChanged<String> onSetResolution;
 
   @override
   Widget build(BuildContext context) {
@@ -534,6 +558,46 @@ class _ThreadPostCard extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (post.postKind == 'mutual_aid') ...[
+                  const SizedBox(height: AppTheme.sp16),
+                  _MutualAidSummary(post: post),
+                  const SizedBox(height: AppTheme.sp8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: post.canUpdateResolution
+                        ? PopupMenuButton<String>(
+                            tooltip: l.postResolutionUpdate,
+                            initialValue: post.resolutionStatus,
+                            onSelected: onSetResolution,
+                            itemBuilder: (_) => [
+                              PopupMenuItem(
+                                value: 'open',
+                                child: Text(l.postResolutionOpen),
+                              ),
+                              PopupMenuItem(
+                                value: 'resolved',
+                                child: Text(l.postResolutionResolved),
+                              ),
+                              PopupMenuItem(
+                                value: 'closed',
+                                child: Text(l.postResolutionClosed),
+                              ),
+                            ],
+                            child: Chip(
+                              avatar: const Icon(Icons.flag_outlined, size: 16),
+                              label: Text(
+                                _resolutionLabel(l, post.resolutionStatus),
+                              ),
+                            ),
+                          )
+                        : Chip(
+                            avatar: const Icon(Icons.flag_outlined, size: 16),
+                            label: Text(
+                              _resolutionLabel(l, post.resolutionStatus),
+                            ),
+                          ),
+                  ),
+                ],
                 if (post.isListing) ...[
                   const SizedBox(height: AppTheme.sp20),
                   _LinkedListingCard(listing: listing),
@@ -559,6 +623,51 @@ class _ThreadPostCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+String _resolutionLabel(AppLocalizations l, String value) => switch (value) {
+  'resolved' => l.postResolutionResolved,
+  'closed' => l.postResolutionClosed,
+  _ => l.postResolutionOpen,
+};
+
+class _MutualAidSummary extends StatelessWidget {
+  const _MutualAidSummary({required this.post});
+
+  final CampusPost post;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    final metadata = post.mutualAidMetadata;
+    final details = <String>[
+      if (metadata['service_direction'] == 'offer')
+        l.postMutualAidOffer
+      else
+        l.postMutualAidWanted,
+      if (metadata['service_mode'] != null)
+        mutualAidModeLabel(l, metadata['service_mode'].toString()),
+      if (metadata['pickup_place'] != null)
+        '${l.postMutualAidPickup}: ${metadata['pickup_place']}',
+      if (metadata['dropoff_place'] != null)
+        '${l.postMutualAidDropoff}: ${metadata['dropoff_place']}',
+      if (metadata['time_hint'] != null)
+        '${l.postMutualAidTime}: ${metadata['time_hint']}',
+      if (metadata['reward_cents'] is num)
+        '${l.postMutualAidReward}: ${((metadata['reward_cents'] as num) / 100).toStringAsFixed(0)}',
+    ];
+    if (details.isEmpty) return const SizedBox.shrink();
+    return Wrap(
+      spacing: 7,
+      runSpacing: 7,
+      children: details
+          .map(
+            (detail) =>
+                Chip(label: Text(detail), visualDensity: VisualDensity.compact),
+          )
+          .toList(growable: false),
     );
   }
 }

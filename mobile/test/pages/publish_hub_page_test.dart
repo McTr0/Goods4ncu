@@ -102,7 +102,6 @@ void main() {
     expect(find.byKey(const ValueKey('publish-choice-discussion')), findsOne);
     expect(find.byKey(const ValueKey('publish-choice-offer')), findsOne);
     expect(find.byKey(const ValueKey('publish-choice-wanted')), findsOne);
-    expect(find.byKey(const ValueKey('publish-choice-errand')), findsOne);
 
     await tester.tap(find.byKey(const ValueKey('publish-choice-discussion')));
     await tester.pumpAndSettle();

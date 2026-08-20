@@ -61,15 +61,15 @@ void main() {
       final service = _FakeFeedFeedbackService();
 
       await service.submitFeedback(
-        resourceType: FeedResourceType.intent,
-        resourceId: 'intent-1',
+        resourceType: FeedResourceType.post,
+        resourceId: 'post-1',
         action: FeedFeedbackAction.lessLikeThis,
       );
 
       expect(service.postUris.single.path, '/api/feed/feedback');
       expect(jsonDecode(service.postBodies.single), {
-        'resource_type': 'intent',
-        'resource_id': 'intent-1',
+        'resource_type': 'post',
+        'resource_id': 'post-1',
         'action': 'less_like_this',
       });
     });

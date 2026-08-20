@@ -1452,40 +1452,6 @@ void main() {
       expect(intent.matchSummary, ['within_budget', 'condition_match']);
       expect(intent.source, 'intent_match');
     });
-
-    test('parses campus errand locations and mode', () {
-      final intent = UserIntent.fromJson({
-        'id': 'errand-1',
-        'kind': 'help',
-        'raw_input': '帮我从图书馆取打印材料',
-        'slots': {
-          'subject': '取打印材料',
-          'service_direction': 'offer',
-          'service_mode': 'pickup',
-          'pickup_place': '前湖校区图书馆',
-          'dropoff_place': '修贤广场',
-          'notes': ['今天 18:00 前'],
-        },
-        'status': 'active',
-      });
-
-      expect(intent.kind, IntentKind.help);
-      expect(intent.slots.serviceMode, 'pickup');
-      expect(intent.slots.serviceDirection, 'offer');
-      expect(intent.slots.isServiceOffer, isTrue);
-      expect(intent.slots.pickupPlace, '前湖校区图书馆');
-      expect(intent.slots.dropoffPlace, '修贤广场');
-      expect(intent.slots.notes, ['今天 18:00 前']);
-      expect(intent.slots.toJson()['service_mode'], 'pickup');
-      expect(intent.slots.toJson()['service_direction'], 'offer');
-    });
-
-    test('treats legacy campus errands as wanted services', () {
-      const slots = IntentSlots(category: 'campus_errand');
-
-      expect(slots.normalizedServiceDirection, 'wanted');
-      expect(slots.isServiceWanted, isTrue);
-    });
   });
 
   group('AgentPlan confirmation protocol', () {
