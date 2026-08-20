@@ -60,7 +60,9 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
   }
 
   void _onPanUpdate(DragUpdateDetails details, Size size) {
-    if (!widget.enableTouchTracking || size.width == 0 || size.height == 0) return;
+    if (!widget.enableTouchTracking || size.width == 0 || size.height == 0) {
+      return;
+    }
     final normalizedX = ((details.localPosition.dx / size.width) - 0.5) * 2.0;
     final normalizedY = ((details.localPosition.dy / size.height) - 0.5) * 2.0;
     widget.controller.lookAt(normalizedX, normalizedY);
