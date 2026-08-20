@@ -753,6 +753,10 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
                 .delete(posts::delete_post),
         )
         .route(
+            "/api/posts/{id}/resolution",
+            patch(posts::update_resolution),
+        )
+        .route(
             "/api/posts/{id}/replies",
             get(posts::list_replies).post(posts::create_reply),
         )

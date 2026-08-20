@@ -40,6 +40,10 @@ category. The existing `/api/feed/preferences` toggle and personalization-clear
 endpoint apply to this rank. Guests and viewers without signals receive a
 recency/engagement fallback.
 
+Mutual-aid requests are ordinary discussion posts with `post_kind =
+"mutual_aid"`. Open mutual-aid posts receive a small ranking boost; resolved
+and closed posts remain readable but rank below open requests.
+
 Response:
 
 ```json
@@ -48,6 +52,7 @@ Response:
     {
       "id": "0c722551-6fce-4efb-94ed-f3ab28c671dc",
       "post_type": "listing",
+      "post_kind": "discussion",
       "category": "electronics",
       "title": "Dorm monitor",
       "body_excerpt": "24-inch monitor in good condition",
@@ -74,6 +79,9 @@ Response:
       },
       "reply_count": 3,
       "status": "active",
+      "mutual_aid_metadata": {},
+      "resolution_status": "open",
+      "can_update_resolution": false,
       "is_locked": false,
       "created_at": "2026-08-15T12:00:00Z",
       "updated_at": "2026-08-15T12:30:00Z",
@@ -105,6 +113,9 @@ Returns the core topic fields from a list item, except `body` contains the
 full topic body and `body_excerpt` is absent. The feed-only ranking fields
 (`rank_reason`, `rank_source`, `ranking_score`) are not included because a
 direct detail lookup does not run the viewer-specific ranker.
+Both list and detail responses include `can_update_resolution`; it is `true`
+only for the authenticated author of a mutual-aid post, allowing clients to
+hide status controls from other viewers without inferring ownership.
 
 ### `GET /api/posts/by-listing/{listing_id}`
 
@@ -169,6 +180,15 @@ storage. Mobile clients should upload the image first, then pass the returned
 platform URL. The response is the new post detail; until moderation approves
 the image, its `cover_image_url` is `null`.
 
+Set `post_kind` to `"mutual_aid"` to publish a help request in the normal post
+feed. Optional `mutual_aid_metadata` accepts `service_direction` (`wanted` or
+`offer`), `service_mode`, public pickup/dropoff locations, `time_hint`,
+`reward_cents`, `valid_until`, and `notes`. Mutual-aid posts default to
+`resolution_status: "open"`. Rewards must be non-negative and no more than
+10,000,000 cents; `valid_until` must be an RFC 3339 timestamp within the next
+year. The unified list, search, category filters, and `sort=for_you` all include
+mutual-aid posts, with open requests ahead of resolved or closed requests.
+
 ### `PUT /api/posts/{id}`
 
 Owner-only partial update for discussion posts:
@@ -185,6 +205,16 @@ Owner-only partial update for discussion posts:
 
 Listing posts reject this route and direct clients back to the listing API.
 Locking preserves read access but rejects new replies.
+
+### `PATCH /api/posts/{id}/resolution`
+
+Owner-only update for mutual-aid posts:
+
+```json
+{ "resolution_status": "resolved" }
+```
+
+Allowed values are `open`, `resolved`, and `closed`.
 
 ### `DELETE /api/posts/{id}`
 

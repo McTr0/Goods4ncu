@@ -44,6 +44,9 @@ pub struct CreatePostRequest {
     #[serde(default)]
     pub tags: Vec<String>,
     pub cover_image_url: Option<String>,
+    pub post_kind: Option<String>,
+    #[serde(default)]
+    pub mutual_aid_metadata: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,6 +56,13 @@ pub struct UpdatePostRequest {
     pub category: Option<String>,
     pub tags: Option<Vec<String>>,
     pub locked: Option<bool>,
+    pub post_kind: Option<String>,
+    pub mutual_aid_metadata: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateResolutionRequest {
+    pub resolution_status: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,6 +87,7 @@ pub struct PostAuthor {
 pub struct PostSummary {
     pub id: Uuid,
     pub post_type: String,
+    pub post_kind: String,
     pub category: String,
     pub title: String,
     pub body_excerpt: String,
@@ -86,6 +97,9 @@ pub struct PostSummary {
     pub author: PostAuthor,
     pub reply_count: i32,
     pub status: String,
+    pub mutual_aid_metadata: serde_json::Value,
+    pub resolution_status: String,
+    pub can_update_resolution: bool,
     pub is_locked: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -100,6 +114,7 @@ pub struct PostSummary {
 pub struct PostDetail {
     pub id: Uuid,
     pub post_type: String,
+    pub post_kind: String,
     pub category: String,
     pub title: String,
     pub body: String,
@@ -109,6 +124,9 @@ pub struct PostDetail {
     pub author: PostAuthor,
     pub reply_count: i32,
     pub status: String,
+    pub mutual_aid_metadata: serde_json::Value,
+    pub resolution_status: String,
+    pub can_update_resolution: bool,
     pub is_locked: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -243,13 +261,16 @@ fn clamp_page(limit: Option<i64>, offset: Option<i64>) -> (i64, i64) {
     (limit.unwrap_or(20).clamp(1, 50), offset.unwrap_or(0).max(0))
 }
 
-fn summary_view(state: &AppState, post: Post) -> PostSummary {
+fn summary_view(state: &AppState, post: Post, viewer_id: Option<&str>) -> PostSummary {
+    let can_update_resolution = post.post_kind == "mutual_aid"
+        && viewer_id.is_some_and(|viewer_id| viewer_id == post.author_id);
     let listing = post
         .listing
         .map(|listing| listing_preview_view(state, listing));
     PostSummary {
         id: post.id,
         post_type: post.post_type,
+        post_kind: post.post_kind.clone(),
         category: post.category,
         title: post.title,
         body_excerpt: excerpt(&post.body, 180),
@@ -264,6 +285,9 @@ fn summary_view(state: &AppState, post: Post) -> PostSummary {
         reply_count: post.reply_count,
         is_locked: post.status == "locked",
         status: post.status,
+        mutual_aid_metadata: post.mutual_aid_metadata.clone(),
+        resolution_status: post.resolution_status.clone(),
+        can_update_resolution,
         created_at: post.created_at,
         updated_at: post.updated_at,
         last_activity_at: post.last_activity_at,
@@ -274,13 +298,17 @@ fn summary_view(state: &AppState, post: Post) -> PostSummary {
     }
 }
 
-fn detail_view(state: &AppState, post: Post) -> PostDetail {
+fn detail_view(state: &AppState, post: Post, viewer_id: Option<&str>) -> PostDetail {
+    let can_update_resolution = post.post_kind == "mutual_aid"
+        && viewer_id.is_some_and(|viewer_id| viewer_id == post.author_id);
     let listing = post
         .listing
         .map(|listing| listing_preview_view(state, listing));
     PostDetail {
         id: post.id,
         post_type: post.post_type,
+        can_update_resolution,
+        post_kind: post.post_kind,
         category: post.category,
         title: post.title,
         body: post.body,
@@ -295,6 +323,8 @@ fn detail_view(state: &AppState, post: Post) -> PostDetail {
         reply_count: post.reply_count,
         is_locked: post.status == "locked",
         status: post.status,
+        mutual_aid_metadata: post.mutual_aid_metadata,
+        resolution_status: post.resolution_status,
         created_at: post.created_at,
         updated_at: post.updated_at,
         last_activity_at: post.last_activity_at,
@@ -360,7 +390,7 @@ pub async fn list_posts(
     Ok(Json(PostListResponse {
         items: posts
             .into_iter()
-            .map(|post| summary_view(&state, post))
+            .map(|post| summary_view(&state, post, viewer_id.as_deref()))
             .collect(),
         total,
         limit,
@@ -375,9 +405,10 @@ pub async fn get_post(
     session: OptionalSession,
     Path(id): Path<Uuid>,
 ) -> Result<Json<PostDetail>, ApiError> {
+    let viewer_id = session.0.as_ref().map(|session| session.user_id.clone());
     let campus_id = resolve_read_campus(&state, session).await?;
     let post = post_service(&state).get(campus_id, id).await?;
-    Ok(Json(detail_view(&state, post)))
+    Ok(Json(detail_view(&state, post, viewer_id.as_deref())))
 }
 
 /// GET /api/posts/by-listing/:listing_id — stable listing-to-topic lookup.
@@ -386,11 +417,12 @@ pub async fn get_post_by_listing(
     session: OptionalSession,
     Path(listing_id): Path<String>,
 ) -> Result<Json<PostDetail>, ApiError> {
+    let viewer_id = session.0.as_ref().map(|session| session.user_id.clone());
     let campus_id = resolve_read_campus(&state, session).await?;
     let post = post_service(&state)
         .get_by_listing(campus_id, &listing_id)
         .await?;
-    Ok(Json(detail_view(&state, post)))
+    Ok(Json(detail_view(&state, post, viewer_id.as_deref())))
 }
 
 /// POST /api/posts — create a discussion topic.
@@ -404,15 +436,21 @@ pub async fn create_post(
     let post = post_service(&state)
         .create(CreateDiscussion {
             campus_id: tenant.campus_id,
-            author_id: tenant.session.user_id,
+            author_id: tenant.session.user_id.clone(),
             title: payload.title,
             body: payload.body,
             category: payload.category,
             tags: payload.tags,
             cover_image_url,
+            post_kind: payload.post_kind,
+            mutual_aid_metadata: payload.mutual_aid_metadata,
         })
         .await?;
-    Ok(Json(detail_view(&state, post)))
+    Ok(Json(detail_view(
+        &state,
+        post,
+        Some(&tenant.session.user_id),
+    )))
 }
 
 /// PUT /api/posts/:id — owner-only discussion edit/lock.
@@ -433,10 +471,38 @@ pub async fn update_post(
                 category: payload.category,
                 tags: payload.tags,
                 locked: payload.locked,
+                post_kind: payload.post_kind,
+                mutual_aid_metadata: payload.mutual_aid_metadata,
             },
         )
         .await?;
-    Ok(Json(detail_view(&state, post)))
+    Ok(Json(detail_view(
+        &state,
+        post,
+        Some(&tenant.session.user_id),
+    )))
+}
+
+/// PATCH /api/posts/:id/resolution — owner-only mutual-aid lifecycle update.
+pub async fn update_resolution(
+    State(state): State<AppState>,
+    tenant: VerifiedTenant,
+    Path(id): Path<Uuid>,
+    Json(payload): Json<UpdateResolutionRequest>,
+) -> Result<Json<PostDetail>, ApiError> {
+    let post = post_service(&state)
+        .update_resolution(
+            tenant.campus_id,
+            id,
+            &tenant.session.user_id,
+            payload.resolution_status,
+        )
+        .await?;
+    Ok(Json(detail_view(
+        &state,
+        post,
+        Some(&tenant.session.user_id),
+    )))
 }
 
 /// DELETE /api/posts/:id — owner-only soft delete for discussions.

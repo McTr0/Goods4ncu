@@ -700,8 +700,7 @@ pub async fn intent_matches(
         .into_iter()
         .filter_map(|other| {
             let match_summary = {
-                let (constraint, offer) =
-                    match_roles(&mine.kind, &mine.slots, &other.kind, &other.slots)?;
+                let (constraint, offer) = match_roles(&mine.kind, &mine.slots, &other.slots)?;
                 if !constraint.compatible_with(offer) {
                     return None;
                 }
@@ -730,32 +729,14 @@ pub async fn intent_matches(
     })))
 }
 
-/// Put the requester's slots first and the provider's second.
-///
-/// Goods encode the side in `kind`; campus services encode it in a slot so
-/// both sides can continue using the existing `help` lifecycle. Help intents
-/// created before that slot existed are requests, not offers. This makes an old
-/// request visible to a new provider while keeping two old requests from being
-/// presented as a match.
+/// Put the requester's slots first and the provider's second for directional
+/// goods matches. Companion and activity intents are symmetric, so their
+/// ordering does not affect compatibility.
 fn match_roles<'a>(
     mine_kind: &str,
     mine: &'a Slots,
-    other_kind: &str,
     other: &'a Slots,
 ) -> Option<(&'a Slots, &'a Slots)> {
-    if mine_kind == kinds::HELP && other_kind == kinds::HELP {
-        if !mine.has_complementary_service_direction(other) {
-            return None;
-        }
-        return if mine.service_direction()
-            == crate::services::intent::slots::SERVICE_DIRECTION_WANTED
-        {
-            Some((mine, other))
-        } else {
-            Some((other, mine))
-        };
-    }
-
     if mine_kind == kinds::GOODS_SEEK {
         Some((mine, other))
     } else {
@@ -840,59 +821,6 @@ mod tests {
         // these would look for a "supplier of partners", which does not exist.
         assert_eq!(counterpart(kinds::COMPANION), kinds::COMPANION);
         assert_eq!(counterpart(kinds::ACTIVITY), kinds::ACTIVITY);
-        assert_eq!(counterpart(kinds::HELP), kinds::HELP);
-    }
-
-    #[test]
-    fn help_matches_only_cross_service_directions_and_legacy_means_wanted() {
-        let legacy = Slots::default();
-        let wanted = Slots {
-            service_direction: Some("wanted".to_string()),
-            ..Default::default()
-        };
-        let offer = Slots {
-            service_direction: Some("offer".to_string()),
-            ..Default::default()
-        };
-
-        assert!(match_roles(kinds::HELP, &legacy, kinds::HELP, &legacy).is_none());
-        assert!(match_roles(kinds::HELP, &wanted, kinds::HELP, &legacy).is_none());
-        assert!(match_roles(kinds::HELP, &offer, kinds::HELP, &offer).is_none());
-
-        let (constraint, provider) =
-            match_roles(kinds::HELP, &legacy, kinds::HELP, &offer).unwrap();
-        assert_eq!(constraint.service_direction(), "wanted");
-        assert_eq!(provider.service_direction(), "offer");
-
-        let (constraint, provider) =
-            match_roles(kinds::HELP, &offer, kinds::HELP, &legacy).unwrap();
-        assert_eq!(constraint.service_direction(), "wanted");
-        assert_eq!(provider.service_direction(), "offer");
-
-        assert!(
-            match_roles(kinds::COMPANION, &legacy, kinds::COMPANION, &legacy).is_some(),
-            "directional filtering is specific to help intents",
-        );
-    }
-
-    #[test]
-    fn help_price_constraints_always_run_from_wanted_to_offer() {
-        let wanted = Slots {
-            service_direction: Some("wanted".to_string()),
-            price: Some(PriceSlot::Exact { cents: 1_000 }),
-            ..Default::default()
-        };
-        let offer = Slots {
-            service_direction: Some("offer".to_string()),
-            price: Some(PriceSlot::Exact { cents: 1_500 }),
-            ..Default::default()
-        };
-
-        for (mine, other) in [(&wanted, &offer), (&offer, &wanted)] {
-            let (constraint, provider) =
-                match_roles(kinds::HELP, mine, kinds::HELP, other).unwrap();
-            assert!(!constraint.compatible_with(provider));
-        }
     }
 
     #[test]

@@ -83,7 +83,7 @@ created_at / updated_at
 | `id` | 意图稳定标识 | `intents.id`（UUID） |
 | `campus_id` | 所属校园 | `intents.campus_id`，由活动 tenant context 写入 |
 | `author_id` | 声明意图的人 | `intents.author_id`；他人 feed/matches 响应不序列化此字段 |
-| `kind` | `goods_offer | goods_seek | companion | help | activity` | 数据库 CHECK 与 service 枚举共同约束 |
+| `kind` | `goods_offer | goods_seek | companion | activity` | 数据库 CHECK 与 service 枚举共同约束；原 `help` 已由 `posts.post_kind = mutual_aid` 取代 |
 | `raw_input` | 用户原始表达 | 原文保存，允许未来重新解析 |
 | `slots` | 结构化但允许模糊/缺失的槽位 | JSONB；价格、时间等支持 `whatever/flexible` 语义 |
 | `confidence` | 对槽位解析的置信度 | 0–1；这是解析置信度，不是匹配分数 |

@@ -9,6 +9,7 @@ pub struct Post {
     pub id: Uuid,
     pub campus_id: Uuid,
     pub post_type: String,
+    pub post_kind: String,
     pub category: String,
     pub title: String,
     pub body: String,
@@ -20,6 +21,8 @@ pub struct Post {
     pub author_avatar_url: Option<String>,
     pub reply_count: i32,
     pub status: String,
+    pub mutual_aid_metadata: serde_json::Value,
+    pub resolution_status: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub last_activity_at: chrono::DateTime<chrono::Utc>,
@@ -68,6 +71,8 @@ pub struct NewDiscussionPost {
     pub body: String,
     pub tags: Vec<String>,
     pub image_url: Option<String>,
+    pub post_kind: String,
+    pub mutual_aid_metadata: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -77,6 +82,8 @@ pub struct UpdateDiscussionPost {
     pub category: Option<String>,
     pub tags: Option<Vec<String>>,
     pub locked: Option<bool>,
+    pub post_kind: Option<String>,
+    pub mutual_aid_metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -141,6 +148,14 @@ pub trait PostRepository: Send + Sync {
         author_id: &str,
     ) -> Result<bool, ApiError>;
 
+    async fn update_resolution(
+        &self,
+        campus_id: Uuid,
+        id: Uuid,
+        author_id: &str,
+        resolution_status: &str,
+    ) -> Result<bool, ApiError>;
+
     async fn list_replies(
         &self,
         campus_id: Uuid,
@@ -194,8 +209,9 @@ impl PostgresPostRepository {
     }
 
     fn post_columns() -> &'static str {
-        r#"p.id, p.campus_id, p.post_type, p.category, p.title, p.body,
-           p.tags, p.listing_id, p.reply_count, p.status, p.created_at,
+        r#"p.id, p.campus_id, p.post_type, p.post_kind, p.category, p.title, p.body,
+           p.tags, p.listing_id, p.reply_count, p.status, p.mutual_aid_metadata,
+           p.resolution_status, p.created_at,
            p.updated_at, p.last_activity_at,
            author.id AS author_id, author.username AS author_username,
            CASE WHEN author.avatar_moderation_status = 'approved'
@@ -268,10 +284,10 @@ impl PostRepository for PostgresPostRepository {
             .map(escape_like_pattern)
             .map(|value| format!("%{value}%"));
         let order_by = match filter.sort {
-            PostSort::Latest => "p.created_at DESC, p.id DESC",
-            PostSort::Active => "p.last_activity_at DESC, p.id DESC",
-            PostSort::Replies => "p.reply_count DESC, p.last_activity_at DESC, p.id DESC",
-            PostSort::ForYou => "p.last_activity_at DESC, p.id DESC",
+            PostSort::Latest => "CASE WHEN p.post_kind = 'mutual_aid' AND p.resolution_status = 'open' THEN 0 ELSE 1 END, p.created_at DESC, p.id DESC",
+            PostSort::Active => "CASE WHEN p.post_kind = 'mutual_aid' AND p.resolution_status = 'open' THEN 0 ELSE 1 END, p.last_activity_at DESC, p.id DESC",
+            PostSort::Replies => "CASE WHEN p.post_kind = 'mutual_aid' AND p.resolution_status = 'open' THEN 0 ELSE 1 END, p.reply_count DESC, p.last_activity_at DESC, p.id DESC",
+            PostSort::ForYou => "CASE WHEN p.post_kind = 'mutual_aid' AND p.resolution_status = 'open' THEN 0 ELSE 1 END, p.last_activity_at DESC, p.id DESC",
         };
         let visibility = "p.campus_id = $1
               AND p.status IN ('active', 'locked')
@@ -410,6 +426,8 @@ impl PostRepository for PostgresPostRepository {
                         ELSE 'recency'
                       END AS rank_source,
                       (
+                        CASE WHEN p.post_kind = 'mutual_aid' AND p.resolution_status = 'open' THEN 1.5 ELSE 0.0 END
+                        +
                         CASE WHEN pref.personalization_enabled
                              THEN COALESCE(affinity.weight, 0) * 3.0
                                   - COALESCE(less_like.weight, 0) * 4.0
@@ -445,7 +463,12 @@ impl PostRepository for PostgresPostRepository {
                                AND exact_feedback.resource_id = p.listing_id)
                          )
                      ))
-               ORDER BY ranking_score DESC, p.last_activity_at DESC, p.id DESC
+               ORDER BY CASE
+                          WHEN p.post_kind = 'mutual_aid'
+                               AND p.resolution_status = 'open' THEN 0
+                          ELSE 1
+                        END,
+                        ranking_score DESC, p.last_activity_at DESC, p.id DESC
                LIMIT $7 OFFSET $8"#,
             columns = Self::post_columns(),
             relations = Self::post_relations(),
@@ -539,20 +562,22 @@ impl PostRepository for PostgresPostRepository {
     async fn create_discussion(&self, input: NewDiscussionPost) -> Result<Post, ApiError> {
         let id: Uuid = sqlx::query_scalar(
             "INSERT INTO posts (
-                 campus_id, author_id, post_type, category, title, body, tags,
-                 image_url, images_moderation_status
+                 campus_id, author_id, post_type, post_kind, category, title, body, tags,
+                 mutual_aid_metadata, image_url, images_moderation_status
              ) VALUES (
-                 $1, $2, 'discussion', $3, $4, $5, $6, $7,
-                 CASE WHEN $7::text IS NULL THEN 'approved' ELSE 'pending' END
+                 $1, $2, 'discussion', $3, $4, $5, $6, $7, $8, $9,
+                 CASE WHEN $9::text IS NULL THEN 'approved' ELSE 'pending' END
              )
              RETURNING id",
         )
         .bind(input.campus_id)
         .bind(&input.author_id)
+        .bind(&input.post_kind)
         .bind(&input.category)
         .bind(&input.title)
         .bind(&input.body)
         .bind(serde_json::json!(input.tags))
+        .bind(&input.mutual_aid_metadata)
         .bind(input.image_url.as_deref())
         .fetch_one(&self.pool)
         .await
@@ -575,9 +600,11 @@ impl PostRepository for PostgresPostRepository {
                  body = COALESCE($5, body),
                  category = COALESCE($6, category),
                  tags = COALESCE($7, tags),
+                 post_kind = COALESCE($8, post_kind),
+                 mutual_aid_metadata = COALESCE($9, mutual_aid_metadata),
                  status = CASE
-                     WHEN $8::boolean IS NULL THEN status
-                     WHEN $8 THEN 'locked'
+                     WHEN $10::boolean IS NULL THEN status
+                     WHEN $10 THEN 'locked'
                      ELSE 'active'
                  END,
                  updated_at = NOW()
@@ -591,6 +618,8 @@ impl PostRepository for PostgresPostRepository {
         .bind(input.body.as_deref())
         .bind(input.category.as_deref())
         .bind(input.tags.as_ref().map(|tags| serde_json::json!(tags)))
+        .bind(input.post_kind.as_deref())
+        .bind(input.mutual_aid_metadata.as_ref())
         .bind(input.locked)
         .execute(&self.pool)
         .await
@@ -616,6 +645,29 @@ impl PostRepository for PostgresPostRepository {
         .await
         .map_err(db_error)?;
         Ok(deleted.rows_affected() == 1)
+    }
+
+    async fn update_resolution(
+        &self,
+        campus_id: Uuid,
+        id: Uuid,
+        author_id: &str,
+        resolution_status: &str,
+    ) -> Result<bool, ApiError> {
+        let updated = sqlx::query(
+            "UPDATE posts SET resolution_status = $4, updated_at = NOW()
+             WHERE id = $1 AND campus_id = $2 AND author_id = $3
+               AND post_type = 'discussion' AND post_kind = 'mutual_aid'
+               AND status IN ('active', 'locked')",
+        )
+        .bind(id)
+        .bind(campus_id)
+        .bind(author_id)
+        .bind(resolution_status)
+        .execute(&self.pool)
+        .await
+        .map_err(db_error)?;
+        Ok(updated.rows_affected() == 1)
     }
 
     async fn list_replies(
@@ -784,6 +836,9 @@ fn post_from_row(row: &PgRow) -> Post {
         id: row.get("id"),
         campus_id: row.get("campus_id"),
         post_type: row.get("post_type"),
+        post_kind: row
+            .try_get("post_kind")
+            .unwrap_or_else(|_| "discussion".to_string()),
         category: row.get("category"),
         title: row.get("title"),
         body: row.get("body"),
@@ -795,6 +850,12 @@ fn post_from_row(row: &PgRow) -> Post {
         author_avatar_url: row.get("author_avatar_url"),
         reply_count: row.get("reply_count"),
         status: row.get("status"),
+        mutual_aid_metadata: row
+            .try_get("mutual_aid_metadata")
+            .unwrap_or_else(|_| serde_json::json!({})),
+        resolution_status: row
+            .try_get("resolution_status")
+            .unwrap_or_else(|_| "open".to_string()),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
         last_activity_at: row.get("last_activity_at"),

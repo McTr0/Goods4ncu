@@ -5994,16 +5994,16 @@ async fn intent_feedback_filters_and_explains_feed_and_matches() {
             ))
             .await
             .expect("create companion candidate");
-        let help_candidate = service
+        let activity_candidate = service
             .create(active_intent(
                 campus_id,
                 &author_id,
-                kinds::HELP,
-                "请帮忙搬一个纸箱",
+                kinds::ACTIVITY,
+                "周末一起去爬山",
                 Slots::default(),
             ))
             .await
-            .expect("create help candidate");
+            .expect("create activity candidate");
         let seeking_slots = Slots {
             category: Some("electronics".to_string()),
             price: Some(PriceSlot::Range {
@@ -6068,7 +6068,7 @@ async fn intent_feedback_filters_and_explains_feed_and_matches() {
         for (id, age_hours) in [
             (companion_target, 1_i32),
             (companion_candidate, 2_i32),
-            (help_candidate, 3_i32),
+            (activity_candidate, 3_i32),
             (mine, 4_i32),
             (matching_target, 5_i32),
             (matching_visible, 6_i32),
@@ -6086,7 +6086,7 @@ async fn intent_feedback_filters_and_explains_feed_and_matches() {
         }
         let companion_target = companion_target.to_string();
         let companion_candidate = companion_candidate.to_string();
-        let help_candidate = help_candidate.to_string();
+        let activity_candidate = activity_candidate.to_string();
         let mine = mine.to_string();
         let matching_target = matching_target.to_string();
         let matching_visible = matching_visible.to_string();
@@ -6144,8 +6144,8 @@ async fn intent_feedback_filters_and_explains_feed_and_matches() {
         assert!(
             downranked_items
                 .iter()
-                .position(|item| item["id"] == help_candidate)
-                .expect("help position")
+                .position(|item| item["id"] == activity_candidate)
+                .expect("activity position")
                 < downranked_items
                     .iter()
                     .position(|item| item["id"] == companion_candidate)
@@ -6189,8 +6189,8 @@ async fn intent_feedback_filters_and_explains_feed_and_matches() {
                 .expect("companion position")
                 < disabled_items
                     .iter()
-                    .position(|item| item["id"] == help_candidate)
-                    .expect("help position"),
+                    .position(|item| item["id"] == activity_candidate)
+                    .expect("activity position"),
             "personalization off ignores generalized intent signals"
         );
         assert!(!disabled_items
@@ -6211,8 +6211,8 @@ async fn intent_feedback_filters_and_explains_feed_and_matches() {
         assert!(
             reenabled_items
                 .iter()
-                .position(|item| item["id"] == help_candidate)
-                .expect("help position")
+                .position(|item| item["id"] == activity_candidate)
+                .expect("activity position")
                 < reenabled_items
                     .iter()
                     .position(|item| item["id"] == companion_candidate)
@@ -6246,8 +6246,8 @@ async fn intent_feedback_filters_and_explains_feed_and_matches() {
                 .expect("companion position")
                 < cleared_items
                     .iter()
-                    .position(|item| item["id"] == help_candidate)
-                    .expect("help position"),
+                    .position(|item| item["id"] == activity_candidate)
+                    .expect("activity position"),
             "clear restores recency once generalized downrank is ignored"
         );
         assert!(!cleared_items
@@ -6287,145 +6287,6 @@ async fn intent_feedback_filters_and_explains_feed_and_matches() {
         );
         assert_eq!(visible_match["ranking_version"], "2026.07-intent-hard-v1");
         assert!(visible_match.get("author_id").is_none());
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn campus_errand_matches_cross_service_direction_and_legacy_is_wanted() {
-    with_test_pool(|pool| async move {
-        let password_hash = hash_password("Test1234");
-        let requester_id = Uuid::new_v4().to_string();
-        let provider_id = Uuid::new_v4().to_string();
-        for (id, label) in [(&requester_id, "requester"), (&provider_id, "provider")] {
-            insert_user(
-                &pool,
-                id,
-                &format!("errand_direction_{label}_{}", Uuid::new_v4().simple()),
-                &password_hash,
-                "user",
-                "active",
-            )
-            .await;
-        }
-        let campus_id: Uuid = sqlx::query_scalar("SELECT id FROM campuses WHERE slug = 'ncu'")
-            .fetch_one(&pool)
-            .await
-            .expect("ncu campus");
-        let (requester_token, _, _) = generate_access_token_for_campus(
-            &requester_id,
-            "user",
-            Some(campus_id),
-            "test_jwt_secret_at_least_32_characters_long",
-            3600,
-        )
-        .expect("requester token");
-        let app = create_router(build_state(pool.clone()), &[]);
-
-        let (status, invalid) = authenticated_json(
-            &app,
-            Method::POST,
-            "/api/intents",
-            &requester_token,
-            Some(json!({
-                "kind": "help",
-                "raw_input": "方向不合法",
-                "slots": {
-                    "category": "campus_errand",
-                    "service_direction": "both"
-                }
-            })),
-        )
-        .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{invalid}");
-
-        let (status, created) = authenticated_json(
-            &app,
-            Method::POST,
-            "/api/intents",
-            &requester_token,
-            Some(json!({
-                "kind": "help",
-                "raw_input": "需要代取打印材料",
-                "slots": {
-                    "subject": "代取打印材料",
-                    "category": "campus_errand",
-                    "service_mode": "pickup",
-                    "service_direction": "wanted",
-                    "price": {"kind": "exact", "cents": 1000}
-                }
-            })),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{created}");
-        let mine = created["id"].as_str().expect("created intent id");
-
-        let service = IntentService::new(pool.clone());
-        let offer = service
-            .create(active_intent(
-                campus_id,
-                &provider_id,
-                kinds::HELP,
-                "可以代取打印材料",
-                Slots {
-                    subject: Some("代取打印材料".to_string()),
-                    category: Some("campus_errand".to_string()),
-                    service_direction: Some("offer".to_string()),
-                    price: Some(PriceSlot::Exact { cents: 800 }),
-                    ..Default::default()
-                },
-            ))
-            .await
-            .expect("create service offer");
-        let same_direction = service
-            .create(active_intent(
-                campus_id,
-                &provider_id,
-                kinds::HELP,
-                "也需要代取材料",
-                Slots {
-                    category: Some("campus_errand".to_string()),
-                    service_direction: Some("wanted".to_string()),
-                    ..Default::default()
-                },
-            ))
-            .await
-            .expect("create same-direction request");
-        let legacy_request = service
-            .create(active_intent(
-                campus_id,
-                &provider_id,
-                kinds::HELP,
-                "旧版客户端发布的代取需求",
-                Slots {
-                    category: Some("campus_errand".to_string()),
-                    ..Default::default()
-                },
-            ))
-            .await
-            .expect("create legacy request");
-
-        let (status, matches) = authenticated_json(
-            &app,
-            Method::GET,
-            &format!("/api/intents/{mine}/matches"),
-            &requester_token,
-            None,
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{matches}");
-        let ids: Vec<_> = matches["items"]
-            .as_array()
-            .expect("match items")
-            .iter()
-            .filter_map(|item| item["id"].as_str())
-            .collect();
-        let offer = offer.to_string();
-        let same_direction = same_direction.to_string();
-        let legacy_request = legacy_request.to_string();
-        assert!(ids.contains(&offer.as_str()));
-        assert!(!ids.contains(&same_direction.as_str()));
-        assert!(!ids.contains(&legacy_request.as_str()));
     })
     .await;
 }

@@ -19,9 +19,6 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SERVICE_DIRECTION_OFFER: &str = "offer";
-pub const SERVICE_DIRECTION_WANTED: &str = "wanted";
-
 /// A money slot, in cents.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -165,23 +162,6 @@ pub struct Slots {
     pub time: Option<TimeSlot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub place: Option<String>,
-    /// Public pickup point for a campus errand. Keep this to a landmark or
-    /// service desk rather than a private room number.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pickup_place: Option<String>,
-    /// Public handoff point for a campus errand.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dropoff_place: Option<String>,
-    /// Stable campus errand mode, such as pickup, buy, queue, or print.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub service_mode: Option<String>,
-    /// Which side of a campus service this author is on. `wanted` asks someone
-    /// to do the errand; `offer` volunteers to do errands for other people.
-    ///
-    /// Older help intents predate this slot and are requests, so absence is
-    /// deliberately interpreted as `wanted` by [`Slots::service_direction`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub service_direction: Option<String>,
     /// 1–10, for goods.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub condition_score: Option<i32>,
@@ -196,13 +176,11 @@ pub struct Slots {
 }
 
 impl Slots {
-    pub fn validate_for_kind(&self, kind: &str) -> Result<(), String> {
+    pub fn validate_for_kind(&self, _kind: &str) -> Result<(), String> {
         for (label, value) in [
             ("subject", self.subject.as_deref()),
             ("category", self.category.as_deref()),
             ("place", self.place.as_deref()),
-            ("pickup_place", self.pickup_place.as_deref()),
-            ("dropoff_place", self.dropoff_place.as_deref()),
         ] {
             if value.is_some_and(|value| value.chars().count() > 120) {
                 return Err(format!("{label} 不能超过 120 字"));
@@ -211,44 +189,7 @@ impl Slots {
         if self.notes.len() > 8 || self.notes.iter().any(|note| note.chars().count() > 240) {
             return Err("notes 最多 8 条且每条不能超过 240 字".to_string());
         }
-        if kind == super::kinds::HELP {
-            if let Some(mode) = self.service_mode.as_deref() {
-                const MODES: &[&str] = &["pickup", "buy", "queue", "print", "return", "other"];
-                if !MODES.contains(&mode) {
-                    return Err("未知的校园待办类型".to_string());
-                }
-            }
-            if let Some(direction) = self.service_direction.as_deref() {
-                if ![SERVICE_DIRECTION_OFFER, SERVICE_DIRECTION_WANTED].contains(&direction) {
-                    return Err("service_direction 可选值为 offer 或 wanted".to_string());
-                }
-            }
-        }
         Ok(())
-    }
-
-    /// The service side used for matching help intents.
-    ///
-    /// Before service offers existed, every help intent was a request. Keeping
-    /// that default lets a new offer find old requests without rewriting stored
-    /// JSON, while two old requests correctly remain on the same side.
-    pub fn service_direction(&self) -> &'static str {
-        if self.service_direction.as_deref() == Some(SERVICE_DIRECTION_OFFER) {
-            SERVICE_DIRECTION_OFFER
-        } else {
-            SERVICE_DIRECTION_WANTED
-        }
-    }
-
-    /// Whether two help intents are on opposite sides of the service.
-    pub fn has_complementary_service_direction(&self, other: &Slots) -> bool {
-        self.service_direction() != other.service_direction()
-    }
-
-    fn is_campus_errand(&self) -> bool {
-        self.category
-            .as_deref()
-            .is_some_and(|category| category.eq_ignore_ascii_case("campus_errand"))
     }
 
     /// Whether a seeking intent's slots could be satisfied by an offering
@@ -258,17 +199,6 @@ impl Slots {
     /// "is this good?". Ranking is a separate concern; conflating them lets a
     /// high similarity score talk its way past a stated budget.
     pub fn compatible_with(&self, offer: &Slots) -> bool {
-        // A help intent with an explicit direction, or a legacy campus errand
-        // carrying its category, must be on opposite sides. Ordinary slots do
-        // not have a service side, so their historical compatibility is kept.
-        if (self.service_direction.is_some()
-            || offer.service_direction.is_some()
-            || self.is_campus_errand()
-            || offer.is_campus_errand())
-            && !self.has_complementary_service_direction(offer)
-        {
-            return false;
-        }
         if let (Some(budget), Some(asking)) = (&self.price, &offer.price) {
             if !budget.admits(asking) {
                 return false;
@@ -319,18 +249,6 @@ impl Slots {
         if self.place.is_some() {
             stated += 1;
         }
-        if self.pickup_place.is_some() {
-            stated += 1;
-        }
-        if self.dropoff_place.is_some() {
-            stated += 1;
-        }
-        if self.service_mode.is_some() {
-            stated += 1;
-        }
-        if self.service_direction.is_some() {
-            stated += 1;
-        }
         if self.condition_score.is_some() {
             stated += 1;
         }
@@ -340,7 +258,6 @@ impl Slots {
 
 #[cfg(test)]
 mod tests {
-    use super::super::kinds;
     use super::*;
 
     fn at(hour: u32) -> chrono::DateTime<chrono::Utc> {
@@ -552,70 +469,5 @@ mod tests {
         let object = json.as_object().unwrap();
         assert_eq!(object.len(), 1, "only the stated slot is present: {json}");
         assert!(object.contains_key("subject"));
-    }
-
-    #[test]
-    fn campus_errand_slots_round_trip_and_validate() {
-        let slots = Slots {
-            subject: Some("从图书馆取打印材料".to_string()),
-            category: Some("campus_errand".to_string()),
-            pickup_place: Some("前湖校区图书馆".to_string()),
-            dropoff_place: Some("修贤广场".to_string()),
-            service_mode: Some("pickup".to_string()),
-            service_direction: Some(SERVICE_DIRECTION_WANTED.to_string()),
-            ..Default::default()
-        };
-        slots.validate_for_kind(kinds::HELP).unwrap();
-        let round_trip: Slots =
-            serde_json::from_value(serde_json::to_value(&slots).unwrap()).unwrap();
-        assert_eq!(round_trip, slots);
-    }
-
-    #[test]
-    fn campus_errand_slots_reject_unknown_mode_and_private_sized_text() {
-        let unknown_mode = Slots {
-            service_mode: Some("deliver_money".to_string()),
-            ..Default::default()
-        };
-        assert!(unknown_mode.validate_for_kind(kinds::HELP).is_err());
-
-        let long_place = Slots {
-            pickup_place: Some("x".repeat(121)),
-            ..Default::default()
-        };
-        assert!(long_place.validate_for_kind(kinds::HELP).is_err());
-
-        let unknown_direction = Slots {
-            service_direction: Some("both".to_string()),
-            ..Default::default()
-        };
-        assert!(unknown_direction.validate_for_kind(kinds::HELP).is_err());
-    }
-
-    #[test]
-    fn campus_errand_direction_defaults_old_requests_to_wanted() {
-        let legacy = Slots::default();
-        let wanted = Slots {
-            service_direction: Some(SERVICE_DIRECTION_WANTED.to_string()),
-            ..Default::default()
-        };
-        let offer = Slots {
-            service_direction: Some(SERVICE_DIRECTION_OFFER.to_string()),
-            ..Default::default()
-        };
-
-        assert_eq!(legacy.service_direction(), SERVICE_DIRECTION_WANTED);
-        assert!(!legacy.has_complementary_service_direction(&wanted));
-        assert!(!legacy.has_complementary_service_direction(&legacy));
-        assert!(legacy.has_complementary_service_direction(&offer));
-        assert!(offer.has_complementary_service_direction(&wanted));
-        assert!(!offer.has_complementary_service_direction(&offer));
-
-        let legacy_errand = Slots {
-            category: Some("campus_errand".to_string()),
-            ..Default::default()
-        };
-        assert!(!legacy_errand.compatible_with(&legacy_errand));
-        assert!(legacy_errand.compatible_with(&offer));
     }
 }

@@ -175,7 +175,7 @@ async fn a_crowd_is_capped_rather_than_admitted_whole() {
                 .create(NewIntent {
                     campus_id,
                     author_id: &person,
-                    kind: kinds::HELP,
+                    kind: kinds::COMPANION,
                     raw_input: &raw,
                     slots: Slots {
                         subject: Some("考研数学".to_string()),
@@ -191,7 +191,7 @@ async fn a_crowd_is_capped_rather_than_admitted_whole() {
         }
 
         let (formed, _) = AggregationService::new(pool.clone())
-            .form_spaces(campus_id, kinds::HELP)
+            .form_spaces(campus_id, kinds::COMPANION)
             .await
             .expect("form");
         assert_eq!(formed.len(), 1);

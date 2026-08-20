@@ -297,7 +297,6 @@ pub async fn form_spaces_now(
     for kind in [
         crate::services::intent::kinds::COMPANION,
         crate::services::intent::kinds::ACTIVITY,
-        crate::services::intent::kinds::HELP,
     ] {
         let (spaces, refusals) = service
             .form_spaces(scope.campus_id, kind)

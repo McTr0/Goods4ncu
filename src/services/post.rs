@@ -26,6 +26,8 @@ pub struct CreateDiscussion {
     pub category: Option<String>,
     pub tags: Vec<String>,
     pub cover_image_url: Option<String>,
+    pub post_kind: Option<String>,
+    pub mutual_aid_metadata: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -35,6 +37,8 @@ pub struct EditDiscussion {
     pub category: Option<String>,
     pub tags: Option<Vec<String>>,
     pub locked: Option<bool>,
+    pub post_kind: Option<String>,
+    pub mutual_aid_metadata: Option<serde_json::Value>,
 }
 
 #[derive(Clone)]
@@ -109,6 +113,9 @@ impl PostService {
         let category = normalize_category(input.category)?;
         let tags = normalize_tags(input.tags)?;
         let cover_image_url = normalize_cover_image_url(input.cover_image_url)?;
+        let post_kind = normalize_post_kind(input.post_kind)?;
+        let mutual_aid_metadata =
+            normalize_mutual_aid_metadata(&post_kind, input.mutual_aid_metadata)?;
         self.ensure_text_allowed(&format!("{title}\n{body}\n{}", tags.join(" ")))?;
         let created = self
             .repository
@@ -120,6 +127,8 @@ impl PostService {
                 body,
                 tags,
                 image_url: cover_image_url.clone(),
+                post_kind,
+                mutual_aid_metadata,
             })
             .await?;
         if let Some(image_url) = cover_image_url {
@@ -149,6 +158,8 @@ impl PostService {
             && input.category.is_none()
             && input.tags.is_none()
             && input.locked.is_none()
+            && input.post_kind.is_none()
+            && input.mutual_aid_metadata.is_none()
         {
             return Err(ApiError::BadRequest("没有要更新的字段".to_string()));
         }
@@ -174,6 +185,19 @@ impl PostService {
             .map(|value| normalize_category(Some(value)))
             .transpose()?;
         let tags = input.tags.map(normalize_tags).transpose()?;
+        let post_kind = input
+            .post_kind
+            .map(|value| normalize_post_kind(Some(value)))
+            .transpose()?;
+        let effective_post_kind = post_kind.as_deref().unwrap_or(&existing.post_kind);
+        let mutual_aid_metadata = match input.mutual_aid_metadata {
+            Some(value) => Some(normalize_mutual_aid_metadata(effective_post_kind, value)?),
+            None if post_kind.is_some() => Some(normalize_mutual_aid_metadata(
+                effective_post_kind,
+                existing.mutual_aid_metadata.clone(),
+            )?),
+            None => None,
+        };
         self.ensure_text_allowed(&format!(
             "{}\n{}\n{}",
             title.as_deref().unwrap_or_default(),
@@ -192,6 +216,8 @@ impl PostService {
                     category,
                     tags,
                     locked: input.locked,
+                    post_kind,
+                    mutual_aid_metadata,
                 },
             )
             .await?;
@@ -220,6 +246,35 @@ impl PostService {
         } else {
             Err(ApiError::NotFound)
         }
+    }
+
+    pub async fn update_resolution(
+        &self,
+        campus_id: Uuid,
+        id: Uuid,
+        author_id: &str,
+        resolution_status: String,
+    ) -> Result<Post, ApiError> {
+        let existing = self.get(campus_id, id).await?;
+        if existing.post_kind != "mutual_aid" {
+            return Err(ApiError::BadRequest(
+                "只有互助帖子可以更新解决状态".to_string(),
+            ));
+        }
+        if existing.author_id != author_id {
+            return Err(ApiError::Forbidden);
+        }
+        if !matches!(resolution_status.as_str(), "open" | "resolved" | "closed") {
+            return Err(ApiError::BadRequest("resolution_status 无效".to_string()));
+        }
+        if !self
+            .repository
+            .update_resolution(campus_id, id, author_id, &resolution_status)
+            .await?
+        {
+            return Err(ApiError::NotFound);
+        }
+        self.get(campus_id, id).await
     }
 
     pub async fn list_replies(
@@ -366,6 +421,86 @@ fn normalize_category(value: Option<String>) -> Result<String, ApiError> {
     required_text(value, "category", MAX_CATEGORY_CHARS)
 }
 
+fn normalize_post_kind(value: Option<String>) -> Result<String, ApiError> {
+    let value = value.unwrap_or_else(|| "discussion".to_string());
+    if value != "discussion" && value != "mutual_aid" {
+        return Err(ApiError::BadRequest("post_kind 无效".to_string()));
+    }
+    Ok(value)
+}
+
+fn normalize_mutual_aid_metadata(
+    post_kind: &str,
+    value: serde_json::Value,
+) -> Result<serde_json::Value, ApiError> {
+    if post_kind == "discussion" {
+        return Ok(serde_json::json!({}));
+    }
+    let object = value
+        .as_object()
+        .ok_or_else(|| ApiError::BadRequest("mutual_aid_metadata 必须是对象".to_string()))?;
+    let allowed = [
+        "service_direction",
+        "service_mode",
+        "pickup_place",
+        "dropoff_place",
+        "time_hint",
+        "reward_cents",
+        "valid_until",
+        "notes",
+    ];
+    if object.keys().any(|key| !allowed.contains(&key.as_str())) {
+        return Err(ApiError::BadRequest(
+            "mutual_aid_metadata 包含未知字段".to_string(),
+        ));
+    }
+    let text_fields = ["pickup_place", "dropoff_place", "time_hint", "notes"];
+    for field in text_fields {
+        if let Some(value) = object.get(field) {
+            let text = value
+                .as_str()
+                .ok_or_else(|| ApiError::BadRequest(format!("{field} 必须是文本")))?;
+            if text.chars().count() > 120 {
+                return Err(ApiError::BadRequest(format!("{field} 不能超过 120 个字符")));
+            }
+        }
+    }
+    if let Some(direction) = object.get("service_direction") {
+        if !matches!(direction.as_str(), Some("wanted") | Some("offer")) {
+            return Err(ApiError::BadRequest("service_direction 无效".to_string()));
+        }
+    }
+    if let Some(mode) = object.get("service_mode") {
+        const MODES: &[&str] = &["pickup", "buy", "queue", "print", "return", "other"];
+        if !mode.as_str().is_some_and(|value| MODES.contains(&value)) {
+            return Err(ApiError::BadRequest("service_mode 无效".to_string()));
+        }
+    }
+    if let Some(reward) = object.get("reward_cents") {
+        if reward
+            .as_i64()
+            .is_none_or(|value| !(0..=10_000_000).contains(&value))
+        {
+            return Err(ApiError::BadRequest("reward_cents 无效".to_string()));
+        }
+    }
+    if let Some(valid_until) = object.get("valid_until") {
+        let raw = valid_until
+            .as_str()
+            .ok_or_else(|| ApiError::BadRequest("valid_until 必须是时间文本".to_string()))?;
+        let parsed = chrono::DateTime::parse_from_rfc3339(raw)
+            .map_err(|_| ApiError::BadRequest("valid_until 格式无效".to_string()))?
+            .with_timezone(&chrono::Utc);
+        let now = chrono::Utc::now();
+        if parsed <= now || parsed > now + chrono::Duration::days(365) {
+            return Err(ApiError::BadRequest(
+                "valid_until 必须在未来一年内".to_string(),
+            ));
+        }
+    }
+    Ok(value)
+}
+
 fn normalize_tags(tags: Vec<String>) -> Result<Vec<String>, ApiError> {
     let mut normalized = Vec::new();
     let mut seen = HashSet::new();
@@ -428,5 +563,47 @@ mod tests {
     #[test]
     fn category_defaults_to_general() {
         assert_eq!(normalize_category(None).unwrap(), "general");
+    }
+
+    #[test]
+    fn mutual_aid_metadata_accepts_structured_fields() {
+        let metadata = serde_json::json!({
+            "service_direction": "wanted",
+            "service_mode": "pickup",
+            "pickup_place": "图书馆",
+            "reward_cents": 1200
+        });
+        assert!(normalize_mutual_aid_metadata("mutual_aid", metadata).is_ok());
+    }
+
+    #[test]
+    fn mutual_aid_metadata_rejects_invalid_direction_and_reward() {
+        assert!(normalize_mutual_aid_metadata(
+            "mutual_aid",
+            serde_json::json!({"service_direction": "maybe"})
+        )
+        .is_err());
+        assert!(normalize_mutual_aid_metadata(
+            "mutual_aid",
+            serde_json::json!({"valid_until": "not-a-date"})
+        )
+        .is_err());
+        assert!(normalize_mutual_aid_metadata(
+            "mutual_aid",
+            serde_json::json!({"reward_cents": -1})
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn discussion_posts_discard_mutual_aid_metadata() {
+        assert_eq!(
+            normalize_mutual_aid_metadata(
+                "discussion",
+                serde_json::json!({"service_mode": "pickup"})
+            )
+            .unwrap(),
+            serde_json::json!({})
+        );
     }
 }

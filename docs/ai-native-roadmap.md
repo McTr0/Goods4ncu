@@ -114,7 +114,7 @@
 
 **做什么**
 
-- 新增 `intents` 表：`kind`(goods_offer / goods_seek / companion / help / activity)、`raw_input`、`slots`(JSONB)、`confidence`、`valid_until`、`status`、`visibility`
+- `intents` 表承载 `goods_offer / goods_seek / companion / activity`；校园求助已并入普通帖子，以 `post_kind=mutual_aid` 和可选 metadata 表达
 - 一次输入可产出**多个意图**：一张宿舍照片 → 6 件物品；一句"毕业了东西都不要了，顺便找人接手我的自习座位" → 物品意图 + 转让意图
 - 槽位允许**缺失和模糊**：`price: {kind:"whatever", hint:"能卖就行"}`、`time: {kind:"flexible", hint:"这周都行"}` 都是合法状态
 - `inventory` 降级为 goods 类意图的**展示投影**（兼容现有前端），由意图变更驱动同步
@@ -206,7 +206,7 @@
 
 **做什么**
 
-- 三类意图**对等**进入撮合池。goods_seek 不再是二等公民，companion / help / activity 与 goods 同权
+- 商品、搭子和活动意图**对等**进入撮合池；互助请求进入统一帖子流和帖子个性化推荐，不再拥有独立意图池
 - 每个匹配带**人话理由**和置信度："他刚发的显示器，你上周说想要 24 寸以内、300 以内 —— 尺寸和价都对得上"
 - 硬约束前置（校园、状态、方向、可见性），软排序在后
 - 搜索框**降级为兜底**入口，不再是主路径

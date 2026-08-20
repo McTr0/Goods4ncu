@@ -17,6 +17,112 @@ async fn campus(pool: &sqlx::PgPool) -> Uuid {
         .expect("default campus")
 }
 
+#[tokio::test]
+async fn mutual_aid_posts_use_the_post_feed_and_author_owned_resolution() {
+    with_test_pool(|pool| async move {
+        let campus_id = campus(&pool).await;
+        let owner = user(&pool, "mutual-aid-owner").await;
+        let other = user(&pool, "mutual-aid-other").await;
+        let service = service(&pool);
+
+        let resolved = service
+            .create(CreateDiscussion {
+                campus_id,
+                author_id: owner.clone(),
+                title: "帮忙从图书馆取打印材料".to_string(),
+                body: "今晚六点前在修贤广场交接。".to_string(),
+                category: Some("campus-life".to_string()),
+                tags: vec!["互助".to_string()],
+                cover_image_url: None,
+                post_kind: Some("mutual_aid".to_string()),
+                mutual_aid_metadata: serde_json::json!({
+                    "service_direction": "wanted",
+                    "service_mode": "pickup",
+                    "pickup_place": "图书馆",
+                    "dropoff_place": "修贤广场",
+                    "reward_cents": 500,
+                    "valid_until": (chrono::Utc::now() + chrono::Duration::days(1)).to_rfc3339(),
+                }),
+            })
+            .await
+            .expect("create mutual aid post");
+        assert_eq!(resolved.post_kind, "mutual_aid");
+        assert_eq!(resolved.resolution_status, "open");
+        assert_eq!(resolved.mutual_aid_metadata["service_mode"], "pickup");
+
+        assert!(matches!(
+            service
+                .update_resolution(campus_id, resolved.id, &other, "resolved".to_string())
+                .await,
+            Err(ApiError::Forbidden)
+        ));
+        assert!(matches!(
+            service
+                .update_resolution(campus_id, resolved.id, &owner, "invalid".to_string())
+                .await,
+            Err(ApiError::BadRequest(_))
+        ));
+        let resolved = service
+            .update_resolution(campus_id, resolved.id, &owner, "resolved".to_string())
+            .await
+            .expect("resolve mutual aid post");
+        assert_eq!(resolved.resolution_status, "resolved");
+
+        service
+            .create_reply(
+                campus_id,
+                resolved.id,
+                &other,
+                "事情解决后仍可补充公开信息。".to_string(),
+                None,
+            )
+            .await
+            .expect("resolved mutual aid remains replyable");
+
+        let open = service
+            .create(CreateDiscussion {
+                campus_id,
+                author_id: owner,
+                title: "可以帮忙打印资料".to_string(),
+                body: "有需要的同学可以在帖子里回复。".to_string(),
+                category: Some("campus-life".to_string()),
+                tags: vec!["互助".to_string()],
+                cover_image_url: None,
+                post_kind: Some("mutual_aid".to_string()),
+                mutual_aid_metadata: serde_json::json!({
+                    "service_direction": "offer",
+                    "service_mode": "print",
+                }),
+            })
+            .await
+            .expect("create open mutual aid post");
+
+        for sort in [PostSort::Active, PostSort::ForYou] {
+            let (items, _) = service
+                .list_for_viewer(
+                    campus_id,
+                    None,
+                    &PostFilter {
+                        post_type: Some("discussion".to_string()),
+                        sort,
+                        ..Default::default()
+                    },
+                    50,
+                    0,
+                )
+                .await
+                .expect("list unified posts");
+            let open_position = items.iter().position(|post| post.id == open.id).unwrap();
+            let resolved_position = items
+                .iter()
+                .position(|post| post.id == resolved.id)
+                .unwrap();
+            assert!(open_position < resolved_position);
+        }
+    })
+    .await;
+}
+
 async fn user(pool: &sqlx::PgPool, tag: &str) -> String {
     let id = format!("post-{tag}-{}", Uuid::new_v4().simple());
     sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')")
@@ -59,6 +165,8 @@ async fn discussion_policy_rejection_happens_before_persistence() {
                 category: Some("campus-life".to_string()),
                 tags: vec![],
                 cover_image_url: None,
+                post_kind: None,
+                mutual_aid_metadata: serde_json::json!({}),
             })
             .await;
         assert!(matches!(result, Err(ApiError::ContentViolation(_))));
@@ -93,6 +201,8 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 category: Some("campus-life".to_string()),
                 tags: vec!["毕业季".to_string(), "经验".to_string()],
                 cover_image_url: None,
+                post_kind: None,
+                mutual_aid_metadata: serde_json::json!({}),
             })
             .await
             .expect("create discussion");
@@ -105,6 +215,8 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 category: None,
                 tags: vec![],
                 cover_image_url: None,
+                post_kind: None,
+                mutual_aid_metadata: serde_json::json!({}),
             })
             .await
             .expect("create second discussion");
@@ -233,6 +345,8 @@ async fn discussion_images_stay_private_until_moderation_approval() {
                 category: Some("campus-life".to_string()),
                 tags: vec!["夜市".to_string()],
                 cover_image_url: Some(image_url.to_string()),
+                post_kind: None,
+                mutual_aid_metadata: serde_json::json!({}),
             })
             .await
             .expect("create discussion with image");
@@ -431,6 +545,8 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 category: Some("Books".to_string()),
                 tags: vec!["教材".to_string()],
                 cover_image_url: None,
+                post_kind: None,
+                mutual_aid_metadata: serde_json::json!({}),
             })
             .await
             .expect("relevant post");
@@ -443,6 +559,8 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 category: Some("sports".to_string()),
                 tags: vec![],
                 cover_image_url: None,
+                post_kind: None,
+                mutual_aid_metadata: serde_json::json!({}),
             })
             .await
             .expect("unrelated post");
@@ -455,6 +573,8 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 category: Some("Sports".to_string()),
                 tags: vec![],
                 cover_image_url: None,
+                post_kind: None,
+                mutual_aid_metadata: serde_json::json!({}),
             })
             .await
             .expect("same category post");
@@ -467,6 +587,8 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 category: Some("books".to_string()),
                 tags: vec![],
                 cover_image_url: None,
+                post_kind: None,
+                mutual_aid_metadata: serde_json::json!({}),
             })
             .await
             .expect("viewer post");

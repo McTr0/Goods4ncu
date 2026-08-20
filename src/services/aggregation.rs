@@ -556,7 +556,7 @@ pub async fn run_formation_worker(db_pool: PgPool, shutdown: crate::lifecycle::S
         // Goods are matched one-to-one, not gathered into rooms; only the kinds
         // where several people want the same thing at once make sense here.
         for campus_id in campuses {
-            for kind in [kinds::COMPANION, kinds::ACTIVITY, kinds::HELP] {
+            for kind in [kinds::COMPANION, kinds::ACTIVITY] {
                 match service.form_spaces(campus_id, kind).await {
                     Ok((formed, declined)) => {
                         for space in &formed {

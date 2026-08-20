@@ -196,7 +196,6 @@ async fn people_and_events_travel_the_same_machinery_as_goods() {
             (kinds::GOODS_OFFER, "宿舍冰箱想出掉"),
             (kinds::GOODS_SEEK, "想收个二手显示器"),
             (kinds::COMPANION, "找个羽毛球搭子"),
-            (kinds::HELP, "有人会修自行车吗"),
             (kinds::ACTIVITY, "周末想爬梅岭，有人去吗"),
         ];
         for (kind, raw) in cases {
@@ -552,6 +551,21 @@ async fn an_unknown_kind_is_refused_rather_than_stored() {
             .expect_err("unknown kinds must be refused");
         assert!(error.to_string().contains("gossip"), "error: {error}");
 
+        let retired_help = service
+            .create(stated(
+                campus_id,
+                &author,
+                "help",
+                "有人会修自行车吗",
+                Slots::default(),
+            ))
+            .await
+            .expect_err("help must be published as a mutual-aid post");
+        assert!(
+            retired_help.to_string().contains("help"),
+            "error: {retired_help}"
+        );
+
         // And an intent with no words is not an intent.
         let blank = service
             .create(stated(
@@ -685,13 +699,8 @@ async fn projection_is_idempotent_and_only_for_offers() {
                 .expect("count");
         assert_eq!(listings, 1);
 
-        // A wanted item, a badminton partner and a favour are not listings.
-        for kind in [
-            kinds::GOODS_SEEK,
-            kinds::COMPANION,
-            kinds::HELP,
-            kinds::ACTIVITY,
-        ] {
+        // Wanted items, companions and activities are not listings.
+        for kind in [kinds::GOODS_SEEK, kinds::COMPANION, kinds::ACTIVITY] {
             let id = service
                 .create(stated(
                     campus_id,
@@ -733,8 +742,8 @@ async fn fulfilled_is_kept_distinct_from_withdrawn() {
             .create(stated(
                 campus_id,
                 &author,
-                kinds::HELP,
-                "有人会修自行车吗",
+                kinds::COMPANION,
+                "找个羽毛球搭子",
                 Slots::default(),
             ))
             .await
@@ -743,8 +752,8 @@ async fn fulfilled_is_kept_distinct_from_withdrawn() {
             .create(stated(
                 campus_id,
                 &author,
-                kinds::HELP,
-                "算了不修了",
+                kinds::ACTIVITY,
+                "周末活动取消了",
                 Slots::default(),
             ))
             .await
@@ -797,7 +806,6 @@ async fn the_campus_feed_is_visible_without_posting_anything_first() {
         for (kind, raw) in [
             (kinds::GOODS_SEEK, "想收个二手显示器"),
             (kinds::COMPANION, "找个羽毛球搭子"),
-            (kinds::HELP, "有人会修自行车吗"),
         ] {
             service
                 .create(stated(campus_id, &asker, kind, raw, Slots::default()))
@@ -810,15 +818,15 @@ async fn the_campus_feed_is_visible_without_posting_anything_first() {
             .campus_feed(campus_id, &newcomer, None, 30)
             .await
             .expect("feed");
-        assert_eq!(feed.len(), 3, "every kind is interleaved, newest first");
+        assert_eq!(feed.len(), 2, "every kind is interleaved, newest first");
 
         // Filtering works, and nobody sees their own intents echoed back.
-        let only_help = service
-            .campus_feed(campus_id, &asker, Some(kinds::HELP), 30)
+        let only_companion = service
+            .campus_feed(campus_id, &asker, Some(kinds::COMPANION), 30)
             .await
             .expect("filtered feed");
         assert!(
-            only_help.is_empty(),
+            only_companion.is_empty(),
             "the author's own intents are not news to them",
         );
     })
@@ -843,8 +851,8 @@ async fn the_feed_drops_what_you_have_already_answered() {
             .create(stated(
                 campus_id,
                 &asker,
-                kinds::HELP,
-                "有人会修自行车吗",
+                kinds::ACTIVITY,
+                "周末一起爬梅岭",
                 Slots::default(),
             ))
             .await
@@ -958,8 +966,8 @@ async fn only_a_live_visible_intent_can_be_answered() {
             .create(stated(
                 campus_id,
                 &asker,
-                kinds::HELP,
-                "算了",
+                kinds::COMPANION,
+                "算了不找搭子了",
                 Slots::default(),
             ))
             .await
@@ -976,8 +984,8 @@ async fn only_a_live_visible_intent_can_be_answered() {
             .create(stated(
                 campus_id,
                 &asker,
-                kinds::HELP,
-                "修好了",
+                kinds::ACTIVITY,
+                "活动结束了",
                 Slots::default(),
             ))
             .await

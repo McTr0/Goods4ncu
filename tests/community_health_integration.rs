@@ -543,8 +543,8 @@ async fn an_answered_intent_counts_as_an_answered_post() {
             .create(NewIntent {
                 campus_id,
                 author_id: &asker,
-                kind: kinds::HELP,
-                raw_input: "有人会修自行车吗",
+                kind: kinds::COMPANION,
+                raw_input: "找个羽毛球搭子",
                 slots: Slots::default(),
                 confidence: 1.0,
                 status: status::ACTIVE,

@@ -27,10 +27,9 @@ pub mod kinds {
     pub const GOODS_OFFER: &str = "goods_offer";
     pub const GOODS_SEEK: &str = "goods_seek";
     pub const COMPANION: &str = "companion";
-    pub const HELP: &str = "help";
     pub const ACTIVITY: &str = "activity";
 
-    pub const ALL: &[&str] = &[GOODS_OFFER, GOODS_SEEK, COMPANION, HELP, ACTIVITY];
+    pub const ALL: &[&str] = &[GOODS_OFFER, GOODS_SEEK, COMPANION, ACTIVITY];
 
     /// Whether this kind is about a thing changing hands, and so has a listing
     /// projection.
@@ -596,6 +595,5 @@ mod tests {
         // `inventory` would put people in a shopping grid.
         assert!(!kinds::is_goods(kinds::COMPANION));
         assert!(!kinds::is_goods(kinds::ACTIVITY));
-        assert!(!kinds::is_goods(kinds::HELP));
     }
 }
