@@ -55,9 +55,9 @@ void main() {
     await tester.tap(find.text('打开角色编辑器'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
-    expect(find.text('南大咕咕嘎嘎'), findsOneWidget);
-    expect(find.text('南大 Doro'), findsOneWidget);
-    expect(find.text('南大菲比啾比'), findsOneWidget);
+    expect(find.text('咕咕嘎嘎'), findsOneWidget);
+    expect(find.text('Doro'), findsOneWidget);
+    expect(find.text('菲比啾比'), findsOneWidget);
     expect(find.text('默认角色'), findsNothing);
     expect(find.text('打招呼'), findsOneWidget);
     expect(find.text('庆祝'), findsOneWidget);
@@ -73,7 +73,7 @@ void main() {
     expect(animatedAvatar.motionCue, AvatarMotionCue.wave);
 
     await tester.tap(
-      find.byKey(const ValueKey('persona_character_ncu_phoebe_chupi')),
+      find.byKey(const ValueKey('persona_character_phoebe_chupi')),
     );
     await tester.pump(const Duration(milliseconds: 220));
     await tester.scrollUntilVisible(
@@ -84,7 +84,7 @@ void main() {
     await tester.tap(find.text('保存草稿'));
     await tester.pumpAndSettle();
 
-    expect(saved?.appearanceConfig['character'], 'ncu_phoebe_chupi');
+    expect(saved?.appearanceConfig['character'], 'phoebe_chupi');
   });
 
   testWidgets(

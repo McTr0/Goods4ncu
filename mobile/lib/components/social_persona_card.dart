@@ -259,7 +259,7 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
     _character = _initialValue(
       persona?.appearance.character,
       _characterValues,
-      'ncu_doro',
+      'doro',
     );
     _contactPosture = _initialValue(
       persona?.contactPosture,
@@ -281,9 +281,10 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
   List<String> get _characterValues {
     final values = widget.catalog?.appearance['character'];
     return (values == null || values.isEmpty
-            ? const ['ncu_doro', 'ncu_gugugaga', 'ncu_phoebe_chupi']
+            ? const ['doro', 'gugugaga', 'phoebe_chupi']
             : values)
         .where((value) => value != 'classic')
+        .map((value) => value.startsWith('ncu_') ? value.substring(4) : value)
         .toList(growable: false);
   }
 
@@ -292,8 +293,13 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
     List<String>? allowed,
     String fallback,
   ) {
+    final normalized = current?.startsWith('ncu_') == true
+        ? current!.substring(4)
+        : current;
     final values = allowed == null || allowed.isEmpty ? [fallback] : allowed;
-    return current != null && values.contains(current) ? current : values.first;
+    return normalized != null && values.contains(normalized)
+        ? normalized
+        : values.first;
   }
 
   List<String> _catalogValues(String key, List<String> fallback) {
@@ -401,10 +407,11 @@ class _SocialPersonaEditorSheetState extends State<_SocialPersonaEditorSheet> {
                             context,
                             character: character,
                             label: switch (character) {
-                              'ncu_gugugaga' =>
+                              'gugugaga' || 'ncu_gugugaga' =>
                                 l.socialPersonaCharacterGugugaga,
+                              'doro' ||
                               'ncu_doro' => l.socialPersonaCharacterDoro,
-                              'ncu_phoebe_chupi' =>
+                              'phoebe_chupi' || 'ncu_phoebe_chupi' =>
                                 l.socialPersonaCharacterPhoebeChupi,
                               _ => l.socialPersonaCharacterClassic,
                             },

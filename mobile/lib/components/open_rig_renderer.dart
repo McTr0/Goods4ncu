@@ -29,6 +29,20 @@ class OpenRigCharacter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cached = OpenRigAssetCache.getSync(characterId);
+    if (cached != null) {
+      return RepaintBoundary(
+        child: CustomPaint(
+          key: ValueKey('persona_open_rig_$characterId'),
+          size: Size.square(size),
+          painter: OpenRigPainter(
+            asset: cached,
+            motionKey: motionKey,
+            progress: progress.clamp(0.0, 1.0),
+          ),
+        ),
+      );
+    }
     final future = OpenRigAssetCache.load(characterId);
     if (future == null) return fallback;
     return FutureBuilder<OpenRigAsset>(
@@ -60,19 +74,28 @@ class OpenRigAssetCache {
   OpenRigAssetCache._();
 
   static const manifests = <String, String>{
+    'doro': 'assets/avatars/v2/open_rig/ncu_doro/rig.json',
+    'gugugaga': 'assets/avatars/v2/open_rig/ncu_gugugaga/rig.json',
+    'phoebe_chupi': 'assets/avatars/v2/open_rig/ncu_phoebe_chupi/rig.json',
     'ncu_doro': 'assets/avatars/v2/open_rig/ncu_doro/rig.json',
     'ncu_gugugaga': 'assets/avatars/v2/open_rig/ncu_gugugaga/rig.json',
     'ncu_phoebe_chupi': 'assets/avatars/v2/open_rig/ncu_phoebe_chupi/rig.json',
   };
   static final Map<String, Future<OpenRigAsset>> _cache = {};
+  static final Map<String, OpenRigAsset> _assets = {};
+
+  static OpenRigAsset? getSync(String characterId) => _assets[characterId];
 
   static Future<OpenRigAsset>? load(String characterId) {
     final manifest = manifests[characterId];
     if (manifest == null) return null;
-    return _cache.putIfAbsent(characterId, () => _load(manifest));
+    return _cache.putIfAbsent(characterId, () => _load(characterId, manifest));
   }
 
-  static Future<OpenRigAsset> _load(String manifestAsset) async {
+  static Future<OpenRigAsset> _load(
+    String characterId,
+    String manifestAsset,
+  ) async {
     final raw = jsonDecode(await rootBundle.loadString(manifestAsset));
     if (raw is! Map<String, dynamic>) {
       throw const FormatException('Open rig manifest must be an object');
@@ -80,13 +103,18 @@ class OpenRigAssetCache {
     final definition = OpenRigDefinition.fromJson(raw);
     final textureData = await rootBundle.load(definition.textureAsset);
     final codec = await ui.instantiateImageCodec(
-      textureData.buffer.asUint8List(),
+      textureData.buffer.asUint8List(
+        textureData.offsetInBytes,
+        textureData.lengthInBytes,
+      ),
       targetWidth: 512,
       targetHeight: 512,
     );
     final frame = await codec.getNextFrame();
     codec.dispose();
-    return OpenRigAsset(definition: definition, image: frame.image);
+    final asset = OpenRigAsset(definition: definition, image: frame.image);
+    _assets[characterId] = asset;
+    return asset;
   }
 }
 

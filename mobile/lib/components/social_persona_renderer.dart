@@ -31,16 +31,18 @@ class SocialPersonaRenderSpec {
     SocialPersona persona, {
     String? name,
   }) {
-    final character = persona.appearance.character;
+    final rawChar = persona.appearance.character;
+    final character = switch (rawChar) {
+      'classic' || '' => 'doro',
+      _ => rawChar,
+    };
     return SocialPersonaRenderSpec(
       palette: persona.appearance.palette,
       silhouette: persona.appearance.silhouette,
       accessory: persona.appearance.accessory,
       outfit: persona.appearance.outfit,
       name: name ?? persona.userId ?? '',
-      assetId: character == 'classic' || character.isEmpty
-          ? 'ncu_doro'
-          : character,
+      assetId: character,
     );
   }
 
@@ -54,7 +56,7 @@ class SocialPersonaRenderSpec {
         accessory: 'none',
         outfit: 'campus',
         name: '',
-        assetId: 'ncu_doro',
+        assetId: 'doro',
       );
     }
     final hash = _stableHash(trimmed);
@@ -88,7 +90,7 @@ class SocialPersonaRenderSpec {
       accessory: accessories[accIdx],
       outfit: outfits[outIdx],
       name: trimmed,
-      assetId: 'ncu_doro',
+      assetId: 'doro',
     );
   }
 
@@ -809,17 +811,20 @@ class CampusMascotPersonaRenderer implements SocialPersonaRenderer {
       isDark: isDark,
       semanticLabel: null,
     );
-    Widget character = OpenRigCharacter(
-      characterId: assetId,
-      size: size,
-      motionKey: motionCue.manifestKey,
-      progress: motionProgress,
-      fallback: fallbackCharacter,
+    Widget character = SizedBox.square(
+      dimension: size,
+      child: OpenRigCharacter(
+        characterId: assetId,
+        size: size,
+        motionKey: motionCue.manifestKey,
+        progress: motionProgress,
+        fallback: fallbackCharacter,
+      ),
     );
     if (semanticLabel case final label? when label.isNotEmpty) {
       character = Semantics(label: label, image: true, child: character);
     }
-    return SizedBox.square(dimension: size, child: character);
+    return character;
   }
 }
 
@@ -934,35 +939,32 @@ class _SocialPersonaCharacterViewState extends State<SocialPersonaCharacterView>
     final renderer = widget.renderer ?? defaultPersonaRenderer;
     final shouldAnimate = _shouldAnimate(context);
 
-    final result = shouldAnimate
-        ? AnimatedBuilder(
-            animation: _controller,
-            builder: (context, _) {
-              return renderer.buildCharacter(
-                context,
-                spec: widget.spec,
-                size: widget.size,
-                motionProgress: _controller.value,
-                motionCue: widget.motionCue,
-                isDark: isDark,
-                semanticLabel: null,
-              );
-            },
-          )
-        : renderer.buildCharacter(
-            context,
-            spec: widget.spec,
-            size: widget.size,
-            motionProgress: 0.0,
-            motionCue: widget.motionCue,
-            isDark: isDark,
-            semanticLabel: null,
-          );
-
-    if (widget.semanticLabel case final label? when label.isNotEmpty) {
-      return Semantics(label: label, image: true, child: result);
+    if (!shouldAnimate) {
+      return renderer.buildCharacter(
+        context,
+        spec: widget.spec,
+        size: widget.size,
+        motionProgress: 0.0,
+        motionCue: widget.motionCue,
+        isDark: isDark,
+        semanticLabel: widget.semanticLabel,
+      );
     }
-    return result;
+
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        return renderer.buildCharacter(
+          context,
+          spec: widget.spec,
+          size: widget.size,
+          motionProgress: _controller.value,
+          motionCue: widget.motionCue,
+          isDark: isDark,
+          semanticLabel: widget.semanticLabel,
+        );
+      },
+    );
   }
 }
 

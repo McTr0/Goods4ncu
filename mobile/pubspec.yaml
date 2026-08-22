@@ -101,6 +101,9 @@ flutter:
     - assets/test_product_images/
     - assets/characters/
     - assets/avatars/v1/sprout/
+    - assets/avatars/v2/open_rig/doro/
+    - assets/avatars/v2/open_rig/gugugaga/
+    - assets/avatars/v2/open_rig/phoebe_chupi/
     - assets/avatars/v2/open_rig/ncu_doro/
     - assets/avatars/v2/open_rig/ncu_gugugaga/
     - assets/avatars/v2/open_rig/ncu_phoebe_chupi/

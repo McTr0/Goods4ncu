@@ -43,7 +43,7 @@ void main() {
           silhouette: 'sharp',
           accessory: 'headphones',
           outfit: 'workwear',
-          character: 'ncu_doro',
+          character: 'doro',
         ),
         selfDescriptions: [],
         contactPosture: 'leave_message',
@@ -56,12 +56,12 @@ void main() {
       expect(spec.accessory, 'headphones');
       expect(spec.outfit, 'workwear');
       expect(spec.name, 'user-42');
-      expect(spec.assetId, 'ncu_doro');
+      expect(spec.assetId, 'doro');
     });
 
-    test('default system character selects the versioned sprout asset', () {
+    test('default system character selects the versioned doro asset', () {
       final spec = SocialPersonaRenderSpec.fromName('alice');
-      expect(spec.assetId, 'sprout');
+      expect(spec.assetId, 'doro');
     });
   });
 
@@ -211,8 +211,12 @@ void main() {
           silhouette: 'soft',
           accessory: 'none',
           outfit: 'campus',
-          assetId: 'ncu_gugugaga',
+          assetId: 'gugugaga',
         );
+
+        await tester.runAsync(() async {
+          await OpenRigAssetCache.load('gugugaga');
+        });
 
         await tester.pumpWidget(
           const MaterialApp(
@@ -225,10 +229,10 @@ void main() {
             ),
           ),
         );
-        await tester.pumpAndSettle();
+        await tester.pump(const Duration(milliseconds: 100));
 
         expect(
-          find.byKey(const ValueKey('persona_open_rig_ncu_gugugaga')),
+          find.byKey(const ValueKey('persona_open_rig_gugugaga')),
           findsOneWidget,
         );
         expect(find.byType(CustomPaint), findsWidgets);
@@ -243,8 +247,12 @@ void main() {
         silhouette: 'soft',
         accessory: 'none',
         outfit: 'campus',
-        assetId: 'ncu_phoebe_chupi',
+        assetId: 'phoebe_chupi',
       );
+
+      await tester.runAsync(() async {
+        await OpenRigAssetCache.load('phoebe_chupi');
+      });
 
       await tester.pumpWidget(
         const MaterialApp(
@@ -257,10 +265,10 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 100));
 
       expect(
-        find.byKey(const ValueKey('persona_open_rig_ncu_phoebe_chupi')),
+        find.byKey(const ValueKey('persona_open_rig_phoebe_chupi')),
         findsOneWidget,
       );
     });

@@ -27,8 +27,16 @@ const OUTFITS: &[&str] = &["campus", "workwear", "casual", "lab"];
 // `classic` remains readable for personas created by older clients, but is no
 // longer advertised as a selectable character. New editors only offer the
 // campus character catalog below.
-const CHARACTERS: &[&str] = &["classic", "ncu_gugugaga", "ncu_doro", "ncu_phoebe_chupi"];
-const CATALOG_CHARACTERS: &[&str] = &["ncu_gugugaga", "ncu_doro", "ncu_phoebe_chupi"];
+const CHARACTERS: &[&str] = &[
+    "classic",
+    "doro",
+    "gugugaga",
+    "phoebe_chupi",
+    "ncu_doro",
+    "ncu_gugugaga",
+    "ncu_phoebe_chupi",
+];
+const CATALOG_CHARACTERS: &[&str] = &["doro", "gugugaga", "phoebe_chupi"];
 
 /// The only persona choices exposed to clients.  These values are deliberately
 /// compiled into the server contract: a client can select a catalog token, but
@@ -1021,9 +1029,9 @@ mod tests {
         assert_eq!(
             catalog.appearance["character"],
             vec![
-                "ncu_gugugaga".to_string(),
-                "ncu_doro".to_string(),
-                "ncu_phoebe_chupi".to_string()
+                "doro".to_string(),
+                "gugugaga".to_string(),
+                "phoebe_chupi".to_string()
             ]
         );
         assert!(!catalog.appearance.contains_key("image_url"));

@@ -43,9 +43,10 @@ class UserAvatar extends StatelessWidget {
     final effectiveLabel =
         semanticLabel ?? (trimmedName.isEmpty ? 'User' : trimmedName);
 
+    Widget avatar;
     // 1. Published SocialPersona has highest priority (when persona is enabled)
     if (showPersona && persona != null && persona!.isPublished) {
-      return SocialPersonaAvatar(
+      avatar = SocialPersonaAvatar(
         persona: persona!,
         size: size,
         semanticLabel: effectiveLabel,
@@ -54,18 +55,19 @@ class UserAvatar extends StatelessWidget {
         motionRevision: motionRevision,
         renderer: renderer,
       );
+    } else {
+      // 2. Stable system-drawn default character (deterministic fallback derived from name)
+      final spec = SocialPersonaRenderSpec.fromName(trimmedName);
+      avatar = SocialPersonaCharacterView(
+        spec: spec,
+        size: size,
+        enableMotion: enableMotion,
+        motionCue: motionCue,
+        motionRevision: motionRevision,
+        renderer: renderer,
+        semanticLabel: effectiveLabel,
+      );
     }
-
-    // 2. Stable system-drawn default character (deterministic fallback derived from name)
-    final spec = SocialPersonaRenderSpec.fromName(trimmedName);
-    return SocialPersonaCharacterView(
-      spec: spec,
-      size: size,
-      enableMotion: enableMotion,
-      motionCue: motionCue,
-      motionRevision: motionRevision,
-      renderer: renderer,
-      semanticLabel: effectiveLabel,
-    );
+    return avatar;
   }
 }
