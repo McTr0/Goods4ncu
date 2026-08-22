@@ -107,6 +107,18 @@ async fn conversation(
     .expect("insert conversation")
 }
 
+/// 0061 allows only one *live* realtime thread per unordered pair; metrics
+/// read every row regardless of state, so closing a thread keeps it counted.
+async fn end_conversation(pool: &sqlx::PgPool, id: Uuid) {
+    sqlx::query(
+        "UPDATE chat_conversations SET state = 'closed', last_activity_at = NOW() WHERE id = $1",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .expect("end conversation");
+}
+
 async fn message(
     pool: &sqlx::PgPool,
     conversation_id: Uuid,
@@ -167,6 +179,7 @@ async fn answer_rate_counts_posts_nobody_replied_to() {
         let campus = ncu(&pool).await;
         let seller = member(&pool, campus, "seller", 30).await;
         let buyer = member(&pool, campus, "buyer", 30).await;
+        let buyer2 = member(&pool, campus, "buyer", 30).await;
 
         // Three posts; two get a reply, one is ignored.
         let answered_a = listing(&pool, campus, &seller, "回应A", 10).await;
@@ -175,7 +188,7 @@ async fn answer_rate_counts_posts_nobody_replied_to() {
 
         // Replied two hours after posting.
         conversation(&pool, campus, &answered_a, &buyer, &seller, 8).await;
-        conversation(&pool, campus, &answered_b, &buyer, &seller, 6).await;
+        conversation(&pool, campus, &answered_b, &buyer2, &seller, 6).await;
 
         let health = CommunityHealthService::new(pool.clone())
             .measure(campus, 30)
@@ -204,12 +217,13 @@ async fn completion_is_measured_over_answered_posts_not_all_posts() {
         let seller = member(&pool, campus, "seller", 30).await;
         let buyer = member(&pool, campus, "buyer", 30).await;
 
+        let buyer2 = member(&pool, campus, "buyer", 30).await;
         let closed = listing(&pool, campus, &seller, "成交了", 10).await;
         let stalled = listing(&pool, campus, &seller, "聊了没成", 10).await;
         let _ignored = listing(&pool, campus, &seller, "没人理", 10).await;
 
         conversation(&pool, campus, &closed, &buyer, &seller, 9).await;
-        conversation(&pool, campus, &stalled, &buyer, &seller, 9).await;
+        conversation(&pool, campus, &stalled, &buyer2, &seller, 9).await;
         confirmed_order(&pool, campus, &closed, &buyer, &seller, 8).await;
 
         let health = CommunityHealthService::new(pool.clone())
@@ -311,7 +325,8 @@ async fn a_pair_is_unordered_so_direction_does_not_double_count() {
 
         let a_item = listing(&pool, campus, &a, "A 的东西", 20).await;
         let b_item = listing(&pool, campus, &b, "B 的东西", 20).await;
-        conversation(&pool, campus, &a_item, &b, &a, 19).await;
+        let forward = conversation(&pool, campus, &a_item, &b, &a, 19).await;
+        end_conversation(&pool, forward).await;
         conversation(&pool, campus, &b_item, &a, &b, 18).await;
 
         let health = CommunityHealthService::new(pool.clone())
