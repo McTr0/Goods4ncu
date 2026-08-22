@@ -1630,6 +1630,7 @@
   "assistantHeaderName": "小昌 · 智能数字人",
   "assistantHeaderTagline": "实时语音动作 · 记忆增强 · 校园生活助理",
   "assistantHistoryTooltip": "历史对话",
+  "assistantConfirmSendReply": "确认发送回复",
   "postDiscoveryTitle": "校园发现",
   "postDiscoverySubtitle": "同校同学的讨论和闲置帖子",
   "postFilterAll": "推荐",

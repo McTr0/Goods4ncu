@@ -3482,6 +3482,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get assistantHistoryTooltip => 'Conversation history';
 
   @override
+  String get assistantConfirmSendReply => 'Confirm posting reply';
+
+  @override
   String get postDiscoveryTitle => 'Campus discovery';
 
   @override

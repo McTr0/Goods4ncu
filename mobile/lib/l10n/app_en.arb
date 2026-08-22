@@ -1649,6 +1649,7 @@
   "assistantHeaderName": "Xiaochang · Digital human",
   "assistantHeaderTagline": "Live motion · Memory · Campus assistant",
   "assistantHistoryTooltip": "Conversation history",
+  "assistantConfirmSendReply": "Confirm posting reply",
   "postDiscoveryTitle": "Campus discovery",
   "postDiscoverySubtitle": "Discussions and listings from your campus",
   "postFilterAll": "For you",

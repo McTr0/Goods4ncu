@@ -246,6 +246,16 @@ impl UiAction {
             }),
         }
     }
+
+    pub fn open_comment_draft(post_id: &str, draft_text: &str) -> Self {
+        Self {
+            kind: "OPEN_COMMENT_DRAFT".to_string(),
+            payload: serde_json::json!({
+                "postId": post_id,
+                "draftText": draft_text,
+            }),
+        }
+    }
 }
 
 /// Extract listing IDs from a tool result string.

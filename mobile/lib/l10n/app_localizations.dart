@@ -6360,6 +6360,12 @@ abstract class AppLocalizations {
   /// **'Conversation history'**
   String get assistantHistoryTooltip;
 
+  /// No description provided for @assistantConfirmSendReply.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm posting reply'**
+  String get assistantConfirmSendReply;
+
   /// No description provided for @postDiscoveryTitle.
   ///
   /// In en, this message translates to:

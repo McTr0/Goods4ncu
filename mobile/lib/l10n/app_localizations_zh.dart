@@ -3320,6 +3320,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get assistantHistoryTooltip => '历史对话';
 
   @override
+  String get assistantConfirmSendReply => '确认发送回复';
+
+  @override
   String get postDiscoveryTitle => '校园发现';
 
   @override

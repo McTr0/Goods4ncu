@@ -1871,6 +1871,67 @@ impl Tool for DraftMessageTool {
     }
 }
 
+// 13. DraftCommentTool — packages a reply draft without posting it
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct DraftCommentArgs {
+    pub post_id: String,
+    pub draft_text: String,
+}
+
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct DraftCommentTool {
+    pub ctx: ToolContext,
+}
+
+impl Tool for DraftCommentTool {
+    const NAME: &'static str = "draft_comment";
+    type Error = ToolError;
+    type Args = DraftCommentArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "draft_comment".to_string(),
+            description: "为一条校园帖子生成一条公开回复草稿。不会直接发布——用户确认后才发布。用于帮用户组织回帖语言。".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "post_id": { "type": "string", "description": "The post ID to reply to" },
+                    "draft_text": { "type": "string", "description": "The draft reply text to show the user for confirmation" }
+                },
+                "required": ["post_id", "draft_text"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        // Read-safe packaging only: verify the target post exists and is
+        // active. Real permission checks run again on the publish endpoint
+        // after the user confirms.
+        let post_exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM posts WHERE id = $1::uuid AND status = 'active')",
+        )
+        .bind(&args.post_id)
+        .fetch_one(&self.ctx.db_pool)
+        .await
+        .unwrap_or(false);
+
+        if !post_exists {
+            return Err(ToolError(
+                "无法生成回复草稿：目标帖子不存在或已关闭。".to_string(),
+            ));
+        }
+
+        Ok(format!(
+            "DRAFT_COMMENT|{}|{}",
+            args.post_id, args.draft_text
+        ))
+    }
+}
+
 impl Tool for GetMyListingsTool {
     const NAME: &'static str = "get_my_listings";
     type Error = ToolError;
@@ -2151,6 +2212,7 @@ mod tests {
             FindRelatedPostsTool,
             GetCommentsTool,
             DraftMessageTool,
+            DraftCommentTool,
         )
     }
 
@@ -2408,6 +2470,63 @@ mod tests {
         // SearchInventoryTool is Clone, verify it compiles
         fn assert_clone<T: Clone>() {}
         assert_clone::<SearchInventoryTool>();
+    }
+
+    async fn insert_tool_post(
+        pool: &sqlx::PgPool,
+        post_id: &str,
+        author_id: &str,
+        campus_id: uuid::Uuid,
+    ) {
+        sqlx::query(
+            "INSERT INTO posts (id, campus_id, author_id, post_type, post_kind, category, title, body, status)
+             VALUES ($1::uuid, $2::uuid, $3::text, 'discussion', 'discussion', 'misc', '测试帖', '正文', 'active')",
+        )
+        .bind(post_id)
+        .bind(campus_id)
+        .bind(author_id)
+        .execute(pool)
+        .await
+        .expect("insert post");
+    }
+
+    #[tokio::test]
+    async fn draft_comment_tool_rejects_missing_or_closed_post() {
+        with_test_pool(|pool| async move {
+            let user_id = Uuid::new_v4().to_string();
+            insert_tool_user(&pool, &user_id, "draft_comment_user").await;
+            let campus_id =
+                sqlx::query_scalar::<_, uuid::Uuid>("SELECT id FROM campuses WHERE slug = 'ncu'")
+                    .fetch_one(&pool)
+                    .await
+                    .expect("ncu campus");
+            let post_id = Uuid::new_v4().to_string();
+            insert_tool_post(&pool, &post_id, &user_id, campus_id).await;
+
+            let ctx = tool_context(pool.clone(), Some(user_id.clone()));
+            let tool = DraftCommentTool { ctx };
+
+            let valid = tool
+                .call(DraftCommentArgs {
+                    post_id: post_id.clone(),
+                    draft_text: "请问周末可以自提吗？".to_string(),
+                })
+                .await
+                .expect("valid draft");
+            assert_eq!(
+                valid,
+                format!("DRAFT_COMMENT|{}|{}", post_id, "请问周末可以自提吗？")
+            );
+
+            let missing = tool
+                .call(DraftCommentArgs {
+                    post_id: Uuid::new_v4().to_string(),
+                    draft_text: "test".to_string(),
+                })
+                .await;
+            assert!(missing.is_err());
+        })
+        .await;
     }
 
     #[tokio::test]

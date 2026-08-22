@@ -325,6 +325,17 @@ impl MarketplaceAgent for GeminiMarketplaceAgent {
                                         }
                                     }
                                 }
+                                "draft_comment" => {
+                                    // Parse DRAFT_COMMENT|post_id|text
+                                    let parts: Vec<&str> = result.splitn(3, '|').collect();
+                                    if parts.len() == 3 && parts[0] == "DRAFT_COMMENT" {
+                                        yield AgentStreamChunk::UiAction(
+                                            crate::llm::UiAction::open_comment_draft(
+                                                parts[1], parts[2],
+                                            ),
+                                        );
+                                    }
+                                }
                                 "draft_message" => {
                                     // Parse DRAFT_MESSAGE|listing_id|receiver_id|text
                                     let parts: Vec<&str> = result.splitn(4, '|').collect();

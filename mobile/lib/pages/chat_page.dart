@@ -181,6 +181,15 @@ class _ChatPageState extends State<ChatPage> {
         if (userId != null && userId.isNotEmpty) {
           context.push('/users/$userId');
         }
+      case 'OPEN_COMMENT_DRAFT':
+        final commentDraft = payload['draftText']?.toString();
+        final targetPostId = payload['postId']?.toString();
+        if (commentDraft != null &&
+            targetPostId != null &&
+            targetPostId.isNotEmpty) {
+          _live2DController.brain.onDraftReady();
+          _showCommentDraftConfirmation(commentDraft, targetPostId);
+        }
       case 'OPEN_MESSAGE_DRAFT':
         final draftText = payload['draftText']?.toString();
         final listingId = payload['listingId']?.toString();
@@ -441,6 +450,80 @@ class _ChatPageState extends State<ChatPage> {
         ),
       ),
     );
+  }
+
+  void _showCommentDraftConfirmation(String text, String postId) {
+    final l = AppLocalizations.of(context);
+    _live2DController.showSpeechBubble(l?.assistantDraftReadyBubble ?? '');
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l!.assistantConfirmSendReply),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: SelectableText(text),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () {
+                    _live2DController.setExpression(Live2DExpression.idle);
+                    Navigator.of(ctx).pop();
+                  },
+                  child: Text(l.cancel),
+                ),
+                OutlinedButton(
+                  onPressed: () {
+                    Navigator.of(ctx).pop();
+                    // Let user edit in composer before posting
+                    _controller.text = text;
+                    _live2DController.showSpeechBubble(
+                      l.assistantDraftEditBubble,
+                    );
+                  },
+                  child: Text(l.edit),
+                ),
+                const SizedBox(width: 4),
+                FilledButton(
+                  onPressed: () async {
+                    Navigator.of(ctx).pop();
+                    await _publishAgentReply(text, postId);
+                  },
+                  child: Text(l.send),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _publishAgentReply(String text, String postId) async {
+    try {
+      await _postService.createReply(postId, body: text);
+      if (!mounted) return;
+      final l = AppLocalizations.of(context)!;
+      _live2DController.brain.onDraftSendComplete(succeeded: true);
+      _live2DController.setExpression(Live2DExpression.happy);
+      _live2DController.showSpeechBubble(l.assistantSentBubble);
+    } catch (e) {
+      if (!mounted) return;
+      final l = AppLocalizations.of(context)!;
+      _live2DController.brain.onDraftSendComplete(succeeded: false);
+      _live2DController.setExpression(Live2DExpression.surprised);
+      _live2DController.showSpeechBubble(l.assistantSendFailedBubble);
+    }
   }
 
   Future<void> _sendAgentMessage(
