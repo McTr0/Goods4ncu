@@ -19,7 +19,12 @@ use std::sync::Arc;
 use crate::llm::LlmProvider;
 
 fn default_env_filter() -> anyhow::Result<tracing_subscriber::EnvFilter> {
-    let mut filter = tracing_subscriber::EnvFilter::from_default_env();
+    // An explicit RUST_LOG wins outright; the defaults below only apply when
+    // the operator has not chosen their own filter.
+    if std::env::var_os("RUST_LOG").is_some() {
+        return Ok(tracing_subscriber::EnvFilter::from_default_env());
+    }
+    let mut filter = tracing_subscriber::EnvFilter::new(String::new());
     for directive in ["goods4ncu=info", "hyper=warn", "tower=warn"] {
         let parsed = directive
             .parse()

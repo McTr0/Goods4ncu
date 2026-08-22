@@ -320,6 +320,13 @@ impl MarketplaceAgent for MiniMaxMarketplaceAgent {
                                 .call_tool(&tool_call.function.name, &args_str)
                                 .await
                                 .map_err(|e| anyhow::anyhow!("tool error: {}", e))?;
+                            // Rig serializes the tool Output into a JSON
+                            // string; unwrap that envelope so UI-action
+                            // parsers and the model see the real text.
+                            let result = match serde_json::from_str::<String>(&result) {
+                                Ok(unwrapped) => unwrapped,
+                                Err(_) => result,
+                            };
                             match tool_call.function.name.as_str() {
                                 "search_inventory" => {
                                     if let Ok(ids) = crate::llm::extract_listing_ids(&result) {
