@@ -144,6 +144,10 @@ impl super::LlmProvider for OpenAiCompatibleProvider {
             .tool(crate::agents::tools::PurchaseItemIntentTool { ctx: ctx.clone() })
             .tool(crate::agents::tools::NegotiateItemTool { ctx: ctx.clone() })
             .tool(crate::agents::tools::GetMyListingsTool { ctx: ctx.clone() })
+            .tool(crate::agents::tools::GetUserPostsTool { ctx: ctx.clone() })
+            .tool(crate::agents::tools::FindRelatedPostsTool { ctx: ctx.clone() })
+            .tool(crate::agents::tools::GetCommentsTool { ctx: ctx.clone() })
+            .tool(crate::agents::tools::DraftMessageTool { ctx: ctx.clone() })
             .build();
 
         Ok(Box::new(OpenAiCompatibleMarketplaceAgent(agent)))
@@ -300,11 +304,59 @@ impl MarketplaceAgent for OpenAiCompatibleMarketplaceAgent {
                         }
                         StreamedAssistantContent::ToolCall { tool_call, internal_call_id: _ } => {
                             let args_str = tool_call.function.arguments.to_string();
+                            yield AgentStreamChunk::ToolActivity {
+                                tool: tool_call.function.name.clone(),
+                            };
                             let result = agent
                                 .tool_server_handle
                                 .call_tool(&tool_call.function.name, &args_str)
                                 .await
                                 .map_err(|e| anyhow::anyhow!("tool error: {}", e))?;
+                            match tool_call.function.name.as_str() {
+                                "search_inventory" => {
+                                    if let Ok(ids) = crate::llm::extract_listing_ids(&result) {
+                                        if !ids.is_empty() {
+                                            yield AgentStreamChunk::UiAction(
+                                                crate::llm::UiAction::show_posts(ids),
+                                            );
+                                        }
+                                    }
+                                }
+                                "get_listing_details" => {
+                                    if let Some(id) = tool_call
+                                        .function
+                                        .arguments
+                                        .get("listing_id")
+                                        .and_then(|v| v.as_str())
+                                    {
+                                        yield AgentStreamChunk::UiAction(
+                                            crate::llm::UiAction::scroll_to_post(id),
+                                        );
+                                    }
+                                }
+                                "find_related_posts" | "get_user_posts" => {
+                                    if let Ok(ids) = crate::llm::extract_listing_ids(&result) {
+                                        if !ids.is_empty() {
+                                            yield AgentStreamChunk::UiAction(
+                                                crate::llm::UiAction::show_posts(ids),
+                                            );
+                                        }
+                                    }
+                                }
+                                "draft_message" => {
+                                    let parts: Vec<&str> = result.splitn(4, '|').collect();
+                                    if parts.len() == 4 && parts[0] == "DRAFT_MESSAGE" {
+                                        yield AgentStreamChunk::UiAction(
+                                            crate::llm::UiAction::open_message_draft(
+                                                parts[2],
+                                                parts[1],
+                                                parts[3],
+                                            ),
+                                        );
+                                    }
+                                }
+                                _ => {}
+                            }
                             tool_calls.push((tool_call.id.clone(), tool_call.call_id.clone(), result));
                             did_call_tool = true;
                             call_succeeded = true;
