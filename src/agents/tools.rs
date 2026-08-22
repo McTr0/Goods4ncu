@@ -728,7 +728,7 @@ struct InventoryRow {
     title: String,
     brand: String,
     category: String,
-    condition_score: i64,
+    condition_score: i32,
     suggested_price_cny: i64,
 }
 
