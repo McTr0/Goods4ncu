@@ -97,8 +97,6 @@ class EnvironmentState extends ChangeNotifier {
 
   List<EnvironmentEvent> takeRecentForLLM(int limit) =>
       List.unmodifiable(recentEvents.take(limit));
-
-
 }
 
 /// Bridges UI callbacks into [EnvironmentState] and forwards only meaningful
