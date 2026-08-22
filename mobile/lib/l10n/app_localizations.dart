@@ -2724,6 +2724,12 @@ abstract class AppLocalizations {
   /// **'Processing…'**
   String get assistantTyping;
 
+  /// No description provided for @assistantAskAboutPage.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask Xiaochang'**
+  String get assistantAskAboutPage;
+
   /// No description provided for @relationshipSpacePokeAction.
   ///
   /// In en, this message translates to:
@@ -5625,19 +5631,19 @@ abstract class AppLocalizations {
   /// No description provided for @socialPersonaCharacterGugugaga.
   ///
   /// In en, this message translates to:
-  /// **'NCU Gugugaga'**
+  /// **'Gugugaga'**
   String get socialPersonaCharacterGugugaga;
 
   /// No description provided for @socialPersonaCharacterDoro.
   ///
   /// In en, this message translates to:
-  /// **'NCU Doro'**
+  /// **'Doro'**
   String get socialPersonaCharacterDoro;
 
   /// No description provided for @socialPersonaCharacterPhoebeChupi.
   ///
   /// In en, this message translates to:
-  /// **'NCU Phoebe Chupi'**
+  /// **'Phoebe Chupi'**
   String get socialPersonaCharacterPhoebeChupi;
 
   /// No description provided for @socialPersonaActionWave.

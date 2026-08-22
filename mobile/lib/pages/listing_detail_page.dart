@@ -655,6 +655,14 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
           onPressed: _handleBack,
         ),
         actions: [
+          IconButton(
+            key: const Key('listing-ask-assistant'),
+            tooltip: l.assistantAskAboutPage,
+            onPressed: () => context.push(
+              '/chat?listingId=${Uri.encodeComponent(widget.listingId)}',
+            ),
+            icon: const Icon(Icons.auto_awesome_outlined),
+          ),
           if (_canReportListing)
             if (_isReporting)
               const Padding(

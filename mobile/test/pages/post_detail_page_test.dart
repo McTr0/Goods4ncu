@@ -189,6 +189,46 @@ void main() {
     expect(find.text('Where can I print tonight?'), findsOneWidget);
   });
 
+  testWidgets('ask assistant navigates with the discussion post id', (
+    tester,
+  ) async {
+    final router = GoRouter(
+      initialLocation: '/posts/post-1',
+      routes: [
+        GoRoute(
+          path: '/posts/:id',
+          builder: (context, state) => PostDetailPage(
+            postId: state.pathParameters['id'],
+            postService: _FakePostService(),
+            listingService: _FakeListingService(),
+          ),
+        ),
+        GoRoute(
+          path: '/chat',
+          builder: (context, state) =>
+              Text('assistant ${state.uri.queryParameters['postId']}'),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp.router(
+        theme: AppTheme.light,
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        routerConfig: router,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('post-ask-assistant')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('assistant post-1'), findsOneWidget);
+  });
+
   testWidgets('canonicalizes a listing post link to the unified listing page', (
     tester,
   ) async {

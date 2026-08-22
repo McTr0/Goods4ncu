@@ -194,6 +194,21 @@ class _Live2DPreviewPageState extends State<Live2DPreviewPage> {
                               ),
                             ),
                           ),
+                          const SizedBox(width: 10),
+                          FilledButton.tonalIcon(
+                            onPressed: () {
+                              _controller.playMotion('poke_belly');
+                              _controller.setExpression(Live2DExpression.surprised);
+                              _controller.showSpeechBubble('哎呀，肚子要被你戳扁啦！');
+                            },
+                            icon: const Icon(Icons.back_hand_rounded, size: 18),
+                            label: const Text('戳肚子'),
+                            style: FilledButton.styleFrom(
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
 

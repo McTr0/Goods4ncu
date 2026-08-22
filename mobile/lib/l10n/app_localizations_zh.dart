@@ -1374,6 +1374,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get assistantTyping => '处理中…';
 
   @override
+  String get assistantAskAboutPage => '问小昌';
+
+  @override
   String get relationshipSpacePokeAction => '拍一拍';
 
   @override
@@ -2948,13 +2951,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get socialPersonaCharacterClassic => '经典角色';
 
   @override
-  String get socialPersonaCharacterGugugaga => '南大咕咕嘎嘎';
+  String get socialPersonaCharacterGugugaga => '咕咕嘎嘎';
 
   @override
-  String get socialPersonaCharacterDoro => '南大 Doro';
+  String get socialPersonaCharacterDoro => 'Doro';
 
   @override
-  String get socialPersonaCharacterPhoebeChupi => '南大菲比啾比';
+  String get socialPersonaCharacterPhoebeChupi => '菲比啾比';
 
   @override
   String get socialPersonaActionWave => '打招呼';

@@ -264,6 +264,19 @@ class _PostDetailPageState extends State<PostDetailPage> {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     final post = _post;
+    Widget? askAssistant;
+    if (!widget.embedded && post != null) {
+      askAssistant = IconButton(
+        key: const Key('post-ask-assistant'),
+        tooltip: l.assistantAskAboutPage,
+        onPressed: () => context.push(
+          widget.listingId != null
+              ? '/chat?listingId=${Uri.encodeComponent(widget.listingId!)}'
+              : '/chat?postId=${Uri.encodeComponent(post.id)}',
+        ),
+        icon: const Icon(Icons.auto_awesome_outlined),
+      );
+    }
     if (widget.embedded) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -292,6 +305,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
           onPressed: () => context.canPop() ? context.pop() : context.go('/'),
           icon: const Icon(Icons.arrow_back_rounded),
         ),
+        actions: [?askAssistant],
       ),
       body: _buildBody(),
       bottomNavigationBar: post == null || _loading
@@ -333,10 +347,9 @@ class _PostDetailPageState extends State<PostDetailPage> {
       );
     }
 
-    final post = _post!;
     final content = ResponsiveContent(
       maxWidth: 960,
-      child: _buildThreadContent(post),
+      child: _buildThreadContent(_post!),
     );
     if (widget.embedded) {
       return content;

@@ -41,6 +41,20 @@ import 'publish_navigation.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = BaseService.navigatorKey;
 
+Map<String, dynamic>? assistantPageContext(Uri uri) {
+  final listingId = uri.queryParameters['listingId'];
+  final postId = uri.queryParameters['postId'];
+  final focusedId = listingId ?? postId;
+  if (focusedId == null) return null;
+  final context = {
+    'page': 'post_detail',
+    'listingId': listingId,
+    'postId': focusedId,
+  };
+  if (listingId == null) context.remove('listingId');
+  return context;
+}
+
 Future<bool> getLoginStatus() async {
   final token = await TokenStorage.instance.getAccessToken();
   return token != null && token.isNotEmpty;
@@ -303,9 +317,10 @@ final GoRouter appRouter = GoRouter(
           path: '/chat',
           pageBuilder: (context, state) {
             final prompt = state.uri.queryParameters['prompt'];
+            final pageContext = assistantPageContext(state.uri);
             return NoTransitionPage(
               key: state.pageKey,
-              child: ChatPage(initialPrompt: prompt),
+              child: ChatPage(initialPrompt: prompt, pageContext: pageContext),
             );
           },
         ),

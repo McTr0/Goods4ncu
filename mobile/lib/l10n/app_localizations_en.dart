@@ -1429,6 +1429,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get assistantTyping => 'Processing…';
 
   @override
+  String get assistantAskAboutPage => 'Ask Xiaochang';
+
+  @override
   String get relationshipSpacePokeAction => 'Poke';
 
   @override
@@ -3088,13 +3091,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get socialPersonaCharacterClassic => 'Classic';
 
   @override
-  String get socialPersonaCharacterGugugaga => 'NCU Gugugaga';
+  String get socialPersonaCharacterGugugaga => 'Gugugaga';
 
   @override
-  String get socialPersonaCharacterDoro => 'NCU Doro';
+  String get socialPersonaCharacterDoro => 'Doro';
 
   @override
-  String get socialPersonaCharacterPhoebeChupi => 'NCU Phoebe Chupi';
+  String get socialPersonaCharacterPhoebeChupi => 'Phoebe Chupi';
 
   @override
   String get socialPersonaActionWave => 'Wave';
