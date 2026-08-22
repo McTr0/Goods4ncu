@@ -17,6 +17,8 @@ import '../services/notification_service.dart';
 import '../services/order_service.dart';
 import '../services/recommendation_service.dart';
 import '../services/upload_service.dart';
+import '../companion/companion_config.dart';
+import '../companion/runtime_host.dart';
 import '../services/content_report_service.dart';
 import '../services/feed_feedback_service.dart';
 import '../services/post_service.dart';
@@ -25,6 +27,10 @@ import '../services/post_service.dart';
 /// Pages can use these directly for better testability,
 /// or continue using ApiService for backward compatibility.
 List<SingleChildWidget> get serviceProviders => [
+  if (kCompanionEnabled)
+    ChangeNotifierProvider<CompanionRuntimeHost>(
+      create: (_) => CompanionRuntimeHost(),
+    ),
   Provider<ApiService>(create: (_) => ApiService()),
   Provider<AuthService>(create: (_) => AuthService()),
   Provider<ListingService>(create: (_) => ListingService()),
