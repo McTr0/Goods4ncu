@@ -1028,7 +1028,10 @@ async fn handle_chat_stream_request(
                 }
                 Err(error) => {
                     completed = false;
-                    let payload = serde_json::json!({ "error": error.to_string() });
+                    // Goal §49: raw provider/SQL internals must not reach the
+                    // client; the full error is already in the server log.
+                    tracing::error!(err = %error, "chat stream failed");
+                    let payload = serde_json::json!({ "error": "assistant_stream_failed" });
                     encode_sse_data(&payload)
                 }
             };

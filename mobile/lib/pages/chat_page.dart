@@ -1360,12 +1360,15 @@ class _ChatPageState extends State<ChatPage> {
       });
       return;
     } catch (e) {
+      // Goal §49: the user sees a friendly line, never raw SQL/provider
+      // internals. Full detail goes to the debug console only.
+      debugPrint('chat stream failed: $e');
       final botMsgIndex = _messages.isEmpty ? -1 : _messages.length - 1;
       if (mounted && botMsgIndex >= 0 && botMsgIndex < _messages.length) {
         final l = AppLocalizations.of(context)!;
         setState(() {
           _messages[botMsgIndex] = _messages[botMsgIndex].copyWith(
-            content: '${l.aiError}: $e',
+            content: l.aiError,
             isPartial: false,
           );
         });
