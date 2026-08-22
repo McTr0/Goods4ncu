@@ -73,8 +73,7 @@ python3 - "$G" <<'PY'
 import json,sys,re
 d=json.loads(sys.argv[1]); r=d['reply']
 # A refusal must be present...
-hedge = re.search(r"(无法|不能|没法|难以)[^
-]{0,12}(判断|确定)|仅凭|建议", r)
+hedge = re.search(r"(无法|不能|没法|难以)[^\n]{0,12}(判断|确定)|仅凭|建议", r)
 assert hedge, f"G: no evidence-grounded hedge found: {r[:120]}"
 # ...and no outright verdict.
 verdict = re.search(r"(肯定|一定|就是|确认)[是]?(骗子|骗局|诈骗)|诈骗犯", r)
