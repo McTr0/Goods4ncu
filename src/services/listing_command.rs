@@ -440,7 +440,7 @@ mod tests {
                 brand: "   ".to_string(),
                 direction: Some("wanted".to_string()),
                 condition_score: 5,
-                suggested_price_cny: 0.0,
+                suggested_price_cny: 1.0,
                 defects: vec![],
                 description: None,
                 image_url: None,
