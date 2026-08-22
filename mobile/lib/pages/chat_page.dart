@@ -193,28 +193,28 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   /// Friendly per-tool status shown while 小昌 works (never raw tool JSON).
-  String _toolActivityLabel(String tool) {
+  String _toolActivityLabel(AppLocalizations l, String tool) {
     switch (tool) {
       case 'search_inventory':
-        return '正在翻帖子…';
+        return l.agentToolSearchingPosts;
       case 'get_listing_details':
-        return '正在仔细看这条信息…';
+        return l.agentToolInspectingListing;
       case 'find_related_posts':
-        return '正在找类似的帖子…';
+        return l.agentToolFindingRelated;
       case 'get_user_posts':
-        return '正在看看TA还发过什么…';
+        return l.agentToolBrowsingUserPosts;
       case 'get_comments':
-        return '正在读评论…';
+        return l.agentToolReadingComments;
       case 'get_my_listings':
-        return '正在整理你的发布…';
+        return l.agentToolOrganizingListings;
       case 'draft_message':
-        return '正在帮你起草消息…';
+        return l.agentToolDraftingMessage;
       case 'create_listing':
-        return '正在帮你准备发布…';
+        return l.agentToolPreparingPublish;
       case 'negotiate_item':
-        return '正在准备议价方案…';
+        return l.agentToolPreparingOffer;
       default:
-        return '正在处理你的请求…';
+        return l.agentToolWorking;
     }
   }
 
@@ -298,6 +298,7 @@ class _ChatPageState extends State<ChatPage> {
 
   Widget? get _agentResultsStrip {
     if (_agentResultPosts.isEmpty) return null;
+    final l = AppLocalizations.of(context)!;
     return Container(
       color: const Color(0xFFF0FAF7),
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -307,7 +308,7 @@ class _ChatPageState extends State<ChatPage> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Text(
-              '小昌找到的真实帖子',
+              l.assistantAgentResultTitle,
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
                 fontWeight: FontWeight.w700,
                 color: const Color(0xFF0F766E),
@@ -358,7 +359,7 @@ class _ChatPageState extends State<ChatPage> {
                             const Spacer(),
                             Text(
                               post.displayBody.isEmpty
-                                  ? post.category ?? '平台帖子'
+                                  ? post.category ?? l.assistantFallbackCategory
                                   : post.displayBody,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
@@ -387,11 +388,11 @@ class _ChatPageState extends State<ChatPage> {
     String receiverId,
   ) {
     final l = AppLocalizations.of(context);
-    _live2DController.showSpeechBubble('我帮你拟好了，确认后发送：');
+    _live2DController.showSpeechBubble(l?.assistantDraftReadyBubble ?? '');
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('确认发送消息'),
+        title: Text(l!.assistantConfirmSendMessage),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -413,16 +414,18 @@ class _ChatPageState extends State<ChatPage> {
                     _live2DController.setExpression(Live2DExpression.idle);
                     Navigator.of(ctx).pop();
                   },
-                  child: Text(l?.cancel ?? '取消'),
+                  child: Text(l.cancel),
                 ),
                 OutlinedButton(
                   onPressed: () {
                     Navigator.of(ctx).pop();
                     // Let user edit in composer before sending
                     _controller.text = text;
-                    _live2DController.showSpeechBubble('你可以在输入框修改后再发送');
+                    _live2DController.showSpeechBubble(
+                      l.assistantDraftEditBubble,
+                    );
                   },
-                  child: Text(l?.edit ?? '编辑'),
+                  child: Text(l.edit),
                 ),
                 const SizedBox(width: 4),
                 FilledButton(
@@ -430,7 +433,7 @@ class _ChatPageState extends State<ChatPage> {
                     Navigator.of(ctx).pop();
                     await _sendAgentMessage(text, listingId, receiverId);
                   },
-                  child: Text(l?.send ?? '发送'),
+                  child: Text(l.send),
                 ),
               ],
             ),
@@ -448,14 +451,16 @@ class _ChatPageState extends State<ChatPage> {
     try {
       await _chatService.sendMessage('listing:$listingId', content: text);
       if (!mounted) return;
+      final l = AppLocalizations.of(context)!;
       _live2DController.brain.onDraftSendComplete(succeeded: true);
       _live2DController.setExpression(Live2DExpression.happy);
-      _live2DController.showSpeechBubble('发过去啦！');
+      _live2DController.showSpeechBubble(l.assistantSentBubble);
     } catch (e) {
       if (!mounted) return;
+      final l = AppLocalizations.of(context)!;
       _live2DController.brain.onDraftSendComplete(succeeded: false);
       _live2DController.setExpression(Live2DExpression.surprised);
-      _live2DController.showSpeechBubble('发送失败，请重试');
+      _live2DController.showSpeechBubble(l.assistantSendFailedBubble);
     }
   }
 
@@ -776,6 +781,7 @@ class _ChatPageState extends State<ChatPage> {
 
   /// Send a message using SSE streaming (token-by-token render).
   Future<void> _sendMessage() async {
+    final localizations = AppLocalizations.of(context);
     final text = _controller.text.trim();
     final selectedImage = _selectedImage;
     final selectedImageBytes = _selectedImageBytes;
@@ -860,7 +866,9 @@ class _ChatPageState extends State<ChatPage> {
       }
 
       _live2DController.brain.onMessageSent(userMsg.content);
-      _live2DController.showSpeechBubble('小昌在思考中，正在检索校园记忆...');
+      _live2DController.showSpeechBubble(
+        localizations?.assistantThinkingBubble ?? '',
+      );
       String fullReply = '';
       await for (final token in _sseService.stream) {
         if (!mounted) break;
@@ -878,7 +886,10 @@ class _ChatPageState extends State<ChatPage> {
           if (_agentDebugEnabled) _recordDebugToolCall(activity);
           // Surface a friendly progress line until real reply text arrives.
           if (fullReply.isEmpty) {
-            final label = _toolActivityLabel(activity);
+            final label = _toolActivityLabel(
+              AppLocalizations.of(context)!,
+              activity,
+            );
             _live2DController.showSpeechBubble(label);
           }
         }
@@ -909,7 +920,9 @@ class _ChatPageState extends State<ChatPage> {
         reply: fullReply,
       );
       _live2DController.showSpeechBubble(
-        fullReply.isEmpty ? '小昌收到啦！随时为你服务~' : fullReply,
+        fullReply.isEmpty
+            ? (localizations?.assistantIdleReplyBubble ?? '')
+            : fullReply,
       );
 
       // Finalize the message (no longer partial).
@@ -983,6 +996,7 @@ class _ChatPageState extends State<ChatPage> {
           maxChildSize: 0.95,
           expand: false,
           builder: (context, scrollController) {
+            final l = AppLocalizations.of(context)!;
             return Column(
               children: [
                 Container(
@@ -1002,8 +1016,8 @@ class _ChatPageState extends State<ChatPage> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        '📜 历史对话与智能记忆',
+                      Text(
+                        l.assistantHistorySheetTitle,
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -1022,9 +1036,9 @@ class _ChatPageState extends State<ChatPage> {
                   child: _isLoadingHistory
                       ? const Center(child: CircularProgressIndicator())
                       : _messages.isEmpty
-                      ? const Center(
+                      ? Center(
                           child: Text(
-                            '暂无历史对话',
+                            l.assistantHistoryEmpty,
                             style: TextStyle(color: Colors.grey),
                           ),
                         )
@@ -1054,7 +1068,13 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Widget _buildQuickSuggestionChips() {
-    final chips = ['🚲 校园二手车', '📚 考研二手教材', '🎒 闲置数码与iPad', '📦 查我的校园订单'];
+    final l = AppLocalizations.of(context)!;
+    final chips = [
+      l.assistantSuggestionVehicles,
+      l.assistantSuggestionTextbooks,
+      l.assistantSuggestionGadgets,
+      l.assistantSuggestionOrders,
+    ];
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -1287,7 +1307,7 @@ class _ChatPageState extends State<ChatPage> {
           child: UnifiedMessageComposer(
             controller: _controller,
             focusNode: _composerFocusNode,
-            hintText: '和小昌说说话，找好物、问跑腿...',
+            hintText: l.assistantComposerHint,
             isSending: _isStreaming,
             onChanged: (_) => _live2DController.brain.onUserTyping(),
             onSubmitted: (_) => _sendMessage(),

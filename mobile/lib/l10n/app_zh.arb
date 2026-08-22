@@ -904,21 +904,27 @@
   "campusMapEstimatedDistance": "估算距离约 {meters} 米",
   "@campusMapEstimatedDistance": {
     "placeholders": {
-      "meters": {"type": "int"}
+      "meters": {
+        "type": "int"
+      }
     }
   },
   "campusMapSchematicRouteWarning": "此路线仅按地图中的逻辑相邻关系生成，不含经核验的距离或逐路段指引，请以现场道路和导视为准。",
   "campusMapClassroomArrival": "到达建筑后，按楼内标识前往 {classroom}。",
   "@campusMapClassroomArrival": {
     "placeholders": {
-      "classroom": {"type": "String"}
+      "classroom": {
+        "type": "String"
+      }
     }
   },
   "campusMapChatUnavailable": "该节点的聊天室数据尚未同步",
   "campusMapEnterChat": "进入{name}聊天室",
   "@campusMapEnterChat": {
     "placeholders": {
-      "name": {"type": "String"}
+      "name": {
+        "type": "String"
+      }
     }
   },
   "locationSpacesTitle": "南昌大学地点聊天室",
@@ -928,7 +934,9 @@
   "locationRecommendTitle": "附近是 {name}",
   "@locationRecommendTitle": {
     "placeholders": {
-      "name": {"type": "String"}
+      "name": {
+        "type": "String"
+      }
     }
   },
   "locationRecommendBody": "这是一次性推荐。进入该地点聊天室即可参与当下交流；离开页面后在线状态会过期。",
@@ -941,19 +949,25 @@
   "locationEnterFailed": "进入地点聊天室失败：{error}",
   "@locationEnterFailed": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
   "locationMemberCount": "{count} 位成员",
   "@locationMemberCount": {
     "placeholders": {
-      "count": {"type": "int"}
+      "count": {
+        "type": "int"
+      }
     }
   },
   "locationOnlineCount": "当前在线 {count} 人",
   "@locationOnlineCount": {
     "placeholders": {
-      "count": {"type": "int"}
+      "count": {
+        "type": "int"
+      }
     }
   },
   "locationOnlineUnavailable": "在线人数暂不可用",
@@ -965,7 +979,9 @@
   "locationCreateChildTitle": "在 {name} 下创建小聊天室",
   "@locationCreateChildTitle": {
     "placeholders": {
-      "name": {"type": "String"}
+      "name": {
+        "type": "String"
+      }
     }
   },
   "locationChildCreated": "小聊天室已创建",
@@ -1029,13 +1045,17 @@
   "groupTopicStartedBy": "由 {name} 发起",
   "@groupTopicStartedBy": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "groupTopicReplyCount": "{count} 条",
   "@groupTopicReplyCount": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "spaceFallbackDescription": "{count} 位成员 · {kind}",
@@ -1581,6 +1601,35 @@
   "assistantToolFindPrompt": "帮我找一件商品：",
   "assistantToolPublishPrompt": "帮我根据这些信息发布商品：",
   "assistantToolEstimatePrompt": "帮我参考校园市场估算这件商品的价格：",
+  "agentToolSearchingPosts": "正在翻帖子…",
+  "agentToolInspectingListing": "正在仔细看这条信息…",
+  "agentToolFindingRelated": "正在找类似的帖子…",
+  "agentToolBrowsingUserPosts": "正在看看TA还发过什么…",
+  "agentToolReadingComments": "正在读评论…",
+  "agentToolOrganizingListings": "正在整理你的发布…",
+  "agentToolDraftingMessage": "正在帮你起草消息…",
+  "agentToolPreparingPublish": "正在帮你准备发布…",
+  "agentToolPreparingOffer": "正在准备议价方案…",
+  "agentToolWorking": "正在处理你的请求…",
+  "assistantAgentResultTitle": "小昌找到的真实帖子",
+  "assistantFallbackCategory": "平台帖子",
+  "assistantDraftReadyBubble": "我帮你拟好了，确认后发送：",
+  "assistantConfirmSendMessage": "确认发送消息",
+  "assistantDraftEditBubble": "你可以在输入框修改后再发送",
+  "assistantSentBubble": "发过去啦！",
+  "assistantSendFailedBubble": "发送失败，请重试",
+  "assistantThinkingBubble": "小昌在思考中，正在检索校园记忆...",
+  "assistantIdleReplyBubble": "小昌收到啦！随时为你服务~",
+  "assistantHistorySheetTitle": "📜 历史对话与智能记忆",
+  "assistantHistoryEmpty": "暂无历史对话",
+  "assistantSuggestionVehicles": "🚲 校园二手车",
+  "assistantSuggestionTextbooks": "📚 考研二手教材",
+  "assistantSuggestionGadgets": "🎒 闲置数码与iPad",
+  "assistantSuggestionOrders": "📦 查我的校园订单",
+  "assistantComposerHint": "和小昌说说话，找好物、问跑腿...",
+  "assistantHeaderName": "小昌 · 智能数字人",
+  "assistantHeaderTagline": "实时语音动作 · 记忆增强 · 校园生活助理",
+  "assistantHistoryTooltip": "历史对话",
   "postDiscoveryTitle": "校园发现",
   "postDiscoverySubtitle": "同校同学的讨论和闲置帖子",
   "postFilterAll": "推荐",
@@ -1644,7 +1693,9 @@
   "postReplyingTo": "回复 {username}",
   "@postReplyingTo": {
     "placeholders": {
-      "username": {"type": "String"}
+      "username": {
+        "type": "String"
+      }
     }
   },
   "postLinkedListing": "关联商品信息",

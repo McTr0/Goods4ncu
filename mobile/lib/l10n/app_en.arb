@@ -923,21 +923,27 @@
   "campusMapEstimatedDistance": "Estimated distance: about {meters} m",
   "@campusMapEstimatedDistance": {
     "placeholders": {
-      "meters": {"type": "int"}
+      "meters": {
+        "type": "int"
+      }
     }
   },
   "campusMapSchematicRouteWarning": "This route follows logical adjacency on the guide only. It has no verified distance or turn-by-turn directions; follow on-site paths and signs.",
   "campusMapClassroomArrival": "After reaching the building, follow indoor signs to {classroom}.",
   "@campusMapClassroomArrival": {
     "placeholders": {
-      "classroom": {"type": "String"}
+      "classroom": {
+        "type": "String"
+      }
     }
   },
   "campusMapChatUnavailable": "Chat data for this node is not synced yet",
   "campusMapEnterChat": "Enter {name} chat",
   "@campusMapEnterChat": {
     "placeholders": {
-      "name": {"type": "String"}
+      "name": {
+        "type": "String"
+      }
     }
   },
   "locationSpacesTitle": "Nanchang University place chats",
@@ -947,7 +953,9 @@
   "locationRecommendTitle": "You are near {name}",
   "@locationRecommendTitle": {
     "placeholders": {
-      "name": {"type": "String"}
+      "name": {
+        "type": "String"
+      }
     }
   },
   "locationRecommendBody": "This is a one-time suggestion. Enter the place chat to take part in the current conversation; your online state expires after you leave.",
@@ -960,19 +968,25 @@
   "locationEnterFailed": "Could not enter the place chat: {error}",
   "@locationEnterFailed": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
   "locationMemberCount": "{count} members",
   "@locationMemberCount": {
     "placeholders": {
-      "count": {"type": "int"}
+      "count": {
+        "type": "int"
+      }
     }
   },
   "locationOnlineCount": "{count} online now",
   "@locationOnlineCount": {
     "placeholders": {
-      "count": {"type": "int"}
+      "count": {
+        "type": "int"
+      }
     }
   },
   "locationOnlineUnavailable": "Online count unavailable",
@@ -984,7 +998,9 @@
   "locationCreateChildTitle": "Create a small chat in {name}",
   "@locationCreateChildTitle": {
     "placeholders": {
-      "name": {"type": "String"}
+      "name": {
+        "type": "String"
+      }
     }
   },
   "locationChildCreated": "Small chat created",
@@ -1048,13 +1064,17 @@
   "groupTopicStartedBy": "Started by {name}",
   "@groupTopicStartedBy": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "groupTopicReplyCount": "{count}",
   "@groupTopicReplyCount": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "spaceFallbackDescription": "{count} members · {kind}",
@@ -1600,6 +1620,35 @@
   "assistantToolFindPrompt": "Help me find an item:",
   "assistantToolPublishPrompt": "Help me publish an item using these details:",
   "assistantToolEstimatePrompt": "Estimate a fair campus-market price for this item:",
+  "agentToolSearchingPosts": "Flipping through posts…",
+  "agentToolInspectingListing": "Taking a close look at this listing…",
+  "agentToolFindingRelated": "Looking for similar posts…",
+  "agentToolBrowsingUserPosts": "Seeing what else they posted…",
+  "agentToolReadingComments": "Reading the comments…",
+  "agentToolOrganizingListings": "Organizing your listings…",
+  "agentToolDraftingMessage": "Drafting a message for you…",
+  "agentToolPreparingPublish": "Preparing your listing…",
+  "agentToolPreparingOffer": "Preparing an offer…",
+  "agentToolWorking": "Working on your request…",
+  "assistantAgentResultTitle": "Real posts found by Xiaochang",
+  "assistantFallbackCategory": "Campus post",
+  "assistantDraftReadyBubble": "I've drafted it — send after you confirm:",
+  "assistantConfirmSendMessage": "Confirm sending message",
+  "assistantDraftEditBubble": "Edit it in the composer before sending",
+  "assistantSentBubble": "Sent!",
+  "assistantSendFailedBubble": "Sending failed — please retry",
+  "assistantThinkingBubble": "Xiaochang is thinking, searching campus memories...",
+  "assistantIdleReplyBubble": "Got it! Xiaochang is here whenever you need~",
+  "assistantHistorySheetTitle": "📜 History & smart memory",
+  "assistantHistoryEmpty": "No conversations yet",
+  "assistantSuggestionVehicles": "🚲 Campus bikes",
+  "assistantSuggestionTextbooks": "📚 Grad-exam textbooks",
+  "assistantSuggestionGadgets": "🎒 Gadgets & iPads",
+  "assistantSuggestionOrders": "📦 My campus orders",
+  "assistantComposerHint": "Talk to Xiaochang — find goods or errands...",
+  "assistantHeaderName": "Xiaochang · Digital human",
+  "assistantHeaderTagline": "Live motion · Memory · Campus assistant",
+  "assistantHistoryTooltip": "Conversation history",
   "postDiscoveryTitle": "Campus discovery",
   "postDiscoverySubtitle": "Discussions and listings from your campus",
   "postFilterAll": "For you",
@@ -1663,7 +1712,9 @@
   "postReplyingTo": "Replying to {username}",
   "@postReplyingTo": {
     "placeholders": {
-      "username": {"type": "String"}
+      "username": {
+        "type": "String"
+      }
     }
   },
   "postLinkedListing": "Marketplace listing",

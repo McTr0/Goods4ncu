@@ -3233,6 +3233,93 @@ class AppLocalizationsZh extends AppLocalizations {
   String get assistantToolEstimatePrompt => '帮我参考校园市场估算这件商品的价格：';
 
   @override
+  String get agentToolSearchingPosts => '正在翻帖子…';
+
+  @override
+  String get agentToolInspectingListing => '正在仔细看这条信息…';
+
+  @override
+  String get agentToolFindingRelated => '正在找类似的帖子…';
+
+  @override
+  String get agentToolBrowsingUserPosts => '正在看看TA还发过什么…';
+
+  @override
+  String get agentToolReadingComments => '正在读评论…';
+
+  @override
+  String get agentToolOrganizingListings => '正在整理你的发布…';
+
+  @override
+  String get agentToolDraftingMessage => '正在帮你起草消息…';
+
+  @override
+  String get agentToolPreparingPublish => '正在帮你准备发布…';
+
+  @override
+  String get agentToolPreparingOffer => '正在准备议价方案…';
+
+  @override
+  String get agentToolWorking => '正在处理你的请求…';
+
+  @override
+  String get assistantAgentResultTitle => '小昌找到的真实帖子';
+
+  @override
+  String get assistantFallbackCategory => '平台帖子';
+
+  @override
+  String get assistantDraftReadyBubble => '我帮你拟好了，确认后发送：';
+
+  @override
+  String get assistantConfirmSendMessage => '确认发送消息';
+
+  @override
+  String get assistantDraftEditBubble => '你可以在输入框修改后再发送';
+
+  @override
+  String get assistantSentBubble => '发过去啦！';
+
+  @override
+  String get assistantSendFailedBubble => '发送失败，请重试';
+
+  @override
+  String get assistantThinkingBubble => '小昌在思考中，正在检索校园记忆...';
+
+  @override
+  String get assistantIdleReplyBubble => '小昌收到啦！随时为你服务~';
+
+  @override
+  String get assistantHistorySheetTitle => '📜 历史对话与智能记忆';
+
+  @override
+  String get assistantHistoryEmpty => '暂无历史对话';
+
+  @override
+  String get assistantSuggestionVehicles => '🚲 校园二手车';
+
+  @override
+  String get assistantSuggestionTextbooks => '📚 考研二手教材';
+
+  @override
+  String get assistantSuggestionGadgets => '🎒 闲置数码与iPad';
+
+  @override
+  String get assistantSuggestionOrders => '📦 查我的校园订单';
+
+  @override
+  String get assistantComposerHint => '和小昌说说话，找好物、问跑腿...';
+
+  @override
+  String get assistantHeaderName => '小昌 · 智能数字人';
+
+  @override
+  String get assistantHeaderTagline => '实时语音动作 · 记忆增强 · 校园生活助理';
+
+  @override
+  String get assistantHistoryTooltip => '历史对话';
+
+  @override
   String get postDiscoveryTitle => '校园发现';
 
   @override

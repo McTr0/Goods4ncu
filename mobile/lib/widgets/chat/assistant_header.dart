@@ -11,6 +11,7 @@ class AssistantDigitalHumanHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -24,22 +25,25 @@ class AssistantDigitalHumanHeader extends StatelessWidget {
         children: [
           const XiaochangAvatar(size: 36),
           const SizedBox(width: 10),
-          const Column(
+          Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '小昌 · 智能数字人',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                l.assistantHeaderName,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
               Text(
-                '实时语音动作 · 记忆增强 · 校园生活助理',
-                style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                l.assistantHeaderTagline,
+                style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
               ),
             ],
           ),
           const Spacer(),
           IconButton(
-            tooltip: '历史对话',
+            tooltip: l.assistantHistoryTooltip,
             icon: const Icon(Icons.history_rounded, color: Color(0xFF0F766E)),
             onPressed: onOpenHistory,
           ),

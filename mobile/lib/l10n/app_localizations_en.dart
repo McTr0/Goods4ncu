@@ -3388,6 +3388,100 @@ class AppLocalizationsEn extends AppLocalizations {
       'Estimate a fair campus-market price for this item:';
 
   @override
+  String get agentToolSearchingPosts => 'Flipping through posts…';
+
+  @override
+  String get agentToolInspectingListing =>
+      'Taking a close look at this listing…';
+
+  @override
+  String get agentToolFindingRelated => 'Looking for similar posts…';
+
+  @override
+  String get agentToolBrowsingUserPosts => 'Seeing what else they posted…';
+
+  @override
+  String get agentToolReadingComments => 'Reading the comments…';
+
+  @override
+  String get agentToolOrganizingListings => 'Organizing your listings…';
+
+  @override
+  String get agentToolDraftingMessage => 'Drafting a message for you…';
+
+  @override
+  String get agentToolPreparingPublish => 'Preparing your listing…';
+
+  @override
+  String get agentToolPreparingOffer => 'Preparing an offer…';
+
+  @override
+  String get agentToolWorking => 'Working on your request…';
+
+  @override
+  String get assistantAgentResultTitle => 'Real posts found by Xiaochang';
+
+  @override
+  String get assistantFallbackCategory => 'Campus post';
+
+  @override
+  String get assistantDraftReadyBubble =>
+      'I\'ve drafted it — send after you confirm:';
+
+  @override
+  String get assistantConfirmSendMessage => 'Confirm sending message';
+
+  @override
+  String get assistantDraftEditBubble =>
+      'Edit it in the composer before sending';
+
+  @override
+  String get assistantSentBubble => 'Sent!';
+
+  @override
+  String get assistantSendFailedBubble => 'Sending failed — please retry';
+
+  @override
+  String get assistantThinkingBubble =>
+      'Xiaochang is thinking, searching campus memories...';
+
+  @override
+  String get assistantIdleReplyBubble =>
+      'Got it! Xiaochang is here whenever you need~';
+
+  @override
+  String get assistantHistorySheetTitle => '📜 History & smart memory';
+
+  @override
+  String get assistantHistoryEmpty => 'No conversations yet';
+
+  @override
+  String get assistantSuggestionVehicles => '🚲 Campus bikes';
+
+  @override
+  String get assistantSuggestionTextbooks => '📚 Grad-exam textbooks';
+
+  @override
+  String get assistantSuggestionGadgets => '🎒 Gadgets & iPads';
+
+  @override
+  String get assistantSuggestionOrders => '📦 My campus orders';
+
+  @override
+  String get assistantComposerHint =>
+      'Talk to Xiaochang — find goods or errands...';
+
+  @override
+  String get assistantHeaderName => 'Xiaochang · Digital human';
+
+  @override
+  String get assistantHeaderTagline =>
+      'Live motion · Memory · Campus assistant';
+
+  @override
+  String get assistantHistoryTooltip => 'Conversation history';
+
+  @override
   String get postDiscoveryTitle => 'Campus discovery';
 
   @override

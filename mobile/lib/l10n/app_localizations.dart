@@ -6186,6 +6186,180 @@ abstract class AppLocalizations {
   /// **'Estimate a fair campus-market price for this item:'**
   String get assistantToolEstimatePrompt;
 
+  /// No description provided for @agentToolSearchingPosts.
+  ///
+  /// In en, this message translates to:
+  /// **'Flipping through posts…'**
+  String get agentToolSearchingPosts;
+
+  /// No description provided for @agentToolInspectingListing.
+  ///
+  /// In en, this message translates to:
+  /// **'Taking a close look at this listing…'**
+  String get agentToolInspectingListing;
+
+  /// No description provided for @agentToolFindingRelated.
+  ///
+  /// In en, this message translates to:
+  /// **'Looking for similar posts…'**
+  String get agentToolFindingRelated;
+
+  /// No description provided for @agentToolBrowsingUserPosts.
+  ///
+  /// In en, this message translates to:
+  /// **'Seeing what else they posted…'**
+  String get agentToolBrowsingUserPosts;
+
+  /// No description provided for @agentToolReadingComments.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading the comments…'**
+  String get agentToolReadingComments;
+
+  /// No description provided for @agentToolOrganizingListings.
+  ///
+  /// In en, this message translates to:
+  /// **'Organizing your listings…'**
+  String get agentToolOrganizingListings;
+
+  /// No description provided for @agentToolDraftingMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Drafting a message for you…'**
+  String get agentToolDraftingMessage;
+
+  /// No description provided for @agentToolPreparingPublish.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing your listing…'**
+  String get agentToolPreparingPublish;
+
+  /// No description provided for @agentToolPreparingOffer.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing an offer…'**
+  String get agentToolPreparingOffer;
+
+  /// No description provided for @agentToolWorking.
+  ///
+  /// In en, this message translates to:
+  /// **'Working on your request…'**
+  String get agentToolWorking;
+
+  /// No description provided for @assistantAgentResultTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Real posts found by Xiaochang'**
+  String get assistantAgentResultTitle;
+
+  /// No description provided for @assistantFallbackCategory.
+  ///
+  /// In en, this message translates to:
+  /// **'Campus post'**
+  String get assistantFallbackCategory;
+
+  /// No description provided for @assistantDraftReadyBubble.
+  ///
+  /// In en, this message translates to:
+  /// **'I\'ve drafted it — send after you confirm:'**
+  String get assistantDraftReadyBubble;
+
+  /// No description provided for @assistantConfirmSendMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm sending message'**
+  String get assistantConfirmSendMessage;
+
+  /// No description provided for @assistantDraftEditBubble.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit it in the composer before sending'**
+  String get assistantDraftEditBubble;
+
+  /// No description provided for @assistantSentBubble.
+  ///
+  /// In en, this message translates to:
+  /// **'Sent!'**
+  String get assistantSentBubble;
+
+  /// No description provided for @assistantSendFailedBubble.
+  ///
+  /// In en, this message translates to:
+  /// **'Sending failed — please retry'**
+  String get assistantSendFailedBubble;
+
+  /// No description provided for @assistantThinkingBubble.
+  ///
+  /// In en, this message translates to:
+  /// **'Xiaochang is thinking, searching campus memories...'**
+  String get assistantThinkingBubble;
+
+  /// No description provided for @assistantIdleReplyBubble.
+  ///
+  /// In en, this message translates to:
+  /// **'Got it! Xiaochang is here whenever you need~'**
+  String get assistantIdleReplyBubble;
+
+  /// No description provided for @assistantHistorySheetTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'📜 History & smart memory'**
+  String get assistantHistorySheetTitle;
+
+  /// No description provided for @assistantHistoryEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No conversations yet'**
+  String get assistantHistoryEmpty;
+
+  /// No description provided for @assistantSuggestionVehicles.
+  ///
+  /// In en, this message translates to:
+  /// **'🚲 Campus bikes'**
+  String get assistantSuggestionVehicles;
+
+  /// No description provided for @assistantSuggestionTextbooks.
+  ///
+  /// In en, this message translates to:
+  /// **'📚 Grad-exam textbooks'**
+  String get assistantSuggestionTextbooks;
+
+  /// No description provided for @assistantSuggestionGadgets.
+  ///
+  /// In en, this message translates to:
+  /// **'🎒 Gadgets & iPads'**
+  String get assistantSuggestionGadgets;
+
+  /// No description provided for @assistantSuggestionOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'📦 My campus orders'**
+  String get assistantSuggestionOrders;
+
+  /// No description provided for @assistantComposerHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Talk to Xiaochang — find goods or errands...'**
+  String get assistantComposerHint;
+
+  /// No description provided for @assistantHeaderName.
+  ///
+  /// In en, this message translates to:
+  /// **'Xiaochang · Digital human'**
+  String get assistantHeaderName;
+
+  /// No description provided for @assistantHeaderTagline.
+  ///
+  /// In en, this message translates to:
+  /// **'Live motion · Memory · Campus assistant'**
+  String get assistantHeaderTagline;
+
+  /// No description provided for @assistantHistoryTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Conversation history'**
+  String get assistantHistoryTooltip;
+
   /// No description provided for @postDiscoveryTitle.
   ///
   /// In en, this message translates to:
