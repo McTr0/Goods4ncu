@@ -173,3 +173,81 @@ async fn test_agent_episodic_memories_and_privacy() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn test_session_memory_records_topic_and_listing_recency() {
+    use goods4ncu::services::agent_memory::AgentMemoryService as Svc;
+
+    with_test_pool(|pool| async move {
+        let user_id = format!("usr_{}", Uuid::new_v4());
+        seed_test_user(&pool, &user_id).await;
+        let campus_id = ncu_campus_id();
+        let svc = Svc::new(pool.clone());
+
+        // No session rows yet -> no session lines.
+        let context = svc
+            .format_memory_context(&user_id, campus_id, "switch", None, None)
+            .await
+            .expect("context without session");
+        assert!(!context.contains("会话当前话题"));
+
+        // A search records topic + result ids.
+        svc.record_session_search(
+            &user_id,
+            Some("Switch 游戏机"),
+            &["listing-b".to_string(), "listing-a".to_string()],
+        )
+        .await
+        .expect("record search");
+
+        // Opening a post adds a view at the front of the recency list;
+        // duplicates collapse to the most recent position.
+        svc.record_session_search(&user_id, None, &["listing-a".to_string()])
+            .await
+            .expect("record view");
+
+        let context = svc
+            .format_memory_context(&user_id, campus_id, "最近发的", None, None)
+            .await
+            .expect("context with session");
+        assert!(context.contains("### 当前会话记忆："));
+        assert!(context.contains("**会话当前话题**：Switch 游戏机"));
+        let expected = "- **会话中出现过的帖子（新→旧）**：listing-a、listing-b";
+        assert!(context.contains(expected), "context:\n{context}");
+
+        // A later search replaces the topic but keeps the recency list.
+        svc.record_session_search(&user_id, Some("机械键盘"), &[])
+            .await
+            .expect("record second search");
+        let context = svc
+            .format_memory_context(&user_id, campus_id, "键盘", None, None)
+            .await
+            .expect("context after second search");
+        assert!(context.contains("机械键盘"));
+        assert!(!context.contains("Switch 游戏机"));
+        assert!(context.contains("listing-a、listing-b"));
+
+        // Explicit memory opt-out suppresses session continuity too.
+        svc.update_profile(
+            &user_id,
+            campus_id,
+            UpdateProfileInput {
+                preferred_locations: None,
+                interested_categories: None,
+                budget_preferences: None,
+                custom_instructions: None,
+                privacy_level: Some("minimal".to_string()),
+                is_memory_enabled: None,
+                is_proactive_enabled: None,
+            },
+        )
+        .await
+        .expect("opt out");
+        let context = svc
+            .format_memory_context(&user_id, campus_id, "键盘", None, None)
+            .await
+            .expect("context minimal");
+        assert!(!context.contains("当前会话记忆"));
+    })
+    .await;
+}

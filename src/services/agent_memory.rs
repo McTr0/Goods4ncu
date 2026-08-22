@@ -138,6 +138,98 @@ impl AgentMemoryService {
         Ok(profile)
     }
 
+    /// Record the topic and result ids of the latest platform search so the
+    /// next turn can resolve follow-ups like “最近发的” (goal §36).
+    ///
+    /// The recency list is merged newest-first and capped; the topic is only
+    /// overwritten when a new one is supplied.
+    pub async fn record_session_search(
+        &self,
+        user_id: &str,
+        topic: Option<&str>,
+        listing_ids: &[String],
+    ) -> Result<()> {
+        const SESSION_RECENT_LIMIT: usize = 10;
+
+        let mut merged: Vec<String> = listing_ids.to_vec();
+        merged.extend(self.session_recent_listing_ids(user_id).await?);
+        let mut seen = std::collections::HashSet::new();
+        merged.retain(|id| seen.insert(id.clone()));
+        merged.truncate(SESSION_RECENT_LIMIT);
+
+        sqlx::query(
+            "INSERT INTO agent_session_memory (user_id, current_topic, recent_listing_ids)
+             VALUES ($1, COALESCE($2, ''), $3::jsonb)
+             ON CONFLICT (user_id) DO UPDATE SET
+                current_topic = CASE
+                    WHEN $2 IS NOT NULL AND $2 <> '' THEN $2
+                    ELSE agent_session_memory.current_topic END,
+                recent_listing_ids = EXCLUDED.recent_listing_ids,
+                updated_at = NOW()",
+        )
+        .bind(user_id)
+        .bind(topic)
+        .bind(serde_json::to_string(&merged)?)
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
+    /// Convenience wrapper for single-listing views (opened/focused posts).
+    pub async fn record_session_view(&self, user_id: &str, listing_id: &str) -> Result<()> {
+        self.record_session_search(user_id, None, std::slice::from_ref(&listing_id.to_string()))
+            .await
+    }
+
+    /// Session-scoped working context lines for the prompt (goal §36).
+    pub async fn session_context_lines(&self, user_id: &str) -> Result<Vec<String>> {
+        let row: Option<(String, serde_json::Value)> = sqlx::query_as(
+            "SELECT current_topic, recent_listing_ids
+             FROM agent_session_memory WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.db)
+        .await?;
+
+        let Some((topic, ids_json)) = row else {
+            return Ok(Vec::new());
+        };
+        let ids: Vec<String> = serde_json::from_value(ids_json).unwrap_or_default();
+
+        let mut lines = Vec::new();
+        if !topic.trim().is_empty() {
+            lines.push(format!("- **会话当前话题**：{}", topic.trim()));
+        }
+        if !ids.is_empty() {
+            lines.push(format!(
+                "- **会话中出现过的帖子（新→旧）**：{}",
+                ids.join("、")
+            ));
+        }
+        Ok(lines)
+    }
+
+    /// True when the user explicitly opted out of agent memory.
+    async fn session_memory_suppressed(&self, user_id: &str) -> bool {
+        matches!(
+            self.existing_profile(user_id).await,
+            Ok(Some(profile)) if !profile.is_memory_enabled || profile.privacy_level == "minimal"
+        )
+    }
+
+    async fn session_recent_listing_ids(&self, user_id: &str) -> Result<Vec<String>> {
+        let row: Option<(serde_json::Value,)> = sqlx::query_as(
+            "SELECT recent_listing_ids FROM agent_session_memory WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.db)
+        .await?;
+        let Some((ids,)) = row else {
+            return Ok(Vec::new());
+        };
+        Ok(serde_json::from_value(ids).unwrap_or_default())
+    }
+
     /// Retrieve or initialize default user agent profile.
     pub async fn get_or_create_profile(
         &self,
@@ -425,7 +517,20 @@ impl AgentMemoryService {
         page_context: Option<&serde_json::Value>,
         embedder: Option<&Arc<dyn EmbeddingGenerator>>,
     ) -> Result<String> {
-        let lines = Self::page_context_lines(page_context);
+        let mut lines = Self::page_context_lines(page_context);
+
+        // Session-scoped working context (goal §36): what the user is
+        // currently exploring. Independent of the long-term profile so fresh
+        // users keep cross-turn continuity; an explicit memory opt-out still
+        // suppresses it.
+        if !self.session_memory_suppressed(user_id).await {
+            let session_lines = self.session_context_lines(user_id).await?;
+            if !session_lines.is_empty() {
+                lines.push("### 当前会话记忆：".to_string());
+                lines.extend(session_lines);
+            }
+        }
+
         let profile = self.existing_profile(user_id).await?;
 
         let Some(profile) = profile else {
@@ -435,7 +540,6 @@ impl AgentMemoryService {
             return Ok(Self::join_context(lines));
         }
 
-        let mut lines = lines;
         lines.push("### 用户个性化画像与记忆：".to_string());
 
         if !profile.preferred_locations.is_empty() {

@@ -689,6 +689,19 @@ impl Tool for SearchInventoryTool {
             }
         }
 
+        // Session memory (goal §36): remember the current topic and result
+        // ids so follow-up turns resolve without restating the query.
+        if let Some(user_id) = self.ctx.current_user_id.as_deref() {
+            let ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
+            if let Err(error) =
+                crate::services::agent_memory::AgentMemoryService::new(self.ctx.db_pool.clone())
+                    .record_session_search(user_id, args.keyword.as_deref(), &ids)
+                    .await
+            {
+                tracing::warn!(%error, "failed to record agent session search");
+            }
+        }
+
         if rows.is_empty() {
             return Ok("No items found matching your criteria.".to_string());
         }
@@ -775,6 +788,19 @@ impl Tool for GetListingDetailsTool {
                 } else {
                     "[hidden]".to_string()
                 };
+
+                // Session memory (goal §36): the post the user is inspecting.
+                if let Some(user_id) = self.ctx.current_user_id.as_deref() {
+                    if let Err(error) = crate::services::agent_memory::AgentMemoryService::new(
+                        self.ctx.db_pool.clone(),
+                    )
+                    .record_session_view(user_id, &r.id)
+                    .await
+                    {
+                        tracing::warn!(%error, "failed to record agent session view");
+                    }
+                }
+
                 Ok(format!(
                     "Listing Details:\n\
                      ID: {}\nTitle: {}\nCategory: {}\nBrand: {}\n\
