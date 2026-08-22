@@ -57,6 +57,13 @@ class MockCharacterRenderer implements CharacterRenderer {
     mouthOpen = value.clamp(0.0, 1.0);
   }
 
+  final Map<String, double> parameters = {};
+
+  @override
+  void setParameter(String name, double value) {
+    parameters[name] = value;
+  }
+
   @override
   void stopMotion({int? priority}) {
     lastMotionTag = null;

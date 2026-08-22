@@ -28,6 +28,9 @@ abstract class CharacterRenderer {
 
   void setMouthOpen(double value);
 
+  /// Raw parameter pass-through for body-specific knobs (e.g. `headTilt`).
+  void setParameter(String name, double value);
+
   void stopMotion({int? priority});
 }
 

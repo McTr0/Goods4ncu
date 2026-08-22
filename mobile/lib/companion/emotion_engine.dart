@@ -196,6 +196,8 @@ class EmotionEngine {
 
   static const double _epsilon = 0.005;
 
+  bool _disposed = false;
+
   EmotionVector _state = const EmotionVector();
 
   EmotionVector get state => _state;
@@ -309,29 +311,44 @@ class EmotionEngine {
     _setState(next);
   }
 
+  EmotionVector _lastEmitted = const EmotionVector();
+
   /// Advance decay toward baseline; call once per animation frame or timer.
+  ///
+  /// The state ALWAYS advances — tiny per-frame deltas would otherwise freeze
+  /// below any notification threshold — but listeners are only notified when
+  /// the cumulative movement since the last emission is meaningful.
   void tick(Duration elapsed) {
     final seconds = elapsed.inMicroseconds / Duration.microsecondsPerSecond;
-    if (seconds <= 0) return;
+    if (seconds <= 0 || _disposed) return;
     final base = const EmotionVector().toMap();
     final current = _state.toMap();
-    var changed = false;
     final decayed = <String, double>{};
     current.forEach((dimension, value) {
       final rate = _decay.rateFor(dimension);
       final baseline = base[dimension] ?? 0;
-      final target =
+      decayed[dimension] =
           value + (baseline - value) * (rate * seconds).clamp(0.0, 1.0);
-      if ((target - value).abs() > _epsilon) changed = true;
-      decayed[dimension] = target;
     });
-    if (changed) _setState(EmotionVector.fromMap(decayed));
+    _setState(EmotionVector.fromMap(decayed));
   }
 
   void reset() => _setState(const EmotionVector());
 
+  void dispose() => _disposed = true;
+
   void _setState(EmotionVector next) {
     _state = next;
+    var moved = false;
+    for (final entry in next.toMap().entries) {
+      if ((entry.value - (_lastEmitted.toMap()[entry.key] ?? 0)).abs() >
+          _epsilon) {
+        moved = true;
+        break;
+      }
+    }
+    if (!moved) return;
+    _lastEmitted = next;
     _bus.emit(CompanionEventType.emotionChanged, _state.toMap());
   }
 }
