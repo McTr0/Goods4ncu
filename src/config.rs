@@ -51,7 +51,7 @@ fn is_supported_llm_provider(provider: &str) -> bool {
 
 fn default_llm_model(provider: &str) -> Option<&'static str> {
     match provider {
-        "gemini" => Some("gemini-3-flash-preview"),
+        "gemini" => Some("gemini-3.5-flash-lite"),
         "minimax" => Some("MiniMax-M2.7"),
         _ => None,
     }
