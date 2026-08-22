@@ -90,7 +90,13 @@ class _HomePageState extends State<HomePage> {
         setState(() {
           _recommendationLoading = false;
           _feedLoading = false;
-          _loadError = error.toString();
+          // Initial load failures replace the page; pagination failures keep
+          // the waterfall results and offer an inline retry.
+          if (reset || _posts.isEmpty) {
+            _loadError = error.toString();
+          } else {
+            _postFeedError = error.toString();
+          }
         });
       }
     }

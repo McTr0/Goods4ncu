@@ -113,7 +113,7 @@ void main() {
     )!;
 
     await tester.tap(
-      find.byKey(const ValueKey('feed-feedback-intent-intent-1')),
+      find.byKey(const ValueKey('feed-feedback-post-post-1')),
     );
     await tester.pumpAndSettle();
     await tester.tap(find.text(l.feedFeedbackHide));
@@ -121,11 +121,11 @@ void main() {
 
     expect(service.calls, 1);
     expect(
-      find.byKey(const ValueKey('feed-feedback-loading-intent-intent-1')),
+      find.byKey(const ValueKey('feed-feedback-loading-post-post-1')),
       findsOneWidget,
     );
     expect(
-      find.byKey(const ValueKey('feed-feedback-intent-intent-1')),
+      find.byKey(const ValueKey('feed-feedback-post-post-1')),
       findsNothing,
       reason: 'there is no second submit affordance while the first is pending',
     );
@@ -148,7 +148,7 @@ void main() {
     )!;
 
     await tester.tap(
-      find.byKey(const ValueKey('feed-feedback-intent-intent-1')),
+      find.byKey(const ValueKey('feed-feedback-post-post-1')),
     );
     await tester.pumpAndSettle();
     await tester.tap(find.text(l.feedFeedbackNotRelevant));
@@ -157,7 +157,7 @@ void main() {
     expect(service.calls, 1);
     expect(applied, isEmpty);
     expect(
-      find.byKey(const ValueKey('feed-feedback-intent-intent-1')),
+      find.byKey(const ValueKey('feed-feedback-post-post-1')),
       findsOneWidget,
     );
     expect(find.text(l.feedFeedbackFailed), findsOneWidget);

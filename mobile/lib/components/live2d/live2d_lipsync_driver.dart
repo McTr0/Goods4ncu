@@ -8,34 +8,63 @@ class Live2DLipSyncDriver {
 
   final Live2DController controller;
   Timer? _decayTimer;
-  DateTime _lastTokenTime = DateTime.now();
+  double _targetOpen = 0.0;
+  double _currentOpen = 0.0;
+  Timer? _smoothingTimer;
 
   /// Feed a chunk of incoming text from the SSE chat stream.
   /// Generates a realistic mouth opening burst.
   void feedStreamingChunk(String chunk) {
     if (chunk.trim().isEmpty) return;
 
-    _lastTokenTime = DateTime.now();
     // Calculate burst intensity based on characters
-    final intensity = (0.5 + (0.5 * math.Random().nextDouble())).clamp(0.2, 1.0);
-    controller.setMouthOpen(intensity);
+    _targetOpen = 0.5 + (0.5 * math.Random().nextDouble());
+    _startSmoothing();
 
     _decayTimer?.cancel();
-    _decayTimer = Timer(const Duration(milliseconds: 140), () {
-      final elapsed = DateTime.now().difference(_lastTokenTime).inMilliseconds;
-      if (elapsed >= 120) {
-        controller.setMouthOpen(0.0);
+    _decayTimer = Timer(const Duration(milliseconds: 120), () {
+      _targetOpen = 0.0;
+      _startSmoothing();
+    });
+  }
+
+  void _startSmoothing() {
+    _smoothingTimer?.cancel();
+    // Apply the first easing step synchronously so the mouth reacts to the
+    // chunk immediately instead of waiting for a timer tick.
+    _stepSmoothing();
+    if ((_targetOpen - _currentOpen).abs() < 0.01) {
+      _currentOpen = _targetOpen;
+      controller.setMouthOpen(_currentOpen);
+      return;
+    }
+    _smoothingTimer = Timer.periodic(const Duration(milliseconds: 16), (_) {
+      if (_stepSmoothing()) {
+        _smoothingTimer?.cancel();
+        _smoothingTimer = null;
       }
     });
+  }
+
+  /// Advance one easing step; returns true when the target is reached.
+  bool _stepSmoothing() {
+    _currentOpen += (_targetOpen - _currentOpen) * 0.35;
+    controller.setMouthOpen(_currentOpen);
+    return (_targetOpen - _currentOpen).abs() < 0.01;
   }
 
   /// Mark the stream as finished, resetting the mouth back to closed.
   void onStreamComplete() {
     _decayTimer?.cancel();
+    _smoothingTimer?.cancel();
+    _smoothingTimer = null;
+    _targetOpen = 0.0;
+    _currentOpen = 0.0;
     controller.setMouthOpen(0.0);
   }
 
   void dispose() {
     _decayTimer?.cancel();
+    _smoothingTimer?.cancel();
   }
 }

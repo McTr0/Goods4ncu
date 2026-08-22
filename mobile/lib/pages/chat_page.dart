@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
 import 'package:image_picker/image_picker.dart';
@@ -10,8 +11,11 @@ import '../services/api_service.dart';
 import '../services/chat_service.dart';
 import '../services/sse_service.dart';
 import '../services/upload_service.dart';
+import '../services/post_service.dart';
 import '../services/ws_service.dart';
 import '../models/models.dart';
+import '../models/post.dart' as post;
+import '../components/agent_debug_panel.dart';
 import '../components/assistant_markdown.dart';
 import '../components/live2d/live2d_character_widget.dart';
 import '../components/live2d/live2d_controller.dart';
@@ -440,8 +444,10 @@ class ChatPage extends StatefulWidget {
   final ChatService? chatService;
   final SseService? sseService;
   final UploadService? uploadService;
+  final PostService? postService;
   final ChatPageMediaSender? mediaSender;
   final String? initialPrompt;
+  final Map<String, dynamic>? pageContext;
   final bool embedded;
   final VoidCallback? onConversationUpdated;
 
@@ -451,8 +457,10 @@ class ChatPage extends StatefulWidget {
     this.chatService,
     this.sseService,
     this.uploadService,
+    this.postService,
     this.mediaSender,
     this.initialPrompt,
+    this.pageContext,
     this.embedded = false,
     this.onConversationUpdated,
   });
@@ -487,28 +495,390 @@ class _ChatPageState extends State<ChatPage> {
   // Actions the assistant already performed that are still reversible. Kept
   // separate from _agentPlans: those await the user, these have happened.
   List<UndoableAction> _undoableActions = [];
+  final List<post.CampusPost> _agentResultPosts = [];
+  String? _focusedAgentPostId;
   Timer? _undoTicker;
+
+  // Agent debug overlay (?agentDebug=true) observability buffers.
+  final bool _agentDebugEnabled =
+      Uri.base.queryParameters['agentDebug'] == 'true';
+  final List<String> _debugToolCalls = [];
+  final List<String> _debugUiActions = [];
+  String? _lastToolActivity;
+  DateTime? _turnStartedAt;
+  Duration? _firstTokenLatency;
+  Duration? _lastTurnLatency;
 
   StreamSubscription? _wsSubscription;
 
   late final Live2DController _live2DController;
   late final Live2DLipSyncDriver _lipSyncDriver;
+  late final PostService _postService;
 
   @override
   void initState() {
     super.initState();
     _live2DController = Live2DController();
+    _syncBrainWithPageContext();
     _lipSyncDriver = Live2DLipSyncDriver(controller: _live2DController);
     _apiService = widget.apiService ?? context.read<ApiService>();
     _chatService = widget.chatService ?? context.read<ChatService>();
     _ownsSseService = widget.sseService == null;
     _sseService = widget.sseService ?? SseService();
     _uploadService = widget.uploadService ?? context.read<UploadService>();
+    _postService = widget.postService ?? context.read<PostService>();
     _mediaSender =
         widget.mediaSender ??
         ChatPageMediaSender(uploadService: _uploadService);
+    _controller.addListener(_onComposerChanged);
     _connectWs();
     WidgetsBinding.instance.addPostFrameCallback((_) => _initialize());
+  }
+
+  Timer? _typingDebounce;
+
+  Map<String, dynamic> _buildPageContext() {
+    return {'page': 'chat', ...?widget.pageContext};
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.pageContext != widget.pageContext) {
+      _syncBrainWithPageContext();
+      _focusedAgentPostId = widget.pageContext?['postId']?.toString();
+    }
+  }
+
+  void _syncBrainWithPageContext() {
+    final pageContext = widget.pageContext;
+    if (pageContext == null) {
+      _live2DController.brain.onPageChanged('chat');
+      return;
+    }
+    final page = pageContext['page']?.toString() ?? 'chat';
+    final listingId = pageContext['listingId']?.toString();
+    _live2DController.brain.onPageChanged(page, listingId: listingId);
+  }
+
+  void _handleUiAction(Map<String, dynamic> action) {
+    final type = action['type'] as String?;
+    final payload = action['payload'] as Map<String, dynamic>?;
+    if (payload == null) return;
+    if (_agentDebugEnabled) {
+      _recordDebugUiAction(type, payload);
+    }
+    switch (type) {
+      case 'SHOW_POSTS' || 'SHOW_RELATED_POSTS':
+        final ids = payload['postIds'];
+        if (ids is List && ids.isNotEmpty) {
+          _loadAgentResultPosts(
+            ids,
+            relatedToPostId: type == 'SHOW_RELATED_POSTS'
+                ? payload['sourcePostId']?.toString()
+                : null,
+          );
+        }
+      case 'HIGHLIGHT_POST' || 'SCROLL_TO_POST':
+        final postId = payload['postId']?.toString();
+        if (postId != null && postId.isNotEmpty) {
+          _live2DController.brain.onFocusPost(postId);
+          _loadFocusedAgentPost(postId);
+        }
+      case 'OPEN_POST':
+        final postId = payload['postId']?.toString();
+        if (postId != null && postId.isNotEmpty) {
+          _openAgentPost(postId);
+        }
+      case 'OPEN_PROFILE':
+        final userId = payload['userId']?.toString();
+        if (userId != null && userId.isNotEmpty) {
+          context.push('/users/$userId');
+        }
+      case 'OPEN_MESSAGE_DRAFT':
+        final draftText = payload['draftText']?.toString();
+        final listingId = payload['listingId']?.toString();
+        final receiverId = payload['receiverId']?.toString();
+        if (draftText != null && listingId != null && receiverId != null) {
+          _live2DController.brain.onDraftReady();
+          _showDraftConfirmation(draftText, listingId, receiverId);
+        }
+    }
+  }
+
+  /// Friendly per-tool status shown while 小昌 works (never raw tool JSON).
+  String _toolActivityLabel(String tool) {
+    switch (tool) {
+      case 'search_inventory':
+        return '正在翻帖子…';
+      case 'get_listing_details':
+        return '正在仔细看这条信息…';
+      case 'find_related_posts':
+        return '正在找类似的帖子…';
+      case 'get_user_posts':
+        return '正在看看TA还发过什么…';
+      case 'get_comments':
+        return '正在读评论…';
+      case 'get_my_listings':
+        return '正在整理你的发布…';
+      case 'draft_message':
+        return '正在帮你起草消息…';
+      case 'create_listing':
+        return '正在帮你准备发布…';
+      case 'negotiate_item':
+        return '正在准备议价方案…';
+      default:
+        return '正在处理你的请求…';
+    }
+  }
+
+  void _recordDebugToolCall(String tool) {
+    _debugToolCalls.add('${_debugClock()} $tool');
+    if (_debugToolCalls.length > 20) _debugToolCalls.removeAt(0);
+  }
+
+  void _recordDebugUiAction(String? type, Map<String, dynamic> payload) {
+    final detail = payload.entries
+        .take(2)
+        .map((entry) => '${entry.key}=${entry.value}')
+        .join(' ');
+    _debugUiActions.add('${type ?? 'UNKNOWN'} $detail');
+    if (_debugUiActions.length > 20) _debugUiActions.removeAt(0);
+  }
+
+  String _debugClock() {
+    final now = DateTime.now();
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${two(now.hour)}:${two(now.minute)}:'
+        '${two(now.second)}.${now.millisecond.toString().padLeft(3, '0')}';
+  }
+
+  Future<void> _loadAgentResultPosts(
+    List<dynamic> ids, {
+    String? relatedToPostId,
+  }) async {
+    final posts = await Future.wait([
+      for (final id in ids.take(8)) _loadAgentPost(id.toString()),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _agentResultPosts
+        ..clear()
+        ..addAll(posts.whereType<post.CampusPost>());
+      _focusedAgentPostId = null;
+    });
+    _live2DController.brain.onSearchResultsShown(
+      count: _agentResultPosts.length,
+      relatedToPostId: relatedToPostId,
+    );
+  }
+
+  Future<post.CampusPost?> _loadAgentPost(String id) async {
+    try {
+      return await _postService.getPostByListing(id);
+    } catch (_) {
+      try {
+        return await _postService.getPost(id);
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+
+  Future<void> _openAgentPost(String postId) async {
+    final post = await _loadAgentPost(postId);
+    if (!mounted) return;
+    final listingId = post?.listingId;
+    if (listingId != null && listingId.isNotEmpty) {
+      await context.push('/listing/$listingId');
+    } else {
+      await context.push('/posts/$postId');
+    }
+  }
+
+  void _loadFocusedAgentPost(String listingId) {
+    _loadAgentPost(listingId).then((focusedPost) {
+      if (!mounted || focusedPost == null) return;
+      setState(() {
+        if (!_agentResultPosts.any(
+          (candidate) => candidate.id == focusedPost.id,
+        )) {
+          _agentResultPosts.add(focusedPost);
+        }
+        _focusedAgentPostId = focusedPost.id;
+      });
+    });
+  }
+
+  Widget? get _agentResultsStrip {
+    if (_agentResultPosts.isEmpty) return null;
+    return Container(
+      color: const Color(0xFFF0FAF7),
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text(
+              '小昌找到的真实帖子',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: const Color(0xFF0F766E),
+              ),
+            ),
+          ),
+          SizedBox(
+            height: 150,
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              scrollDirection: Axis.horizontal,
+              itemCount: _agentResultPosts.length,
+              itemBuilder: (context, index) {
+                final post = _agentResultPosts[index];
+                final focused = post.id == _focusedAgentPostId;
+                return SizedBox(
+                  width: 220,
+                  child: Card(
+                    margin: const EdgeInsets.only(right: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      side: BorderSide(
+                        color: focused
+                            ? const Color(0xFF0F766E)
+                            : Colors.transparent,
+                        width: focused ? 2 : 0,
+                      ),
+                    ),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: post.listingId != null
+                          ? () => context.push('/listing/${post.listingId}')
+                          : () => context.push('/posts/${post.id}'),
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              post.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                              ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              post.displayBody.isEmpty
+                                  ? post.category ?? '平台帖子'
+                                  : post.displayBody,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDraftConfirmation(
+    String text,
+    String listingId,
+    String receiverId,
+  ) {
+    final l = AppLocalizations.of(context);
+    _live2DController.showSpeechBubble('我帮你拟好了，确认后发送：');
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('确认发送消息'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: SelectableText(text),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () {
+                    _live2DController.setExpression(Live2DExpression.idle);
+                    Navigator.of(ctx).pop();
+                  },
+                  child: Text(l?.cancel ?? '取消'),
+                ),
+                OutlinedButton(
+                  onPressed: () {
+                    Navigator.of(ctx).pop();
+                    // Let user edit in composer before sending
+                    _controller.text = text;
+                    _live2DController.showSpeechBubble('你可以在输入框修改后再发送');
+                  },
+                  child: Text(l?.edit ?? '编辑'),
+                ),
+                const SizedBox(width: 4),
+                FilledButton(
+                  onPressed: () async {
+                    Navigator.of(ctx).pop();
+                    await _sendAgentMessage(text, listingId, receiverId);
+                  },
+                  child: Text(l?.send ?? '发送'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _sendAgentMessage(
+    String text,
+    String listingId,
+    String receiverId,
+  ) async {
+    try {
+      await _chatService.sendMessage('listing:$listingId', content: text);
+      if (!mounted) return;
+      _live2DController.brain.onDraftSendComplete(succeeded: true);
+      _live2DController.setExpression(Live2DExpression.happy);
+      _live2DController.showSpeechBubble('发过去啦！');
+    } catch (e) {
+      if (!mounted) return;
+      _live2DController.brain.onDraftSendComplete(succeeded: false);
+      _live2DController.setExpression(Live2DExpression.surprised);
+      _live2DController.showSpeechBubble('发送失败，请重试');
+    }
+  }
+
+  void _onComposerChanged() {
+    _live2DController.brain.onUserTyping();
+    _typingDebounce?.cancel();
+    _typingDebounce = Timer(const Duration(milliseconds: 1500), () {
+      _live2DController.brain.onUserTypingStopped();
+    });
   }
 
   Future<void> _initialize() async {
@@ -794,6 +1164,7 @@ class _ChatPageState extends State<ChatPage> {
   void dispose() {
     _lipSyncDriver.dispose();
     _live2DController.dispose();
+    _typingDebounce?.cancel();
     _controller.dispose();
     _composerFocusNode.dispose();
     if (_ownsSseService) _sseService.dispose();
@@ -864,11 +1235,19 @@ class _ChatPageState extends State<ChatPage> {
       // Connect SSE stream with timeout.
       final proposalIdempotencyKey = _uuid.v4();
       bool connected;
+      if (_agentDebugEnabled) {
+        setState(() {
+          _turnStartedAt = DateTime.now();
+          _firstTokenLatency = null;
+          _lastTurnLatency = null;
+        });
+      }
       try {
         await _sseService
             .connect(
               message: userMsg.content,
               conversationId: '__agent__',
+              pageContext: _buildPageContext(),
               imageUrl: uploadedMedia.imageUrl,
               idempotencyKey: proposalIdempotencyKey,
             )
@@ -894,7 +1273,7 @@ class _ChatPageState extends State<ChatPage> {
         return;
       }
 
-      _live2DController.setExpression(Live2DExpression.thinking);
+      _live2DController.brain.onMessageSent(userMsg.content);
       _live2DController.showSpeechBubble('小昌在思考中，正在检索校园记忆...');
       String fullReply = '';
       await for (final token in _sseService.stream) {
@@ -902,8 +1281,28 @@ class _ChatPageState extends State<ChatPage> {
         if (token.error != null) {
           throw Exception(token.error);
         }
+        // Dispatch agent UI actions (e.g. SHOW_POSTS, SCROLL_TO_POST).
+        if (token.uiAction != null) {
+          _handleUiAction(token.uiAction!);
+        }
+        if (token.toolActivity != null) {
+          final activity = token.toolActivity!;
+          _live2DController.brain.onToolStarted(activity);
+          setState(() => _lastToolActivity = activity);
+          if (_agentDebugEnabled) _recordDebugToolCall(activity);
+          // Surface a friendly progress line until real reply text arrives.
+          if (fullReply.isEmpty) {
+            final label = _toolActivityLabel(activity);
+            _live2DController.showSpeechBubble(label);
+          }
+        }
+        if (token.token.isNotEmpty &&
+            _firstTokenLatency == null &&
+            _turnStartedAt != null) {
+          _firstTokenLatency = DateTime.now().difference(_turnStartedAt!);
+        }
         _lipSyncDriver.feedStreamingChunk(token.token);
-        _live2DController.setExpression(Live2DExpression.happy);
+        _live2DController.brain.onResponseToken(token.token);
         fullReply += token.token;
         _live2DController.showSpeechBubble(fullReply);
         setState(() {
@@ -916,7 +1315,13 @@ class _ChatPageState extends State<ChatPage> {
         });
       }
       _lipSyncDriver.onStreamComplete();
-      _live2DController.setExpression(Live2DExpression.idle);
+      if (_turnStartedAt != null) {
+        _lastTurnLatency = DateTime.now().difference(_turnStartedAt!);
+      }
+      _live2DController.brain.onResponseComplete(
+        isError: false,
+        reply: fullReply,
+      );
       _live2DController.showSpeechBubble(
         fullReply.isEmpty ? '小昌收到啦！随时为你服务~' : fullReply,
       );
@@ -965,6 +1370,7 @@ class _ChatPageState extends State<ChatPage> {
           );
         });
       }
+      _live2DController.brain.onResponseComplete(isError: true);
     } finally {
       await _sseService.disconnect();
       if (mounted) {
@@ -1000,7 +1406,10 @@ class _ChatPageState extends State<ChatPage> {
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 4,
+                  ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -1024,13 +1433,13 @@ class _ChatPageState extends State<ChatPage> {
                   child: _isLoadingHistory
                       ? const Center(child: CircularProgressIndicator())
                       : _messages.isEmpty
-                          ? const Center(
-                              child: Text(
-                                '暂无历史对话',
-                                style: TextStyle(color: Colors.grey),
-                              ),
-                            )
-                          : ListView.builder(
+                      ? const Center(
+                          child: Text(
+                            '暂无历史对话',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        )
+                      : ListView.builder(
                           controller: scrollController,
                           padding: const EdgeInsets.all(16),
                           itemCount: _messages.length,
@@ -1056,12 +1465,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Widget _buildQuickSuggestionChips() {
-    final chips = [
-      '🚲 校园二手车',
-      '📚 考研二手教材',
-      '🎒 闲置数码与iPad',
-      '📦 查我的校园订单',
-    ];
+    final chips = ['🚲 校园二手车', '📚 考研二手教材', '🎒 闲置数码与iPad', '📦 查我的校园订单'];
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -1100,11 +1504,11 @@ class _ChatPageState extends State<ChatPage> {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
-    return Column(
+    final agentResults = _agentResultsStrip;
+    final page = Column(
       children: [
-        _AssistantDigitalHumanHeader(
-          onOpenHistory: _showHistorySheet,
-        ),
+        _AssistantDigitalHumanHeader(onOpenHistory: _showHistorySheet),
+        ?agentResults,
         if (_historyError != null)
           Container(
             width: double.infinity,
@@ -1252,10 +1656,7 @@ class _ChatPageState extends State<ChatPage> {
               gradient: RadialGradient(
                 center: Alignment(0, -0.1),
                 radius: 0.85,
-                colors: [
-                  Color(0xFFE1F4EF),
-                  Color(0xFFFFFBF5),
-                ],
+                colors: [Color(0xFFE1F4EF), Color(0xFFFFFBF5)],
               ),
             ),
             child: SingleChildScrollView(
@@ -1299,6 +1700,7 @@ class _ChatPageState extends State<ChatPage> {
             focusNode: _composerFocusNode,
             hintText: '和小昌说说话，找好物、问跑腿...',
             isSending: _isStreaming,
+            onChanged: (_) => _live2DController.brain.onUserTyping(),
             onSubmitted: (_) => _sendMessage(),
             onSend: _sendMessage,
             primaryActions: [
@@ -1314,7 +1716,8 @@ class _ChatPageState extends State<ChatPage> {
                 id: 'assistant-find',
                 icon: Icons.search_rounded,
                 label: l.assistantToolFind,
-                onPressed: () => _applyAssistantPrompt(l.assistantToolFindPrompt),
+                onPressed: () =>
+                    _applyAssistantPrompt(l.assistantToolFindPrompt),
               ),
               MessageComposerAction(
                 id: 'assistant-estimate',
@@ -1327,6 +1730,26 @@ class _ChatPageState extends State<ChatPage> {
             contextContent: [
               if (_selectedImageBytes != null) _buildSelectedImagePreview(l),
             ],
+          ),
+        ),
+      ],
+    );
+    if (!_agentDebugEnabled) return page;
+    return Stack(
+      children: [
+        page,
+        Positioned(
+          top: 12,
+          right: 12,
+          child: AgentDebugPanel(
+            brain: _live2DController.brain,
+            pageContext: _buildPageContext(),
+            toolCalls: _debugToolCalls,
+            uiActions: _debugUiActions,
+            pendingConfirmations: _hitlRequests.length + _agentPlans.length,
+            currentTool: _lastToolActivity,
+            firstTokenLatency: _firstTokenLatency,
+            lastTurnLatency: _lastTurnLatency,
           ),
         ),
       ],
@@ -1415,17 +1838,11 @@ class _AssistantDigitalHumanHeader extends StatelessWidget {
             children: [
               Text(
                 '小昌 · 智能数字人',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                ),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
               ),
               Text(
                 '实时语音动作 · 记忆增强 · 校园生活助理',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Color(0xFF64748B),
-                ),
+                style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
               ),
             ],
           ),

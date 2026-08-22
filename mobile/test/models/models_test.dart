@@ -206,7 +206,7 @@ void main() {
 
         expect(persona.isPublished, isTrue);
         expect(persona.appearance.palette, 'plum');
-        expect(persona.appearance.character, 'classic');
+        expect(persona.appearance.character, 'doro');
         expect(persona.selfDescriptions, ['slow_to_warm', 'meetup_friendly']);
         expect(persona.contactPosture, 'leave_message');
       },
@@ -228,7 +228,7 @@ void main() {
           'silhouette': 'soft',
           'accessory': 'none',
           'outfit': 'campus',
-          'character': 'classic',
+          'character': 'doro',
         });
       },
     );

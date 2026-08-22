@@ -6,6 +6,7 @@ import 'package:goods4ncu_mobile/pages/chat_page.dart';
 import 'package:goods4ncu_mobile/services/api_service.dart';
 import 'package:goods4ncu_mobile/services/chat_service.dart';
 import 'package:goods4ncu_mobile/services/sse_service.dart';
+import 'package:goods4ncu_mobile/services/post_service.dart';
 import 'package:goods4ncu_mobile/services/upload_service.dart';
 
 class _FakeApiService extends ApiService {
@@ -79,6 +80,8 @@ class _FakeChatService extends ChatService {
 
 class _FakeUploadService extends UploadService {}
 
+class _FakePostService extends PostService {}
+
 Widget _buildTestApp(Widget child) {
   return MaterialApp(
     locale: const Locale('zh'),
@@ -99,19 +102,24 @@ void main() {
           chatService: _FakeChatService(),
           sseService: SseService(),
           uploadService: _FakeUploadService(),
+          postService: _FakePostService(),
           embedded: true,
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
-    expect(find.text(l.assistantName), findsOneWidget);
+    // The digital-human header shows 小昌's identity inside the persistent
+    // shell rather than a standalone app bar title.
+    expect(find.text('小昌 · 智能数字人'), findsOneWidget);
     expect(find.byTooltip(l.closeConversationAction), findsNothing);
     expect(find.byKey(const Key('unified-message-composer')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('composer-tools-toggle')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(
       find.byKey(const Key('composer-tool-assistant-publish')),
       findsNothing,
@@ -144,11 +152,13 @@ void main() {
           chatService: _FakeChatService(),
           sseService: SseService(),
           uploadService: _FakeUploadService(),
+          postService: _FakePostService(),
           embedded: true,
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
     expect(find.text(l.undoDoneHeader), findsOneWidget);
@@ -157,7 +167,8 @@ void main() {
     expect(find.textContaining('剩'), findsOneWidget);
 
     await tester.tap(find.text(l.undoAction));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     expect(api.undone, ['action-1']);
     // The affordance goes away with the action it belonged to.
@@ -193,11 +204,13 @@ void main() {
           chatService: _FakeChatService(),
           sseService: SseService(),
           uploadService: _FakeUploadService(),
+          postService: _FakePostService(),
           embedded: true,
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
     await tester.tap(find.text(l.undoAction));
@@ -228,11 +241,13 @@ void main() {
           chatService: _FakeChatService(),
           sseService: SseService(),
           uploadService: _FakeUploadService(),
+          postService: _FakePostService(),
           embedded: true,
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
     expect(find.text(l.undoDoneHeader), findsNothing);
@@ -269,15 +284,18 @@ void main() {
           chatService: _FakeChatService(),
           sseService: SseService(),
           uploadService: _FakeUploadService(),
+          postService: _FakePostService(),
           embedded: true,
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
     await tester.tap(find.text(l.agentPlanConfirmAction));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     expect(api.confirmedTokens, ['primary-token']);
     expect(find.byType(AlertDialog), findsOneWidget);
@@ -288,7 +306,8 @@ void main() {
         matching: find.text(l.agentPlanSecondConfirmAction),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     expect(api.confirmedTokens, ['primary-token', 'rotated-second-token']);
   });
@@ -319,15 +338,18 @@ void main() {
           chatService: _FakeChatService(),
           sseService: SseService(),
           uploadService: _FakeUploadService(),
+          postService: _FakePostService(),
           embedded: true,
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
     await tester.tap(find.text(l.agentPlanConfirmAction));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.byType(AlertDialog), findsOneWidget);
     expect(api.confirmedTokens, isEmpty);
@@ -338,11 +360,13 @@ void main() {
         matching: find.text(l.cancel),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(api.confirmedTokens, isEmpty);
 
     await tester.tap(find.text(l.agentPlanConfirmAction));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(api.confirmedTokens, isEmpty);
 
     await tester.tap(
@@ -351,7 +375,8 @@ void main() {
         matching: find.text(l.agentPlanSecondConfirmAction),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(api.confirmedTokens, ['second-token-from-list']);
   });
 }

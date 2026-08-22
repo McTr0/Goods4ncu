@@ -18,9 +18,12 @@ void main() {
     expect(find.text('摸摸头'), findsOneWidget);
     expect(find.text('模拟说话口型'), findsOneWidget);
 
-    // Tap "摸摸头" button
+    // Tap "摸摸头" button (scroll it into view; the page stage animates
+    // forever so only bounded pumps are possible).
+    await tester.ensureVisible(find.text('摸摸头'));
+    await tester.pump(const Duration(milliseconds: 200));
     await tester.tap(find.text('摸摸头'));
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
 
     // Verify speech bubble / reaction
     expect(find.textContaining('摸摸小脑袋'), findsOneWidget);
