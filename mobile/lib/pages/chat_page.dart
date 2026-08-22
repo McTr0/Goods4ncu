@@ -18,6 +18,7 @@ import '../models/post.dart' as post;
 import '../companion/companion_config.dart';
 import '../companion/companion_events.dart';
 import '../companion/environment.dart';
+import '../companion/working_memory.dart';
 import '../companion/runtime_host.dart';
 import '../companion/attention.dart';
 import '../companion/state_machine.dart';
@@ -109,6 +110,7 @@ class _ChatPageState extends State<ChatPage> {
   late final PostService _postService;
   CompanionRuntimeHost? _companionHost;
   EnvironmentTracker? _environmentTracker;
+  final WorkingMemory _workingMemory = WorkingMemory();
 
   @override
   void initState() {
@@ -149,7 +151,11 @@ class _ChatPageState extends State<ChatPage> {
   Timer? _typingDebounce;
 
   Map<String, dynamic> _buildPageContext() {
-    return {'page': 'chat', ...?widget.pageContext};
+    return {
+      'page': 'chat',
+      ...?widget.pageContext,
+      if (kCompanionEnabled) ..._workingMemory.toPromptFragment(),
+    };
   }
 
   @override

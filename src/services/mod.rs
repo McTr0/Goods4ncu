@@ -15,6 +15,7 @@ pub mod chat;
 pub mod chat_conversation;
 pub mod chat_expire;
 pub mod community_health;
+pub mod companion_relationship;
 pub mod content_report;
 pub mod embedding_jobs;
 pub mod embedding_worker;

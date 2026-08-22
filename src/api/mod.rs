@@ -20,6 +20,7 @@ pub mod agreements;
 pub mod auth;
 pub mod campuses;
 pub mod chat;
+pub mod companion;
 pub mod content_reports;
 pub mod conversations;
 pub mod error;
@@ -781,6 +782,14 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .route("/api/auth/mfa/totp/confirm", post(mfa::totp_confirm))
         .route("/api/agent/plans", get(agent_plans::list_plans))
         .route("/api/agent/runs", get(agent_runs::list_runs))
+        .route(
+            "/api/companion/relationship",
+            get(companion::get_relationship),
+        )
+        .route(
+            "/api/companion/relationship/events",
+            post(companion::record_relationship_event),
+        )
         .route(
             "/api/agent/profile",
             get(agent_memory::get_profile).put(agent_memory::update_profile),
