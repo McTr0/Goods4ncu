@@ -9,10 +9,12 @@
 #![allow(dead_code)]
 
 use crate::agents::tools::{
-    CreateListingArgs, CreateListingTool, DeleteListingArgs, DeleteListingTool,
+    CreateListingArgs, CreateListingTool, DeleteListingArgs, DeleteListingTool, DraftMessageArgs,
+    DraftMessageTool, FindRelatedPostsArgs, FindRelatedPostsTool, GetCommentsArgs, GetCommentsTool,
     GetListingDetailsArgs, GetListingDetailsTool, GetMyListingsArgs, GetMyListingsTool,
-    NegotiateItemArgs, NegotiateItemTool, PurchaseItemIntentArgs, PurchaseItemIntentTool,
-    SearchInventoryArgs, SearchInventoryTool, ToolContext,
+    GetUserPostsArgs, GetUserPostsTool, NegotiateItemArgs, NegotiateItemTool,
+    PurchaseItemIntentArgs, PurchaseItemIntentTool, SearchInventoryArgs, SearchInventoryTool,
+    ToolContext,
 };
 use crate::llm::AgentTokenUsage;
 use rig::tool::Tool;
@@ -27,6 +29,10 @@ pub const DEFAULT_STEP_TIMEOUT: Duration = Duration::from_secs(10);
 pub enum StepActionType {
     SearchInventory,
     GetListingDetails,
+    GetUserPosts,
+    FindRelatedPosts,
+    GetComments,
+    DraftMessage,
     GetMyListings,
     CreateListing,
     UpdateListing,
@@ -44,6 +50,10 @@ impl FromStr for StepActionType {
         Ok(match s.trim().to_lowercase().as_str() {
             "search_inventory" | "search" => Self::SearchInventory,
             "get_listing_details" | "details" => Self::GetListingDetails,
+            "get_user_posts" | "user_posts" => Self::GetUserPosts,
+            "find_related_posts" | "related" => Self::FindRelatedPosts,
+            "get_comments" | "comments" => Self::GetComments,
+            "draft_message" | "draft" => Self::DraftMessage,
             "get_my_listings" | "my_listings" => Self::GetMyListings,
             "create_listing" | "create" => Self::CreateListing,
             "update_listing" | "update" => Self::UpdateListing,
@@ -198,6 +208,66 @@ impl ReActEngine {
                         format!("参数解析失败: {}", e),
                         Some("无效的商品ID参数".to_string()),
                     ),
+                }
+            }
+            StepActionType::GetUserPosts => {
+                let parsed: Result<GetUserPostsArgs, _> = serde_json::from_value(args.clone());
+                match parsed {
+                    Ok(parsed_args) => {
+                        let tool = GetUserPostsTool {
+                            ctx: self.tool_ctx.clone(),
+                        };
+                        match tool.call(parsed_args).await {
+                            Ok(res) => (res, None),
+                            Err(e) => (format!("获取用户帖子失败: {}", e), None),
+                        }
+                    }
+                    Err(e) => (format!("参数解析失败: {}", e), None),
+                }
+            }
+            StepActionType::FindRelatedPosts => {
+                let parsed: Result<FindRelatedPostsArgs, _> = serde_json::from_value(args.clone());
+                match parsed {
+                    Ok(parsed_args) => {
+                        let tool = FindRelatedPostsTool {
+                            ctx: self.tool_ctx.clone(),
+                        };
+                        match tool.call(parsed_args).await {
+                            Ok(res) => (res, None),
+                            Err(e) => (format!("查找相似帖子失败: {}", e), None),
+                        }
+                    }
+                    Err(e) => (format!("参数解析失败: {}", e), None),
+                }
+            }
+            StepActionType::GetComments => {
+                let parsed: Result<GetCommentsArgs, _> = serde_json::from_value(args.clone());
+                match parsed {
+                    Ok(parsed_args) => {
+                        let tool = GetCommentsTool {
+                            ctx: self.tool_ctx.clone(),
+                        };
+                        match tool.call(parsed_args).await {
+                            Ok(res) => (res, None),
+                            Err(e) => (format!("获取留言失败: {}", e), None),
+                        }
+                    }
+                    Err(e) => (format!("参数解析失败: {}", e), None),
+                }
+            }
+            StepActionType::DraftMessage => {
+                let parsed: Result<DraftMessageArgs, _> = serde_json::from_value(args.clone());
+                match parsed {
+                    Ok(parsed_args) => {
+                        let tool = DraftMessageTool {
+                            ctx: self.tool_ctx.clone(),
+                        };
+                        match tool.call(parsed_args).await {
+                            Ok(res) => (res, None),
+                            Err(e) => (format!("生成草稿失败: {}", e), None),
+                        }
+                    }
+                    Err(e) => (format!("参数解析失败: {}", e), None),
                 }
             }
             StepActionType::GetMyListings => {
