@@ -113,6 +113,29 @@ flutter run -d chrome \
 
 更完整的环境、数据库和排错说明见[开发指南](docs/development.md)与[运行手册](docs/operations.md)。
 
+## AI Agent（小昌）配置
+
+模型通过 `.env` 配置：
+
+```bash
+GEMINI_API_KEY=...        # LLM provider key
+LLM_PROVIDER=gemini       # gemini / minimax / openai_compatible
+LLM_MODEL=...             # 模型名
+# LLM_BASE_URL=...        # 自定义兼容端点（可选）
+```
+
+- **禁用 AI**：设置 `AGENT_ENABLED=false` 后重启。所有 Agent 接口返回 503，
+  平台其余功能完全不受影响；缺少该变量时默认启用。
+- **新增 Tool**：在 `src/agents/tools.rs` 定义 `Args` 与 `impl Tool`，注册到三个
+  provider，并按需在 ReAct 中加分发分支，完整步骤见[Agent 工具](docs/agent-tools.md)。
+- **新增 UI Action**：在 provider 的工具结果处理中 emit `UiAction`
+  （如 `SHOW_POSTS`、`SCROLL_TO_POST`），后端以 SSE `ui_action` 下发，前端在
+  `mobile/lib/pages/chat_page.dart` 的 `_handleUiAction` 中消费。
+- **更换 Live2D 模型**：替换 `mobile/assets/live2d/` 与
+  `mobile/assets/avatars/v2/open_rig/<character>/` 下的模型资产并在
+  `pubspec.yaml` 声明；业务层只依赖 `CharacterRenderer` 抽象，详见
+  [角色系统](docs/character-system.md)。
+
 ## 验证
 
 ```bash
