@@ -15,6 +15,12 @@ class SseToken {
   final String token;
   final String conversationId;
 
+  /// Tool name while the backend is performing real platform work.
+  final String? toolActivity;
+
+  /// Optional UI action from the agent (e.g. SHOW_POSTS, SCROLL_TO_POST).
+  final Map<String, dynamic>? uiAction;
+
   /// True when this is a complete message (e.g. greeting) rather than a streaming token.
   /// Complete messages should be finalized immediately without waiting for [DONE].
   final bool isComplete;
@@ -25,6 +31,8 @@ class SseToken {
     required this.conversationId,
     this.isComplete = false,
     this.error,
+    this.uiAction,
+    this.toolActivity,
   });
 
   factory SseToken.fromJson(Map<String, dynamic> json) {
@@ -33,6 +41,9 @@ class SseToken {
       conversationId: json['conversation_id'] ?? '',
       isComplete: json['is_complete'] as bool? ?? false,
       error: json['error']?.toString(),
+      uiAction: json['ui_action'] as Map<String, dynamic>?,
+      toolActivity: (json['tool_activity'] as Map<String, dynamic>?)?['tool']
+          ?.toString(),
     );
   }
 }
@@ -92,6 +103,7 @@ class SseService {
     required String message,
     String? conversationId,
     String? listingId,
+    Map<String, dynamic>? pageContext,
     String? imageUrl,
     String? audioUrl,
     String? idempotencyKey,
@@ -120,6 +132,7 @@ class SseService {
     final body = <String, dynamic>{'message': message};
     if (conversationId != null) body['conversation_id'] = conversationId;
     if (listingId != null) body['listing_id'] = listingId;
+    if (pageContext != null) body['page_context'] = pageContext;
     if (imageUrl != null) body['image_url'] = imageUrl;
     if (audioUrl != null) body['audio_url'] = audioUrl;
 
@@ -357,7 +370,7 @@ class SseService {
       final decoded = jsonDecode(jsonStr) as Map<String, dynamic>;
 
       // Handle error events from backend.
-      final error = decoded['error'] as String?;
+      final error = decoded['error']?.toString();
       if (error != null) {
         return SseToken(
           token: '',
@@ -376,6 +389,11 @@ class SseService {
           conversationId: decoded['conversation_id'] as String? ?? '',
           isComplete: true, // Finalize immediately — no [DONE] will follow.
         );
+      }
+
+      if (decoded['ui_action'] is Map<String, dynamic> ||
+          decoded['tool_activity'] is Map<String, dynamic>) {
+        return SseToken.fromJson(decoded);
       }
 
       // Streaming token.

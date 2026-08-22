@@ -1,5 +1,9 @@
+import 'dart:async';
 import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+
+import 'live2d_effects.dart';
 import 'live2d_controller.dart';
 
 /// Interactive Live2D digital character viewport widget (Talking-Tom style).
@@ -8,7 +12,7 @@ class Live2DCharacterWidget extends StatefulWidget {
     super.key,
     required this.controller,
     this.size = 280,
-    this.modelAssetPath = 'assets/live2d/doro/Doro.2048/texture_00.png',
+    this.modelAssetPath = 'assets/live2d/doro/icon.png',
     this.showSpeechBubble = true,
     this.enableTouchTracking = true,
   });
@@ -28,18 +32,62 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
   late final AnimationController _animController;
   Offset _touchRipplePos = Offset.zero;
   bool _showRipple = false;
+  Timer? _rippleTimer;
+  final List<AmbientBubble> _ambientBubbles = [];
+  Timer? _ambientTimer;
 
   @override
   void initState() {
     super.initState();
+    _initAmbientBubbles();
+    _startAmbientMotion();
     _animController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 4),
     )..repeat();
   }
 
+  void _initAmbientBubbles() {
+    final random = math.Random();
+    for (var i = 0; i < 8; i++) {
+      _ambientBubbles.add(
+        AmbientBubble(
+          x: random.nextDouble(),
+          y: random.nextDouble(),
+          size: 4 + random.nextDouble() * 12,
+          speed: 0.0003 + random.nextDouble() * 0.0005,
+          opacity: 0.08 + random.nextDouble() * 0.1,
+          wobblePhase: random.nextDouble() * math.pi * 2,
+        ),
+      );
+    }
+  }
+
+  void _startAmbientMotion() {
+    double t = 0.0;
+    _ambientTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+      if (!mounted) return;
+      t += 0.05;
+      setState(() {
+        for (final b in _ambientBubbles) {
+          b.y -= b.speed * 10;
+          b.x += math.sin(t + b.wobblePhase) * 0.001;
+          // Wrap around when reaching the top
+          if (b.y < -0.05) {
+            b.y = 1.05;
+            b.x = math.Random().nextDouble();
+          }
+          if (b.x < -0.05) b.x = 1.05;
+          if (b.x > 1.05) b.x = -0.05;
+        }
+      });
+    });
+  }
+
   @override
   void dispose() {
+    _rippleTimer?.cancel();
+    _ambientTimer?.cancel();
     _animController.dispose();
     super.dispose();
   }
@@ -52,25 +100,27 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
 
     widget.controller.handleTap(details.localPosition, size);
 
-    Future.delayed(const Duration(milliseconds: 300), () {
+    _rippleTimer?.cancel();
+    _rippleTimer = Timer(const Duration(milliseconds: 300), () {
       if (mounted) {
         setState(() => _showRipple = false);
       }
     });
   }
 
-  void _onPanUpdate(DragUpdateDetails details, Size size) {
-    if (!widget.enableTouchTracking || size.width == 0 || size.height == 0) {
-      return;
-    }
-    final normalizedX = ((details.localPosition.dx / size.width) - 0.5) * 2.0;
-    final normalizedY = ((details.localPosition.dy / size.height) - 0.5) * 2.0;
-    widget.controller.lookAt(normalizedX, normalizedY);
+  void _onDragStart(DragStartDetails details) {
+    if (!widget.enableTouchTracking) return;
+    widget.controller.startDrag(details.localPosition);
   }
 
-  void _onPanEnd(DragEndDetails details) {
+  void _onDragUpdate(DragUpdateDetails details) {
     if (!widget.enableTouchTracking) return;
-    widget.controller.resetGaze();
+    widget.controller.updateDrag(details.localPosition);
+  }
+
+  void _onDragEnd(DragEndDetails details) {
+    if (!widget.enableTouchTracking) return;
+    widget.controller.endDrag();
   }
 
   @override
@@ -89,107 +139,205 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
             clipBehavior: Clip.none,
             alignment: Alignment.bottomCenter,
             children: [
+              // Ambient background bubbles
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: CustomPaint(
+                    painter: AmbientBubblePainter(bubbles: _ambientBubbles),
+                  ),
+                ),
+              ),
               // 1. Interactive Doro Live2D Character Viewport
               Positioned(
                 bottom: 0,
                 child: GestureDetector(
                   onTapDown: (details) => _onTapDown(details, effectiveSize),
-                  onPanUpdate: (details) => _onPanUpdate(details, effectiveSize),
-                  onPanEnd: _onPanEnd,
+                  onPanStart: _onDragStart,
+                  onPanUpdate: _onDragUpdate,
+                  onPanEnd: _onDragEnd,
                   child: AnimatedBuilder(
                     animation: _animController,
                     builder: (context, _) {
                       final t = _animController.value * 2 * math.pi;
-                      final breathOffsetY = math.sin(t) * 4.0;
-                      final breathScaleY = 1.0 + math.sin(t) * 0.015;
+                      final breathOffsetY =
+                          math.sin(t) * 3.0 + math.sin(t * 2.7) * 1.2;
+                      final breathScaleY = 1.0 + math.sin(t) * 0.02;
 
                       // Physical motion variables
                       double motionScaleX = 1.0;
                       double motionScaleY = 1.0;
-                      double headAngle = widget.controller.lookAtX * 0.08;
+                      double bodyAngle =
+                          widget.controller.lookAtX * 0.035 +
+                          widget.controller.idleSway;
+                      double headAngle =
+                          widget.controller.lookAtX * 0.08 +
+                          widget.controller.idleSway * 0.5;
 
-                      if (widget.controller.activeMotion == 'poke_belly') {
+                      final motion = widget.controller.activeMotion;
+                      if (motion == 'lift') {
+                        motionScaleX = 0.98;
+                        motionScaleY = 1.04;
+                        bodyAngle += 0.025;
+                      } else if (motion == 'spring_back') {
+                        final progress = 1 - _animController.value * 4 % 1;
+                        bodyAngle += math.sin(progress * math.pi) * 0.06;
+                        motionScaleY = 1 + math.sin(progress * math.pi) * 0.04;
+                      } else if (motion == 'scan_inventory' ||
+                          motion == 'look_at_results' ||
+                          motion == 'present_results' ||
+                          motion == 'focus_post') {
+                        bodyAngle += 0.05;
+                        headAngle += 0.05;
+                      } else if (motion == 'careful_review' ||
+                          motion == 'confirm_understanding' ||
+                          motion == 'apologize' ||
+                          motion == 'no_results') {
+                        bodyAngle -= 0.035;
+                        motionScaleY = 0.98;
+                      } else if (motion == 'poke_belly') {
                         motionScaleX = 1.14;
                         motionScaleY = 0.86;
-                      } else if (widget.controller.activeMotion == 'tap_head') {
+                      } else if (motion == 'tap_head') {
                         headAngle += 0.08;
                         motionScaleX = 0.95;
                         motionScaleY = 1.05;
+                      } else if (motion == 'lean_forward' ||
+                          motion == 'think') {
+                        motionScaleX = 1.03;
+                        motionScaleY = 0.98;
                       }
 
-                      final lookX = widget.controller.lookAtX * (widget.size * 0.05);
-                      final lookY = widget.controller.lookAtY * (widget.size * 0.03);
+                      final lookX =
+                          widget.controller.lookAtX * (widget.size * 0.05);
+                      final lookY =
+                          widget.controller.lookAtY * (widget.size * 0.03);
+                      final dragOffset = widget.controller.isDragging
+                          ? widget.controller.dragOffset
+                          : Offset.zero;
 
                       return Transform.translate(
-                        offset: Offset(lookX, breathOffsetY + lookY),
+                        offset: Offset(
+                          lookX + dragOffset.dx,
+                          breathOffsetY + lookY + dragOffset.dy,
+                        ),
                         child: Transform.rotate(
-                          angle: headAngle,
+                          angle: bodyAngle,
                           child: Transform.scale(
                             scaleX: motionScaleX,
                             scaleY: motionScaleY * breathScaleY,
-                            child: SizedBox(
-                              width: effectiveSize.width,
-                              height: effectiveSize.height,
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  // Soft Ambient Shadow below Doro
-                                  Positioned(
-                                    bottom: 6,
-                                    child: Container(
-                                      width: effectiveSize.width * 0.72,
-                                      height: 18,
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(100),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: const Color(0xFF0F766E).withValues(alpha: 0.18),
-                                            blurRadius: 18,
-                                            spreadRadius: 2,
-                                            offset: const Offset(0, 6),
+                            child: Transform.translate(
+                              offset: Offset(-lookX * 0.35, -lookY * 0.25),
+                              child: Transform.rotate(
+                                angle: headAngle - bodyAngle,
+                                child: SizedBox(
+                                  width: effectiveSize.width,
+                                  height: effectiveSize.height,
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      // Soft Ambient Shadow below Doro
+                                      Positioned(
+                                        bottom: 6,
+                                        child: Container(
+                                          width: effectiveSize.width * 0.72,
+                                          height: 18,
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(
+                                              100,
+                                            ),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: const Color(
+                                                  0xFF0F766E,
+                                                ).withValues(alpha: 0.18),
+                                                blurRadius: 18,
+                                                spreadRadius: 2,
+                                                offset: const Offset(0, 6),
+                                              ),
+                                            ],
                                           ),
-                                        ],
+                                        ),
                                       ),
-                                    ),
-                                  ),
 
-                                  // Doro Live2D Character Image Asset
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(widget.size * 0.35),
-                                    child: Image.asset(
-                                      'assets/live2d/doro/icon.png',
-                                      width: effectiveSize.width * 0.92,
-                                      height: effectiveSize.height * 0.92,
-                                      fit: BoxFit.contain,
-                                      errorBuilder: (context, error, stackTrace) => Image.asset(
-                                        'assets/characters/xiaochang.png',
-                                        width: effectiveSize.width * 0.92,
-                                        height: effectiveSize.height * 0.92,
-                                        fit: BoxFit.contain,
+                                      // Doro Live2D Character Image Asset
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(
+                                          widget.size * 0.28,
+                                        ),
+                                        child: RepaintBoundary(
+                                          child: Image.asset(
+                                            widget.modelAssetPath,
+                                            width: effectiveSize.width * 0.96,
+                                            height: effectiveSize.height * 0.96,
+                                            fit: BoxFit.contain,
+                                            errorBuilder:
+                                                (
+                                                  context,
+                                                  error,
+                                                  stackTrace,
+                                                ) => Image.asset(
+                                                  'assets/characters/xiaochang.png',
+                                                  width:
+                                                      effectiveSize.width *
+                                                      0.92,
+                                                  height:
+                                                      effectiveSize.height *
+                                                      0.92,
+                                                  fit: BoxFit.contain,
+                                                ),
+                                          ),
+                                        ),
                                       ),
-                                    ),
+
+                                      // Lip-Sync Dynamic Mouth Overlay during SSE streaming speech
+                                      if (widget.controller.mouthOpen > 0.05)
+                                        Positioned(
+                                          bottom: effectiveSize.height * 0.28,
+                                          child: _buildDynamicMouth(
+                                            widget.controller.mouthOpen,
+                                          ),
+                                        ),
+
+                                      // Blink overlay
+                                      if (widget.controller.isBlinking)
+                                        Positioned(
+                                          top: effectiveSize.height * 0.18,
+                                          left: effectiveSize.width * 0.22,
+                                          right: effectiveSize.width * 0.22,
+                                          child: IgnorePointer(
+                                            child: Container(
+                                              height:
+                                                  effectiveSize.height * 0.04,
+                                              decoration: BoxDecoration(
+                                                color: const Color(
+                                                  0xFF134E4A,
+                                                ).withValues(alpha: 0.0),
+                                                borderRadius:
+                                                    BorderRadius.circular(100),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+
+                                      // Shy / Happy Blushing Emotion Overlay
+                                      if (widget.controller.expression ==
+                                              Live2DExpression.shy ||
+                                          widget.controller.expression ==
+                                              Live2DExpression.happy)
+                                        Positioned.fill(
+                                          child: _buildBlushOverlay(
+                                            effectiveSize,
+                                          ),
+                                        ),
+
+                                      // Touch ripple effect
+                                      if (_showRipple)
+                                        Positioned.fill(
+                                          child: _buildTouchRipple(),
+                                        ),
+                                    ],
                                   ),
-
-                                  // Lip-Sync Dynamic Mouth Overlay during SSE streaming speech
-                                  if (widget.controller.mouthOpen > 0.05)
-                                    Positioned(
-                                      bottom: effectiveSize.height * 0.28,
-                                      child: _buildDynamicMouth(widget.controller.mouthOpen),
-                                    ),
-
-                                  // Shy / Happy Blushing Emotion Overlay
-                                  if (widget.controller.expression == Live2DExpression.shy ||
-                                      widget.controller.expression == Live2DExpression.happy)
-                                    Positioned.fill(
-                                      child: _buildBlushOverlay(effectiveSize),
-                                    ),
-
-                                  // Touch ripple effect
-                                  if (_showRipple)
-                                    Positioned.fill(
-                                      child: _buildTouchRipple(),
-                                    ),
-                                ],
+                                ),
                               ),
                             ),
                           ),
@@ -200,12 +348,27 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
                 ),
               ),
 
-              // 2. Dynamic Speech Bubble Overlay (Talking Tom Dialogue)
-              if (widget.showSpeechBubble && speech != null && speech.isNotEmpty)
-                Positioned(
-                  top: 0,
-                  child: _buildSpeechBubble(speech),
+              // Particle effects overlay
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: ListenableBuilder(
+                    listenable: widget.controller.particleSystem,
+                    builder: (context, _) {
+                      return CustomPaint(
+                        painter: Live2DParticlePainter(
+                          particles: widget.controller.particleSystem.particles,
+                        ),
+                      );
+                    },
+                  ),
                 ),
+              ),
+
+              // 2. Dynamic Speech Bubble Overlay (Talking Tom Dialogue)
+              if (widget.showSpeechBubble &&
+                  speech != null &&
+                  speech.isNotEmpty)
+                Positioned(top: 0, child: _buildSpeechBubble(speech)),
             ],
           ),
         );
@@ -214,24 +377,27 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
   }
 
   Widget _buildDynamicMouth(double mouthOpen) {
-    final height = 5.0 + 16.0 * mouthOpen;
-    final width = 14.0 + 10.0 * mouthOpen;
+    final height = 4.0 + 14.0 * mouthOpen;
+    final width = 12.0 + 8.0 * mouthOpen;
 
     return Container(
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: const Color(0xFF991B1B),
-        borderRadius: BorderRadius.circular(height * 0.5),
-        border: Border.all(color: const Color(0xFF134E4A), width: 1.5),
+        color: const Color(0xFFB91C1C).withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(height * 0.6),
+        border: Border.all(
+          color: const Color(0xFF134E4A).withValues(alpha: 0.7),
+          width: 1.2,
+        ),
       ),
       child: Center(
         child: Container(
-          width: width * 0.6,
-          height: height * 0.45,
+          width: width * 0.55,
+          height: height * 0.35,
           decoration: BoxDecoration(
-            color: const Color(0xFFFB923C),
-            borderRadius: BorderRadius.circular(8),
+            color: const Color(0xFFFCA5A5).withValues(alpha: 0.9),
+            borderRadius: BorderRadius.circular(height * 0.3),
           ),
         ),
       ),
@@ -249,7 +415,7 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
               width: size.width * 0.14,
               height: size.height * 0.07,
               decoration: BoxDecoration(
-                color: const Color(0xFFF97316).withValues(alpha: 0.35),
+                color: const Color(0xFFF9A8D4).withValues(alpha: 0.45),
                 borderRadius: BorderRadius.circular(100),
               ),
             ),
@@ -261,7 +427,7 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
               width: size.width * 0.14,
               height: size.height * 0.07,
               decoration: BoxDecoration(
-                color: const Color(0xFFF97316).withValues(alpha: 0.35),
+                color: const Color(0xFFF9A8D4).withValues(alpha: 0.45),
                 borderRadius: BorderRadius.circular(100),
               ),
             ),
@@ -321,9 +487,7 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
   }
 
   Widget _buildTouchRipple() {
-    return CustomPaint(
-      painter: _TouchRipplePainter(pos: _touchRipplePos),
-    );
+    return CustomPaint(painter: _TouchRipplePainter(pos: _touchRipplePos));
   }
 }
 
