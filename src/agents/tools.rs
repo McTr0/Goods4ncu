@@ -803,7 +803,7 @@ struct FullListingRow {
     title: String,
     category: String,
     brand: String,
-    condition_score: i64,
+    condition_score: i32,
     suggested_price_cny: i64,
     defects: String,
     description: Option<String>,
