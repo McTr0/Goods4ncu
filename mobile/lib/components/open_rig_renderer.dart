@@ -74,12 +74,9 @@ class OpenRigAssetCache {
   OpenRigAssetCache._();
 
   static const manifests = <String, String>{
-    'doro': 'assets/avatars/v2/open_rig/ncu_doro/rig.json',
-    'gugugaga': 'assets/avatars/v2/open_rig/ncu_gugugaga/rig.json',
-    'phoebe_chupi': 'assets/avatars/v2/open_rig/ncu_phoebe_chupi/rig.json',
-    'ncu_doro': 'assets/avatars/v2/open_rig/ncu_doro/rig.json',
-    'ncu_gugugaga': 'assets/avatars/v2/open_rig/ncu_gugugaga/rig.json',
-    'ncu_phoebe_chupi': 'assets/avatars/v2/open_rig/ncu_phoebe_chupi/rig.json',
+    'doro': 'assets/avatars/v2/open_rig/doro/rig.json',
+    'gugugaga': 'assets/avatars/v2/open_rig/gugugaga/rig.json',
+    'phoebe_chupi': 'assets/avatars/v2/open_rig/phoebe_chupi/rig.json',
   };
   static final Map<String, Future<OpenRigAsset>> _cache = {};
   static final Map<String, OpenRigAsset> _assets = {};
