@@ -15,6 +15,13 @@ import '../services/post_service.dart';
 import '../services/ws_service.dart';
 import '../models/models.dart';
 import '../models/post.dart' as post;
+import '../companion/companion_config.dart';
+import '../companion/companion_events.dart';
+import '../companion/environment.dart';
+import '../companion/runtime_host.dart';
+import '../companion/attention.dart';
+import '../companion/state_machine.dart';
+import 'package:provider/provider.dart' as p2;
 import '../components/agent_debug_panel.dart';
 import '../components/assistant_markdown.dart';
 import '../components/live2d/live2d_character_widget.dart';
@@ -100,6 +107,8 @@ class _ChatPageState extends State<ChatPage> {
   late final Live2DController _live2DController;
   late final Live2DLipSyncDriver _lipSyncDriver;
   late final PostService _postService;
+  CompanionRuntimeHost? _companionHost;
+  EnvironmentTracker? _environmentTracker;
 
   @override
   void initState() {
@@ -116,6 +125,22 @@ class _ChatPageState extends State<ChatPage> {
     _mediaSender =
         widget.mediaSender ??
         ChatPageMediaSender(uploadService: _uploadService);
+    if (kCompanionEnabled) {
+      _companionHost = p2.Provider.of<CompanionRuntimeHost?>(
+        context,
+        listen: false,
+      );
+      _environmentTracker = EnvironmentTracker(
+        state: EnvironmentState(),
+        onMeaningfulEvent: (event) {
+          _companionHost?.bus.emit(CompanionEventType.environmentChanged, {
+            'type': event.type.name,
+            ...event.payload,
+          });
+        },
+      );
+      _syncEnvironmentTracker();
+    }
     _controller.addListener(_onComposerChanged);
     _connectWs();
     WidgetsBinding.instance.addPostFrameCallback((_) => _initialize());
@@ -132,7 +157,73 @@ class _ChatPageState extends State<ChatPage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.pageContext != widget.pageContext) {
       _syncBrainWithPageContext();
+      _syncEnvironmentTracker();
       _focusedAgentPostId = widget.pageContext?['postId']?.toString();
+    }
+  }
+
+  void _syncEnvironmentTracker() {
+    final tracker = _environmentTracker;
+    if (tracker == null) return;
+    final ctx = widget.pageContext;
+    if (ctx == null) return;
+    final page = ctx['page']?.toString() ?? 'chat';
+    final listingId = ctx['listingId']?.toString();
+    final postId = ctx['postId']?.toString();
+    tracker.track(
+      EnvironmentEvent(
+        EnvironmentEventType.pageChanged,
+        payload: {'page': page},
+      ),
+    );
+    if (listingId != null || postId != null) {
+      tracker.trackPostOpened(postId: postId, listingId: listingId);
+    }
+  }
+
+  void _companionTurnStart() {
+    final host = _companionHost;
+    if (host == null) return;
+    host.machine.transition(CompanionState.listening);
+  }
+
+  void _companionOnTool(String tool) {
+    _companionHost?.bus.emit(CompanionEventType.toolStarted, {'tool': tool});
+    _companionHost?.onSignal('tool_using_$tool');
+  }
+
+  void _companionOnUiAction(String type) {
+    final host = _companionHost;
+    host?.onSignal(type);
+    switch (type) {
+      case 'SHOW_POSTS' || 'SHOW_RELATED_POSTS':
+        host?.attention.lookAt(AttentionTarget.postList);
+      case 'HIGHLIGHT_POST' || 'SCROLL_TO_POST' || 'OPEN_POST':
+        host?.attention.lookAt(AttentionTarget.post);
+      case 'OPEN_PROFILE':
+        host?.attention.lookAt(AttentionTarget.none);
+    }
+  }
+
+  void _companionOnFirstToken() {
+    _companionHost?.machine.transition(CompanionState.speaking);
+    _companionHost?.bus.emit(CompanionEventType.agentResponseStart);
+  }
+
+  void _companionOnStreamEnd({required bool failed}) {
+    final host = _companionHost;
+    if (host == null) return;
+    host.bus.emit(
+      failed
+          ? CompanionEventType.interrupted
+          : CompanionEventType.agentResponseEnd,
+      {},
+    );
+    host.machine.transition(
+      failed ? CompanionState.error : CompanionState.idle,
+    );
+    if (!failed) {
+      host.machine.transition(CompanionState.idle);
     }
   }
 
@@ -949,10 +1040,15 @@ class _ChatPageState extends State<ChatPage> {
       }
 
       _live2DController.brain.onMessageSent(userMsg.content);
+      _companionTurnStart();
+      _environmentTracker?.track(
+        EnvironmentEvent(EnvironmentEventType.messageSent),
+      );
       _live2DController.showSpeechBubble(
         localizations?.assistantThinkingBubble ?? '',
       );
       String fullReply = '';
+      var companionSawFirstToken = false;
       await for (final token in _sseService.stream) {
         if (!mounted) break;
         if (token.error != null) {
@@ -961,10 +1057,15 @@ class _ChatPageState extends State<ChatPage> {
         // Dispatch agent UI actions (e.g. SHOW_POSTS, SCROLL_TO_POST).
         if (token.uiAction != null) {
           _handleUiAction(token.uiAction!);
+          _companionOnUiAction(token.uiAction!['type']?.toString() ?? '');
         }
         if (token.toolActivity != null) {
           final activity = token.toolActivity!;
           _live2DController.brain.onToolStarted(activity);
+          _companionOnTool(activity);
+          _environmentTracker?.track(
+            EnvironmentEvent(EnvironmentEventType.postListUpdated),
+          );
           setState(() => _lastToolActivity = activity);
           if (_agentDebugEnabled) _recordDebugToolCall(activity);
           // Surface a friendly progress line until real reply text arrives.
@@ -975,6 +1076,10 @@ class _ChatPageState extends State<ChatPage> {
             );
             _live2DController.showSpeechBubble(label);
           }
+        }
+        if (!companionSawFirstToken && token.token.isNotEmpty) {
+          companionSawFirstToken = true;
+          _companionOnFirstToken();
         }
         if (token.token.isNotEmpty &&
             _firstTokenLatency == null &&
@@ -995,6 +1100,7 @@ class _ChatPageState extends State<ChatPage> {
         });
       }
       _lipSyncDriver.onStreamComplete();
+      _companionOnStreamEnd(failed: false);
       if (_turnStartedAt != null) {
         _lastTurnLatency = DateTime.now().difference(_turnStartedAt!);
       }
@@ -1042,6 +1148,7 @@ class _ChatPageState extends State<ChatPage> {
       });
       return;
     } catch (e) {
+      _companionOnStreamEnd(failed: true);
       // Goal §49: the user sees a friendly line, never raw SQL/provider
       // internals. Full detail goes to the debug console only.
       debugPrint('chat stream failed: $e');
