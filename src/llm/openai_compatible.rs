@@ -133,7 +133,7 @@ impl super::LlmProvider for OpenAiCompatibleProvider {
         let agent = self
             .chat_client
             .agent(&self.model)
-            .preamble(PREAMBLE)
+            .preamble(crate::llm::system_preamble())
             // Global dynamic_context is disabled until vector retrieval can
             // enforce campus/status/restriction scope before similarity.
             .tool(crate::agents::tools::CreateListingTool { ctx: ctx.clone() })

@@ -119,7 +119,7 @@ impl super::LlmProvider for GeminiProvider {
         let agent = self
             .client
             .agent(&self.model)
-            .preamble(PREAMBLE)
+            .preamble(crate::llm::system_preamble())
             // Global dynamic_context is disabled: rig's vector store cannot
             // apply campus/status/restriction filters before similarity.
             .tool(crate::agents::tools::CreateListingTool { ctx: ctx.clone() })

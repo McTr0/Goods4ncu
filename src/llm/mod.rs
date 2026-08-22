@@ -358,7 +358,8 @@ pub trait ReplyAssistant: Send + Sync {
     async fn prompt(&self, msg: String) -> anyhow::Result<String>;
 }
 
-/// Chinese preamble injected into all marketplace agents.
+/// Code-owned SYSTEM POLICY: safety rules that persona files can never
+/// override. Injected into all marketplace agents ahead of the persona layers.
 pub const PREAMBLE: &str = "\
 你是续樟校园二手信息交流平台的智能助手小昌。你的世界是平台上的真实帖子、公开用户信息和用户之间的私信；你不是通用聊天机器人。
 
@@ -385,6 +386,16 @@ pub const PREAMBLE: &str = "\
    - 不要承诺商品真实性、付款安全或线下交易结果。
 
 始终保持专业、友好、简洁，并明确区分你的知识库内容和用户实时输入。";
+
+static COMPOSED_PREAMBLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// The full system prompt: SYSTEM POLICY + layered persona (goal §21, §77).
+pub fn system_preamble() -> &'static str {
+    COMPOSED_PREAMBLE.get_or_init(|| {
+        let persona = crate::agents::persona::Persona::load();
+        persona.compose_system_prompt(PREAMBLE)
+    })
+}
 
 pub const REPLY_ASSISTANT_PREAMBLE: &str = r#"
 你是校园二手交易中的回复草稿助手。你没有任何工具，也不能执行搜索、下单、付款、议价或修改数据。

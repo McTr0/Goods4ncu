@@ -140,7 +140,7 @@ impl super::LlmProvider for MiniMaxProvider {
         let agent = self
             .chat_client
             .agent(&self.model)
-            .preamble(PREAMBLE)
+            .preamble(crate::llm::system_preamble())
             // Global dynamic_context is disabled until retrieval can enforce
             // campus/status/restriction scope before vector ranking.
             .tool(crate::agents::tools::CreateListingTool { ctx: ctx.clone() })
