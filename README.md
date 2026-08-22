@@ -139,6 +139,10 @@ flutter test
 | 产品使命与“出 / 收”哲学 | [产品设计](docs/product-design.md) |
 | 领域对象与状态机 | [信息模型](docs/information-model.md) |
 | Agent 权限与确认机制 | [Agent 系统设计](docs/agent-system.md) |
+| 小昌 AI 伙伴架构（Live2D + Agent） | [Agent 架构](docs/agent-architecture.md) |
+| Agent 工具清单与扩展方法 | [Agent 工具](docs/agent-tools.md) |
+| 角色表情与交互系统 | [角色系统](docs/character-system.md) |
+| Agent 安全边界 | [Agent 安全](docs/agent-safety.md) |
 | 审核、隐私与治理 | [信任与安全](docs/trust-safety.md) |
 | 当前公共接口 | [API 参考](docs/api-reference.md) |
 | 真实用户集成验收 | [集成测试手册](docs/integration-testing.md) |

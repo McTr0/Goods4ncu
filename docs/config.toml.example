@@ -49,6 +49,15 @@ vector_dim = 768             # Embedding vector dimensions
 #   LLM_API_KEY or provider-specific keys such as DEEPSEEK_API_KEY/GROQ_API_KEY
 
 # -----------------------------------------------------------------------
+# Agent Feature Flag
+#
+# AGENT_ENABLED=false disables all AI assistant endpoints (SSE chat stream
+# returns 503). The rest of the platform operates as the original non-AI demo.
+#
+# Set via env var: AGENT_ENABLED=false (defaults to true when unset)
+# -----------------------------------------------------------------------
+
+# -----------------------------------------------------------------------
 # Rate Limiting
 # -----------------------------------------------------------------------
 [rate_limit]
