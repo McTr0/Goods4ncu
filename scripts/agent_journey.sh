@@ -8,6 +8,8 @@ JOURNEY_USER="${JOURNEY_USER:-buyer1}"
 JOURNEY_PASS="${JOURNEY_PASS:-Test1234}"
 
 curl() { command curl -sS --noproxy '*' "$@"; }
+# Reasoning models can take >60s per turn.
+TURN_TIMEOUT="${TURN_TIMEOUT:-240}"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
@@ -17,7 +19,7 @@ TOKEN=$(curl -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' 
 [ -n "$TOKEN" ] || fail "login"
 
 chat() { # chat "message" "page_context_json"
-  curl -N -m 90 -X POST "$BASE/api/chat/stream" \
+  curl -N -m "$TURN_TIMEOUT" -X POST "$BASE/api/chat/stream" \
     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
     -d "{\"message\":\"$1\",\"page_context\":$2}"
 }
