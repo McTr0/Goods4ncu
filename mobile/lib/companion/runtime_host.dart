@@ -13,6 +13,7 @@ import 'emotion_engine.dart';
 import 'gaze.dart';
 import 'mock_renderer.dart';
 import 'motion_library.dart';
+import 'open_rig_adapter.dart';
 import 'state_machine.dart';
 
 /// Owns the companion runtime singletons and exposes one snapshot stream.
@@ -20,7 +21,10 @@ import 'state_machine.dart';
 /// Provided at app root so the assistant page, debug console, and timeline
 /// debugger all observe the *same* runtime.
 class CompanionRuntimeHost extends ChangeNotifier {
-  CompanionRuntimeHost({bool startTicker = true}) {
+  CompanionRuntimeHost({
+    bool startTicker = true,
+    CharacterRenderer? customRenderer,
+  }) {
     bus = CompanionEventBus();
     machine = CompanionStateMachine(
       bus: bus,
@@ -30,16 +34,24 @@ class CompanionRuntimeHost extends ChangeNotifier {
     );
     emotions = EmotionEngine(bus: bus);
     attention = AttentionController(bus: bus);
-    renderer = MockCharacterRenderer();
+    renderer = customRenderer ?? MockCharacterRenderer();
     timeline.attachTo(bus);
     _busSub = bus.stream.listen(_onEvent);
 
     planner = const BehaviorPlanner();
+    final body = renderer;
     scheduler = AnimationScheduler(
       bus: bus,
-      onPlayClip: (clip) => unawaited(renderer.playMotion(clip)),
+      onPlayClip: (clip) {
+        final rig = rigAdapter;
+        if (rig != null) {
+          rig.playMotionClip(clip);
+        } else {
+          unawaited(body.playMotion(clip));
+        }
+      },
       onGaze: (x, y) => _gaze.setTarget(x, y),
-      onHeadTilt: (degrees) => renderer.setParameter('headTilt', degrees),
+      onHeadTilt: (degrees) => body.setParameter('headTilt', degrees),
     );
 
     if (startTicker) {
@@ -55,12 +67,25 @@ class CompanionRuntimeHost extends ChangeNotifier {
   late final CompanionStateMachine machine;
   late final EmotionEngine emotions;
   late final AttentionController attention;
-  late final MockCharacterRenderer renderer;
+  late final CharacterRenderer renderer;
+  OpenRigCharacterRenderer? get rigAdapter => switch (renderer) {
+    OpenRigCharacterRenderer r => r,
+    _ => null,
+  };
+  MockCharacterRenderer? get mock => switch (renderer) {
+    MockCharacterRenderer m => m,
+    _ => null,
+  };
+
   late final BehaviorPlanner planner;
   late final AnimationScheduler scheduler;
   final CompanionTimeline timeline = CompanionTimeline();
   StreamSubscription<CompanionEvent>? _busSub;
   bool _disposed = false;
+
+  /// Real bodies drive their own mouth via the lip-sync driver; the host
+  /// samples it each tick for the debug snapshot.
+  double Function()? mouthSampler;
 
   final GazeSmoother _gaze = GazeSmoother();
   final Random _random = Random();
@@ -69,13 +94,21 @@ class CompanionRuntimeHost extends ChangeNotifier {
   DateTime _lastInteraction = DateTime.now();
 
   String? currentMotion;
+  double mouthOpen = 0;
+
+  /// Real bodies own their mouth (lip-sync driver writes the controller).
+  static const double controllerMouthFallback = 0;
+
+  /// Latest smoothed gaze for debug surfaces.
+  double get gazeX => _gaze.x;
+  double get gazeY => _gaze.y;
 
   CompanionRuntimeSnapshot snapshot() => CompanionRuntimeSnapshot(
     state: machine.state,
     emotion: emotions.state,
     attention: attention.state,
     currentMotion: currentMotion,
-    mouthOpen: renderer.mouthOpen,
+    mouthOpen: mouthOpen,
   );
 
   // ---------------------------------------------------------------------------
@@ -191,6 +224,7 @@ class CompanionRuntimeHost extends ChangeNotifier {
     emotions.tick(elapsed);
     _gaze.tick(elapsed);
     renderer.setGaze(_gaze.x, _gaze.y);
+    mouthOpen = mouthSampler?.call() ?? mock?.mouthOpen ?? 0;
 
     if (machine.state == CompanionState.idle &&
         !scheduler.isBusy &&

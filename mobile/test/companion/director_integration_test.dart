@@ -22,11 +22,11 @@ void main() {
       expect(host.scheduler.isBusy, isTrue);
       expect(host.currentMotion, 'thinking');
       expect(
-        host.renderer.lastMotionTag,
+        host.mock!.lastMotionTag,
         isNull,
         reason: 'thinking is procedural — no clip, gaze/tilt only',
       );
-      expect(host.renderer.parameters['headTilt'], isNotNull);
+      expect(host.rigAdapter?.headTilt ?? 0, isNotNull);
     },
   );
 
@@ -89,7 +89,7 @@ void main() {
     );
     for (var i = 0; i < 12; i++) {
       await settle(20);
-      outputs.add(host.renderer.gazeX);
+      outputs.add(host.gazeX);
     }
 
     expect(outputs.first, lessThan(outputs.last));

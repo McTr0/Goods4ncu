@@ -46,7 +46,7 @@ void main() {
       containsAll([CompanionEventType.ttsStart, CompanionEventType.ttsEnd]),
     );
     // And the mock body received the speech gesture.
-    expect(host.renderer.motionLog.map((m) => m.$1), contains('acknowledge'));
+    expect(host.mock!.motionLog.map((m) => m.$1), contains('acknowledge'));
 
     host.dispose();
   });
