@@ -263,8 +263,9 @@ impl UiAction {
 pub fn extract_listing_ids(result: &str) -> Result<Vec<String>, anyhow::Error> {
     let mut ids = Vec::new();
     for line in result.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with(|c: char| c.is_ascii_digit()) {
+        let trimmed = line.trim().trim_start_matches(['-', '*', '•']);
+        let trimmed = trimmed.trim_start();
+        if trimmed.starts_with(|c: char| c.is_ascii_digit()) || trimmed.starts_with('[') {
             if let Some(start) = trimmed.find('[') {
                 if let Some(end) = trimmed[start..].find(']') {
                     let id = &trimmed[start + 1..start + end];
@@ -462,6 +463,16 @@ mod tests {
                       没有更多结果。";
         let ids = extract_listing_ids(result).expect("extract");
         assert_eq!(ids, vec!["listing_a", "listing_b"]);
+    }
+
+    #[test]
+    fn extract_listing_ids_parses_dash_bullet_lines() {
+        // SearchInventoryTool formats results as "- [id] Title (…)".
+        let result = "Found 2 item(s):\n\
+                      - [l_a] iPhone 14 Pro Max (Brand: Apple, Condition: 9/10)\n\
+                      * [l_b] 小米手环8 (Condition: 8/10)\n";
+        let ids = extract_listing_ids(result).expect("extract");
+        assert_eq!(ids, vec!["l_a", "l_b"]);
     }
 
     #[test]
