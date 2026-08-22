@@ -1,6 +1,6 @@
 use super::{
     AgentStreamChunk, AgentTokenUsage, CircuitBreaker, EmbeddingGenerator, EmbeddingModelMetadata,
-    MarketplaceAgent, ReplyAssistant, LLM_CIRCUIT_BREAKER, PREAMBLE, REPLY_ASSISTANT_PREAMBLE,
+    MarketplaceAgent, ReplyAssistant, LLM_CIRCUIT_BREAKER, REPLY_ASSISTANT_PREAMBLE,
 };
 use crate::agents::models::Document;
 use crate::agents::tools::ToolContext;
