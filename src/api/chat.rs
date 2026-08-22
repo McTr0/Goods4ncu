@@ -47,6 +47,8 @@ pub(crate) struct ChatRequest {
     /// When provided, anchors the conversation to a specific listing. The
     /// listing owner is stored as receiver so they see the inquiry immediately.
     pub listing_id: Option<String>,
+    /// Current page context (e.g. {"page": "post_detail", "postId": "..."}).
+    pub page_context: Option<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -59,6 +61,7 @@ pub(crate) struct ChatResponse {
 pub(crate) struct ChatStreamRequest {
     pub message: String,
     pub listing_id: Option<String>,
+    pub page_context: Option<serde_json::Value>,
     pub conversation_id: Option<String>,
     pub image_url: Option<String>,
     pub audio_url: Option<String>,
@@ -394,6 +397,11 @@ pub(crate) async fn handle_chat(
     Session(session): Session,
     Json(payload): Json<ChatRequest>,
 ) -> Result<Json<ChatResponse>, ApiError> {
+    if !state.agents.agent_enabled {
+        return Err(ApiError::ServiceUnavailable(
+            "AI assistant is disabled on this server.",
+        ));
+    }
     let ChatRequest {
         message,
         image,
@@ -402,6 +410,7 @@ pub(crate) async fn handle_chat(
         audio_url,
         conversation_id,
         listing_id,
+        page_context,
     } = payload;
 
     // 10 MB network limit enforced by RequestBodyLimitLayer; text beyond 2000
@@ -595,7 +604,13 @@ pub(crate) async fn handle_chat(
             crate::services::agent_memory::AgentMemoryService::new(state.infra.db.clone());
         let embedder = state.agents.llm_provider.clone().embedding_generator();
         memory_svc
-            .format_memory_context(&current_user_id, campus_id, &message, Some(&embedder))
+            .format_memory_context(
+                &current_user_id,
+                campus_id,
+                &message,
+                page_context.as_ref(),
+                Some(&embedder),
+            )
             .await
             .unwrap_or_default()
     } else {
@@ -692,9 +707,15 @@ async fn handle_chat_stream_request(
     headers: HeaderMap,
     payload: ChatStreamRequest,
 ) -> Result<impl axum::response::IntoResponse, ApiError> {
+    if !state.agents.agent_enabled {
+        return Err(ApiError::ServiceUnavailable(
+            "AI assistant is disabled on this server.",
+        ));
+    }
     let ChatStreamRequest {
         message,
         listing_id,
+        page_context,
         conversation_id,
         image_url,
         audio_url,
@@ -870,7 +891,13 @@ async fn handle_chat_stream_request(
             crate::services::agent_memory::AgentMemoryService::new(state.infra.db.clone());
         let embedder = state.agents.llm_provider.clone().embedding_generator();
         memory_svc
-            .format_memory_context(&current_user_id, campus_id, &message, Some(&embedder))
+            .format_memory_context(
+                &current_user_id,
+                campus_id,
+                &message,
+                page_context.as_ref(),
+                Some(&embedder),
+            )
             .await
             .unwrap_or_default()
     } else {
@@ -979,6 +1006,25 @@ async fn handle_chat_stream_request(
                 Ok(AgentStreamChunk::Usage(reported_usage)) => {
                     usage = Some(reported_usage);
                     continue;
+                }
+                Ok(AgentStreamChunk::ToolActivity { tool }) => {
+                    let payload = serde_json::json!({
+                        "tool_activity": {
+                            "tool": tool,
+                        },
+                        "conversation_id": public_conversation_id,
+                    });
+                    encode_sse_data(&payload)
+                }
+                Ok(AgentStreamChunk::UiAction(action)) => {
+                    let payload = serde_json::json!({
+                        "ui_action": {
+                            "type": action.kind,
+                            "payload": action.payload,
+                        },
+                        "conversation_id": public_conversation_id
+                    });
+                    encode_sse_data(&payload)
                 }
                 Err(error) => {
                     completed = false;

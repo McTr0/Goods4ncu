@@ -402,6 +402,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 Some(llm_provider.clone().embedding_generator()),
             ),
             router,
+            agent_enabled: config.agent_enabled,
         },
         listing_repo: repositories::PostgresListingRepository::new(db_pool.clone()),
         user_repo: repositories::PostgresUserRepository::new(db_pool.clone()),

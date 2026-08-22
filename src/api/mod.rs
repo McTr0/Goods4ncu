@@ -391,6 +391,8 @@ pub struct ApiAgents {
     #[allow(dead_code)]
     pub router: IntentRouter,
     pub tri_tier_router: crate::agents::router::TriTierIntentRouter,
+    /// When false, AI assistant endpoints return ServiceUnavailable.
+    pub agent_enabled: bool,
 }
 
 #[derive(Clone)]

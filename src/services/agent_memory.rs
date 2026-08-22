@@ -28,6 +28,58 @@ pub struct UserAgentProfile {
     pub updated_at: DateTime<Utc>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::AgentMemoryService;
+
+    #[test]
+    fn page_context_fields_are_extractable_for_grounding() {
+        let context = serde_json::json!({
+            "page": "post_detail",
+            "postId": "post_1",
+            "listingId": "listing_1",
+        });
+
+        let page = context
+            .get("page")
+            .and_then(serde_json::Value::as_str)
+            .expect("page");
+        let post_id = context
+            .get("postId")
+            .and_then(serde_json::Value::as_str)
+            .expect("post id");
+        let listing_id = context
+            .get("listingId")
+            .and_then(serde_json::Value::as_str)
+            .expect("listing id");
+
+        assert_eq!(page, "post_detail");
+        assert_eq!(post_id, "post_1");
+        assert_eq!(listing_id, "listing_1");
+    }
+
+    #[test]
+    fn page_context_lines_are_built_without_profile_access() {
+        let context = serde_json::json!({
+            "page": "post_detail",
+            "postId": "post_1",
+            "listingId": "listing_1",
+        });
+
+        let lines = AgentMemoryService::page_context_lines(Some(&context));
+
+        assert_eq!(lines.len(), 4);
+        assert!(lines[0].contains("当前页面上下文"));
+        assert!(lines.iter().any(|line| line.contains("post_1")));
+        assert!(lines.iter().any(|line| line.contains("listing_1")));
+
+        assert_eq!(
+            AgentMemoryService::page_context_lines(None),
+            Vec::<String>::new()
+        );
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateProfileInput {
     pub preferred_locations: Option<Vec<String>>,
@@ -71,13 +123,8 @@ impl AgentMemoryService {
         Self { db }
     }
 
-    /// Retrieve or initialize default user agent profile.
-    pub async fn get_or_create_profile(
-        &self,
-        user_id: &str,
-        campus_id: Uuid,
-    ) -> Result<UserAgentProfile> {
-        let existing = sqlx::query_as::<_, UserAgentProfile>(
+    async fn existing_profile(&self, user_id: &str) -> Result<Option<UserAgentProfile>> {
+        let profile = sqlx::query_as::<_, UserAgentProfile>(
             "SELECT user_id, campus_id, preferred_locations, interested_categories,
                     budget_preferences, custom_instructions, privacy_level,
                     is_memory_enabled, is_proactive_enabled, created_at, updated_at
@@ -87,6 +134,17 @@ impl AgentMemoryService {
         .bind(user_id)
         .fetch_optional(&self.db)
         .await?;
+
+        Ok(profile)
+    }
+
+    /// Retrieve or initialize default user agent profile.
+    pub async fn get_or_create_profile(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+    ) -> Result<UserAgentProfile> {
+        let existing = self.existing_profile(user_id).await?;
 
         if let Some(profile) = existing {
             return Ok(profile);
@@ -321,21 +379,63 @@ impl AgentMemoryService {
         Ok(result.rows_affected())
     }
 
+    fn page_context_lines(page_context: Option<&serde_json::Value>) -> Vec<String> {
+        let Some(ctx) = page_context else {
+            return Vec::new();
+        };
+
+        let mut lines = vec!["### 用户当前页面上下文：".to_string()];
+        if let Some(page) = ctx.get("page").and_then(|v| v.as_str()) {
+            lines.push(format!("- **当前页面**：{}", page));
+        }
+        if let Some(post_id) = ctx.get("postId").and_then(|v| v.as_str()) {
+            lines.push(format!(
+                "- **正在查看的帖子 ID**：{}（当用户说\"这个帖子\"或\"它\"时，优先使用此 ID）",
+                post_id
+            ));
+        }
+        if let Some(listing_id) = ctx.get("listingId").and_then(|v| v.as_str()) {
+            lines.push(format!(
+                "- **正在查看的商品/Listing ID**：{}（读取商品详情、查找相关帖子或拟私信时优先使用此 ID）",
+                listing_id
+            ));
+        }
+        lines
+    }
+
+    fn join_context(lines: Vec<String>) -> String {
+        if lines.len() <= 1 {
+            return String::new();
+        }
+
+        let mut lines = lines;
+        lines.push(
+            "（注意：以上信息用于提供更贴合用户校区和偏好的建议，严禁将个人偏好当成绝对事实外泄）"
+                .to_string(),
+        );
+        lines.join("\n")
+    }
+
     /// Build dynamic memory context for injecting into agent prompt.
     pub async fn format_memory_context(
         &self,
         user_id: &str,
         campus_id: Uuid,
         query: &str,
+        page_context: Option<&serde_json::Value>,
         embedder: Option<&Arc<dyn EmbeddingGenerator>>,
     ) -> Result<String> {
-        let profile = self.get_or_create_profile(user_id, campus_id).await?;
+        let lines = Self::page_context_lines(page_context);
+        let profile = self.existing_profile(user_id).await?;
 
+        let Some(profile) = profile else {
+            return Ok(Self::join_context(lines));
+        };
         if !profile.is_memory_enabled || profile.privacy_level == "minimal" {
-            return Ok(String::new());
+            return Ok(Self::join_context(lines));
         }
 
-        let mut lines = Vec::new();
+        let mut lines = lines;
         lines.push("### 用户个性化画像与记忆：".to_string());
 
         if !profile.preferred_locations.is_empty() {
@@ -369,14 +469,6 @@ impl AgentMemoryService {
             }
         }
 
-        if lines.len() <= 1 {
-            return Ok(String::new());
-        }
-
-        lines.push(
-            "（注意：以上信息用于提供更贴合用户校区和偏好的建议，严禁将个人偏好当成绝对事实外泄）"
-                .to_string(),
-        );
-        Ok(lines.join("\n"))
+        Ok(Self::join_context(lines))
     }
 }

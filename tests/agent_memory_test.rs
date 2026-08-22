@@ -120,7 +120,7 @@ async fn test_agent_episodic_memories_and_privacy() {
 
         // 3. Format context for prompt (standard privacy)
         let context = svc
-            .format_memory_context(&user_id, campus_id, "考研", None)
+            .format_memory_context(&user_id, campus_id, "考研", None, None)
             .await
             .expect("format context");
         assert!(context.contains("用户想收一本考研数学二资料"));
@@ -143,7 +143,7 @@ async fn test_agent_episodic_memories_and_privacy() {
         .expect("update to minimal");
 
         let context_minimal = svc
-            .format_memory_context(&user_id, campus_id, "考研", None)
+            .format_memory_context(&user_id, campus_id, "考研", None, None)
             .await
             .expect("format context minimal");
         assert!(context_minimal.is_empty());

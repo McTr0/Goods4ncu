@@ -894,6 +894,7 @@ mod tests {
             llm_provider: "gemini".to_string(),
             llm_model: "gemini-3-flash-preview".to_string(),
             llm_base_url: None,
+            agent_enabled: true,
             vector_dim: 768,
             cors_origins: vec![],
             oss_endpoint: String::new(),
