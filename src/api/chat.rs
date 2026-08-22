@@ -954,6 +954,14 @@ async fn handle_chat_stream_request(
     };
 
     let mut stream = agent.stream_chat(prompt_msg, chat_history);
+    let log_page = page_context
+        .as_ref()
+        .and_then(|ctx| ctx.get("page"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("chat")
+        .to_string();
+    let log_route = intent_result.intent.as_str().to_string();
+    let log_request_id = crate::api::request_context::current_or_new_request_id();
     let run_for_stream = run.clone();
     let reconciliation_tx = run.clone().map(schedule_agent_run_reconciliation);
     let persisted_conversation_id = conversation_id.clone();
@@ -967,6 +975,9 @@ async fn handle_chat_stream_request(
         let mut usage = None;
         let mut completed = true;
         let mut ttft_recorded = false;
+        let mut tool_calls: u32 = 0;
+        let mut first_token_ms: Option<i32> = None;
+        let stream_started_at = std::time::Instant::now();
         while let Some(result) = stream.next().await {
             let bytes = match result {
                 Ok(AgentStreamChunk::Text(token)) => {
@@ -977,6 +988,7 @@ async fn handle_chat_stream_request(
                                 .elapsed()
                                 .as_millis()
                                 .min(i32::MAX as u128) as i32;
+                            first_token_ms = Some(ttft_ms);
                             if let Err(error) = run
                                 .service
                                 .record_ttft(
@@ -1008,6 +1020,7 @@ async fn handle_chat_stream_request(
                     continue;
                 }
                 Ok(AgentStreamChunk::ToolActivity { tool }) => {
+                    tool_calls += 1;
                     let payload = serde_json::json!({
                         "tool_activity": {
                             "tool": tool,
@@ -1071,6 +1084,23 @@ async fn handle_chat_stream_request(
         } else {
             true
         };
+        // Goal §75: one structured line per agent turn. Message bodies,
+        // tokens, and keys never enter logs; per-tool detail lives in
+        // agent_runs DB events instead of stdout.
+        tracing::info!(
+            request_id = %log_request_id,
+            user_id = %persisted_user_id,
+            conversation_id = %public_conversation_id,
+            page = %log_page,
+            route = %log_route,
+            provider = %provider_name,
+            model = %provider_model,
+            tool_calls,
+            ttft_ms = first_token_ms.unwrap_or(0),
+            total_ms = stream_started_at.elapsed().as_millis() as u64,
+            completed,
+            "agent stream finished"
+        );
         if finished {
             if let Some(done_tx) = reconciliation_tx {
                 let _ = done_tx.send(());
