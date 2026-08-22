@@ -357,6 +357,13 @@ impl MarketplaceAgent for OpenAiCompatibleMarketplaceAgent {
                                 }
                                 _ => {}
                             }
+                            // Goal §40: user-generated platform content is
+                            // untrusted data; fence it before it reaches the
+                            // model so embedded instructions stay inert.
+                            let result = crate::llm::wrap_untrusted_platform_data(
+                                &tool_call.function.name,
+                                &result,
+                            );
                             tool_calls.push((tool_call.id.clone(), tool_call.call_id.clone(), result));
                             did_call_tool = true;
                             call_succeeded = true;
