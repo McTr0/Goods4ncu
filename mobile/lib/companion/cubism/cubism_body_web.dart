@@ -1,17 +1,47 @@
+import 'dart:async';
+import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
+import 'dart:ui_web' as ui_web;
+
 import 'package:flutter/widgets.dart';
 
 import '../character_renderer.dart';
 import 'cubism_bridge_web.dart';
 import 'cubism_renderer.dart';
 
-const String _containerId = 'live2d-stage-container';
-
-/// Flutter web serves declared assets under `/assets/<repo-path>`, and the
-/// repo path itself starts with `assets/`, hence the doubled prefix.
+const String _viewType = 'companion-live2d-stage';
 const String _defaultModelUrl = '/assets/assets/live2d/doro/Doro.model3.json';
 
-/// Web stage: an HtmlElementView hosting the PIXI canvas; mounting happens
-/// when the platform view is created (goal §72 — real Cubism body on web).
+bool _factoryRegistered = false;
+
+/// Registers (once) the platform-view factory that creates the PIXI host
+/// div and boots the model into it. Without this registration Flutter web
+/// throws "platform view is not registered" and blanks the layout.
+void _ensureViewFactory(String modelUrl) {
+  if (_factoryRegistered) return;
+  ui_web.platformViewRegistry.registerViewFactory(_viewType, (int viewId) {
+    final document = globalContext.getProperty<JSObject>('document'.toJS);
+    final container =
+        document.callMethod('createElement'.toJS, 'div'.toJS) as JSObject;
+    container.setProperty('id'.toJS, '$_viewType-$viewId'.toJS);
+    container.callMethod(
+      'setAttribute'.toJS,
+      'style'.toJS,
+      'width:100%;height:100%;'.toJS,
+    );
+    scheduleMicrotask(() {
+      final stage = WebCubismBridge.find();
+      if (stage == null) return;
+      final containerId = (container.getProperty('id'.toJS) as JSString).toDart;
+      WebCubismBridge(stage).mount(containerId, modelUrl);
+    });
+    return container;
+  });
+  _factoryRegistered = true;
+}
+
+/// Web stage: an HtmlElementView hosting the PIXI canvas with the real
+/// Cubism model (goal §72).
 class CubismStageWebView extends StatelessWidget {
   const CubismStageWebView({
     super.key,
@@ -26,17 +56,12 @@ class CubismStageWebView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final stage = WebCubismBridge.find();
-    if (stage == null) return const SizedBox.shrink();
+    if (!WebCubismBridge.isReady) return const SizedBox.shrink();
+    _ensureViewFactory(modelUrl);
     return SizedBox(
       width: width,
       height: height,
-      child: HtmlElementView(
-        viewType: _containerId,
-        onPlatformViewCreated: (_) {
-          WebCubismBridge(stage).mount(_containerId, modelUrl);
-        },
-      ),
+      child: HtmlElementView(viewType: _viewType),
     );
   }
 }
