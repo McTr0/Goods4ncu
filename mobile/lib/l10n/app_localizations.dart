@@ -3681,7 +3681,7 @@ abstract class AppLocalizations {
   /// No description provided for @spaceMembersRoleLine.
   ///
   /// In en, this message translates to:
-  /// **'{count} members · My role {role}'**
+  /// **'{count} members · {role}'**
   String spaceMembersRoleLine(int count, String role);
 
   /// No description provided for @spaceMessagesLoadFailedTitle.
@@ -3707,18 +3707,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cancel reply'**
   String get cancelReply;
-
-  /// No description provided for @groupTopicsTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Group topics'**
-  String get groupTopicsTitle;
-
-  /// No description provided for @groupTopicsSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'There is no shared message stream. Open a topic to join its discussion.'**
-  String get groupTopicsSubtitle;
 
   /// No description provided for @startGroupTopic.
   ///

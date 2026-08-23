@@ -1879,7 +1879,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String spaceMembersRoleLine(int count, String role) {
-    return '$count 位成员 · 我的角色 $role';
+    return '$count 位成员 · $role';
   }
 
   @override
@@ -1895,12 +1895,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get cancelReply => '取消回复';
-
-  @override
-  String get groupTopicsTitle => '群聊话题';
-
-  @override
-  String get groupTopicsSubtitle => '群聊不设公共消息流，选择一个话题进入讨论。';
 
   @override
   String get startGroupTopic => '发起话题';

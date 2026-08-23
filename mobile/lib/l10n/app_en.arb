@@ -872,7 +872,7 @@
       }
     }
   },
-  "spaceMembersRoleLine": "{count} members · My role {role}",
+  "spaceMembersRoleLine": "{count} members · {role}",
   "@spaceMembersRoleLine": {
     "placeholders": {
       "count": {
@@ -894,8 +894,6 @@
     }
   },
   "cancelReply": "Cancel reply",
-  "groupTopicsTitle": "Group topics",
-  "groupTopicsSubtitle": "There is no shared message stream. Open a topic to join its discussion.",
   "startGroupTopic": "Start a topic",
   "groupTopicTitleHint": "Describe what you want to discuss",
   "groupTopicCreateHint": "Every reply will stay inside this topic.",

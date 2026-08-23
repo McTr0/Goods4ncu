@@ -1556,64 +1556,21 @@ class _SpaceDetailPaneState extends State<_SpaceDetailPane> {
     final scheme = Theme.of(context).colorScheme;
     return Column(
       children: [
-        Container(
-          padding: const EdgeInsets.fromLTRB(18, 16, 12, 14),
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest.withValues(alpha: 0.42),
-            border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
-          ),
-          child: Row(
-            children: [
-              _SpaceAvatar(space: widget.space),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            widget.space.displayName(l) ?? l.unnamedSpace,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      l.spaceMembersRoleLine(
-                        widget.space.memberCount,
-                        _spaceRoleLabel(l, widget.space.myRole),
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: scheme.onSurfaceVariant,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (widget.space.description?.isNotEmpty == true)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(18, 10, 18, 10),
-            color: scheme.secondaryContainer.withValues(alpha: 0.24),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 10, 18, 8),
+          child: Align(
+            alignment: Alignment.centerLeft,
             child: Text(
-              widget.space.description!,
-              style: TextStyle(color: scheme.onSurfaceVariant, height: 1.35),
+              l.spaceMembersRoleLine(
+                widget.space.memberCount,
+                _spaceRoleLabel(l, widget.space.myRole),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
             ),
           ),
+        ),
         Expanded(child: _buildTopicSurface()),
         if (_selectedTopic == null)
           SafeArea(
@@ -1662,21 +1619,10 @@ class _SpaceDetailPaneState extends State<_SpaceDetailPane> {
       child: ListView.separated(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-        itemCount: _topics.length + 1,
+        itemCount: _topics.length,
         separatorBuilder: (_, _) => const SizedBox(height: 10),
         itemBuilder: (context, index) {
-          if (index == 0) {
-            return ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.forum_outlined),
-              title: Text(
-                l.groupTopicsTitle,
-                style: const TextStyle(fontWeight: FontWeight.w900),
-              ),
-              subtitle: Text(l.groupTopicsSubtitle),
-            );
-          }
-          final topic = _topics[index - 1];
+          final topic = _topics[index];
           final replyCount = _repliesFor(topic.id).length;
           return _TopicCard(
             topic: topic,

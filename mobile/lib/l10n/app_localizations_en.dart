@@ -1962,7 +1962,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String spaceMembersRoleLine(int count, String role) {
-    return '$count members · My role $role';
+    return '$count members · $role';
   }
 
   @override
@@ -1978,13 +1978,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cancelReply => 'Cancel reply';
-
-  @override
-  String get groupTopicsTitle => 'Group topics';
-
-  @override
-  String get groupTopicsSubtitle =>
-      'There is no shared message stream. Open a topic to join its discussion.';
 
   @override
   String get startGroupTopic => 'Start a topic';

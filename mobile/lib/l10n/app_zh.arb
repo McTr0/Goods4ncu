@@ -853,7 +853,7 @@
       }
     }
   },
-  "spaceMembersRoleLine": "{count} 位成员 · 我的角色 {role}",
+  "spaceMembersRoleLine": "{count} 位成员 · {role}",
   "@spaceMembersRoleLine": {
     "placeholders": {
       "count": {
@@ -875,8 +875,6 @@
     }
   },
   "cancelReply": "取消回复",
-  "groupTopicsTitle": "群聊话题",
-  "groupTopicsSubtitle": "群聊不设公共消息流，选择一个话题进入讨论。",
   "startGroupTopic": "发起话题",
   "groupTopicTitleHint": "一句话说明想讨论什么",
   "groupTopicCreateHint": "创建后，所有回复都会归在这个话题下。",
