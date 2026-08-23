@@ -2819,6 +2819,27 @@ class AppLocalizationsEn extends AppLocalizations {
   String get composerImageAction => 'Image';
 
   @override
+  String get composerReferenceAction => 'Reference';
+
+  @override
+  String get referenceChipPost => 'Quoted post';
+
+  @override
+  String get referenceChipListing => 'Quoted listing';
+
+  @override
+  String get referencePickerTitle => 'Pick something to reference';
+
+  @override
+  String get referencePickerSearchHint => 'Search posts or listings';
+
+  @override
+  String get referenceRecentSection => 'Recently viewed';
+
+  @override
+  String get referenceRemoveTooltip => 'Remove reference';
+
+  @override
   String get composerVoiceMessageAction => 'Voice message';
 
   @override

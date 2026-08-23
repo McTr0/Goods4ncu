@@ -5178,6 +5178,48 @@ abstract class AppLocalizations {
   /// **'Image'**
   String get composerImageAction;
 
+  /// No description provided for @composerReferenceAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Reference'**
+  String get composerReferenceAction;
+
+  /// No description provided for @referenceChipPost.
+  ///
+  /// In en, this message translates to:
+  /// **'Quoted post'**
+  String get referenceChipPost;
+
+  /// No description provided for @referenceChipListing.
+  ///
+  /// In en, this message translates to:
+  /// **'Quoted listing'**
+  String get referenceChipListing;
+
+  /// No description provided for @referencePickerTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick something to reference'**
+  String get referencePickerTitle;
+
+  /// No description provided for @referencePickerSearchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search posts or listings'**
+  String get referencePickerSearchHint;
+
+  /// No description provided for @referenceRecentSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently viewed'**
+  String get referenceRecentSection;
+
+  /// No description provided for @referenceRemoveTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove reference'**
+  String get referenceRemoveTooltip;
+
   /// No description provided for @composerVoiceMessageAction.
   ///
   /// In en, this message translates to:

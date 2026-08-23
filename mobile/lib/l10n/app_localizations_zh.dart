@@ -2698,6 +2698,27 @@ class AppLocalizationsZh extends AppLocalizations {
   String get composerImageAction => '图片';
 
   @override
+  String get composerReferenceAction => '引用';
+
+  @override
+  String get referenceChipPost => '引用帖子';
+
+  @override
+  String get referenceChipListing => '引用商品';
+
+  @override
+  String get referencePickerTitle => '选择要引用的内容';
+
+  @override
+  String get referencePickerSearchHint => '搜索帖子或商品';
+
+  @override
+  String get referenceRecentSection => '最近浏览';
+
+  @override
+  String get referenceRemoveTooltip => '移除引用';
+
+  @override
   String get composerVoiceMessageAction => '语音消息';
 
   @override

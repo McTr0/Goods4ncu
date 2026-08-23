@@ -97,6 +97,7 @@ class _ChatPageState extends State<ChatPage> {
   List<UndoableAction> _undoableActions = [];
   final List<post.CampusPost> _agentResultPosts = [];
   final ScrollController _agentResultsController = ScrollController();
+  _PendingReference? _pendingReference;
   String? _focusedAgentPostId;
   Timer? _undoTicker;
 
@@ -505,7 +506,11 @@ class _ChatPageState extends State<ChatPage> {
                   itemBuilder: (context, index) {
                     final post = _agentResultPosts[index];
                     final focused = post.id == _focusedAgentPostId;
-                    return _AgentResultCard(item: post, focused: focused);
+                    return _AgentResultCard(
+                      item: post,
+                      focused: focused,
+                      onReference: () => _attachPostReference(post),
+                    );
                   },
                 ),
               ),
@@ -1011,6 +1016,33 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   /// Send a message using SSE streaming (token-by-token render).
+  void _attachPostReference(post.CampusPost item) {
+    final isListing = item.listingId != null && item.listingId!.isNotEmpty;
+    setState(() {
+      _pendingReference = _PendingReference(
+        kind: isListing ? 'listing' : 'post',
+        refId: (isListing ? item.listingId : item.id) ?? item.id,
+        title: item.title,
+      );
+    });
+  }
+
+  /// Bottom-sheet picker: recently-viewed posts plus keyword search.
+  Future<void> _showReferencePicker() async {
+    final picked = await showModalBottomSheet<post.CampusPost>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      constraints: const BoxConstraints(maxWidth: 640),
+      builder: (sheetContext) => _ReferencePickerSheet(
+        postService: _postService,
+        recentIds: List<String>.from(_workingMemory.recentPostIds),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    _attachPostReference(picked);
+  }
+
   Future<void> _sendMessage() async {
     final localizations = AppLocalizations.of(context);
     final text = _controller.text.trim();
@@ -1030,9 +1062,14 @@ class _ChatPageState extends State<ChatPage> {
         imageBytes: selectedImageBytes,
       );
 
+      final reference = _pendingReference;
+      final effectiveText = reference == null || text.isEmpty
+          ? text
+          : '[${reference.kind == 'listing' ? '引用商品' : '引用帖子'}：${reference.title} (${reference.refId})]\n\n$text';
+
       final userMsg = ChatMessage(
         sender: 'user',
-        content: text.isEmpty ? '[Multimedia Message]' : text,
+        content: effectiveText.isEmpty ? '[Multimedia Message]' : effectiveText,
         imageUrl: uploadedMedia.imageUrl,
         timestamp: DateTime.now(),
       );
@@ -1040,6 +1077,7 @@ class _ChatPageState extends State<ChatPage> {
       setState(() {
         _messages.add(userMsg);
         _controller.clear();
+        _pendingReference = null;
         _selectedImage = null;
         _selectedImageBytes = null;
       });
@@ -1604,6 +1642,12 @@ class _ChatPageState extends State<ChatPage> {
                 onPressed: _pickImage,
               ),
               MessageComposerAction(
+                id: 'reference',
+                icon: Icons.format_quote_outlined,
+                label: l.composerReferenceAction,
+                onPressed: _showReferencePicker,
+              ),
+              MessageComposerAction(
                 id: 'assistant-find',
                 icon: Icons.search_rounded,
                 label: l.assistantToolFind,
@@ -1619,6 +1663,7 @@ class _ChatPageState extends State<ChatPage> {
               ),
             ],
             contextContent: [
+              if (_pendingReference != null) _buildPendingReferenceChip(l),
               if (_selectedImageBytes != null) _buildSelectedImagePreview(l),
             ],
           ),
@@ -1653,6 +1698,28 @@ class _ChatPageState extends State<ChatPage> {
       selection: TextSelection.collapsed(offset: prompt.length),
     );
     _composerFocusNode.requestFocus();
+  }
+
+  Widget _buildPendingReferenceChip(AppLocalizations l) {
+    final reference = _pendingReference;
+    if (reference == null) return const SizedBox.shrink();
+    final label = reference.kind == 'listing'
+        ? l.referenceChipListing
+        : l.referenceChipPost;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: InputChip(
+        key: const Key('pending-reference-chip'),
+        avatar: Icon(
+          reference.kind == 'listing'
+              ? Icons.sell_outlined
+              : Icons.article_outlined,
+          size: 16,
+        ),
+        label: Text('$label：${reference.title}'),
+        onDeleted: () => setState(() => _pendingReference = null),
+      ),
+    );
   }
 
   Widget _buildSelectedImagePreview(AppLocalizations l) {
@@ -1706,10 +1773,15 @@ class _ChatPageState extends State<ChatPage> {
 
 /// Image-first result card for agent recommendation strips.
 class _AgentResultCard extends StatelessWidget {
-  const _AgentResultCard({required this.item, required this.focused});
+  const _AgentResultCard({
+    required this.item,
+    required this.focused,
+    this.onReference,
+  });
 
   final post.CampusPost item;
   final bool focused;
+  final VoidCallback? onReference;
 
   @override
   Widget build(BuildContext context) {
@@ -1739,15 +1811,33 @@ class _AgentResultCard extends StatelessWidget {
             children: [
               SizedBox(
                 height: 84,
-                child:
-                    item.coverImageUrl != null && item.coverImageUrl!.isNotEmpty
-                    ? Image.network(
-                        item.coverImageUrl!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) =>
-                            _placeholder(scheme),
-                      )
-                    : _placeholder(scheme),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _buildCover(scheme),
+                    if (onReference != null)
+                      Positioned(
+                        right: 4,
+                        top: 4,
+                        child: Material(
+                          color: Colors.black54,
+                          shape: const CircleBorder(),
+                          child: InkWell(
+                            customBorder: const CircleBorder(),
+                            onTap: onReference,
+                            child: const Padding(
+                              padding: EdgeInsets.all(4),
+                              child: Icon(
+                                Icons.format_quote_outlined,
+                                size: 14,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
@@ -1805,6 +1895,16 @@ class _AgentResultCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildCover(ColorScheme scheme) {
+    final url = item.coverImageUrl;
+    if (url == null || url.isEmpty) return _placeholder(scheme);
+    return Image.network(
+      url,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) => _placeholder(scheme),
     );
   }
 
@@ -1928,6 +2028,214 @@ class _ChatBubble extends StatelessWidget {
         ),
         ?trailingCard,
       ],
+    );
+  }
+}
+
+/// A post/listing the user attached to the next outgoing message.
+class _PendingReference {
+  const _PendingReference({
+    required this.kind,
+    required this.refId,
+    required this.title,
+  });
+
+  final String kind; // 'post' | 'listing'
+  final String refId;
+  final String title;
+}
+
+/// Pick a post/listing to quote: recently-viewed first, then keyword search.
+class _ReferencePickerSheet extends StatefulWidget {
+  const _ReferencePickerSheet({
+    required this.postService,
+    required this.recentIds,
+  });
+
+  final PostService postService;
+  final List<String> recentIds;
+
+  @override
+  State<_ReferencePickerSheet> createState() => _ReferencePickerSheetState();
+}
+
+class _ReferencePickerSheetState extends State<_ReferencePickerSheet> {
+  final TextEditingController _searchController = TextEditingController();
+  List<post.CampusPost>? _results;
+  bool _searching = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRecent();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadRecent() async {
+    final posts = await Future.wait([
+      for (final id in widget.recentIds.take(6)) _safeLoad(id),
+    ]);
+    final loaded = posts.whereType<post.CampusPost>().toList(growable: false);
+    if (!mounted || _searchController.text.isNotEmpty) return;
+    setState(() => _results = loaded);
+  }
+
+  Future<post.CampusPost?> _safeLoad(String id) async {
+    try {
+      return await widget.postService.getPost(id);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _runSearch(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) {
+      await _loadRecent();
+      return;
+    }
+    setState(() {
+      _searching = true;
+      _error = null;
+    });
+    try {
+      final response = await widget.postService.getPosts(
+        search: trimmed,
+        limit: 12,
+      );
+      if (!mounted) return;
+      setState(() {
+        _results = response.items;
+        _searching = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _searching = false;
+        _error = error.toString();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.72,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                l.referencePickerTitle,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: l.referencePickerSearchHint,
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  suffixIcon: _searchController.text.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          onPressed: () {
+                            _searchController.clear();
+                            _runSearch('');
+                          },
+                        ),
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+                textInputAction: TextInputAction.search,
+                onSubmitted: _runSearch,
+                onChanged: (value) {
+                  if (value.isEmpty) _runSearch('');
+                },
+              ),
+              const SizedBox(height: 8),
+              if (_searching)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    _error!,
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                )
+              else
+                Expanded(child: _buildResults(l)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResults(AppLocalizations l) {
+    final items = _results ?? const <post.CampusPost>[];
+    if (items.isEmpty) {
+      return Center(child: Text(l.conversationEmptyTitle));
+    }
+    final showRecentHeader = _searchController.text.isEmpty && items.isNotEmpty;
+    return ListView.builder(
+      shrinkWrap: true,
+      itemCount: items.length + (showRecentHeader ? 1 : 0),
+      itemBuilder: (context, index) {
+        if (showRecentHeader && index == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 4, left: 4),
+            child: Text(
+              l.referenceRecentSection,
+              style: TextStyle(
+                color: Theme.of(context).hintColor,
+                fontSize: 12,
+              ),
+            ),
+          );
+        }
+        final item = items[index - (showRecentHeader ? 1 : 0)];
+        return ListTile(
+          dense: true,
+          leading: item.coverImageUrl != null && item.coverImageUrl!.isNotEmpty
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: Image.network(
+                    item.coverImageUrl!,
+                    width: 40,
+                    height: 40,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) =>
+                        const Icon(Icons.article_outlined),
+                  ),
+                )
+              : const Icon(Icons.article_outlined),
+          title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Text(
+            item.listing?.title ?? item.category ?? '',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          onTap: () => Navigator.pop(context, item),
+        );
+      },
     );
   }
 }
