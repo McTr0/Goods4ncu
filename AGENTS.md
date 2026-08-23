@@ -18,6 +18,20 @@ If the user says Codex was restarted, assume local long-running processes may ha
 
 For Codex Browser GUI validation after a restart, do not trust port listeners alone. A stale process can still appear in `lsof` while returning `Empty reply from server` or failing inside the in-app browser. Always verify the backend with a real health/login request such as `GET /api/health` and, when auth matters, `POST /api/auth/login`; verify the frontend by actually loading `http://localhost:3001` in Codex Browser. If either service gives an empty response, stop the stale process and restart from the current workspace code. For Flutter Web static validation, rebuild `mobile/build/web` after UI edits and serve it with a host binding that Codex Browser can reach, for example `python3 -m http.server 3001 --bind 0.0.0.0` from `mobile/build/web`.
 
+### Flutter Web stale-bundle trap (learned twice, 2026-08-23)
+
+The Dart web compiler emits Chinese (and other non-BMP) string literals as `\uXXXX` escapes inside `main.dart.js`. Plain `grep '中文' mobile/build/web/main.dart.js` therefore always reports 0 matches and falsely "proves" the bundle is clean or current — it proves nothing. This hid two stale-bundle incidents in one day.
+
+After any frontend change, before claiming the served UI is updated:
+
+1. Rebuild: `flutter build web --dart-define=COMPANION_ENABLED=true`.
+2. Decode before searching — e.g. Python:
+   `re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1),16)), js)` — then assert expected strings are present and removed strings are gone.
+3. Compare hashes between the local `build/web/main.dart.js` and what `http://127.0.0.1:3001/main.dart.js` actually serves (`sha256sum` both). A mismatch means :3001 is serving a stale build; rebuild or restart the server.
+4. Remember `python3 -m http.server` serves live from disk, but browsers cache aggressively — tell the user to hard-reload (Cmd+Shift+R) after bundle swaps.
+
+Never report frontend verification based on undecoded greps of compiled JS.
+
 ## Coding Style & Naming Conventions
 
 Rust uses the default `rustfmt` style with 4-space indentation. Follow standard naming: modules and functions in `snake_case`, types in `PascalCase`, constants in `SCREAMING_SNAKE_CASE`. Existing patterns matter: services use names like `OrderService`, tools use names like `CreateListingTool`.
