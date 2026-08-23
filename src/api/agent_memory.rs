@@ -7,6 +7,7 @@
 //! - POST /api/agent/memories    — manually add a preference or memory note
 //! - DELETE /api/agent/memories/:id — delete a specific memory item
 //! - DELETE /api/agent/memories     — clear all stored memories
+//! - DELETE /api/agent/session-memory — reset the session working context
 
 use axum::extract::{Path, Query, State};
 use axum::response::Response;
@@ -31,6 +32,19 @@ pub struct MemoryListQuery {
 pub struct CreateMemoryRequest {
     pub memory_type: Option<String>,
     pub content: String,
+}
+
+/// DELETE /api/agent/session-memory — reset session working context
+pub async fn clear_session_memory(
+    State(state): State<AppState>,
+    tenant: VerifiedTenant,
+) -> Result<Response, ApiError> {
+    let service = AgentMemoryService::new(state.infra.db.clone());
+    let removed = service
+        .clear_session_memory(&tenant.session.user_id)
+        .await
+        .map_err(ApiError::Internal)?;
+    Ok(no_store_json(serde_json::json!({ "cleared": removed })))
 }
 
 /// GET /api/agent/profile — get user's assistant profile & preferences

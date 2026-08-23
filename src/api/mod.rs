@@ -9,7 +9,7 @@ use axum::{
     extract::State,
     middleware,
     response::Response,
-    routing::{get, patch, post, put},
+    routing::{delete, get, patch, post, put},
     Router,
 };
 pub mod admin;
@@ -773,7 +773,10 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             "/api/chat/stream",
             get(chat::handle_chat_stream_get).post(chat::handle_chat_stream_post),
         )
-        .route("/api/chat/assistant", get(chat::get_assistant_history))
+        .route(
+            "/api/chat/assistant",
+            get(chat::get_assistant_history).delete(chat::clear_assistant_history),
+        )
         .route("/api/auth/register", post(auth::register))
         .route("/api/auth/login", post(auth::login))
         .route("/api/auth/reauth", post(auth::reauthenticate))
@@ -799,6 +802,10 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             get(agent_memory::list_memories)
                 .post(agent_memory::create_memory)
                 .delete(agent_memory::clear_memories),
+        )
+        .route(
+            "/api/agent/session-memory",
+            delete(agent_memory::clear_session_memory),
         )
         .route(
             "/api/agent/memories/{id}",

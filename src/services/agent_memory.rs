@@ -175,6 +175,15 @@ impl AgentMemoryService {
         Ok(())
     }
 
+    /// Reset the session-scoped working memory (topic + recent listings).
+    pub async fn clear_session_memory(&self, user_id: &str) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM agent_session_memory WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&self.db)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
     /// Convenience wrapper for single-listing views (opened/focused posts).
     pub async fn record_session_view(&self, user_id: &str, listing_id: &str) -> Result<()> {
         self.record_session_search(user_id, None, std::slice::from_ref(&listing_id.to_string()))

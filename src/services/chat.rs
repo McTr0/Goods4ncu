@@ -204,6 +204,18 @@ impl ChatService {
             .collect())
     }
 
+    /// Hard-delete every message in the user's synthetic assistant thread.
+    pub async fn clear_assistant_messages(&self, user_id: &str) -> Result<u64> {
+        let conversation_id = Self::assistant_conversation_id(user_id);
+        let result =
+            sqlx::query("DELETE FROM chat_messages WHERE conversation_id = $1 AND sender = $2")
+                .bind(&conversation_id)
+                .bind(user_id)
+                .execute(&self.db)
+                .await?;
+        Ok(result.rows_affected())
+    }
+
     pub async fn get_assistant_messages(
         &self,
         user_id: &str,

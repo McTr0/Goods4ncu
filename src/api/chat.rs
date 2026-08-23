@@ -132,6 +132,19 @@ pub(crate) async fn get_assistant_history(
     }))
 }
 
+/// DELETE /api/chat/assistant — clear the caller's assistant chat history.
+pub(crate) async fn clear_assistant_history(
+    State(state): State<AppState>,
+    Session(session): Session,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let service = ChatService::new(state.infra.db.clone());
+    let removed = service
+        .clear_assistant_messages(&session.user_id)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
+    Ok(Json(serde_json::json!({ "cleared": removed })))
+}
+
 /// Resolve listing context for a chat request.
 ///
 /// Returns `(resolved_listing_id, receiver)`. When `listing_id` points to an
