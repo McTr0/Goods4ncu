@@ -59,11 +59,14 @@ async fn settled_arrangement(pool: &sqlx::PgPool, campus_id: Uuid, a: &str, b: &
     .await
     .expect("listing");
 
+    // 0061 allows one *live* thread per pair; reputation reads join
+    // conversations without a state filter, so arrangements are inserted
+    // already closed.
     let convo: Uuid = sqlx::query_scalar(
         "INSERT INTO chat_conversations (campus_id, client_request_id, mode, state,
                                          initiator_id, recipient_id, listing_id,
                                          created_at, last_activity_at)
-         VALUES ($1, $2, 'realtime', 'active', $3, $4, $5, NOW(), NOW())
+         VALUES ($1, $2, 'realtime', 'closed', $3, $4, $5, NOW(), NOW())
          RETURNING id",
     )
     .bind(campus_id)

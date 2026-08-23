@@ -162,7 +162,7 @@ flutter test
 | 产品使命与“出 / 收”哲学 | [产品设计](docs/product-design.md) |
 | 领域对象与状态机 | [信息模型](docs/information-model.md) |
 | Agent 权限与确认机制 | [Agent 系统设计](docs/agent-system.md) |
-| 小昌 AI 伙伴架构（Live2D + Agent） | [Agent 架构](docs/agent-architecture.md) |
+| 小昌 Companion Runtime 架构 | [Companion 架构](docs/companion-architecture.md) |
 | Companion Runtime 总体架构 | [Companion 架构](docs/companion-architecture.md) |
 | 实时语音与打断 | [实时语音](docs/realtime-voice.md) |
 | 角色导演与动画系统 | [角色导演](docs/character-director.md) / [动画系统](docs/animation-system.md) |
