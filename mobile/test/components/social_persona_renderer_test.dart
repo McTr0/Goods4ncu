@@ -286,4 +286,133 @@ void main() {
       });
     });
   });
+  _doroPortraitTests();
+}
+
+void _doroPortraitTests() {
+  const spec = SocialPersonaRenderSpec(
+    palette: 'teal',
+    silhouette: 'soft',
+    accessory: 'none',
+    outfit: 'campus',
+    assetId: 'doro',
+  );
+  const other = SocialPersonaRenderSpec(
+    palette: 'teal',
+    silhouette: 'soft',
+    accessory: 'none',
+    outfit: 'campus',
+    assetId: 'phoebe_chupi',
+  );
+
+  testWidgets('doro assetId renders the official doro portrait', (
+    tester,
+  ) async {
+    late BuildContext ctx;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (c) {
+            ctx = c;
+            return const Scaffold();
+          },
+        ),
+      ),
+    );
+    const renderer = DoroPortraitPersonaRenderer(
+      fallback: CodeDrawnPersonaRenderer(),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: renderer.buildCharacter(
+              ctx,
+              spec: spec,
+              size: 96,
+              motionProgress: 0,
+              motionCue: AvatarMotionCue.idle,
+              isDark: false,
+              semanticLabel: 'me',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final image = tester.widget<Image>(find.byType(Image));
+    expect(
+      (image.image as AssetImage).assetName,
+      'assets/live2d/doro/icon.png',
+    );
+    expect(find.bySemanticsLabel('me'), findsOneWidget);
+  });
+
+  testWidgets('non-doro characters fall through to the sprite chain', (
+    tester,
+  ) async {
+    late BuildContext ctx;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (c) {
+            ctx = c;
+            return const Scaffold();
+          },
+        ),
+      ),
+    );
+
+    final sawDoroAsset = <String>[];
+    final renderer = DoroPortraitPersonaRenderer(
+      fallback: _RecordingPersonaRenderer(
+        onBuild: (spec) {
+          final id = spec.assetId;
+          if (id != null && id == 'doro') sawDoroAsset.add(id);
+        },
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: renderer.buildCharacter(
+              ctx,
+              spec: other,
+              size: 64,
+              motionProgress: 0,
+              motionCue: AvatarMotionCue.idle,
+              isDark: false,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(Image), findsNothing);
+    expect(sawDoroAsset, isEmpty);
+  });
+}
+
+class _RecordingPersonaRenderer implements SocialPersonaRenderer {
+  _RecordingPersonaRenderer({required this.onBuild});
+  final void Function(SocialPersonaRenderSpec spec) onBuild;
+
+  @override
+  Widget buildCharacter(
+    BuildContext context, {
+    required SocialPersonaRenderSpec spec,
+    required double size,
+    required double motionProgress,
+    required AvatarMotionCue motionCue,
+    required bool isDark,
+    String? semanticLabel,
+  }) {
+    onBuild(spec);
+    return const SizedBox(width: 64, height: 64, key: Key('recorded'));
+  }
 }

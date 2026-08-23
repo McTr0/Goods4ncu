@@ -567,7 +567,16 @@ void main() {
       expect(find.textContaining('商品 · 数据库教材'), findsOneWidget);
       expect(find.textContaining('链接 · 交接地点'), findsOneWidget);
       expect(find.textContaining('从原处分享，只在这里查看'), findsOneWidget);
-      expect(find.byType(Image), findsNothing);
+      // Local doro portraits allowed; network images are not.
+      final images = tester.widgetList<Image>(find.byType(Image));
+      for (final image in images) {
+        final asset = image.image;
+        if (asset is AssetImage) {
+          expect(asset.assetName, contains('doro'));
+        } else {
+          fail('non-asset image rendered: ${image.image}');
+        }
+      }
     },
   );
 }

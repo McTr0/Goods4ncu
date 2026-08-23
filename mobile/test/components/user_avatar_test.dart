@@ -143,10 +143,19 @@ void main() {
       // Renders code-drawn CustomPaint canvas
       expect(find.byType(CustomPaint), findsWidgets);
 
-      // Must NEVER render generic person icons or network image avatars
+      // Must NEVER render generic person icons or network image avatars.
       expect(find.byIcon(Icons.person), findsNothing);
       expect(find.byIcon(Icons.person_outline_rounded), findsNothing);
-      expect(find.byType(Image), findsNothing);
+      // Local doro portrait is the unified system fallback and is allowed.
+      final images = tester.widgetList<Image>(find.byType(Image));
+      for (final image in images) {
+        final asset = image.image;
+        if (asset is AssetImage) {
+          expect(asset.assetName, contains('doro'));
+        } else {
+          fail('non-asset image rendered: ${image.image}');
+        }
+      }
     },
   );
 

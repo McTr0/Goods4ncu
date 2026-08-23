@@ -585,7 +585,7 @@ class SpriteAtlasPersonaRenderer implements SocialPersonaRenderer {
     required bool isDark,
     String? semanticLabel,
   }) {
-    if (spec.assetId != assetId) {
+    if (spec.assetId != 'doro') {
       return fallback.buildCharacter(
         context,
         spec: spec,
@@ -768,8 +768,57 @@ class _SpriteAtlasPainter extends CustomPainter {
       oldDelegate.background != background;
 }
 
-const defaultPersonaRenderer = SpriteAtlasPersonaRenderer(
-  manifestAsset: 'assets/avatars/v1/sprout/manifest.json',
+/// Renders the real Doro identity (official portrait asset) for persona
+/// slots whose selected character is doro — keeps the profile presentation
+/// in sync with the companion stage body.
+class DoroPortraitPersonaRenderer implements SocialPersonaRenderer {
+  const DoroPortraitPersonaRenderer({required this.fallback});
+
+  final SocialPersonaRenderer fallback;
+
+  static const String _assetPath = 'assets/live2d/doro/icon.png';
+
+  @override
+  Widget buildCharacter(
+    BuildContext context, {
+    required SocialPersonaRenderSpec spec,
+    required double size,
+    required double motionProgress,
+    required AvatarMotionCue motionCue,
+    required bool isDark,
+    String? semanticLabel,
+  }) {
+    if (spec.assetId != 'doro') {
+      return fallback.buildCharacter(
+        context,
+        spec: spec,
+        size: size,
+        motionProgress: motionProgress,
+        motionCue: motionCue,
+        isDark: isDark,
+        semanticLabel: semanticLabel,
+      );
+    }
+    Widget portrait = ClipRRect(
+      borderRadius: BorderRadius.circular(size * 0.24),
+      child: Image.asset(
+        _assetPath,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+      ),
+    );
+    if (semanticLabel case final label? when label.isNotEmpty) {
+      portrait = Semantics(label: label, image: true, child: portrait);
+    }
+    return portrait;
+  }
+}
+
+const defaultPersonaRenderer = DoroPortraitPersonaRenderer(
+  fallback: SpriteAtlasPersonaRenderer(
+    manifestAsset: 'assets/avatars/v1/sprout/manifest.json',
+  ),
 );
 
 /// Widget that hosts a character spec with subtle local-only idle motion.
