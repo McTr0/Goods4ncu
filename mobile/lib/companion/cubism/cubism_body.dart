@@ -16,7 +16,7 @@ const String kCompanionCharacter = String.fromEnvironment(
 
 /// Asset url for a character's model3.json (flutter web doubles the prefix).
 String cubismModelUrlFor(String character) =>
-    '/assets/assets/live2d/\$character/\$character.model3.json';
+    '/assets/assets/live2d/$character/$character.model3.json';
 
 /// Whether the Cubism4 runtime is actually usable on this platform
 /// (scripts loaded AND runtime libs present). Degrades to false on any error.
