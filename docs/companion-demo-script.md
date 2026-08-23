@@ -18,7 +18,7 @@
 
 ## 打开方式
 
-- 助手页：`http://localhost:3001/#/chat?agentDebug=true`
+- 助手页：`http://localhost:3001/?agentDebug=true#/chat`（或直接点助手页右上角的 🐞 图标进入 `/companion/debug`）
 - 另开标签：Timeline `http://localhost:3001/#/companion/timeline`
 - 关系态重置（可选，演示"初次见面"）：
   ```bash

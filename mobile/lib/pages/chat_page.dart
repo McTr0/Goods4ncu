@@ -95,9 +95,11 @@ class _ChatPageState extends State<ChatPage> {
   String? _focusedAgentPostId;
   Timer? _undoTicker;
 
-  // Agent debug overlay (?agentDebug=true) observability buffers.
+  // Agent debug overlay observability buffers. The flag may sit before or
+  // after the hash-router fragment, so match the full URL instead of
+  // Uri.base.queryParameters (which only sees the pre-# query).
   final bool _agentDebugEnabled =
-      Uri.base.queryParameters['agentDebug'] == 'true';
+      Uri.base.toString().contains('agentDebug=true');
   final List<String> _debugToolCalls = [];
   final List<String> _debugUiActions = [];
   String? _lastToolActivity;

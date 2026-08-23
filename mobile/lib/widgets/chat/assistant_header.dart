@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'package:go_router/go_router.dart';
+
+import '../../companion/companion_config.dart';
 import '../../components/xiaochang_avatar.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/models.dart';
@@ -47,6 +50,16 @@ class AssistantDigitalHumanHeader extends StatelessWidget {
             icon: const Icon(Icons.history_rounded, color: Color(0xFF0F766E)),
             onPressed: onOpenHistory,
           ),
+          if (kCompanionEnabled)
+            IconButton(
+              key: const Key('assistant-open-companion-debug'),
+              tooltip: 'Companion Debug',
+              icon: const Icon(
+                Icons.bug_report_outlined,
+                color: Color(0xFF0F766E),
+              ),
+              onPressed: () => context.push('/companion/debug'),
+            ),
           const SizedBox(width: 4),
           const AgentStatusPill(),
         ],
