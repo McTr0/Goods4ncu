@@ -429,6 +429,7 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
   SocialPersona? _selfPersona;
   RelationshipSpace? _relationshipSpace;
   List<Conversation> _conversations = const [];
+  ConversationMode? _historyFilter;
   Set<String> _expandedIds = const {};
   bool _loading = true;
   String? _error;
@@ -544,6 +545,37 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
     );
   }
 
+  Widget _buildHistoryFilterRow() {
+    final l = AppLocalizations.of(context)!;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          _HistoryFilterChip(
+            label: l.conversationFilterAll,
+            selected: _historyFilter == null,
+            onTap: () => setState(() => _historyFilter = null),
+          ),
+          const SizedBox(width: 8),
+          _HistoryFilterChip(
+            label: l.conversationFilterRealtime,
+            icon: Icons.bolt_rounded,
+            selected: _historyFilter == ConversationMode.realtime,
+            onTap: () =>
+                setState(() => _historyFilter = ConversationMode.realtime),
+          ),
+          const SizedBox(width: 8),
+          _HistoryFilterChip(
+            label: l.conversationFilterMail,
+            icon: Icons.mark_email_unread_outlined,
+            selected: _historyFilter == ConversationMode.mail,
+            onTap: () => setState(() => _historyFilter = ConversationMode.mail),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildHeader() {
     final l = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
@@ -581,12 +613,8 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
                     Text(
                       thread == null
                           ? l.conversationThreadLoading
-                          : thread.latestPreview ??
-                                l.conversationThreadStats(
-                                  thread.realtimeCount,
-                                  thread.mailCount,
-                                  thread.conversationCount,
-                                ),
+                          : (thread.latestPreview ??
+                                l.conversationTimelineFallback),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(color: scheme.onSurfaceVariant),
@@ -621,13 +649,21 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
         subtitle: l.conversationThreadEmptySubtitle,
       );
     }
+    final visibleConversations = _historyFilter == null
+        ? _conversations
+        : _conversations
+              .where((conversation) => conversation.mode == _historyFilter)
+              .toList(growable: false);
     return RefreshIndicator(
       onRefresh: _loadThread,
       child: ListView.builder(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
-        itemCount: _conversations.length,
+        itemCount: visibleConversations.length + 1,
         itemBuilder: (context, index) {
-          final conversation = _conversations[index];
+          if (index == 0) {
+            return _buildHistoryFilterRow();
+          }
+          final conversation = visibleConversations[index - 1];
           final expanded = _expandedIds.contains(conversation.id);
           final relationshipSpace = _relationshipSpaceFor(conversation.id);
           return _ConversationSegmentCard(
@@ -2665,6 +2701,45 @@ class _CenteredMessage extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _HistoryFilterChip extends StatelessWidget {
+  const _HistoryFilterChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.icon,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return FilterChip(
+      selected: selected,
+      onSelected: (_) => onTap(),
+      avatar: icon == null
+          ? null
+          : Icon(
+              icon,
+              size: 16,
+              color: selected ? scheme.onSecondaryContainer : scheme.primary,
+            ),
+      label: Text(label),
+      labelStyle: TextStyle(
+        fontWeight: FontWeight.w700,
+        color: selected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant,
+      ),
+      selectedColor: scheme.secondaryContainer,
+      checkmarkColor: Colors.transparent,
+      showCheckmark: false,
+      visualDensity: VisualDensity.compact,
     );
   }
 }
