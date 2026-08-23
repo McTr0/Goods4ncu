@@ -90,7 +90,7 @@ class MotionPlan {
 }
 
 /// Built-in mapping from semantic tags to concrete steps for the current
-/// OpenRig body (8 clips + procedural gestures).
+/// legacy sprite body body (8 clips + procedural gestures).
 ///
 /// Replacing the body later means swapping THIS table (or loading it from an
 /// asset) — nothing above the library may reference clip names directly (§28).

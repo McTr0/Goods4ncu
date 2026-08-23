@@ -4,12 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 /// Particle types spawned by character interactions.
-enum Live2DParticleType {
-  heart,
-  star,
-  bubble,
-  sparkle,
-}
+enum Live2DParticleType { heart, star, bubble, sparkle }
 
 /// A single visual particle that floats upward and fades out.
 class Live2DParticle {
@@ -81,19 +76,21 @@ class Live2DParticleSystem extends ChangeNotifier {
     for (var i = 0; i < count && particles.length < maxParticles; i++) {
       final angle = _random.nextDouble() * math.pi * 2;
       final speed = 0.5 + _random.nextDouble() * 1.5;
-      particles.add(Live2DParticle(
-        type: type,
-        x: x + (_random.nextDouble() - 0.5) * 20,
-        y: y + (_random.nextDouble() - 0.5) * 20,
-        velocityX: math.cos(angle) * speed,
-        velocityY: math.sin(angle) * speed - 1.0,
-        size: 4 + _random.nextDouble() * 8,
-        life: 1.0 + _random.nextDouble() * 0.5,
-        maxLife: 1.0 + _random.nextDouble() * 0.5,
-        color: color ?? _defaultColor(type),
-        rotation: _random.nextDouble() * math.pi * 2,
-        rotationSpeed: (_random.nextDouble() - 0.5) * 0.2,
-      ));
+      particles.add(
+        Live2DParticle(
+          type: type,
+          x: x + (_random.nextDouble() - 0.5) * 20,
+          y: y + (_random.nextDouble() - 0.5) * 20,
+          velocityX: math.cos(angle) * speed,
+          velocityY: math.sin(angle) * speed - 1.0,
+          size: 4 + _random.nextDouble() * 8,
+          life: 1.0 + _random.nextDouble() * 0.5,
+          maxLife: 1.0 + _random.nextDouble() * 0.5,
+          color: color ?? _defaultColor(type),
+          rotation: _random.nextDouble() * math.pi * 2,
+          rotationSpeed: (_random.nextDouble() - 0.5) * 0.2,
+        ),
+      );
     }
     notifyListeners();
   }

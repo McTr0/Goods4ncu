@@ -32,7 +32,7 @@ agency around the existing campus marketplace.
         │                │                │
    AnimationScheduler  GazeSmoother   VoiceProvider(TTS)
         │                │                │
-  OpenRigCharacterRenderer ◄──── LipSync pulses
+  CubismCharacterRenderer ◄──── LipSync pulses
         │
      COMPANION (小昌)
 ```
@@ -49,7 +49,7 @@ agency around the existing campus marketplace.
 | Priority arbitration | `animation_scheduler.dart` | §29–31 |
 | Intent → plan | `behavior_planner.dart` | §26 |
 | Gaze smoothing, idle tiers | `gaze.dart` | §32–35, §42 |
-| Body adapter | `open_rig_adapter.dart` + `character_renderer.dart` | §71–72 |
+| Body adapter (web) | `cubism/cubism_body.dart` + `cubism_renderer.dart`; legacy sprite fallback in `fallback_body_adapter.dart` | §71–72, §74 |
 | Environment | `environment.dart` | §49–52 |
 | Working memory | `working_memory.dart` | §17 |
 | Voice in/out, barge-in | `turn_taking_engine.dart`, `voice_*.dart`, `voice_controller.dart` | §5–8, §46–48 |
@@ -59,6 +59,15 @@ Server side: persona layers (`persona/*.md`, `src/agents/persona.rs`),
 relationship state (`src/services/companion_relationship.rs`, table 0095),
 agent tools (`src/agents/tools.rs`), session/episodic/profile memory
 (`src/services/agent_memory.rs`).
+
+## Body renderer
+
+Web renders the real Cubism model (`Doro.moc3`) through pixi-live2d-display
+inside an HtmlElementView; the self-built OpenRig sprite engine was removed.
+Non-web platforms fall back to the sprite body. Gaze maps to ParamAngleX/Y +
+BodyAngleZ + focusController; states pick expression choreography (smile/
+brows/tilt); mouth rides ParamMouthOpenY from the shared lip-sync pipeline;
+breath and blink run on an internal JS ticker.
 
 ## Flags
 

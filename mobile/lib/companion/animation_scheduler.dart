@@ -36,7 +36,7 @@ class AnimationScheduler {
 
   final CompanionEventBus _bus;
 
-  /// Adapter hooks — wired to the real body (OpenRig) or the mock renderer.
+  /// Adapter hooks — wired to the real body (legacy sprite body) or the mock renderer.
   final void Function(String clip)? onPlayClip;
   final void Function(double x, double y)? onGaze;
   final void Function(double degrees)? onHeadTilt;

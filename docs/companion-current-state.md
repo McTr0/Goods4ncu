@@ -21,8 +21,8 @@
 ### Character body
 | Piece | Location | Notes |
 |---|---|---|
-| Rig renderer | `mobile/lib/components/open_rig_renderer.dart` | Custom skeletal-grid rig: bones `root/head/left_action/right_action`, keyframe channels `t/tx/ty/r/sx/sy`, smoothstep interpolation. **This is the body runtime; Cubism moc3 assets exist on disk but are unused.** |
-| Motion clips | `assets/avatars/v2/open_rig/<char>/rig.json` | 8 clips per character: idle(loop)/pressed/selected/wave/poke/high_five/encourage/acknowledge. No expression concept in rig. |
+| Rig renderer | *(removed)* | The self-built OpenRig sprite engine was deleted once the real Cubism body shipped; `Doro.moc3` now renders via pixi-live2d-display (web). |
+| Motion clips | *(removed with the OpenRig engine)* | Semantic tags now map to Cubism gestures or procedural parameter choreography. |
 | Expressions | PNG overlay swaps in `live2d_character_widget.dart` | idle/happy/thinking/shy/surprised/tongueOut — composited sprites, not rig parameters. |
 | Mouth | Image overlay when `mouthOpen > 0.05` | Driven by `Live2DLipSyncDriver`. |
 | Micro-motion | `live2d_controller.dart` blink + idle sway timers | **Suspend entirely while any motion is active** (known defect vs goal §31). |
@@ -69,6 +69,6 @@ no relationship, no event bus, no proactive engine, no turn-taking/barge-in.
   both off ⇒ existing marketplace untouched.
 
 ## Explicit non-goals carried from the master goal
-- No Cubism SDK integration (OpenRig stays the body; swap documented).
+- ~~No Cubism SDK integration~~ — superseded: the web companion renders the real Doro.moc3 via pixi-live2d-display.
 - No vector DB additions beyond existing pgvector usage.
 - No manipulative relationship mechanics (see boundaries.md once created).

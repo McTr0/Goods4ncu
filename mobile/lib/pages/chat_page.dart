@@ -21,7 +21,7 @@ import '../companion/environment.dart';
 import '../companion/working_memory.dart';
 import '../companion/relationship_signals.dart';
 import '../companion/cubism/cubism_body.dart';
-import '../companion/open_rig_adapter.dart';
+import '../companion/fallback_body_adapter.dart';
 import '../companion/runtime_host.dart';
 import '../companion/attention.dart';
 import '../companion/state_machine.dart';
@@ -143,7 +143,7 @@ class _ChatPageState extends State<ChatPage> {
       if (_companionHost != null) {
         // Body takeover cut 1: the Director drives 小昌's body through the
         // OpenRig adapter; the legacy brain is starved of page events.
-        _companionHost!.attachBody(OpenRigCharacterRenderer(_live2DController));
+        _companionHost!.attachBody(FallbackBodyRenderer(_live2DController));
         _live2DController.detachBrain();
       }
       _environmentTracker = EnvironmentTracker(

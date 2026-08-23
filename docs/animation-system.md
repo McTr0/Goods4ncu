@@ -5,12 +5,15 @@
 ## Motion library & mapping (§27–28)
 
 Semantic tags (`greeting`, `thinking`, `toolWorking`, …) map to executable
-steps in `motion_library.dart`. A step is either an OpenRig clip name or a
-procedural gesture (gaze shift / head tilt / hold). Replacing the body means
-replacing this one table — runtime code never references clips.
+steps in `motion_library.dart`. A step is either a Cubism gesture (nod /
+shake) or a procedural one (gaze shift / head tilt / hold) written as raw
+parameter ramps. Replacing the body means replacing this one table — runtime
+code never references model assets.
 
-Current OpenRig inventory: idle(loop)/pressed/selected/wave/poke/high_five/
-encourage/acknowledge on bones root/head/left_action/right_action.
+Clip-style steps map to Cubism gestures (nod/shake) or degrade to procedural
+gaze/tilt choreography — the real body is the Doro.moc3 model driven by raw
+parameter writes (AngleX/Y/Z, BodyAngleZ, Breath, EyeL/R, MouthOpenY/Form).
+The former OpenRig sprite clip set was removed with that engine.
 
 ## Scheduler guarantees (§29–31)
 

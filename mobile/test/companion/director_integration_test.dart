@@ -28,7 +28,7 @@ void main() {
         isNull,
         reason: 'thinking is procedural — no clip, gaze/tilt only',
       );
-      expect(host.rigAdapter?.headTilt ?? 0, isNotNull);
+      expect(host.fallbackBody?.headTilt ?? 0, isNotNull);
     },
   );
 

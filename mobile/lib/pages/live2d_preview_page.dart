@@ -54,7 +54,10 @@ class _Live2DPreviewPageState extends State<Live2DPreviewPage> {
             children: [
               // 1. Tip banner explaining touch capabilities
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFF0F766E).withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(16),
@@ -64,7 +67,11 @@ class _Live2DPreviewPageState extends State<Live2DPreviewPage> {
                 ),
                 child: const Row(
                   children: [
-                    Icon(Icons.touch_app_rounded, color: Color(0xFF0F766E), size: 22),
+                    Icon(
+                      Icons.touch_app_rounded,
+                      color: Color(0xFF0F766E),
+                      size: 22,
+                    ),
                     SizedBox(width: 12),
                     Expanded(
                       child: Text(
@@ -90,10 +97,7 @@ class _Live2DPreviewPageState extends State<Live2DPreviewPage> {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   gradient: const RadialGradient(
-                    colors: [
-                      Color(0xFFE1F4EF),
-                      Colors.transparent,
-                    ],
+                    colors: [Color(0xFFE1F4EF), Colors.transparent],
                     radius: 0.75,
                   ),
                   borderRadius: BorderRadius.circular(24),
@@ -121,7 +125,8 @@ class _Live2DPreviewPageState extends State<Live2DPreviewPage> {
                         active: _controller.lastHitZone == Live2DHitZone.head,
                       ),
                       _buildStatusChip(
-                        label: '说话状态: ${_controller.mouthOpen > 0.1 ? "讲话中..." : "待机"}',
+                        label:
+                            '说话状态: ${_controller.mouthOpen > 0.1 ? "讲话中..." : "待机"}',
                         icon: Icons.record_voice_over_rounded,
                         active: _controller.mouthOpen > 0.1,
                       ),
@@ -165,12 +170,17 @@ class _Live2DPreviewPageState extends State<Live2DPreviewPage> {
                           Expanded(
                             child: FilledButton.icon(
                               onPressed: () {
-                                _controller.showSpeechBubble('欢迎来到续樟！我是你的智能助理小昌~');
+                                _controller.showSpeechBubble(
+                                  '欢迎来到续樟！我是你的智能助理小昌~',
+                                );
                                 _controller.startTalkingSimulation(
                                   duration: const Duration(seconds: 3),
                                 );
                               },
-                              icon: const Icon(Icons.volume_up_rounded, size: 18),
+                              icon: const Icon(
+                                Icons.volume_up_rounded,
+                                size: 18,
+                              ),
                               label: const Text('模拟说话口型'),
                               style: FilledButton.styleFrom(
                                 backgroundColor: const Color(0xFF0F766E),
@@ -198,7 +208,9 @@ class _Live2DPreviewPageState extends State<Live2DPreviewPage> {
                           FilledButton.tonalIcon(
                             onPressed: () {
                               _controller.playMotion('poke_belly');
-                              _controller.setExpression(Live2DExpression.surprised);
+                              _controller.setExpression(
+                                Live2DExpression.surprised,
+                              );
                               _controller.showSpeechBubble('哎呀，肚子要被你戳扁啦！');
                             },
                             icon: const Icon(Icons.back_hand_rounded, size: 18),
@@ -219,13 +231,22 @@ class _Live2DPreviewPageState extends State<Live2DPreviewPage> {
                         scrollDirection: Axis.horizontal,
                         child: Row(
                           children: [
-                            _buildEmotionButton('😊 开心', Live2DExpression.happy),
+                            _buildEmotionButton(
+                              '😊 开心',
+                              Live2DExpression.happy,
+                            ),
                             const SizedBox(width: 8),
-                            _buildEmotionButton('🤔 思考', Live2DExpression.thinking),
+                            _buildEmotionButton(
+                              '🤔 思考',
+                              Live2DExpression.thinking,
+                            ),
                             const SizedBox(width: 8),
                             _buildEmotionButton('😳 害羞', Live2DExpression.shy),
                             const SizedBox(width: 8),
-                            _buildEmotionButton('😛 吐舌', Live2DExpression.tongueOut),
+                            _buildEmotionButton(
+                              '😛 吐舌',
+                              Live2DExpression.tongueOut,
+                            ),
                             const SizedBox(width: 8),
                             _buildEmotionButton('🌿 复位', Live2DExpression.idle),
                           ],
@@ -248,7 +269,10 @@ class _Live2DPreviewPageState extends State<Live2DPreviewPage> {
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     foregroundColor: const Color(0xFF0F766E),
-                    side: const BorderSide(color: Color(0xFF0F766E), width: 1.5),
+                    side: const BorderSide(
+                      color: Color(0xFF0F766E),
+                      width: 1.5,
+                    ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),
@@ -267,9 +291,13 @@ class _Live2DPreviewPageState extends State<Live2DPreviewPage> {
     return OutlinedButton(
       onPressed: () => _controller.setExpression(expr),
       style: OutlinedButton.styleFrom(
-        backgroundColor: isSelected ? const Color(0xFF0F766E).withValues(alpha: 0.12) : null,
+        backgroundColor: isSelected
+            ? const Color(0xFF0F766E).withValues(alpha: 0.12)
+            : null,
         side: BorderSide(
-          color: isSelected ? const Color(0xFF0F766E) : Colors.grey.withValues(alpha: 0.3),
+          color: isSelected
+              ? const Color(0xFF0F766E)
+              : Colors.grey.withValues(alpha: 0.3),
         ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),

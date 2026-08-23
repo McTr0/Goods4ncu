@@ -101,9 +101,6 @@ flutter:
     - assets/test_product_images/
     - assets/characters/
     - assets/avatars/v1/sprout/
-    - assets/avatars/v2/open_rig/doro/
-    - assets/avatars/v2/open_rig/gugugaga/
-    - assets/avatars/v2/open_rig/phoebe_chupi/
     - assets/live2d/doro/
     - assets/live2d/doro/Doro.2048/
     - assets/live2d/doro/Expressions/

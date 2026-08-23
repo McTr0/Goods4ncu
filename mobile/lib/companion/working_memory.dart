@@ -25,15 +25,14 @@ class WorkingMemory {
         currentTopic = event.payload['query']?.toString();
         break;
       case EnvironmentEventType.postOpened:
-        final id =
-            (event.payload['postId'] ?? event.payload['listingId'])?.toString();
+        final id = (event.payload['postId'] ?? event.payload['listingId'])
+            ?.toString();
         if (id != null) touchPost(id);
         break;
       case EnvironmentEventType.draftShown:
         pendingDraft = event.payload['draftText']?.toString();
-        pendingDraftTarget = (event.payload['listingId'] ??
-                event.payload['postId'])
-            ?.toString();
+        pendingDraftTarget =
+            (event.payload['listingId'] ?? event.payload['postId'])?.toString();
         break;
       case EnvironmentEventType.draftConfirmed:
       case EnvironmentEventType.draftCancelled:
@@ -60,10 +59,10 @@ class WorkingMemory {
 
   /// Merged into the chat request's page_context so grounding stays honest.
   Map<String, Object?> toPromptFragment() => {
-        if (currentTopic != null && currentTopic!.isNotEmpty)
-          'currentTopic': currentTopic,
-        if (filters.isNotEmpty) 'filters': filters,
-        if (recentPostIds.isNotEmpty) 'recentPostIds': recentPostIds.take(4),
-        if (pendingDraft != null) 'hasPendingDraft': true,
-      };
+    if (currentTopic != null && currentTopic!.isNotEmpty)
+      'currentTopic': currentTopic,
+    if (filters.isNotEmpty) 'filters': filters,
+    if (recentPostIds.isNotEmpty) 'recentPostIds': recentPostIds.take(4),
+    if (pendingDraft != null) 'hasPendingDraft': true,
+  };
 }

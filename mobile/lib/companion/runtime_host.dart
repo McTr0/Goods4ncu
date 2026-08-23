@@ -13,7 +13,7 @@ import 'emotion_engine.dart';
 import 'gaze.dart';
 import 'mock_renderer.dart';
 import 'motion_library.dart';
-import 'open_rig_adapter.dart';
+import 'fallback_body_adapter.dart';
 import 'proactive_engine.dart';
 import 'state_machine.dart';
 
@@ -73,8 +73,8 @@ class CompanionRuntimeHost extends ChangeNotifier {
   late final CharacterRenderer renderer;
   late final MockCharacterRenderer _defaultMock;
   MockCharacterRenderer get mock => _defaultMock;
-  OpenRigCharacterRenderer? get rigAdapter => switch (renderer) {
-    OpenRigCharacterRenderer r => r,
+  FallbackBodyRenderer? get fallbackBody => switch (renderer) {
+    FallbackBodyRenderer r => r,
     _ => null,
   };
 
@@ -174,7 +174,7 @@ class CompanionRuntimeHost extends ChangeNotifier {
 
   // ---------------------------------------------------------------------------
   // Body attachment (Phase 3/§71): a real body can be attached after
-  // construction — e.g. OpenRigCharacterRenderer over the page's own
+  // construction — e.g. FallbackBodyRenderer over the page's own
   // Live2DController. Until then the mock records everything.
   // ---------------------------------------------------------------------------
 

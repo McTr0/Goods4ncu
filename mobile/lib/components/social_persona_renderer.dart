@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/models.dart';
-import 'open_rig_renderer.dart';
 
 /// Resolved specification for rendering a SocialPersona or default system character.
 class SocialPersonaRenderSpec {
@@ -769,69 +768,8 @@ class _SpriteAtlasPainter extends CustomPainter {
       oldDelegate.background != background;
 }
 
-/// Borderless campus mascot renderer backed by the repository-owned open rig.
-///
-/// A low-density mesh deforms a transparent PNG texture using JSON-authored
-/// bone influences and motion tracks. This keeps the runtime and asset format
-/// free of editor subscriptions while supporting Android, iOS and Web through
-/// Flutter's Canvas/Impeller stack.
-class CampusMascotPersonaRenderer implements SocialPersonaRenderer {
-  const CampusMascotPersonaRenderer({required this.fallback});
-
-  final SocialPersonaRenderer fallback;
-
-  @override
-  Widget buildCharacter(
-    BuildContext context, {
-    required SocialPersonaRenderSpec spec,
-    required double size,
-    required double motionProgress,
-    required AvatarMotionCue motionCue,
-    required bool isDark,
-    String? semanticLabel,
-  }) {
-    final assetId = spec.assetId;
-    if (assetId == null || !OpenRigAssetCache.manifests.containsKey(assetId)) {
-      return fallback.buildCharacter(
-        context,
-        spec: spec,
-        size: size,
-        motionProgress: motionProgress,
-        motionCue: motionCue,
-        isDark: isDark,
-        semanticLabel: semanticLabel,
-      );
-    }
-    final fallbackCharacter = fallback.buildCharacter(
-      context,
-      spec: spec,
-      size: size,
-      motionProgress: motionProgress,
-      motionCue: motionCue,
-      isDark: isDark,
-      semanticLabel: null,
-    );
-    Widget character = SizedBox.square(
-      dimension: size,
-      child: OpenRigCharacter(
-        characterId: assetId,
-        size: size,
-        motionKey: motionCue.manifestKey,
-        progress: motionProgress,
-        fallback: fallbackCharacter,
-      ),
-    );
-    if (semanticLabel case final label? when label.isNotEmpty) {
-      character = Semantics(label: label, image: true, child: character);
-    }
-    return character;
-  }
-}
-
-const defaultPersonaRenderer = CampusMascotPersonaRenderer(
-  fallback: SpriteAtlasPersonaRenderer(
-    manifestAsset: 'assets/avatars/v1/sprout/manifest.json',
-  ),
+const defaultPersonaRenderer = SpriteAtlasPersonaRenderer(
+  manifestAsset: 'assets/avatars/v1/sprout/manifest.json',
 );
 
 /// Widget that hosts a character spec with subtle local-only idle motion.

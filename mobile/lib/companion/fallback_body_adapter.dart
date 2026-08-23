@@ -13,15 +13,15 @@ const Map<CompanionState, Live2DExpression> _stateExpressions = {
   CompanionState.sleeping: Live2DExpression.idle,
 };
 
-/// `CharacterRenderer` implementation over the existing OpenRig body
+/// `CharacterRenderer` implementation over the legacy sprite body
 /// (`Live2DController` + `Live2DCharacterWidget`).
 ///
 /// Semantic commands in, controller calls out. The scheduler's clip steps
 /// arrive through [playMotionClip]; procedural gaze/tilt land on the
 /// controller/tilt field; micro-motion (blink/sway) keeps running in the
 /// controller underneath everything.
-class OpenRigCharacterRenderer implements CharacterRenderer {
-  OpenRigCharacterRenderer(this.controller);
+class FallbackBodyRenderer implements CharacterRenderer {
+  FallbackBodyRenderer(this.controller);
 
   final Live2DController controller;
 

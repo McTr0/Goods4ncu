@@ -8,7 +8,7 @@ import 'state_machine.dart';
 /// What the character's body can be told to do (master goal §71).
 ///
 /// Everything above this line (director, planner, scheduler) speaks in
-/// *semantics* — everything below renders. Swapping the OpenRig body for a
+/// *semantics* — everything below renders. Swapping the legacy sprite body body for a
 /// Cubism model, or any of it for the mock, must never touch runtime logic.
 abstract class CharacterRenderer {
   Future<void> load();

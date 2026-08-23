@@ -112,9 +112,7 @@ void main() {
       tester.element(find.byType(FeedFeedbackMenu)),
     )!;
 
-    await tester.tap(
-      find.byKey(const ValueKey('feed-feedback-post-post-1')),
-    );
+    await tester.tap(find.byKey(const ValueKey('feed-feedback-post-post-1')));
     await tester.pumpAndSettle();
     await tester.tap(find.text(l.feedFeedbackHide));
     await tester.pump();
@@ -147,9 +145,7 @@ void main() {
       tester.element(find.byType(FeedFeedbackMenu)),
     )!;
 
-    await tester.tap(
-      find.byKey(const ValueKey('feed-feedback-post-post-1')),
-    );
+    await tester.tap(find.byKey(const ValueKey('feed-feedback-post-post-1')));
     await tester.pumpAndSettle();
     await tester.tap(find.text(l.feedFeedbackNotRelevant));
     await tester.pumpAndSettle();

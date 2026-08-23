@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/components/social_persona_renderer.dart';
-import 'package:goods4ncu_mobile/components/open_rig_renderer.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 
 void main() {
@@ -125,87 +124,52 @@ void main() {
         throwsFormatException,
       );
     });
-  });
 
-  group('OpenRigDefinition', () {
-    test('parses mesh bones and interpolates motion tracks', () {
-      final rig = OpenRigDefinition.fromJson({
-        'version': 1,
-        'id': 'test',
-        'texture': 'assets/test.png',
-        'grid': [8, 8],
-        'bones': [
-          {
-            'id': 'root',
-            'pivot': [0.5, 0.5],
-            'radius': 1.0,
-            'strength': 1.0,
-          },
-        ],
-        'motions': {
-          'wave': {
-            'tracks': {
-              'root': [
-                {'t': 0.0, 'tx': 0.0},
-                {'t': 1.0, 'tx': 0.2},
-              ],
-            },
-          },
-        },
+    group('AvatarActionController', () {
+      test('replays the same semantic action with a new revision', () {
+        final controller = AvatarActionController();
+        var notifications = 0;
+        controller.addListener(() => notifications += 1);
+
+        controller.play(AvatarMotionCue.wave);
+        final firstRevision = controller.revision;
+        controller.play(AvatarMotionCue.wave);
+
+        expect(controller.cue, AvatarMotionCue.wave);
+        expect(controller.revision, firstRevision + 1);
+        expect(notifications, 2);
+        controller.dispose();
       });
-
-      expect(rig.columns, 8);
-      expect(rig.bones.single.influence(const Offset(0.5, 0.5)), 1);
-      final pose = rig.motionFor('wave')!.transformFor('root', 0.5);
-      expect(pose.translateX, closeTo(0.1, 0.0001));
     });
-  });
 
-  group('AvatarActionController', () {
-    test('replays the same semantic action with a new revision', () {
-      final controller = AvatarActionController();
-      var notifications = 0;
-      controller.addListener(() => notifications += 1);
+    group('PersonaPaletteTokens', () {
+      test('resolves light and dark tokens for all standard palettes', () {
+        for (final palette in [
+          'teal',
+          'plum',
+          'sun',
+          'slate',
+          'emerald',
+          'sky',
+          'rose',
+          'indigo',
+        ]) {
+          final light = PersonaPaletteTokens.resolve(palette, isDark: false);
+          final dark = PersonaPaletteTokens.resolve(palette, isDark: true);
 
-      controller.play(AvatarMotionCue.wave);
-      final firstRevision = controller.revision;
-      controller.play(AvatarMotionCue.wave);
-
-      expect(controller.cue, AvatarMotionCue.wave);
-      expect(controller.revision, firstRevision + 1);
-      expect(notifications, 2);
-      controller.dispose();
+          expect(light.primary, isNotNull);
+          expect(light.background, isNotNull);
+          expect(dark.primary, isNotNull);
+          expect(dark.background, isNotNull);
+          expect(light.primary, isNot(equals(dark.primary)));
+        }
+      });
     });
-  });
 
-  group('PersonaPaletteTokens', () {
-    test('resolves light and dark tokens for all standard palettes', () {
-      for (final palette in [
-        'teal',
-        'plum',
-        'sun',
-        'slate',
-        'emerald',
-        'sky',
-        'rose',
-        'indigo',
-      ]) {
-        final light = PersonaPaletteTokens.resolve(palette, isDark: false);
-        final dark = PersonaPaletteTokens.resolve(palette, isDark: true);
-
-        expect(light.primary, isNotNull);
-        expect(light.background, isNotNull);
-        expect(dark.primary, isNotNull);
-        expect(dark.background, isNotNull);
-        expect(light.primary, isNot(equals(dark.primary)));
-      }
-    });
-  });
-
-  group('CodeDrawnPersonaRenderer & SocialPersonaCharacterView', () {
-    testWidgets(
-      'renders borderless campus mascot assets from character token',
-      (tester) async {
+    group('CodeDrawnPersonaRenderer & SocialPersonaCharacterView', () {
+      testWidgets('renders borderless mascot via sprite fallback when no rig', (
+        tester,
+      ) async {
         const spec = SocialPersonaRenderSpec(
           palette: 'teal',
           silhouette: 'soft',
@@ -213,10 +177,6 @@ void main() {
           outfit: 'campus',
           assetId: 'gugugaga',
         );
-
-        await tester.runAsync(() async {
-          await OpenRigAssetCache.load('gugugaga');
-        });
 
         await tester.pumpWidget(
           const MaterialApp(
@@ -231,136 +191,99 @@ void main() {
         );
         await tester.pump(const Duration(milliseconds: 100));
 
-        expect(
-          find.byKey(const ValueKey('persona_open_rig_gugugaga')),
-          findsOneWidget,
-        );
+        // The rig engine was removed; the sprite atlas fallback must render.
         expect(find.byType(CustomPaint), findsWidgets);
-      },
-    );
-
-    testWidgets('renders Phoebe Chupi from the campus character catalog', (
-      tester,
-    ) async {
-      const spec = SocialPersonaRenderSpec(
-        palette: 'teal',
-        silhouette: 'soft',
-        accessory: 'none',
-        outfit: 'campus',
-        assetId: 'phoebe_chupi',
-      );
-
-      await tester.runAsync(() async {
-        await OpenRigAssetCache.load('phoebe_chupi');
       });
 
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: SocialPersonaCharacterView(
-              spec: spec,
-              size: 160,
-              enableMotion: false,
+      testWidgets('renders CustomPaint vector character for all silhouettes', (
+        tester,
+      ) async {
+        for (final sil in ['soft', 'round', 'sharp']) {
+          final spec = SocialPersonaRenderSpec(
+            palette: 'teal',
+            silhouette: sil,
+            accessory: 'glasses',
+            outfit: 'campus',
+            name: 'test-$sil',
+          );
+
+          await tester.pumpWidget(
+            MaterialApp(
+              home: Scaffold(
+                body: Center(
+                  child: SocialPersonaCharacterView(
+                    spec: spec,
+                    size: 48,
+                    enableMotion: false,
+                  ),
+                ),
+              ),
             ),
-          ),
-        ),
-      );
-      await tester.pump(const Duration(milliseconds: 100));
+          );
+          await tester.pumpAndSettle();
 
-      expect(
-        find.byKey(const ValueKey('persona_open_rig_phoebe_chupi')),
-        findsOneWidget,
-      );
-    });
+          expect(find.byType(CustomPaint), findsWidgets);
+          expect(find.byType(SocialPersonaCharacterView), findsOneWidget);
+        }
+      });
 
-    testWidgets('renders CustomPaint vector character for all silhouettes', (
-      tester,
-    ) async {
-      for (final sil in ['soft', 'round', 'sharp']) {
-        final spec = SocialPersonaRenderSpec(
+      testWidgets('micro size (<32) stays static without active ticking', (
+        tester,
+      ) async {
+        const spec = SocialPersonaRenderSpec(
           palette: 'teal',
-          silhouette: sil,
-          accessory: 'glasses',
-          outfit: 'campus',
-          name: 'test-$sil',
+          silhouette: 'soft',
+          accessory: 'leaf',
+          outfit: 'casual',
+          name: 'micro',
         );
 
         await tester.pumpWidget(
-          MaterialApp(
+          const MaterialApp(
             home: Scaffold(
               body: Center(
-                child: SocialPersonaCharacterView(
-                  spec: spec,
-                  size: 48,
-                  enableMotion: false,
-                ),
+                child: SocialPersonaCharacterView(spec: spec, size: 24),
               ),
             ),
           ),
         );
         await tester.pumpAndSettle();
 
-        expect(find.byType(CustomPaint), findsWidgets);
-        expect(find.byType(SocialPersonaCharacterView), findsOneWidget);
-      }
-    });
+        expect(
+          tester.getSize(find.byType(SocialPersonaCharacterView)),
+          const Size(24, 24),
+        );
+      });
 
-    testWidgets('micro size (<32) stays static without active ticking', (
-      tester,
-    ) async {
-      const spec = SocialPersonaRenderSpec(
-        palette: 'teal',
-        silhouette: 'soft',
-        accessory: 'leaf',
-        outfit: 'casual',
-        name: 'micro',
-      );
+      testWidgets('large character renders with idle motion when enabled', (
+        tester,
+      ) async {
+        const spec = SocialPersonaRenderSpec(
+          palette: 'plum',
+          silhouette: 'round',
+          accessory: 'headphones',
+          outfit: 'lab',
+          name: 'interactive',
+        );
 
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: Center(
-              child: SocialPersonaCharacterView(spec: spec, size: 24),
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(
-        tester.getSize(find.byType(SocialPersonaCharacterView)),
-        const Size(24, 24),
-      );
-    });
-
-    testWidgets('large character renders with idle motion when enabled', (
-      tester,
-    ) async {
-      const spec = SocialPersonaRenderSpec(
-        palette: 'plum',
-        silhouette: 'round',
-        accessory: 'headphones',
-        outfit: 'lab',
-        name: 'interactive',
-      );
-
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: Center(
-              child: SocialPersonaCharacterView(
-                spec: spec,
-                size: 160,
-                enableMotion: true,
+        await tester.pumpWidget(
+          const MaterialApp(
+            home: Scaffold(
+              body: Center(
+                child: SocialPersonaCharacterView(
+                  spec: spec,
+                  size: 160,
+                  enableMotion: true,
+                ),
               ),
             ),
           ),
-        ),
-      );
+        );
 
-      expect(find.byType(SocialPersonaCharacterView), findsOneWidget);
-      await tester.pump(const Duration(milliseconds: 500));
-      expect(tester.takeException(), isNull);
+        expect(find.byType(SocialPersonaCharacterView), findsOneWidget);
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(tester.takeException(), isNull);
+      });
     });
   });
 }

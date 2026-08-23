@@ -5,12 +5,11 @@ import 'package:goods4ncu_mobile/pages/live2d_preview_page.dart';
 import 'package:goods4ncu_mobile/theme/app_theme.dart';
 
 void main() {
-  testWidgets('Live2DPreviewPage renders character widget and controls', (tester) async {
+  testWidgets('Live2DPreviewPage renders character widget and controls', (
+    tester,
+  ) async {
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.light,
-        home: const Live2DPreviewPage(),
-      ),
+      MaterialApp(theme: AppTheme.light, home: const Live2DPreviewPage()),
     );
 
     expect(find.text('小昌 · 2D 互动数字人'), findsOneWidget);
