@@ -48,7 +48,7 @@ MaterialApp _app(GoRouter router) {
 }
 
 void main() {
-  testWidgets('contact and mail use a full route instead of a modal', (
+  testWidgets('contact page opens directly in the requested mode', (
     tester,
   ) async {
     final service = _FakeChatService();
@@ -65,6 +65,7 @@ void main() {
                   context: context,
                   chatService: service,
                   recipientId: 'peer-one',
+                  mode: ConversationMode.mail,
                   recipientName: '同学甲',
                 );
               },
@@ -77,6 +78,9 @@ void main() {
           builder: (context, state) => ContactConversationPage(
             chatService: service,
             recipientId: state.pathParameters['recipientId']!,
+            initialMode: ConversationMode.parse(
+              state.uri.queryParameters['mode'],
+            ),
             recipientName: state.uri.queryParameters['recipientName'],
           ),
         ),
@@ -87,14 +91,13 @@ void main() {
     await tester.tap(find.text('再联系'));
     await tester.pumpAndSettle();
 
+    // The mail composer shows immediately — no intermediate mode picker.
     expect(find.byType(ContactConversationPage), findsOneWidget);
     expect(find.byType(Dialog), findsNothing);
     expect(find.byType(BottomSheet), findsNothing);
-    expect(find.text('实时对话'), findsOneWidget);
-    expect(find.text('留言'), findsOneWidget);
+    expect(find.text('写封留言'), findsOneWidget);
+    expect(find.byKey(const ValueKey('mail-subject-field')), findsOneWidget);
 
-    await tester.tap(find.text('留言'));
-    await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey('mail-subject-field')),
       '借书安排',
@@ -113,6 +116,32 @@ void main() {
     expect(service.createdContent, '周五可以在图书馆见面吗？');
   });
 
+  testWidgets('realtime mode skips the subject field', (tester) async {
+    final service = _FakeChatService();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: ContactConversationPage(
+          chatService: service,
+          recipientId: 'peer-one',
+          initialMode: ConversationMode.realtime,
+          recipientName: '同学甲',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('mail-subject-field')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('conversation-opening-field')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('contact page stays phone friendly and web width constrained', (
     tester,
   ) async {
@@ -128,6 +157,7 @@ void main() {
         home: ContactConversationPage(
           chatService: service,
           recipientId: 'peer-one',
+          initialMode: ConversationMode.mail,
           recipientName: '同学甲',
         ),
       ),

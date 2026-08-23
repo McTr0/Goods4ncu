@@ -380,6 +380,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         context: context,
         chatService: _chatService,
         recipientId: listing.ownerId!,
+        mode: ConversationMode.mail,
         listingId: listing.id,
         listingTitle: listing.title,
       );

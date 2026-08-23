@@ -600,6 +600,9 @@
   },
   "viewClassmateListings": "View listings",
   "contactAction": "Contact",
+  "contactConnectAction": "Connect",
+  "contactMailAction": "Message",
+  "chatHistoryAction": "Chat history",
   "classmateActiveListingsTitle": "{username}'s listings",
   "@classmateActiveListingsTitle": {
     "placeholders": {
@@ -667,6 +670,7 @@
   "contactPageModeHint": "This is a full contact page. Choose realtime contact or mail; going back preserves the previous page.",
   "contactBackAction": "Back to contact methods",
   "contactContextUser": "Contact {username}",
+  "contactPageTitle": "New conversation",
   "@contactContextUser": {
     "placeholders": {
       "username": {

@@ -135,12 +135,14 @@ class _UserHomePageState extends State<UserHomePage> {
     }
   }
 
-  Future<void> _contactUser() async {
+  bool get _isSelfProfile =>
+      _currentUserId != null && _currentUserId == widget.userId;
+
+  Future<void> _contactUser(ConversationMode mode) async {
     final l = AppLocalizations.of(context)!;
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final self = await _userService.getUserProfile();
-      if (self['user_id']?.toString() == widget.userId) {
+      if (_isSelfProfile) {
         messenger.showSnackBar(SnackBar(content: Text(l.chatWithSelf)));
         return;
       }
@@ -149,6 +151,7 @@ class _UserHomePageState extends State<UserHomePage> {
         context: context,
         chatService: _chatService,
         recipientId: widget.userId,
+        mode: mode,
         recipientName: _profile?['username']?.toString(),
       );
       if (!mounted || conversation == null) return;
@@ -166,6 +169,14 @@ class _UserHomePageState extends State<UserHomePage> {
         SnackBar(content: Text(l.operationFailed(error.toString()))),
       );
     }
+  }
+
+  void _openChatHistory() {
+    if (_isSelfProfile) return;
+    context.pushNamed(
+      'chat-thread',
+      pathParameters: {'peerUserId': widget.userId},
+    );
   }
 
   bool get _canReportUser =>
@@ -276,7 +287,10 @@ class _UserHomePageState extends State<UserHomePage> {
               _ProfileHeader(
                 profile: _profile!,
                 persona: _persona,
-                onContact: _contactUser,
+                isSelf: _isSelfProfile,
+                onConnect: () => _contactUser(ConversationMode.realtime),
+                onMail: () => _contactUser(ConversationMode.mail),
+                onHistory: _openChatHistory,
               ),
               // Right where someone decides whether to deal with this person.
               // A record kept and never shown is bookkeeping, not trust.
@@ -306,12 +320,18 @@ class _ProfileHeader extends StatelessWidget {
   const _ProfileHeader({
     required this.profile,
     this.persona,
-    required this.onContact,
+    required this.isSelf,
+    required this.onConnect,
+    required this.onMail,
+    required this.onHistory,
   });
 
   final Map<String, dynamic> profile;
   final SocialPersona? persona;
-  final VoidCallback onContact;
+  final bool isSelf;
+  final VoidCallback onConnect;
+  final VoidCallback onMail;
+  final VoidCallback onHistory;
 
   @override
   Widget build(BuildContext context) {
@@ -362,11 +382,32 @@ class _ProfileHeader extends StatelessWidget {
               ),
             ),
             const SizedBox(width: AppTheme.sp12),
-            FilledButton.icon(
-              onPressed: onContact,
-              icon: const Icon(Icons.chat_bubble_outline),
-              label: Text(l.contactAction),
-            ),
+            if (!isSelf)
+              Wrap(
+                spacing: AppTheme.sp8,
+                runSpacing: AppTheme.sp8,
+                alignment: WrapAlignment.end,
+                children: [
+                  FilledButton.icon(
+                    key: const ValueKey('profile-connect-action'),
+                    onPressed: onConnect,
+                    icon: const Icon(Icons.bolt_rounded),
+                    label: Text(l.contactConnectAction),
+                  ),
+                  OutlinedButton.icon(
+                    key: const ValueKey('profile-mail-action'),
+                    onPressed: onMail,
+                    icon: const Icon(Icons.mail_outline_rounded),
+                    label: Text(l.contactMailAction),
+                  ),
+                  OutlinedButton.icon(
+                    key: const ValueKey('profile-history-action'),
+                    onPressed: onHistory,
+                    icon: const Icon(Icons.history_rounded),
+                    label: Text(l.chatHistoryAction),
+                  ),
+                ],
+              ),
           ],
         ),
       ),

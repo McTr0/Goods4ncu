@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
-import '../components/contact_conversation_sheet.dart';
 import '../components/relationship_space_preview.dart';
 import '../components/unified_message_composer.dart';
 import '../components/user_avatar.dart';
@@ -576,19 +575,6 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
     return ids;
   }
 
-  Future<void> _startConversation() async {
-    final thread = _thread;
-    if (thread == null) return;
-    final conversation = await openContactConversationPage(
-      context: context,
-      chatService: widget.chatService,
-      recipientId: thread.peerUserId,
-      recipientName: thread.peerUsername,
-    );
-    if (!mounted || conversation == null) return;
-    await _loadThread(silent: true);
-  }
-
   @override
   Widget build(BuildContext context) {
     final body = Column(
@@ -607,12 +593,6 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
     final l = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
     final thread = _thread;
-    final narrow = MediaQuery.sizeOf(context).width < 520;
-    final reconnectAction = TextButton.icon(
-      onPressed: thread == null ? null : _startConversation,
-      icon: const Icon(Icons.add_comment_outlined, size: 18),
-      label: Text(l.conversationReconnect),
-    );
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
@@ -659,13 +639,8 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
                   ],
                 ),
               ),
-              if (!narrow) ...[const SizedBox(width: 8), reconnectAction],
             ],
           ),
-          if (narrow) ...[
-            const SizedBox(height: 2),
-            Align(alignment: Alignment.centerLeft, child: reconnectAction),
-          ],
         ],
       ),
     );
@@ -1894,15 +1869,11 @@ class _UserLookupDialogState extends State<_UserLookupDialog> {
     }
   }
 
-  Future<void> _contact(UserLookupMatch match) async {
-    final conversation = await openContactConversationPage(
-      context: context,
-      chatService: widget.chatService,
-      recipientId: match.userId,
-      recipientName: match.username,
-    );
-    if (!mounted || conversation == null) return;
-    Navigator.of(context).pop(conversation);
+  void _contact(UserLookupMatch match) {
+    // Clicking a contact lands on their profile first; connect / mail /
+    // history are chosen from there.
+    Navigator.of(context).pop();
+    context.push('/users/${match.userId}');
   }
 
   void _showListings(UserLookupMatch match) {

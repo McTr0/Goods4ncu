@@ -1386,6 +1386,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get contactAction => 'Contact';
 
   @override
+  String get contactConnectAction => 'Connect';
+
+  @override
+  String get contactMailAction => 'Message';
+
+  @override
+  String get chatHistoryAction => 'Chat history';
+
+  @override
   String classmateActiveListingsTitle(String username) {
     return '$username\'s listings';
   }
@@ -1508,6 +1517,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String contactContextUser(String username) {
     return 'Contact $username';
   }
+
+  @override
+  String get contactPageTitle => 'New conversation';
 
   @override
   String contactContextListing(String title) {

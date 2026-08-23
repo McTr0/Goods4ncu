@@ -657,6 +657,7 @@ class _UserChatPageState extends State<UserChatPage> {
       context: context,
       chatService: _chatService,
       recipientId: conversation.otherUserId,
+      mode: conversation.mode,
       listingId: conversation.listingId,
       listingTitle: conversation.listingTitle,
       recipientName: conversation.otherUsername,

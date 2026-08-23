@@ -2652,6 +2652,24 @@ abstract class AppLocalizations {
   /// **'Contact'**
   String get contactAction;
 
+  /// No description provided for @contactConnectAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect'**
+  String get contactConnectAction;
+
+  /// No description provided for @contactMailAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Message'**
+  String get contactMailAction;
+
+  /// No description provided for @chatHistoryAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat history'**
+  String get chatHistoryAction;
+
   /// No description provided for @classmateActiveListingsTitle.
   ///
   /// In en, this message translates to:
@@ -2867,6 +2885,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Contact {username}'**
   String contactContextUser(String username);
+
+  /// No description provided for @contactPageTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'New conversation'**
+  String get contactPageTitle;
 
   /// No description provided for @contactContextListing.
   ///

@@ -201,6 +201,9 @@ final GoRouter appRouter = GoRouter(
                     extra?['chatService'] as ChatService? ??
                     context.read<ChatService>(),
                 recipientId: recipientId,
+                initialMode: ConversationMode.parse(
+                  state.uri.queryParameters['mode'],
+                ),
                 listingId: state.uri.queryParameters['listingId'],
                 listingTitle: state.uri.queryParameters['listingTitle'],
                 recipientName: state.uri.queryParameters['recipientName'],

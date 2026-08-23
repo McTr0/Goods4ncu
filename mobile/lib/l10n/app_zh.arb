@@ -581,6 +581,9 @@
   },
   "viewClassmateListings": "查看TA的在售",
   "contactAction": "联系",
+  "contactConnectAction": "连接",
+  "contactMailAction": "留言",
+  "chatHistoryAction": "聊天历史",
   "classmateActiveListingsTitle": "{username} 的在售",
   "@classmateActiveListingsTitle": {
     "placeholders": {
@@ -648,6 +651,7 @@
   "contactPageModeHint": "这是完整的联系页面。选择实时联系或留言，返回时仍会保留原页面上下文。",
   "contactBackAction": "返回选择联系方式",
   "contactContextUser": "联系 {username}",
+  "contactPageTitle": "发起新会话",
   "@contactContextUser": {
     "placeholders": {
       "username": {

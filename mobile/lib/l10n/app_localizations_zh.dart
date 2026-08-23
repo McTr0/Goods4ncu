@@ -1334,6 +1334,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get contactAction => '联系';
 
   @override
+  String get contactConnectAction => '连接';
+
+  @override
+  String get contactMailAction => '留言';
+
+  @override
+  String get chatHistoryAction => '聊天历史';
+
+  @override
   String classmateActiveListingsTitle(String username) {
     return '$username 的在售';
   }
@@ -1450,6 +1459,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String contactContextUser(String username) {
     return '联系 $username';
   }
+
+  @override
+  String get contactPageTitle => '发起新会话';
 
   @override
   String contactContextListing(String title) {

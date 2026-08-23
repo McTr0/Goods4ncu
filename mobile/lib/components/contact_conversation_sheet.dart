@@ -9,6 +9,7 @@ Future<Conversation?> openContactConversationPage({
   required BuildContext context,
   required ChatService chatService,
   required String recipientId,
+  required ConversationMode mode,
   String? listingId,
   String? listingTitle,
   String? recipientName,
@@ -16,6 +17,7 @@ Future<Conversation?> openContactConversationPage({
   final route = Uri(
     pathSegments: ['contact', recipientId],
     queryParameters: {
+      'mode': mode.wireValue,
       'listingId': ?listingId,
       'listingTitle': ?listingTitle,
       'recipientName': ?recipientName,
@@ -32,6 +34,7 @@ class ContactConversationPage extends StatefulWidget {
     super.key,
     required this.chatService,
     required this.recipientId,
+    required this.initialMode,
     this.listingId,
     this.listingTitle,
     this.recipientName,
@@ -39,6 +42,7 @@ class ContactConversationPage extends StatefulWidget {
 
   final ChatService chatService;
   final String recipientId;
+  final ConversationMode initialMode;
   final String? listingId;
   final String? listingTitle;
   final String? recipientName;
@@ -51,7 +55,7 @@ class ContactConversationPage extends StatefulWidget {
 class _ContactConversationPageState extends State<ContactConversationPage> {
   final _subjectController = TextEditingController();
   final _contentController = TextEditingController();
-  ConversationMode? _mode;
+  late final ConversationMode _mode = widget.initialMode;
   MailExpectation _mailExpectation = MailExpectation.ordinary;
   bool _submitting = false;
   String? _error;
@@ -64,15 +68,14 @@ class _ContactConversationPageState extends State<ContactConversationPage> {
   }
 
   Future<void> _submit() async {
-    final mode = _mode;
     final subject = _subjectController.text.trim();
     final content = _contentController.text.trim();
     final l = AppLocalizations.of(context)!;
-    if (mode == null || content.isEmpty) {
+    if (content.isEmpty) {
       setState(() => _error = l.contactOpeningRequired);
       return;
     }
-    if (mode == ConversationMode.mail && subject.isEmpty) {
+    if (_mode == ConversationMode.mail && subject.isEmpty) {
       setState(() => _error = l.contactMailSubjectRequired);
       return;
     }
@@ -84,9 +87,9 @@ class _ContactConversationPageState extends State<ContactConversationPage> {
       final conversation = await widget.chatService.createConversation(
         recipientId: widget.recipientId,
         listingId: widget.listingId,
-        mode: mode,
-        subject: mode == ConversationMode.mail ? subject : null,
-        mailExpectation: mode == ConversationMode.mail
+        mode: _mode,
+        subject: _mode == ConversationMode.mail ? subject : null,
+        mailExpectation: _mode == ConversationMode.mail
             ? _mailExpectation
             : null,
         content: content,
@@ -109,7 +112,7 @@ class _ContactConversationPageState extends State<ContactConversationPage> {
         ? l.contactContextUser(widget.recipientName ?? l.contactFallbackUser)
         : l.contactContextListing(widget.listingTitle!);
     return Scaffold(
-      appBar: AppBar(title: Text(l.contactModePromptTitle)),
+      appBar: AppBar(title: Text(l.contactPageTitle)),
       body: SafeArea(
         top: false,
         child: LayoutBuilder(
@@ -160,12 +163,7 @@ class _ContactConversationPageState extends State<ContactConversationPage> {
                         ),
                       ),
                       const SizedBox(height: 18),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 180),
-                        child: _mode == null
-                            ? _buildModeChoice()
-                            : _buildComposer(),
-                      ),
+                      _buildComposer(),
                     ],
                   ),
                 ),
@@ -177,60 +175,15 @@ class _ContactConversationPageState extends State<ContactConversationPage> {
     );
   }
 
-  Widget _buildModeChoice() {
-    final l = AppLocalizations.of(context)!;
-    final scheme = Theme.of(context).colorScheme;
-    return Column(
-      key: const ValueKey('contact-mode-choice'),
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          l.contactModePromptTitle,
-          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          l.contactPageModeHint,
-          style: TextStyle(color: scheme.onSurfaceVariant, height: 1.4),
-        ),
-        const SizedBox(height: 22),
-        _ModeCard(
-          icon: Icons.bolt_rounded,
-          color: scheme.primary,
-          title: l.contactModeRealtimeTitle,
-          description: l.contactModeRealtimeDescription,
-          onTap: () => setState(() => _mode = ConversationMode.realtime),
-        ),
-        const SizedBox(height: 12),
-        _ModeCard(
-          icon: Icons.mark_email_unread_outlined,
-          color: scheme.secondary,
-          title: l.contactModeMailTitle,
-          description: l.contactModeMailDescription,
-          onTap: () => setState(() => _mode = ConversationMode.mail),
-        ),
-      ],
-    );
-  }
-
   Widget _buildComposer() {
     final l = AppLocalizations.of(context)!;
-    final scheme = Theme.of(context).colorScheme;
     final isMail = _mode == ConversationMode.mail;
     return Column(
-      key: ValueKey('contact-compose-${_mode!.wireValue}'),
+      key: ValueKey('contact-compose-${_mode.wireValue}'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
-            IconButton.filledTonal(
-              tooltip: l.contactBackAction,
-              onPressed: _submitting
-                  ? null
-                  : () => setState(() => _mode = null),
-              icon: const Icon(Icons.arrow_back_rounded),
-            ),
-            const SizedBox(width: 12),
             Expanded(
               child: Text(
                 isMail
@@ -261,7 +214,7 @@ class _ContactConversationPageState extends State<ContactConversationPage> {
           Text(
             l.contactMailExpectationLabel,
             style: TextStyle(
-              color: scheme.onSurfaceVariant,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -312,7 +265,10 @@ class _ContactConversationPageState extends State<ContactConversationPage> {
         ),
         if (_error != null) ...[
           const SizedBox(height: 4),
-          Text(_error!, style: TextStyle(color: scheme.error)),
+          Text(
+            _error!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
         ],
         const SizedBox(height: 14),
         FilledButton.icon(
@@ -328,81 +284,6 @@ class _ContactConversationPageState extends State<ContactConversationPage> {
           label: Text(isMail ? l.contactMailSubmit : l.contactRealtimeSubmit),
         ),
       ],
-    );
-  }
-}
-
-class _ModeCard extends StatelessWidget {
-  const _ModeCard({
-    required this.icon,
-    required this.color,
-    required this.title,
-    required this.description,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final Color color;
-  final String title;
-  final String description;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: color.withValues(
-        alpha: Theme.of(context).brightness == Brightness.dark ? 0.18 : 0.08,
-      ),
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Icon(icon, color: Colors.white),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      description,
-                      style: TextStyle(
-                        color: scheme.onSurfaceVariant,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(
-                Icons.arrow_forward_ios_rounded,
-                size: 16,
-                color: scheme.onSurfaceVariant,
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
