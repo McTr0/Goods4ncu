@@ -5,6 +5,8 @@ import 'dart:ui_web' as ui_web;
 
 import 'package:flutter/widgets.dart';
 
+import 'cubism_body.dart' show cubismModelUrlFor, runtimeCompanionCharacter;
+
 import '../character_renderer.dart';
 import 'cubism_bridge_web.dart';
 import 'cubism_renderer.dart';
@@ -169,14 +171,15 @@ CharacterRenderer createCubismRenderer() =>
 
 Widget? createCubismStage({
   required WidgetBuilder fallback,
-  required String modelUrl,
+  String? modelUrl,
   double width = 300,
   double height = 360,
 }) {
-  _ensureViewFactory(modelUrl);
+  final url = modelUrl ?? cubismModelUrlFor(runtimeCompanionCharacter);
+  _ensureViewFactory(url);
   return CubismStageWebView(
     fallback: fallback,
-    modelUrl: modelUrl,
+    modelUrl: url,
     width: width,
     height: height,
   );

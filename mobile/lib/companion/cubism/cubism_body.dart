@@ -8,11 +8,34 @@ import 'cubism_body_default.dart'
 export 'cubism_params.dart'
     show CubismBridge, CubismParams, gestureForTag, paramsForState;
 
-/// Active companion character (multi-character catalog).
+/// Compile-time default companion character (multi-character catalog).
 const String kCompanionCharacter = String.fromEnvironment(
   'COMPANION_CHARACTER',
   defaultValue: 'doro',
 );
+
+/// Characters with a shipped Cubism model.
+const List<String> availableCompanionCharacters = ['doro'];
+
+String _runtimeCharacter = kCompanionCharacter;
+
+/// Character the Cubism stage should render right now. Defaults to the
+/// compile-time value; [setRuntimeCompanionCharacter] overrides it when the
+/// user picks a different character in settings.
+String get runtimeCompanionCharacter => _runtimeCharacter;
+
+void setRuntimeCompanionCharacter(String character) {
+  if (availableCompanionCharacters.contains(character)) {
+    _runtimeCharacter = character;
+  }
+}
+
+/// Portrait icon asset for a character (settings previews); null if the
+/// character ships no icon.
+String? companionCharacterIconAsset(String character) => switch (character) {
+  'doro' => 'assets/live2d/doro/icon.png',
+  _ => null,
+};
 
 /// Asset url for a character's model3.json (flutter web doubles the prefix).
 String cubismModelUrlFor(String character) =>
@@ -40,13 +63,14 @@ CharacterRenderer? createCubismRendererOrNull() {
 /// Platform-selected stage widget with graceful fallback.
 Widget? createCubismStage({
   required WidgetBuilder fallback,
+  String? modelUrl,
   double width = 300,
   double height = 360,
 }) {
   try {
     return impl.createCubismStage(
       fallback: fallback,
-      modelUrl: cubismModelUrlFor(kCompanionCharacter),
+      modelUrl: modelUrl ?? cubismModelUrlFor(runtimeCompanionCharacter),
       width: width,
       height: height,
     );

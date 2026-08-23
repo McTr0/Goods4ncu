@@ -15,7 +15,7 @@ CharacterRenderer createCubismRenderer() =>
 /// Platform-selected stage widget with graceful fallback (§74).
 Widget? createCubismStage({
   required WidgetBuilder fallback,
-  required String modelUrl,
+  String? modelUrl,
   double width = 300,
   double height = 360,
 }) => null;

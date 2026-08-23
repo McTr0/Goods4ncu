@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../services/api_service.dart';
 import '../services/chat_service.dart';
+import '../services/companion_character_service.dart';
 import '../services/sse_service.dart';
 import '../services/upload_service.dart';
 import '../services/post_service.dart';
@@ -124,6 +125,9 @@ class _ChatPageState extends State<ChatPage> {
   void initState() {
     super.initState();
     _live2DController = Live2DController();
+    CompanionCharacterService.instance
+      ..load()
+      ..addListener(_onCompanionCharacterChanged);
     _syncBrainWithPageContext();
     _lipSyncDriver = Live2DLipSyncDriver(controller: _live2DController);
     _apiService = widget.apiService ?? context.read<ApiService>();
@@ -1001,8 +1005,15 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  void _onCompanionCharacterChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    CompanionCharacterService.instance.removeListener(
+      _onCompanionCharacterChanged,
+    );
     _lipSyncDriver.dispose();
     _live2DController.dispose();
     _typingDebounce?.cancel();
@@ -1571,22 +1582,29 @@ class _ChatPageState extends State<ChatPage> {
                   // stage internally falls back to the legacy sprite body if
                   // the model fails after mount.
                   if (_companionOwnsBody)
-                    createCubismStage(
-                          fallback: (context) => Live2DCharacterWidget(
+                    KeyedSubtree(
+                      key: ValueKey(
+                        'cubism-stage-'
+                        '${CompanionCharacterService.instance.character}',
+                      ),
+                      child:
+                          createCubismStage(
+                            fallback: (context) => Live2DCharacterWidget(
+                              controller: _live2DController,
+                              size: 260,
+                              showSpeechBubble: true,
+                              enableTouchTracking: true,
+                            ),
+                            width: 300,
+                            height: 340,
+                          ) ??
+                          Live2DCharacterWidget(
                             controller: _live2DController,
                             size: 260,
                             showSpeechBubble: true,
                             enableTouchTracking: true,
                           ),
-                          width: 300,
-                          height: 340,
-                        ) ??
-                        Live2DCharacterWidget(
-                          controller: _live2DController,
-                          size: 260,
-                          showSpeechBubble: true,
-                          enableTouchTracking: true,
-                        )
+                    )
                   else
                     Live2DCharacterWidget(
                       controller: _live2DController,

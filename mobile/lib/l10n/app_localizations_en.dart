@@ -3059,6 +3059,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get socialPersonaCharacter => 'Avatar character';
 
   @override
+  String get characterSettingsSubtitle =>
+      'Choose the character that accompanies you in chat. Tap your avatar anytime to change it.';
+
+  @override
+  String get characterSettingsUpdated => 'Companion character updated';
+
+  @override
   String get socialPersonaCharacterDoro => 'Doro';
 
   @override

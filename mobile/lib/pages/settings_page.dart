@@ -12,6 +12,9 @@ import '../models/models.dart';
 import '../services/locale_service.dart';
 import '../services/user_service.dart';
 import '../services/base_service.dart';
+import '../services/companion_character_service.dart';
+import '../companion/cubism/cubism_body.dart'
+    show availableCompanionCharacters, companionCharacterIconAsset;
 import '../services/feed_feedback_service.dart';
 import '../services/chat_service.dart';
 import '../theme/app_theme.dart';
@@ -218,16 +221,105 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildAvatarHeader() {
+    final l = AppLocalizations.of(context)!;
     final username = _profile?['username'] as String? ?? '';
 
     return Center(
-      child: UserAvatar(
-        name: username,
-        persona: _persona,
-        size: 104,
-        semanticLabel: username,
+      child: Tooltip(
+        message: l.socialPersonaCharacter,
+        child: InkWell(
+          onTap: _showCompanionCharacterSheet,
+          borderRadius: BorderRadius.circular(52),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              UserAvatar(
+                name: username,
+                persona: _persona,
+                size: 104,
+                semanticLabel: username,
+              ),
+              Positioned(
+                right: -2,
+                bottom: -2,
+                child: Container(
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                  child: const Icon(
+                    Icons.palette_outlined,
+                    size: 14,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
+  }
+
+  Future<void> _showCompanionCharacterSheet() async {
+    final l = AppLocalizations.of(context)!;
+    final messenger = ScaffoldMessenger.of(context);
+    final service = CompanionCharacterService.instance;
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppTheme.sp16,
+            0,
+            AppTheme.sp16,
+            AppTheme.sp16,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                l.socialPersonaCharacter,
+                style: Theme.of(
+                  sheetContext,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: AppTheme.sp4),
+              Text(
+                l.characterSettingsSubtitle,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.textSecondary,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: AppTheme.sp12),
+              for (final character in availableCompanionCharacters)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AppTheme.sp8),
+                  child: _CharacterOptionCard(
+                    characterId: character,
+                    label: l.socialPersonaCharacterDoro,
+                    iconAsset: companionCharacterIconAsset(character),
+                    selected:
+                        character ==
+                        CompanionCharacterService.instance.character,
+                    onSelect: () => Navigator.pop(sheetContext, character),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected == null || selected == service.character) return;
+    await service.select(selected);
+    if (!mounted) return;
+    messenger.showSnackBar(SnackBar(content: Text(l.characterSettingsUpdated)));
   }
 
   Widget _buildDiscoverySettings() {
@@ -1201,6 +1293,55 @@ class _PaymentQrCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _CharacterOptionCard extends StatelessWidget {
+  const _CharacterOptionCard({
+    required this.characterId,
+    required this.label,
+    required this.iconAsset,
+    required this.selected,
+    required this.onSelect,
+  });
+
+  final String characterId;
+  final String label;
+  final String? iconAsset;
+  final bool selected;
+  final VoidCallback onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      child: ListTile(
+        key: ValueKey('character-option-$characterId'),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: AppTheme.sp12,
+          vertical: AppTheme.sp4,
+        ),
+        leading: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: iconAsset == null
+              ? const Icon(Icons.person_outline)
+              : Image.asset(
+                  iconAsset!,
+                  width: 44,
+                  height: 44,
+                  fit: BoxFit.cover,
+                ),
+        ),
+        title: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+        trailing: selected
+            ? const Icon(Icons.check_circle, color: AppTheme.primary)
+            : const Icon(
+                Icons.radio_button_unchecked,
+                color: AppTheme.textSecondary,
+              ),
+        onTap: onSelect,
       ),
     );
   }

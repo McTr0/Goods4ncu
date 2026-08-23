@@ -1517,6 +1517,8 @@
   "adminListingNoActions": "No administrative action is available for this listing.",
   "socialPersonaTitle": "Role presentation",
   "socialPersonaCharacter": "Avatar character",
+  "characterSettingsSubtitle": "Choose the character that accompanies you in chat. Tap your avatar anytime to change it.",
+  "characterSettingsUpdated": "Companion character updated",
   "socialPersonaCharacterDoro": "Doro",
   "socialPersonaLeaveMessage": "Leave a message; replies may not be immediate",
   "socialPersonaConnectionAllowed": "Connection requests are welcome",

@@ -2920,6 +2920,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get socialPersonaCharacter => '角色选择';
 
   @override
+  String get characterSettingsSubtitle => '选择在聊天中陪伴你的角色形象，点击头像可随时更换。';
+
+  @override
+  String get characterSettingsUpdated => '陪伴角色已更新';
+
+  @override
   String get socialPersonaCharacterDoro => 'Doro';
 
   @override

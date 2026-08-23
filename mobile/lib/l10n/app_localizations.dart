@@ -5568,6 +5568,18 @@ abstract class AppLocalizations {
   /// **'Avatar character'**
   String get socialPersonaCharacter;
 
+  /// No description provided for @characterSettingsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose the character that accompanies you in chat. Tap your avatar anytime to change it.'**
+  String get characterSettingsSubtitle;
+
+  /// No description provided for @characterSettingsUpdated.
+  ///
+  /// In en, this message translates to:
+  /// **'Companion character updated'**
+  String get characterSettingsUpdated;
+
   /// No description provided for @socialPersonaCharacterDoro.
   ///
   /// In en, this message translates to:
