@@ -5358,6 +5358,48 @@ abstract class AppLocalizations {
   /// **'Remove reference'**
   String get referenceRemoveTooltip;
 
+  /// No description provided for @assistantStageCollapsed.
+  ///
+  /// In en, this message translates to:
+  /// **'Show companion'**
+  String get assistantStageCollapsed;
+
+  /// No description provided for @assistantClearHistoryTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear chat history'**
+  String get assistantClearHistoryTooltip;
+
+  /// No description provided for @assistantClearHistoryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear assistant chat history?'**
+  String get assistantClearHistoryTitle;
+
+  /// No description provided for @assistantClearHistoryBody.
+  ///
+  /// In en, this message translates to:
+  /// **'All messages will be deleted permanently.'**
+  String get assistantClearHistoryBody;
+
+  /// No description provided for @assistantClearHistoryAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear'**
+  String get assistantClearHistoryAction;
+
+  /// No description provided for @assistantHistoryCleared.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat history cleared'**
+  String get assistantHistoryCleared;
+
+  /// No description provided for @assistantMessagesEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Say hi to your companion!'**
+  String get assistantMessagesEmpty;
+
   /// No description provided for @composerVoiceMessageAction.
   ///
   /// In en, this message translates to:

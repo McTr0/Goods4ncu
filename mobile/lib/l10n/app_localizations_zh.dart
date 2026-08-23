@@ -2791,6 +2791,27 @@ class AppLocalizationsZh extends AppLocalizations {
   String get referenceRemoveTooltip => '移除引用';
 
   @override
+  String get assistantStageCollapsed => '展开小昌';
+
+  @override
+  String get assistantClearHistoryTooltip => '清空聊天记录';
+
+  @override
+  String get assistantClearHistoryTitle => '清空与小昌的聊天记录？';
+
+  @override
+  String get assistantClearHistoryBody => '所有消息将被删除，且无法恢复。';
+
+  @override
+  String get assistantClearHistoryAction => '清空';
+
+  @override
+  String get assistantHistoryCleared => '聊天记录已清空';
+
+  @override
+  String get assistantMessagesEmpty => '和小昌说点什么吧！';
+
+  @override
   String get composerVoiceMessageAction => '语音消息';
 
   @override

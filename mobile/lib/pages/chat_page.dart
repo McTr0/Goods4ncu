@@ -99,6 +99,8 @@ class _ChatPageState extends State<ChatPage> {
   final List<post.CampusPost> _agentResultPosts = [];
   final ScrollController _agentResultsController = ScrollController();
   _PendingReference? _pendingReference;
+  bool _stageExpanded = true;
+  final ScrollController _messageListController = ScrollController();
   String? _focusedAgentPostId;
   Timer? _undoTicker;
 
@@ -987,6 +989,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void dispose() {
     _agentResultsController.dispose();
+    _messageListController.dispose();
     CompanionCharacterService.instance.removeListener(
       _onCompanionCharacterChanged,
     );
@@ -1288,6 +1291,85 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  Widget _buildAssistantMessageList() {
+    final l = AppLocalizations.of(context)!;
+    if (_messages.isEmpty) {
+      return Center(
+        child: Text(
+          l.assistantMessagesEmpty,
+          style: const TextStyle(color: Colors.grey),
+        ),
+      );
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_messageListController.hasClients &&
+          _messageListController.position.maxScrollExtent > 0) {
+        _messageListController.jumpTo(
+          _messageListController.position.maxScrollExtent,
+        );
+      }
+    });
+    return ListView.builder(
+      key: const Key('assistant-message-list'),
+      controller: _messageListController,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      itemCount: _messages.length,
+      itemBuilder: (context, index) {
+        final message = _messages[index];
+        return _ChatBubble(
+          message: message,
+          isUser: message.sender == 'user',
+          hitlRequests: _hitlRequests,
+          currentUserId: _currentUserId ?? '',
+          apiService: _apiService,
+          onHitlUpdated: _loadNegotiations,
+        );
+      },
+    );
+  }
+
+  Future<void> _clearAssistantHistory() async {
+    final l = AppLocalizations.of(context)!;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l.assistantClearHistoryTitle),
+        content: Text(l.assistantClearHistoryBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(l.cancel),
+          ),
+          FilledButton(
+            key: const Key('assistant-clear-confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: Text(l.assistantClearHistoryAction),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await _chatService.clearAssistantHistory();
+      if (!mounted) return;
+      setState(() {
+        _messages.clear();
+        _historyError = null;
+      });
+      await _loadAssistantHistory();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.assistantHistoryCleared)));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString()), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   void _showHistorySheet() {
     showModalBottomSheet<void>(
       context: context,
@@ -1409,6 +1491,7 @@ class _ChatPageState extends State<ChatPage> {
         AssistantDigitalHumanHeader(
           onOpenHistory: _showHistorySheet,
           onOpenMemoryPanel: () => AssistantMemoryPanel.show(context),
+          onClearHistory: _clearAssistantHistory,
         ),
         ?agentResults,
         if (_historyError != null)
@@ -1553,69 +1636,100 @@ class _ChatPageState extends State<ChatPage> {
               },
             ),
           ),
-        // Main Digital Human Virtual Avatar Stage
-        Expanded(
+        // Collapsible companion banner + persistent message history.
+        InkWell(
+          key: const Key('assistant-stage-toggle'),
+          onTap: () => setState(() => _stageExpanded = !_stageExpanded),
           child: Container(
             width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 6),
             decoration: const BoxDecoration(
-              gradient: RadialGradient(
-                center: Alignment(0, -0.1),
-                radius: 0.85,
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
                 colors: [Color(0xFFE1F4EF), Color(0xFFFFFBF5)],
               ),
             ),
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const SizedBox(height: 10),
-                  // Body selection (§74): real Cubism model on web when the
-                  // runtime is usable and the companion owns the body. The
-                  // stage internally falls back to the legacy sprite body if
-                  // the model fails after mount.
-                  if (_companionOwnsBody)
-                    KeyedSubtree(
-                      key: ValueKey(
-                        'cubism-stage-'
-                        '${CompanionCharacterService.instance.character}',
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      _stageExpanded
+                          ? Icons.keyboard_arrow_up_rounded
+                          : Icons.keyboard_arrow_down_rounded,
+                      size: 18,
+                      color: const Color(0xFF0F766E),
+                    ),
+                    Text(
+                      _stageExpanded ? '' : l.assistantStageCollapsed,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF0F766E),
                       ),
-                      child:
-                          createCubismStage(
-                            fallback: (context) => Live2DCharacterWidget(
+                    ),
+                  ],
+                ),
+                AnimatedCrossFade(
+                  duration: const Duration(milliseconds: 200),
+                  crossFadeState: _stageExpanded
+                      ? CrossFadeState.showFirst
+                      : CrossFadeState.showSecond,
+                  firstChild: SizedBox(
+                    width: double.infinity,
+                    child: SingleChildScrollView(
+                      physics: const NeverScrollableScrollPhysics(),
+                      child: Column(
+                        children: [
+                          if (_companionOwnsBody)
+                            KeyedSubtree(
+                              key: ValueKey(
+                                'cubism-stage-'
+                                '${CompanionCharacterService.instance.character}',
+                              ),
+                              child:
+                                  createCubismStage(
+                                    fallback: (context) =>
+                                        Live2DCharacterWidget(
+                                          controller: _live2DController,
+                                          size: 220,
+                                          showSpeechBubble: true,
+                                          enableTouchTracking: true,
+                                        ),
+                                    width: 240,
+                                    height: 260,
+                                  ) ??
+                                  Live2DCharacterWidget(
+                                    controller: _live2DController,
+                                    size: 220,
+                                    showSpeechBubble: true,
+                                    enableTouchTracking: true,
+                                  ),
+                            )
+                          else
+                            Live2DCharacterWidget(
                               controller: _live2DController,
-                              size: 260,
+                              size: 220,
                               showSpeechBubble: true,
                               enableTouchTracking: true,
                             ),
-                            width: 300,
-                            height: 340,
-                          ) ??
-                          Live2DCharacterWidget(
-                            controller: _live2DController,
-                            size: 260,
-                            showSpeechBubble: true,
-                            enableTouchTracking: true,
-                          ),
-                    )
-                  else
-                    Live2DCharacterWidget(
-                      controller: _live2DController,
-                      size: 260,
-                      showSpeechBubble: true,
-                      enableTouchTracking: true,
+                          _buildQuickSuggestionChips(),
+                        ],
+                      ),
                     ),
-                  const SizedBox(height: 18),
-                  // Quick suggestion chips
-                  _buildQuickSuggestionChips(),
-                  const SizedBox(height: 10),
-                ],
-              ),
+                  ),
+                  secondChild: const SizedBox(
+                    width: double.infinity,
+                    height: 8,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
+        Expanded(child: _buildAssistantMessageList()),
         // Bottom Input Message Composer
         Container(
           decoration: BoxDecoration(

@@ -2916,6 +2916,28 @@ class AppLocalizationsEn extends AppLocalizations {
   String get referenceRemoveTooltip => 'Remove reference';
 
   @override
+  String get assistantStageCollapsed => 'Show companion';
+
+  @override
+  String get assistantClearHistoryTooltip => 'Clear chat history';
+
+  @override
+  String get assistantClearHistoryTitle => 'Clear assistant chat history?';
+
+  @override
+  String get assistantClearHistoryBody =>
+      'All messages will be deleted permanently.';
+
+  @override
+  String get assistantClearHistoryAction => 'Clear';
+
+  @override
+  String get assistantHistoryCleared => 'Chat history cleared';
+
+  @override
+  String get assistantMessagesEmpty => 'Say hi to your companion!';
+
+  @override
   String get composerVoiceMessageAction => 'Voice message';
 
   @override

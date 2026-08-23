@@ -21,6 +21,17 @@ class ChatService extends BaseService {
         .toList();
   }
 
+  /// DELETE /api/chat/assistant — hard-clear the synthetic agent thread.
+  Future<int> clearAssistantHistory() async {
+    final headers = await authHeaders();
+    final response = await delete(
+      Uri.parse('$baseUrl/api/chat/assistant'),
+      headers,
+    );
+    final data = handleResponse(response, (d) => d as Map<String, dynamic>);
+    return (data['cleared'] as num?)?.toInt() ?? 0;
+  }
+
   /// GET /api/companion/relationship — current relationship snapshot.
   Future<Map<String, dynamic>> getCompanionRelationship() async {
     final headers = await authHeaders();

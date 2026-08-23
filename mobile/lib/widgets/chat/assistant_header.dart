@@ -7,10 +7,12 @@ class AssistantDigitalHumanHeader extends StatelessWidget {
     super.key,
     required this.onOpenHistory,
     this.onOpenMemoryPanel,
+    this.onClearHistory,
   });
 
   final VoidCallback onOpenHistory;
   final VoidCallback? onOpenMemoryPanel;
+  final VoidCallback? onClearHistory;
 
   @override
   Widget build(BuildContext context) {
@@ -33,6 +35,13 @@ class AssistantDigitalHumanHeader extends StatelessWidget {
             tooltip: l.assistantMemoryEntry,
             icon: const Icon(Icons.psychology_outlined),
             onPressed: onOpenMemoryPanel,
+          ),
+        if (onClearHistory != null)
+          IconButton(
+            key: const Key('assistant-clear-history'),
+            tooltip: l.assistantClearHistoryTooltip,
+            icon: const Icon(Icons.delete_sweep_outlined),
+            onPressed: onClearHistory,
           ),
       ],
     );
