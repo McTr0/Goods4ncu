@@ -20,6 +20,7 @@ import '../companion/companion_events.dart';
 import '../companion/environment.dart';
 import '../companion/working_memory.dart';
 import '../companion/relationship_signals.dart';
+import '../companion/cubism/cubism_body.dart';
 import '../companion/open_rig_adapter.dart';
 import '../companion/runtime_host.dart';
 import '../companion/attention.dart';
@@ -98,8 +99,9 @@ class _ChatPageState extends State<ChatPage> {
   // Agent debug overlay observability buffers. The flag may sit before or
   // after the hash-router fragment, so match the full URL instead of
   // Uri.base.queryParameters (which only sees the pre-# query).
-  final bool _agentDebugEnabled =
-      Uri.base.toString().contains('agentDebug=true');
+  final bool _agentDebugEnabled = Uri.base.toString().contains(
+    'agentDebug=true',
+  );
   final List<String> _debugToolCalls = [];
   final List<String> _debugUiActions = [];
   String? _lastToolActivity;
@@ -205,6 +207,9 @@ class _ChatPageState extends State<ChatPage> {
 
   /// When the companion owns the body, legacy brain feeds must stay silent.
   bool get _useLegacyBrain => !(kCompanionEnabled && _companionHost != null);
+
+  /// Companion owns the body AND the real Cubism model is renderable here.
+  bool get _companionOwnsBody => _useLegacyBrain == false && cubismAvailable;
 
   static final RegExp _thanksPattern = RegExp(
     r'谢谢|感谢|thx|thanks',
@@ -1551,13 +1556,17 @@ class _ChatPageState extends State<ChatPage> {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   const SizedBox(height: 10),
-                  // Live2D Character with dynamic speech bubble & tap physics
-                  Live2DCharacterWidget(
-                    controller: _live2DController,
-                    size: 260,
-                    showSpeechBubble: true,
-                    enableTouchTracking: true,
-                  ),
+                  // Body selection (§74): real Cubism model on web when the
+                  // companion owns the body; legacy sprite body otherwise.
+                  if (_companionOwnsBody && cubismAvailable)
+                    createCubismStage(width: 300, height: 340)!
+                  else
+                    Live2DCharacterWidget(
+                      controller: _live2DController,
+                      size: 260,
+                      showSpeechBubble: true,
+                      enableTouchTracking: true,
+                    ),
                   const SizedBox(height: 18),
                   // Quick suggestion chips
                   _buildQuickSuggestionChips(),
