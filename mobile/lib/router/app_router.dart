@@ -32,7 +32,6 @@ import '../services/admin_role_cache.dart';
 import '../pages/trust_page.dart';
 import '../pages/post_detail_page.dart';
 import '../pages/create_post_page.dart';
-import '../pages/campus_map_page.dart';
 import '../pages/live2d_preview_page.dart';
 import '../pages/publish_hub_page.dart';
 import '../services/token_storage.dart';
@@ -162,10 +161,6 @@ final GoRouter appRouter = GoRouter(
             final id = state.pathParameters['id']!;
             return PostDetailPage(postId: id);
           },
-        ),
-        GoRoute(
-          path: '/campus-map',
-          builder: (context, state) => const CampusMapPage(),
         ),
         GoRoute(
           path: '/live2d-preview',
@@ -364,7 +359,6 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
   int _tabIndexForLocation(String location) {
     if (location == '/') return 0;
     if (location == '/conversations' ||
-        location == '/campus-map' ||
         location.startsWith('/user-chat/') ||
         location.startsWith('/chat/threads/') ||
         location.startsWith('/spaces/')) {

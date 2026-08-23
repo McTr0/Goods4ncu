@@ -37,9 +37,7 @@ void main() {
     });
 
     test('load restores a persisted selection', () async {
-      SharedPreferences.setMockInitialValues({
-        'companion.character': 'doro',
-      });
+      SharedPreferences.setMockInitialValues({'companion.character': 'doro'});
       final service = CompanionCharacterService.instance;
       await service.load();
 
@@ -61,22 +59,24 @@ void main() {
   group('settings character sheet contract', () {
     testWidgets('exposes localized labels for the picker', (tester) async {
       late AppLocalizations l;
-      await tester.pumpWidget(MaterialApp(
-        localizationsDelegates: const [
-          AppLocalizations.delegate,
-          GlobalMaterialLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-        ],
-        supportedLocales: AppLocalizations.supportedLocales,
-        locale: const Locale('zh'),
-        home: Builder(
-          builder: (context) {
-            l = AppLocalizations.of(context)!;
-            return const Scaffold(body: SizedBox.shrink());
-          },
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: const [
+            AppLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: AppLocalizations.supportedLocales,
+          locale: const Locale('zh'),
+          home: Builder(
+            builder: (context) {
+              l = AppLocalizations.of(context)!;
+              return const Scaffold(body: SizedBox.shrink());
+            },
+          ),
         ),
-      ));
+      );
       await tester.pump();
 
       expect(l.socialPersonaCharacter, '角色选择');

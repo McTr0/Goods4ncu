@@ -6,11 +6,9 @@ import 'package:go_router/go_router.dart';
 import 'package:goods4ncu_mobile/components/social_persona_card.dart';
 import 'package:goods4ncu_mobile/components/user_avatar.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
-import 'package:goods4ncu_mobile/models/location_space.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/pages/conversation_list_page.dart';
 import 'package:goods4ncu_mobile/services/chat_service.dart';
-import 'package:goods4ncu_mobile/services/campus_location_service.dart';
 import 'package:goods4ncu_mobile/services/user_service.dart';
 import 'package:goods4ncu_mobile/theme/app_theme.dart';
 
@@ -19,73 +17,13 @@ class _FakeChatService extends ChatService {
     this.failConversations = false,
     List<ChatThread>? threads,
     this.conversations = const [],
-    this.locationSpaces = const [],
-    this.locationRecommendation,
   }) : threads = threads ?? const [];
 
   final bool failConversations;
   final List<ChatThread> threads;
   final List<Conversation> conversations;
-  final List<CampusLocationSpace> locationSpaces;
-  final CampusLocationSpace? locationRecommendation;
-  String? joinedLocationSpaceId;
-  int locationPresenceCalls = 0;
   final List<Map<String, dynamic>> spaces = [];
   final List<Map<String, dynamic>> spaceMessages = [];
-
-  @override
-  Future<List<CampusLocationSpace>> getLocationSpaces() async => locationSpaces;
-
-  @override
-  Future<CampusLocationRecommendation> recommendLocationSpace({
-    required double latitude,
-    required double longitude,
-  }) async {
-    return CampusLocationRecommendation(
-      matched: locationRecommendation != null,
-      space: locationRecommendation,
-    );
-  }
-
-  @override
-  Future<Map<String, dynamic>> joinLocationSpace(String spaceId) async {
-    joinedLocationSpaceId = spaceId;
-    return {
-      'id': spaceId,
-      'kind': 'group',
-      'name': locationRecommendation?.name ?? '地点聊天室',
-      'my_role': 'member',
-      'member_count': 2,
-      'created_at': '2026-08-16T10:00:00Z',
-      'updated_at': '2026-08-16T10:00:00Z',
-    };
-  }
-
-  @override
-  Future<Map<String, dynamic>> enterLocationSpace(String spaceId) async {
-    joinedLocationSpaceId = spaceId;
-    return {
-      'id': spaceId,
-      'kind': 'group',
-      'name': locationRecommendation?.name ?? '地点聊天室',
-      'my_role': 'visitor',
-      'member_count': 12,
-      'online_count': 4,
-      'is_location_space': true,
-      'origin': 'campus_location',
-      'created_at': '2026-08-16T10:00:00Z',
-      'updated_at': '2026-08-16T10:00:00Z',
-    };
-  }
-
-  @override
-  Future<CampusLocationPresence> setLocationSpacePresence(
-    String spaceId, {
-    required bool active,
-  }) async {
-    if (active) locationPresenceCalls++;
-    return const CampusLocationPresence(onlineCount: 4, expiresInSeconds: 30);
-  }
 
   void seedSpace({
     String id = 'space-seeded',
@@ -188,10 +126,6 @@ class _FakeChatService extends ChatService {
     'name': '前湖北院',
     'my_role': 'visitor',
     'member_count': 99,
-    'online_count': 4,
-    'is_location_space': true,
-    'origin': 'campus_location',
-    'location_kind': 'area',
     'created_at': '2026-08-16T10:00:00Z',
     'updated_at': '2026-08-16T10:00:00Z',
   };
@@ -232,15 +166,6 @@ class _FakeUserService extends UserService {
   );
 }
 
-class _FakeCampusLocationService extends CampusLocationService {
-  _FakeCampusLocationService(this.position);
-
-  final CoarseCampusPosition position;
-
-  @override
-  Future<CoarseCampusPosition> determineCoarsePosition() async => position;
-}
-
 const _publishedPeerPersona = SocialPersona(
   representationMode: 'role_character',
   styleVersion: 'v1',
@@ -261,7 +186,6 @@ Widget _buildPage(
   Locale locale = const Locale('zh'),
   ThemeMode themeMode = ThemeMode.light,
   double textScale = 1,
-  CampusLocationService? locationService,
 }) {
   return MaterialApp(
     theme: AppTheme.light,
@@ -279,7 +203,6 @@ Widget _buildPage(
     home: ConversationListPage(
       chatService: service,
       userService: _FakeUserService(),
-      locationService: locationService,
     ),
   );
 }
@@ -822,183 +745,6 @@ void main() {
       expect(find.text('开始了一次连接'), findsNothing);
     },
   );
-
-  testWidgets('renders four collapsible location roots with online counts', (
-    tester,
-  ) async {
-    final spaces = [
-      CampusLocationSpace(
-        id: 'qianhu-north',
-        name: '前湖北院',
-        locationKind: 'area',
-        isOfficial: true,
-        isMember: false,
-        memberCount: 12,
-        canCreateChildren: false,
-        onlineCount: 7,
-        children: [
-          CampusLocationSpace(
-            id: 'xian-su-yuan',
-            name: '先骕园',
-            parentSpaceId: 'qianhu-north',
-            locationKind: 'facility',
-            isOfficial: true,
-            isMember: false,
-            memberCount: 5,
-            canCreateChildren: false,
-            onlineCount: 3,
-          ),
-        ],
-      ),
-      const CampusLocationSpace(
-        id: 'qianhu-south',
-        name: '前湖南院',
-        locationKind: 'area',
-        isOfficial: true,
-        isMember: false,
-        memberCount: 0,
-        canCreateChildren: false,
-        onlineCount: 2,
-      ),
-      const CampusLocationSpace(
-        id: 'qingshanhu-campus',
-        name: '青山湖校区',
-        locationKind: 'campus',
-        isOfficial: true,
-        isMember: false,
-        memberCount: 0,
-        canCreateChildren: false,
-      ),
-      const CampusLocationSpace(
-        id: 'donghu-campus',
-        name: '东湖校区',
-        locationKind: 'campus',
-        isOfficial: true,
-        isMember: false,
-        memberCount: 0,
-        canCreateChildren: false,
-        onlineCount: 1,
-      ),
-    ];
-
-    await tester.pumpWidget(
-      _buildPage(_FakeChatService(locationSpaces: spaces)),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('南昌大学地点聊天室'), findsOneWidget);
-    expect(find.text('前湖北院'), findsOneWidget);
-    expect(find.text('前湖南院'), findsOneWidget);
-    expect(find.text('青山湖校区'), findsOneWidget);
-    expect(find.text('东湖校区'), findsOneWidget);
-    expect(find.text('当前在线 7 人'), findsOneWidget);
-    expect(find.text('7 位成员'), findsNothing);
-    expect(find.text('加入'), findsNothing);
-    expect(find.text('先骕园'), findsNothing);
-
-    await tester.tap(find.text('前湖北院'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('先骕园'), findsOneWidget);
-    expect(find.text('当前在线 3 人'), findsOneWidget);
-    expect(find.byTooltip('打开校园地图'), findsOneWidget);
-  });
-
-  testWidgets('one-shot location enters without a membership step', (
-    tester,
-  ) async {
-    final leaf = CampusLocationSpace(
-      id: 'xiuxian-square',
-      name: '修贤广场',
-      locationKind: 'landmark',
-      isOfficial: true,
-      isMember: false,
-      memberCount: 8,
-      canCreateChildren: true,
-    );
-    final service = _FakeChatService(
-      locationSpaces: [leaf],
-      locationRecommendation: leaf,
-    );
-    final router = GoRouter(
-      initialLocation: '/conversations',
-      routes: [
-        GoRoute(
-          path: '/conversations',
-          builder: (context, state) => ConversationListPage(
-            chatService: service,
-            userService: _FakeUserService(),
-            locationService: _FakeCampusLocationService(
-              const CoarseCampusPosition(latitude: 28.662, longitude: 115.801),
-            ),
-          ),
-        ),
-        GoRoute(
-          name: 'chat-space',
-          path: '/chat/spaces/:spaceId',
-          builder: (context, state) => Scaffold(
-            body: Center(
-              child: Text('opened-${state.pathParameters['spaceId']}'),
-            ),
-          ),
-        ),
-      ],
-    );
-
-    await tester.pumpWidget(
-      MaterialApp.router(
-        theme: AppTheme.light,
-        locale: const Locale('zh'),
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        routerConfig: router,
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('location-use-current')));
-    await tester.pumpAndSettle();
-
-    expect(service.joinedLocationSpaceId, leaf.id);
-    expect(find.text('opened-${leaf.id}'), findsOneWidget);
-  });
-
-  testWidgets('location room shows presence instead of member semantics', (
-    tester,
-  ) async {
-    final service = _FakeChatService();
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.light,
-        locale: const Locale('zh'),
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        home: SpaceChatPage(
-          spaceId: 'qianhu-north',
-          initialSpace: const {
-            'id': 'qianhu-north',
-            'kind': 'group',
-            'name': '前湖北院',
-            'my_role': 'visitor',
-            'member_count': 99,
-            'online_count': 4,
-            'is_location_space': true,
-            'created_at': '2026-08-16T10:00:00Z',
-            'updated_at': '2026-08-16T10:00:00Z',
-          },
-          chatService: service,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('当前在线 4 人'), findsOneWidget);
-    expect(find.textContaining('99 位成员'), findsNothing);
-    expect(find.textContaining('我的角色'), findsNothing);
-    expect(find.text('地点聊天室'), findsOneWidget);
-    expect(find.text('还没有话题'), findsOneWidget);
-    expect(find.text('发起话题'), findsOneWidget);
-    expect(service.locationPresenceCalls, greaterThanOrEqualTo(1));
-  });
 
   testWidgets('group discussion requires a topic before replies', (
     tester,

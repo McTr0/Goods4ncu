@@ -9,11 +9,9 @@ import '../components/relationship_space_preview.dart';
 import '../components/unified_message_composer.dart';
 import '../components/user_avatar.dart';
 import '../l10n/app_localizations.dart';
-import '../models/location_space.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
 import '../services/chat_local_seen_storage.dart';
-import '../services/campus_location_service.dart';
 import '../services/user_service.dart';
 import '../services/ws_service.dart';
 import '../theme/app_theme.dart';
@@ -27,13 +25,11 @@ class ConversationListPage extends StatefulWidget {
     this.chatService,
     this.userService,
     this.localSeenStorage,
-    this.locationService,
   });
 
   final ChatService? chatService;
   final UserService? userService;
   final ChatLocalSeenStorage? localSeenStorage;
-  final CampusLocationService? locationService;
 
   @override
   State<ConversationListPage> createState() => _ConversationListPageState();
@@ -43,17 +39,12 @@ class _ConversationListPageState extends State<ConversationListPage> {
   late final ChatService _chatService;
   late final UserService _userService;
   late final ChatLocalSeenStorage _localSeenStorage;
-  late final CampusLocationService _locationService;
   StreamSubscription<WsNotification>? _wsSubscription;
   List<ChatThread> _threads = const [];
   List<_ChatSpace> _spaces = const [];
   ConversationMode? _filter;
   bool _loading = true;
   String? _error;
-  List<CampusLocationSpace> _locationSpaces = const [];
-  bool _locationLoading = true;
-  bool _locating = false;
-  String? _locationError;
 
   @override
   void initState() {
@@ -62,9 +53,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
     _userService = widget.userService ?? context.read<UserService>();
     _localSeenStorage =
         widget.localSeenStorage ?? SharedPreferencesChatLocalSeenStorage();
-    _locationService = widget.locationService ?? CampusLocationService();
     _load();
-    _loadLocationSpaces();
     _wsSubscription = WsService.instance.stream.listen((notification) {
       if (!mounted) return;
       if ({
@@ -78,8 +67,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
         'space_member_changed',
       }.contains(notification.eventType)) {
         _load(silent: true);
-      } else if (notification.eventType == 'space_presence_changed') {
-        _loadLocationSpaces(silent: true);
       }
     });
   }
@@ -126,33 +113,8 @@ class _ConversationListPageState extends State<ConversationListPage> {
     }
   }
 
-  Future<void> _loadLocationSpaces({bool silent = false}) async {
-    if (!silent) {
-      setState(() {
-        _locationLoading = true;
-        _locationError = null;
-      });
-    }
-    try {
-      final spaces = await _chatService.getLocationSpaces();
-      final primary = CampusLocationSpace.primaryDirectories(spaces);
-      if (!mounted) return;
-      setState(() {
-        _locationSpaces = primary.isEmpty ? spaces : primary;
-        _locationLoading = false;
-        _locationError = null;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _locationLoading = false;
-        _locationError = error.toString();
-      });
-    }
-  }
-
   Future<void> _refreshAll() async {
-    await Future.wait([_load(), _loadLocationSpaces(silent: true)]);
+    await _load();
   }
 
   Future<ChatThread> _applyLocalSeen(ChatThread thread) async {
@@ -248,67 +210,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(l.conversationCreateFailed(error.toString()))),
       );
-    }
-  }
-
-  Future<void> _enterLocationSpace(CampusLocationSpace space) async {
-    try {
-      final data = await _chatService.enterLocationSpace(space.id);
-      await _loadLocationSpaces(silent: true);
-      if (!mounted) return;
-      _openSpace(
-        _ChatSpace.fromJson({
-          ...data,
-          'is_location_space': true,
-          'origin': space.origin ?? 'campus_location',
-          'location_kind': space.locationKind,
-          'location_slug': space.locationSlug,
-        }),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(l10n(context).locationEnterFailed(error.toString())),
-        ),
-      );
-    }
-  }
-
-  Future<void> _locateAndEnter() async {
-    if (_locating) return;
-    setState(() => _locating = true);
-    try {
-      final position = await _locationService.determineCoarsePosition();
-      final recommendation = await _chatService.recommendLocationSpace(
-        latitude: position.latitude,
-        longitude: position.longitude,
-      );
-      if (!mounted) return;
-      final space = recommendation.space;
-      if (!recommendation.matched || space == null) {
-        setState(() => _locationError = l10n(context).locationNoMatch);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(l10n(context).locationNoMatch)));
-        return;
-      }
-      await _enterLocationSpace(space);
-    } on CampusLocationException {
-      if (!mounted) return;
-      setState(() => _locationError = l10n(context).locationUnavailable);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n(context).locationUnavailable)),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(l10n(context).locationEnterFailed(error.toString())),
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _locating = false);
     }
   }
 
@@ -418,8 +319,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
     final regular = _threads
         .where((thread) => thread.pendingCount == 0)
         .toList();
-    final hasInboxData =
-        _threads.isNotEmpty || _spaces.isNotEmpty || _locationSpaces.isNotEmpty;
+    final hasInboxData = _threads.isNotEmpty || _spaces.isNotEmpty;
     return RefreshIndicator(
       onRefresh: _refreshAll,
       child: ListView(
@@ -434,17 +334,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
                 subtitle: _error!,
                 action: TextButton(onPressed: _load, child: Text(l.retry)),
               ),
-            ),
-          if (_filter == null)
-            _LocationSpaceSection(
-              spaces: _locationSpaces,
-              loading: _locationLoading,
-              error: _locationError,
-              locating: _locating,
-              onLocate: _locateAndEnter,
-              onOpenMap: () => context.push('/campus-map'),
-              onRetry: _loadLocationSpaces,
-              onEnter: _enterLocationSpace,
             ),
           if (_error == null && !hasInboxData)
             Padding(
@@ -1113,78 +1002,28 @@ class SpaceChatPage extends StatefulWidget {
   State<SpaceChatPage> createState() => _SpaceChatPageState();
 }
 
-class _SpaceChatPageState extends State<SpaceChatPage>
-    with WidgetsBindingObserver {
+class _SpaceChatPageState extends State<SpaceChatPage> {
   late final ChatService _chatService;
   _ChatSpace? _space;
   bool _loading = true;
-  bool _presenceUpdating = false;
-  bool _presenceActive = false;
   String? _error;
   int _loadGeneration = 0;
-  Timer? _presenceTimer;
-  StreamSubscription<WsNotification>? _presenceWsSubscription;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _chatService = widget.chatService ?? context.read<ChatService>();
-    _presenceWsSubscription = WsService.instance.stream.listen((notification) {
-      if (!mounted ||
-          notification.eventType != 'space_presence_changed' ||
-          notification.spaceId != widget.spaceId ||
-          notification.onlineCount == null ||
-          _space?.isLocationSpace != true) {
-        return;
-      }
-      setState(() {
-        _space = _space?.copyWith(onlineCount: notification.onlineCount);
-      });
-    });
     final initial = widget.initialSpace;
     if (initial != null) {
       _space = _ChatSpace.fromJson(initial);
       _loading = false;
-      if (_space!.isLocationSpace) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _refreshPresence();
-        });
-      }
     }
     _loadSpace(silent: initial != null);
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _presenceWsSubscription?.cancel();
-    _presenceTimer?.cancel();
-    if (_presenceActive && _space?.isLocationSpace == true) {
-      unawaited(
-        _chatService.setLocationSpacePresence(widget.spaceId, active: false),
-      );
-    }
     super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_space?.isLocationSpace != true) return;
-    if (state == AppLifecycleState.resumed) {
-      _refreshPresence();
-      return;
-    }
-    if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.paused ||
-        state == AppLifecycleState.detached) {
-      _presenceTimer?.cancel();
-      _presenceTimer = null;
-      _presenceActive = false;
-      unawaited(
-        _chatService.setLocationSpacePresence(widget.spaceId, active: false),
-      );
-    }
   }
 
   Future<void> _loadSpace({bool silent = false}) async {
@@ -1205,7 +1044,6 @@ class _SpaceChatPageState extends State<SpaceChatPage>
         _loading = false;
         _error = null;
       });
-      if (next.isLocationSpace) await _refreshPresence();
     } catch (error) {
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
@@ -1213,36 +1051,6 @@ class _SpaceChatPageState extends State<SpaceChatPage>
         _loading = false;
       });
     }
-  }
-
-  Future<void> _refreshPresence() async {
-    if (_presenceUpdating || _space?.isLocationSpace != true) return;
-    _presenceUpdating = true;
-    try {
-      final presence = await _chatService.setLocationSpacePresence(
-        widget.spaceId,
-        active: true,
-      );
-      if (!mounted) return;
-      setState(() {
-        _presenceActive = true;
-        _space = _space?.copyWith(
-          onlineCount: presence.onlineCount,
-          presenceExpiresInSeconds: presence.expiresInSeconds,
-        );
-      });
-      _schedulePresenceHeartbeat(presence.expiresInSeconds);
-    } catch (_) {
-      if (mounted) _schedulePresenceHeartbeat(60);
-    } finally {
-      _presenceUpdating = false;
-    }
-  }
-
-  void _schedulePresenceHeartbeat(int expiresInSeconds) {
-    _presenceTimer?.cancel();
-    final seconds = (expiresInSeconds ~/ 2).clamp(10, 60);
-    _presenceTimer = Timer(Duration(seconds: seconds), _refreshPresence);
   }
 
   @override
@@ -1362,213 +1170,6 @@ class _CreateSpaceDialogState extends State<_CreateSpaceDialog> {
   }
 }
 
-class _LocationSpaceSection extends StatelessWidget {
-  const _LocationSpaceSection({
-    required this.spaces,
-    required this.loading,
-    required this.error,
-    required this.locating,
-    required this.onLocate,
-    required this.onOpenMap,
-    required this.onRetry,
-    required this.onEnter,
-  });
-
-  final List<CampusLocationSpace> spaces;
-  final bool loading;
-  final String? error;
-  final bool locating;
-  final VoidCallback onLocate;
-  final VoidCallback onOpenMap;
-  final Future<void> Function() onRetry;
-  final Future<void> Function(CampusLocationSpace space) onEnter;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = l10n(context);
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          border: Border(
-            top: BorderSide(color: scheme.outlineVariant),
-            bottom: BorderSide(color: scheme.outlineVariant),
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.location_on_outlined, color: scheme.primary),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      l.locationSpacesTitle,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                  IconButton(
-                    key: const ValueKey('location-open-map'),
-                    tooltip: l.campusMapOpenTooltip,
-                    onPressed: onOpenMap,
-                    icon: const Icon(Icons.map_outlined),
-                  ),
-                  IconButton(
-                    key: const ValueKey('location-use-current'),
-                    tooltip: l.locationUseCurrent,
-                    onPressed: locating ? null : onLocate,
-                    icon: locating
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.my_location_rounded),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 5),
-              Text(
-                l.locationPrivacyHint,
-                style: TextStyle(
-                  color: scheme.onSurfaceVariant,
-                  fontSize: 12,
-                  height: 1.35,
-                ),
-              ),
-              if (loading) ...[
-                const SizedBox(height: 12),
-                const LinearProgressIndicator(minHeight: 2),
-              ] else if (error != null && spaces.isEmpty) ...[
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        l.locationLoadFailed,
-                        style: TextStyle(color: scheme.onSurfaceVariant),
-                      ),
-                    ),
-                    TextButton(onPressed: onRetry, child: Text(l.retry)),
-                  ],
-                ),
-              ] else if (spaces.isNotEmpty) ...[
-                const SizedBox(height: 7),
-                for (final space in spaces)
-                  _LocationSpaceNodeTile(
-                    space: space,
-                    level: 0,
-                    onEnter: onEnter,
-                  ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LocationSpaceNodeTile extends StatelessWidget {
-  const _LocationSpaceNodeTile({
-    required this.space,
-    required this.level,
-    required this.onEnter,
-  });
-
-  final CampusLocationSpace space;
-  final int level;
-  final Future<void> Function(CampusLocationSpace space) onEnter;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = l10n(context);
-    final scheme = Theme.of(context).colorScheme;
-    final icon = switch (space.locationKind) {
-      'campus' => Icons.school_outlined,
-      'area' => Icons.domain_outlined,
-      _ => Icons.place_outlined,
-    };
-    final title = Row(
-      children: [
-        Expanded(
-          child: Text(
-            space.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w700),
-          ),
-        ),
-        if (!space.locationMatchable)
-          Padding(
-            padding: const EdgeInsets.only(left: 5),
-            child: Text(
-              l.locationManualOnlyLabel,
-              style: TextStyle(
-                color: scheme.onSurfaceVariant,
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        if (space.children.isNotEmpty)
-          IconButton(
-            key: ValueKey('location-enter-${space.id}'),
-            tooltip: l.locationEnterAction,
-            onPressed: () => onEnter(space),
-            icon: const Icon(Icons.forum_outlined, size: 19),
-          ),
-      ],
-    );
-    final subtitle = Text(
-      space.onlineCount == null
-          ? l.locationOnlineUnavailable
-          : l.locationOnlineCount(space.onlineCount!),
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-    );
-    if (space.children.isEmpty) {
-      return Padding(
-        padding: EdgeInsets.only(left: level * 14.0),
-        child: ListTile(
-          key: ValueKey('location-node-${space.id}'),
-          dense: true,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-          leading: Icon(icon, color: scheme.primary),
-          title: title,
-          subtitle: subtitle,
-          trailing: const Icon(Icons.chevron_right_rounded),
-          onTap: () => onEnter(space),
-        ),
-      );
-    }
-    return Padding(
-      padding: EdgeInsets.only(left: level * 10.0),
-      child: ExpansionTile(
-        key: PageStorageKey('location-node-${space.id}'),
-        dense: true,
-        tilePadding: const EdgeInsets.symmetric(horizontal: 4),
-        childrenPadding: EdgeInsets.zero,
-        leading: Icon(icon, color: scheme.primary),
-        title: title,
-        subtitle: subtitle,
-        children: [
-          for (final child in space.children)
-            _LocationSpaceNodeTile(
-              space: child,
-              level: level + 1,
-              onEnter: onEnter,
-            ),
-        ],
-      ),
-    );
-  }
-}
-
 class _ChatSpace {
   const _ChatSpace({
     required this.id,
@@ -1580,11 +1181,6 @@ class _ChatSpace {
     required this.createdAt,
     required this.updatedAt,
     this.description,
-    this.onlineCount,
-    this.presenceExpiresInSeconds,
-    this.isLocationSpace = false,
-    this.locationKind,
-    this.locationSlug,
     this.origin,
   });
 
@@ -1597,18 +1193,13 @@ class _ChatSpace {
   final int memberCount;
   final DateTime createdAt;
   final DateTime updatedAt;
-  final int? onlineCount;
-  final int? presenceExpiresInSeconds;
-  final bool isLocationSpace;
-  final String? locationKind;
-  final String? locationSlug;
   final String? origin;
 
   bool get canPost => true;
   String? displayName(AppLocalizations l) =>
       name.trim().isEmpty ? l.unnamedSpace : name;
 
-  _ChatSpace copyWith({int? onlineCount, int? presenceExpiresInSeconds}) {
+  _ChatSpace copyWith({String? origin}) {
     return _ChatSpace(
       id: id,
       kind: kind,
@@ -1619,13 +1210,7 @@ class _ChatSpace {
       createdAt: createdAt,
       updatedAt: updatedAt,
       description: description,
-      onlineCount: onlineCount ?? this.onlineCount,
-      presenceExpiresInSeconds:
-          presenceExpiresInSeconds ?? this.presenceExpiresInSeconds,
-      isLocationSpace: isLocationSpace,
-      locationKind: locationKind,
-      locationSlug: locationSlug,
-      origin: origin,
+      origin: origin ?? this.origin,
     );
   }
 
@@ -1637,11 +1222,6 @@ class _ChatSpace {
     'owner_id': ownerId,
     'my_role': myRole,
     'member_count': memberCount,
-    'online_count': onlineCount,
-    'presence_expires_in_seconds': presenceExpiresInSeconds,
-    'is_location_space': isLocationSpace,
-    'location_kind': locationKind,
-    'location_slug': locationSlug,
     'origin': origin,
     'created_at': createdAt.toIso8601String(),
     'updated_at': updatedAt.toIso8601String(),
@@ -1656,15 +1236,6 @@ class _ChatSpace {
       ownerId: json['owner_id']?.toString() ?? '',
       myRole: json['my_role']?.toString() ?? 'member',
       memberCount: (json['member_count'] as num?)?.toInt() ?? 0,
-      onlineCount: (json['online_count'] as num?)?.toInt(),
-      presenceExpiresInSeconds: (json['presence_expires_in_seconds'] as num?)
-          ?.toInt(),
-      isLocationSpace:
-          json['is_location_space'] == true ||
-          json['origin'] == 'campus_location' ||
-          json['origin'] == 'location_child',
-      locationKind: json['location_kind']?.toString(),
-      locationSlug: json['location_slug']?.toString(),
       origin: json['origin']?.toString(),
       createdAt:
           DateTime.tryParse(json['created_at']?.toString() ?? '') ??
@@ -1970,16 +1541,10 @@ class _SpaceDetailPaneState extends State<_SpaceDetailPane> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      widget.space.isLocationSpace
-                          ? widget.space.onlineCount == null
-                                ? l.locationOnlineUnavailable
-                                : l.locationOnlineCount(
-                                    widget.space.onlineCount!,
-                                  )
-                          : l.spaceMembersRoleLine(
-                              widget.space.memberCount,
-                              _spaceRoleLabel(l, widget.space.myRole),
-                            ),
+                      l.spaceMembersRoleLine(
+                        widget.space.memberCount,
+                        _spaceRoleLabel(l, widget.space.myRole),
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -2137,29 +1702,26 @@ class _SpaceDetailPaneState extends State<_SpaceDetailPane> {
       isSending: _sending,
       onSubmitted: (_) => _send(),
       onSend: _send,
-      expandedActions: widget.space.isLocationSpace
-          ? const []
-          : [
-              MessageComposerAction(
-                id: 'relay',
-                icon: Icons.format_list_numbered_rounded,
-                label: l.groupToolRelay,
-                onPressed: () => _applySpaceTemplate(l.groupToolRelayTemplate),
-              ),
-              MessageComposerAction(
-                id: 'collection',
-                icon: Icons.inventory_2_outlined,
-                label: l.groupToolCollection,
-                onPressed: () =>
-                    _applySpaceTemplate(l.groupToolCollectionTemplate),
-              ),
-              MessageComposerAction(
-                id: 'poll',
-                icon: Icons.poll_outlined,
-                label: l.groupToolPoll,
-                onPressed: () => _applySpaceTemplate(l.groupToolPollTemplate),
-              ),
-            ],
+      expandedActions: [
+        MessageComposerAction(
+          id: 'relay',
+          icon: Icons.format_list_numbered_rounded,
+          label: l.groupToolRelay,
+          onPressed: () => _applySpaceTemplate(l.groupToolRelayTemplate),
+        ),
+        MessageComposerAction(
+          id: 'collection',
+          icon: Icons.inventory_2_outlined,
+          label: l.groupToolCollection,
+          onPressed: () => _applySpaceTemplate(l.groupToolCollectionTemplate),
+        ),
+        MessageComposerAction(
+          id: 'poll',
+          icon: Icons.poll_outlined,
+          label: l.groupToolPoll,
+          onPressed: () => _applySpaceTemplate(l.groupToolPollTemplate),
+        ),
+      ],
     );
   }
 
@@ -3021,17 +2583,9 @@ class _SpaceAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final isLocation = space.isLocationSpace;
     return CircleAvatar(
-      backgroundColor: isLocation
-          ? scheme.tertiaryContainer
-          : scheme.primaryContainer,
-      child: Icon(
-        isLocation ? Icons.place_outlined : Icons.groups_2_outlined,
-        color: isLocation
-            ? scheme.onTertiaryContainer
-            : scheme.onPrimaryContainer,
-      ),
+      backgroundColor: scheme.primaryContainer,
+      child: Icon(Icons.groups_2_outlined, color: scheme.onPrimaryContainer),
     );
   }
 }
@@ -3045,7 +2599,7 @@ class _SpaceKindBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
-    final color = space.isLocationSpace ? scheme.tertiary : scheme.primary;
+    final color = scheme.primary;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
@@ -3053,7 +2607,7 @@ class _SpaceKindBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(9),
       ),
       child: Text(
-        space.isLocationSpace ? l.locationSpaceKind : l.spaceKindGroup,
+        l.spaceKindGroup,
         style: TextStyle(
           color: color,
           fontSize: 11,
