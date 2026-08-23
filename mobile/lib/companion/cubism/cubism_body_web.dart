@@ -5,7 +5,10 @@ import 'cubism_bridge_web.dart';
 import 'cubism_renderer.dart';
 
 const String _containerId = 'live2d-stage-container';
-const String _defaultModelUrl = '/assets/live2d/doro/Doro.model3.json';
+
+/// Flutter web serves declared assets under /assets/<repo-path>, and the
+/// repo path itself starts with assets/, hence the doubled prefix.
+const String _defaultModelUrl = '/assets/assets/live2d/doro/Doro.model3.json';
 
 /// Web stage: an HtmlElementView hosting the PIXI canvas; mounting happens
 /// when the platform view is created (goal §72 — real Cubism body on web).
