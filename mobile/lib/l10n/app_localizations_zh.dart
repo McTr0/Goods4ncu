@@ -1520,12 +1520,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get publicProfile => '同学主页';
 
   @override
-  String get myPublicProfile => '我的公开主页';
-
-  @override
-  String get myPublicProfileSubtitle => '预览别人看到你的样子。';
-
-  @override
   String get viewPublicProfile => '查看主页';
 
   @override
@@ -1751,19 +1745,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get relationshipSpaceTitle => '共同空间';
 
   @override
-  String get relationshipSpaceSubtitle => '异步时保留历史，连接时只显示明确的连接状态。';
-
-  @override
   String get relationshipSpaceMe => '我';
 
   @override
-  String get relationshipSpaceAsync => '可以留言';
+  String get relationshipSpaceAsync => '未连接';
 
   @override
   String get relationshipSpaceConnected => '已连接';
-
-  @override
-  String get relationshipSpaceTimeline => '时间轨迹';
 
   @override
   String get relationshipSpaceLastConnection => '上次连接';
@@ -2914,9 +2902,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get adminListingNoActions => '当前没有可执行的管理操作。';
 
   @override
-  String get socialPersonaTitle => '角色化呈现';
-
-  @override
   String get socialPersonaCharacter => '角色选择';
 
   @override
@@ -2927,39 +2912,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get socialPersonaCharacterDoro => 'Doro';
-
-  @override
-  String get socialPersonaLeaveMessage => '可以留言，不保证即时回复';
-
-  @override
-  String get socialPersonaConnectionAllowed => '可以请求连接';
-
-  @override
-  String get socialPersonaBusy => '最近忙，仍可留言';
-
-  @override
-  String get socialPersonaLater => '稍后处理';
-
-  @override
-  String get socialPersonaLabelSlowToWarm => '慢热';
-
-  @override
-  String get socialPersonaLabelBusinessOnly => '只谈正事';
-
-  @override
-  String get socialPersonaLabelMeetupFriendly => '面交友好';
-
-  @override
-  String get socialPersonaLabelCasualChat => '喜欢闲聊';
-
-  @override
-  String get socialPersonaLabelReplyLater => '回消息偏慢';
-
-  @override
-  String get socialPersonaLabelTechEnthusiast => '技术宅';
-
-  @override
-  String get socialPersonaPreviewRole => '角色预览';
 
   @override
   String get composerMoreTools => '更多工具';

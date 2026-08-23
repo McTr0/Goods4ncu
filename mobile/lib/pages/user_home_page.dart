@@ -6,7 +6,6 @@ import '../components/contact_conversation_sheet.dart';
 import '../components/content_report_dialog.dart';
 import '../components/payment_qr_image.dart';
 import '../components/price_tag.dart';
-import '../components/social_persona_card.dart';
 import '../components/user_avatar.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
@@ -279,13 +278,6 @@ class _UserHomePageState extends State<UserHomePage> {
                 persona: _persona,
                 onContact: _contactUser,
               ),
-              if (_persona != null) ...[
-                const SizedBox(height: AppTheme.sp12),
-                SocialPersonaPreviewCard(
-                  persona: _persona!,
-                  title: l.socialPersonaTitle,
-                ),
-              ],
               // Right where someone decides whether to deal with this person.
               // A record kept and never shown is bookkeeping, not trust.
               if (_reputation != null)

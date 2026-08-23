@@ -76,7 +76,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('共同空间'), findsOneWidget);
-      expect(find.text('可以留言'), findsOneWidget);
+      expect(find.text('未连接'), findsOneWidget);
       expect(find.text('发送了留言'), findsOneWidget);
       expect(find.text('Alice'), findsOneWidget);
       expect(find.text('我'), findsWidgets);

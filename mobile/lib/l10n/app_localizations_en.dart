@@ -1583,12 +1583,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get publicProfile => 'Classmate Profile';
 
   @override
-  String get myPublicProfile => 'My public profile';
-
-  @override
-  String get myPublicProfileSubtitle => 'Preview how others see your profile.';
-
-  @override
   String get viewPublicProfile => 'View profile';
 
   @override
@@ -1828,10 +1822,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get relationshipSpaceTitle => 'Shared space';
 
   @override
-  String get relationshipSpaceSubtitle =>
-      'Keep history while asynchronous; show only explicit connection state when connected.';
-
-  @override
   String get relationshipSpaceMe => 'Me';
 
   @override
@@ -1839,9 +1829,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get relationshipSpaceConnected => 'Connected';
-
-  @override
-  String get relationshipSpaceTimeline => 'Timeline';
 
   @override
   String get relationshipSpaceLastConnection => 'Last connection';
@@ -3053,9 +3040,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'No administrative action is available for this listing.';
 
   @override
-  String get socialPersonaTitle => 'Role presentation';
-
-  @override
   String get socialPersonaCharacter => 'Avatar character';
 
   @override
@@ -3067,41 +3051,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get socialPersonaCharacterDoro => 'Doro';
-
-  @override
-  String get socialPersonaLeaveMessage =>
-      'Leave a message; replies may not be immediate';
-
-  @override
-  String get socialPersonaConnectionAllowed =>
-      'Connection requests are welcome';
-
-  @override
-  String get socialPersonaBusy => 'Busy lately; messages are still welcome';
-
-  @override
-  String get socialPersonaLater => 'Will look later';
-
-  @override
-  String get socialPersonaLabelSlowToWarm => 'Slow to warm';
-
-  @override
-  String get socialPersonaLabelBusinessOnly => 'Business only';
-
-  @override
-  String get socialPersonaLabelMeetupFriendly => 'Meetup friendly';
-
-  @override
-  String get socialPersonaLabelCasualChat => 'Casual chat';
-
-  @override
-  String get socialPersonaLabelReplyLater => 'Replies later';
-
-  @override
-  String get socialPersonaLabelTechEnthusiast => 'Tech enthusiast';
-
-  @override
-  String get socialPersonaPreviewRole => 'Role preview';
 
   @override
   String get composerMoreTools => 'More tools';

@@ -3000,18 +3000,6 @@ abstract class AppLocalizations {
   /// **'Classmate Profile'**
   String get publicProfile;
 
-  /// No description provided for @myPublicProfile.
-  ///
-  /// In en, this message translates to:
-  /// **'My public profile'**
-  String get myPublicProfile;
-
-  /// No description provided for @myPublicProfileSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Preview how others see your profile.'**
-  String get myPublicProfileSubtitle;
-
   /// No description provided for @viewPublicProfile.
   ///
   /// In en, this message translates to:
@@ -3432,12 +3420,6 @@ abstract class AppLocalizations {
   /// **'Shared space'**
   String get relationshipSpaceTitle;
 
-  /// No description provided for @relationshipSpaceSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Keep history while asynchronous; show only explicit connection state when connected.'**
-  String get relationshipSpaceSubtitle;
-
   /// No description provided for @relationshipSpaceMe.
   ///
   /// In en, this message translates to:
@@ -3455,12 +3437,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Connected'**
   String get relationshipSpaceConnected;
-
-  /// No description provided for @relationshipSpaceTimeline.
-  ///
-  /// In en, this message translates to:
-  /// **'Timeline'**
-  String get relationshipSpaceTimeline;
 
   /// No description provided for @relationshipSpaceLastConnection.
   ///
@@ -5556,12 +5532,6 @@ abstract class AppLocalizations {
   /// **'No administrative action is available for this listing.'**
   String get adminListingNoActions;
 
-  /// No description provided for @socialPersonaTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Role presentation'**
-  String get socialPersonaTitle;
-
   /// No description provided for @socialPersonaCharacter.
   ///
   /// In en, this message translates to:
@@ -5585,72 +5555,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Doro'**
   String get socialPersonaCharacterDoro;
-
-  /// No description provided for @socialPersonaLeaveMessage.
-  ///
-  /// In en, this message translates to:
-  /// **'Leave a message; replies may not be immediate'**
-  String get socialPersonaLeaveMessage;
-
-  /// No description provided for @socialPersonaConnectionAllowed.
-  ///
-  /// In en, this message translates to:
-  /// **'Connection requests are welcome'**
-  String get socialPersonaConnectionAllowed;
-
-  /// No description provided for @socialPersonaBusy.
-  ///
-  /// In en, this message translates to:
-  /// **'Busy lately; messages are still welcome'**
-  String get socialPersonaBusy;
-
-  /// No description provided for @socialPersonaLater.
-  ///
-  /// In en, this message translates to:
-  /// **'Will look later'**
-  String get socialPersonaLater;
-
-  /// No description provided for @socialPersonaLabelSlowToWarm.
-  ///
-  /// In en, this message translates to:
-  /// **'Slow to warm'**
-  String get socialPersonaLabelSlowToWarm;
-
-  /// No description provided for @socialPersonaLabelBusinessOnly.
-  ///
-  /// In en, this message translates to:
-  /// **'Business only'**
-  String get socialPersonaLabelBusinessOnly;
-
-  /// No description provided for @socialPersonaLabelMeetupFriendly.
-  ///
-  /// In en, this message translates to:
-  /// **'Meetup friendly'**
-  String get socialPersonaLabelMeetupFriendly;
-
-  /// No description provided for @socialPersonaLabelCasualChat.
-  ///
-  /// In en, this message translates to:
-  /// **'Casual chat'**
-  String get socialPersonaLabelCasualChat;
-
-  /// No description provided for @socialPersonaLabelReplyLater.
-  ///
-  /// In en, this message translates to:
-  /// **'Replies later'**
-  String get socialPersonaLabelReplyLater;
-
-  /// No description provided for @socialPersonaLabelTechEnthusiast.
-  ///
-  /// In en, this message translates to:
-  /// **'Tech enthusiast'**
-  String get socialPersonaLabelTechEnthusiast;
-
-  /// No description provided for @socialPersonaPreviewRole.
-  ///
-  /// In en, this message translates to:
-  /// **'Role preview'**
-  String get socialPersonaPreviewRole;
 
   /// No description provided for @composerMoreTools.
   ///

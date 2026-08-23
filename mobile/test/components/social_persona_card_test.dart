@@ -30,23 +30,6 @@ SocialPersona _persona() => const SocialPersona(
 );
 
 void main() {
-  testWidgets(
-    'preview renders explicit identity choices without attention claims',
-    (tester) async {
-      await tester.pumpWidget(
-        _host(SocialPersonaPreviewCard(persona: _persona(), title: '角色化呈现')),
-      );
-
-      expect(find.text('角色化呈现'), findsOneWidget);
-      expect(find.text('可以留言，不保证即时回复'), findsOneWidget);
-      expect(find.text('慢热'), findsOneWidget);
-      expect(find.text('面交友好'), findsOneWidget);
-      expect(find.textContaining('在线'), findsNothing);
-      expect(find.textContaining('已读'), findsNothing);
-      expect(find.textContaining('正在输入'), findsNothing);
-    },
-  );
-
   testWidgets('role token keeps the same deterministic visual at 24/48/160', (
     tester,
   ) async {
@@ -71,26 +54,6 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('preview card selects 48 compact and 160 full role tokens', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      _host(SocialPersonaPreviewCard(persona: _persona(), compact: true)),
-    );
-    expect(
-      tester.getSize(find.byType(SocialPersonaAvatar)),
-      const Size(48, 48),
-    );
-
-    await tester.pumpWidget(
-      _host(SocialPersonaPreviewCard(persona: _persona())),
-    );
-    expect(
-      tester.getSize(find.byType(SocialPersonaAvatar)),
-      const Size(160, 160),
-    );
-  });
-
   testWidgets(
     'role token stays static and legible in dark reduced-motion mode',
     (tester) async {
@@ -98,26 +61,12 @@ void main() {
         _host(
           MediaQuery(
             data: const MediaQueryData(disableAnimations: true),
-            child: const SocialPersonaAvatar(
-              persona: SocialPersona(
-                representationMode: 'role_character',
-                styleVersion: 'v1',
-                appearance: SocialPersonaAppearance(
-                  palette: 'slate',
-                  silhouette: 'sharp',
-                  accessory: 'glasses',
-                  outfit: 'campus',
-                ),
-                selfDescriptions: [],
-                contactPosture: 'later',
-                status: 'published',
-              ),
-              size: 48,
-            ),
+            child: SocialPersonaAvatar(persona: _persona(), size: 48),
           ),
           theme: AppTheme.dark,
         ),
       );
+      await tester.pumpAndSettle();
 
       expect(find.byType(SocialPersonaAvatar), findsOneWidget);
       expect(tester.takeException(), isNull);
