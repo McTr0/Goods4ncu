@@ -41,7 +41,6 @@ class _ConversationListPageState extends State<ConversationListPage> {
   StreamSubscription<WsNotification>? _wsSubscription;
   List<ChatThread> _threads = const [];
   List<_ChatSpace> _spaces = const [];
-  ConversationMode? _filter;
   bool _loading = true;
   String? _error;
 
@@ -85,11 +84,8 @@ class _ConversationListPageState extends State<ConversationListPage> {
     }
     try {
       final results = await Future.wait<Object>([
-        _chatService.getThreads(mode: _filter),
-        if (_filter == null)
-          _chatService.getSpaces()
-        else
-          Future.value(<Map<String, dynamic>>[]),
+        _chatService.getThreads(),
+        _chatService.getSpaces(),
       ]);
       final serverThreads = results[0] as List<ChatThread>;
       final threads = await Future.wait(serverThreads.map(_applyLocalSeen));
@@ -154,11 +150,9 @@ class _ConversationListPageState extends State<ConversationListPage> {
   }
 
   void _openThread(ChatThread thread) {
-    context.pushNamed(
-      'chat-thread',
-      pathParameters: {'peerUserId': thread.peerUserId},
-      extra: {'thread': thread},
-    );
+    // Clicking a contact lands on their profile; connect / mail / history
+    // are chosen from there.
+    context.push('/users/${thread.peerUserId}');
   }
 
   void _openSpace(_ChatSpace space) {
@@ -266,46 +260,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
   }
 
   Widget _buildInbox() {
-    final l = AppLocalizations.of(context)!;
-    return Column(
-      children: [
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _FilterChip(
-                label: l.conversationFilterAll,
-                selected: _filter == null,
-                onTap: () => _setFilter(null),
-              ),
-              const SizedBox(width: 8),
-              _FilterChip(
-                label: l.conversationFilterRealtime,
-                icon: Icons.bolt_rounded,
-                selected: _filter == ConversationMode.realtime,
-                onTap: () => _setFilter(ConversationMode.realtime),
-              ),
-              const SizedBox(width: 8),
-              _FilterChip(
-                label: l.conversationFilterMail,
-                icon: Icons.mark_email_unread_outlined,
-                selected: _filter == ConversationMode.mail,
-                onTap: () => _setFilter(ConversationMode.mail),
-              ),
-            ],
-          ),
-        ),
-        Expanded(child: _buildConversationList()),
-      ],
-    );
-  }
-
-  void _setFilter(ConversationMode? filter) {
-    if (_filter == filter) return;
-    setState(() => _filter = filter);
-    _load();
+    return _buildConversationList();
   }
 
   Widget _buildConversationList() {
@@ -1511,7 +1466,6 @@ class _SpaceDetailPaneState extends State<_SpaceDetailPane> {
                             ),
                           ),
                         ),
-                        _SpaceKindBadge(space: widget.space),
                       ],
                     ),
                     const SizedBox(height: 4),
@@ -2399,30 +2353,6 @@ class _PeerThreadCard extends StatelessWidget {
                   ],
                 ],
               ),
-              const SizedBox(height: 7),
-              Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                children: [
-                  if (thread.realtimeCount > 0)
-                    _SmallStatusPill(
-                      label: l.conversationRealtimeCount(thread.realtimeCount),
-                      color: scheme.primaryContainer,
-                      foreground: scheme.onPrimaryContainer,
-                    ),
-                  if (thread.mailCount > 0)
-                    _SmallStatusPill(
-                      label: l.conversationMailCount(thread.mailCount),
-                      color: scheme.secondaryContainer,
-                      foreground: scheme.onSecondaryContainer,
-                    ),
-                  _SmallStatusPill(
-                    label: l.conversationSegmentCount(thread.conversationCount),
-                    color: scheme.surfaceContainerHighest,
-                    foreground: scheme.onSurfaceVariant,
-                  ),
-                ],
-              ),
             ],
           ),
         ),
@@ -2522,8 +2452,6 @@ class _SpaceCard extends StatelessWidget {
                 style: const TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
-            const SizedBox(width: 8),
-            _SpaceKindBadge(space: space),
           ],
         ),
         subtitle: Padding(
@@ -2561,34 +2489,6 @@ class _SpaceAvatar extends StatelessWidget {
   }
 }
 
-class _SpaceKindBadge extends StatelessWidget {
-  const _SpaceKindBadge({required this.space});
-
-  final _ChatSpace space;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
-    final scheme = Theme.of(context).colorScheme;
-    final color = scheme.primary;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(9),
-      ),
-      child: Text(
-        l.spaceKindGroup,
-        style: TextStyle(
-          color: color,
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
-
 class _ModeBadge extends StatelessWidget {
   const _ModeBadge({required this.mode});
   final ConversationMode mode;
@@ -2611,59 +2511,6 @@ class _ModeBadge extends StatelessWidget {
           color: color,
           fontSize: 11,
           fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
-
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    this.icon,
-  });
-  final String label;
-  final IconData? icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final foreground = selected ? scheme.onPrimaryContainer : scheme.onSurface;
-    return Semantics(
-      button: true,
-      selected: selected,
-      child: Material(
-        color: selected ? scheme.primaryContainer : scheme.surface,
-        shape: StadiumBorder(
-          side: BorderSide(
-            color: selected
-                ? scheme.primary.withValues(alpha: 0.24)
-                : scheme.outlineVariant,
-          ),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon ?? Icons.check_rounded, size: 18, color: foreground),
-                const SizedBox(width: 8),
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.visible,
-                  style: TextStyle(color: foreground),
-                ),
-              ],
-            ),
-          ),
         ),
       ),
     );

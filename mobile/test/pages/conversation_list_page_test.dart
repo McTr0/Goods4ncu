@@ -218,10 +218,6 @@ void main() {
     expect(find.byTooltip('问小昌'), findsNothing);
     expect(find.text('校园发现'), findsOneWidget);
     expect(find.text('发布出 / 收'), findsNothing);
-
-    await tester.tap(find.text('连接'));
-    await tester.pumpAndSettle();
-
     expect(find.text('小昌'), findsNothing);
     expect(find.byTooltip('问小昌'), findsNothing);
   });
@@ -249,7 +245,7 @@ void main() {
 
     expect(find.text('Xiaochang'), findsNothing);
     expect(find.byTooltip('Ask Xiaochang'), findsNothing);
-    expect(find.text('Connections'), findsOneWidget);
+    expect(find.text('Connections'), findsNothing);
     expect(find.text('No conversations'), findsOneWidget);
     expect(find.text('找同学'), findsNothing);
   });
@@ -280,9 +276,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('seller2'), findsOneWidget);
-    expect(find.text('连接 2'), findsOneWidget);
-    expect(find.text('留言 2'), findsOneWidget);
-    expect(find.text('共 4 段'), findsOneWidget);
+    expect(find.text('连接 2'), findsNothing);
+    expect(find.text('留言 2'), findsNothing);
+    expect(find.text('共 4 段'), findsNothing);
     expect(find.text('待回应 1'), findsOneWidget);
     expect(find.byType(SocialPersonaAvatar), findsOneWidget);
     expect(
@@ -316,10 +312,9 @@ void main() {
           ),
         ),
         GoRoute(
-          name: 'chat-thread',
-          path: '/chat/threads/:peerUserId',
+          path: '/users/:userId',
           builder: (context, state) =>
-              const Scaffold(body: Center(child: Text('full-page-thread'))),
+              Scaffold(body: Center(child: Text('peer-profile'))),
         ),
       ],
     );
@@ -337,7 +332,7 @@ void main() {
     await tester.tap(find.text('seller2'));
     await tester.pumpAndSettle();
 
-    expect(find.text('full-page-thread'), findsOneWidget);
+    expect(find.text('peer-profile'), findsOneWidget);
     expect(find.byType(ConversationListPage), findsNothing);
   });
 
