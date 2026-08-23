@@ -1,5 +1,8 @@
 # Companion Debugging
 
+> last-verified: 2026-08-23
+
+
 Two surfaces, both gated by COMPANION_ENABLED:
 
 * **Debug console** — route `/companion/debug`: live state pill, emotion

@@ -1,5 +1,8 @@
 # Companion Architecture
 
+> last-verified: 2026-08-23
+
+
 The companion is a **runtime**, not a chat window: a persistent Dart-side
 system that owns attention, emotion, timing, motion, voice, and platform
 agency around the existing campus marketplace.

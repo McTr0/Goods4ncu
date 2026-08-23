@@ -1,5 +1,8 @@
 # Agent Tools Reference
 
+> last-verified: 2026-08-23
+
+
 Tools are defined in `src/agents/tools.rs`. All tools share a `ToolContext`
 with the DB pool, current user, campus scope, moderation, and notifications.
 

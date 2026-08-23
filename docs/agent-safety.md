@@ -1,5 +1,8 @@
 # Agent Safety
 
+> last-verified: 2026-08-23
+
+
 ## Confirmation Boundaries (L0–L3)
 
 | Level | Actions | Behavior |

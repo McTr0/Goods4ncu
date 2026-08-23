@@ -24,6 +24,15 @@ Rust uses the default `rustfmt` style with 4-space indentation. Follow standard 
 
 Keep the current layering intact: handlers should call services and repositories instead of embedding ad hoc SQL. In Flutter, follow `flutter_lints`, keep pages/services/providers split by responsibility, and route new user-facing strings through `mobile/lib/l10n/`.
 
+## Companion Runtime (小昌)
+
+Live2D AI companion. Runtime lives in `mobile/lib/companion/`; persona layers in `/persona/*.md` (loaded server-side via `src/agents/persona.rs`); journey script at `scripts/agent_journey.sh`.
+
+- Flags: `AGENT_ENABLED` (server AI endpoints), `COMPANION_ENABLED` (dart-define, runtime shell). Both off ⇒ plain marketplace.
+- Tests: `flutter test test/companion` (unit) — full gates per repo rules.
+- Architecture, subsystem docs, and debugging routes (`/companion/debug`, `/companion/timeline`): see **docs/companion-architecture.md** and the linked companion-* documents.
+- Rule of thumb: when touching `mobile/lib/companion/**` or agent prompt assembly, update the matching companion doc and refresh its `last-verified:` line.
+
 ## Testing Guidelines
 
 Name Rust tests by behavior and purpose, using suffixes like `_integration.rs` and `_regression.rs`. Keep Dart tests under `mobile/test/` with `_test.dart` names. Add or update tests for new endpoints, auth changes, moderation paths, and bug fixes; there is no stated coverage target, but PRs are expected to prove the changed path.

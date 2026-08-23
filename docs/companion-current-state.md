@@ -1,5 +1,8 @@
 # Companion Runtime — Current State Audit
 
+> last-verified: 2026-08-23
+
+
 > Phase 0 of the Companion master goal. Facts on the ground as of 2026-08-22,
 > gathered from code inspection. This document is the baseline every later
 > phase diffs against.
