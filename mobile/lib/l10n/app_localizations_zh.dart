@@ -1261,6 +1261,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationEmptyAskAssistant => '小昌';
 
   @override
+  String get conversationSearchHint => '搜索联系人、消息、商品或群聊';
+
+  @override
+  String get conversationSearchClear => '清除搜索';
+
+  @override
+  String get conversationSearchEmptyTitle => '没有匹配的消息';
+
+  @override
+  String get conversationSearchEmptySubtitle => '试试联系人、商品名称、最近消息或群聊名称。';
+
+  @override
   String get findClassmate => '找同学';
 
   @override

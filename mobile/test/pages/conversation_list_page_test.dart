@@ -287,6 +287,65 @@ void main() {
     );
   });
 
+  testWidgets('inbox search filters direct messages and campus groups', (
+    tester,
+  ) async {
+    final service = _FakeChatService(
+      threads: [
+        ChatThread(
+          peerUserId: 'seller-2',
+          peerUsername: 'seller2',
+          latestActivityAt: DateTime(2026, 7, 6, 12),
+          latestPreview: '今晚七点可以吗',
+          latestListingTitle: '二手显示器',
+        ),
+        ChatThread(
+          peerUserId: 'buyer-3',
+          peerUsername: 'BuyerThree',
+          latestActivityAt: DateTime(2026, 7, 6, 11),
+          latestPreview: '教材还在吗',
+          latestListingTitle: '高数教材',
+        ),
+      ],
+    )..seedSpace(name: '考研互助群', description: '资料交换与复习交流');
+
+    await tester.pumpWidget(_buildPage(service));
+    await tester.pumpAndSettle();
+
+    final searchField = find.byKey(const Key('conversation-search-field'));
+    expect(searchField, findsOneWidget);
+    expect(find.text('seller2'), findsOneWidget);
+    expect(find.text('BuyerThree'), findsOneWidget);
+    expect(find.text('考研互助群'), findsOneWidget);
+
+    await tester.enterText(searchField, '显示器');
+    await tester.pump();
+    expect(find.text('seller2'), findsOneWidget);
+    expect(find.text('BuyerThree'), findsNothing);
+    expect(find.text('考研互助群'), findsNothing);
+
+    await tester.enterText(searchField, '资料交换');
+    await tester.pump();
+    expect(find.text('seller2'), findsNothing);
+    expect(find.text('BuyerThree'), findsNothing);
+    expect(find.text('考研互助群'), findsOneWidget);
+
+    await tester.enterText(searchField, 'BUYERTHREE');
+    await tester.pump();
+    expect(find.text('BuyerThree'), findsOneWidget);
+    expect(find.text('seller2'), findsNothing);
+
+    await tester.enterText(searchField, '不存在的会话');
+    await tester.pump();
+    expect(find.text('没有匹配的消息'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('conversation-search-clear')));
+    await tester.pump();
+    expect(find.text('seller2'), findsOneWidget);
+    expect(find.text('BuyerThree'), findsOneWidget);
+    expect(find.text('考研互助群'), findsOneWidget);
+  });
+
   testWidgets('desktop thread selection opens a full-page route', (
     tester,
   ) async {

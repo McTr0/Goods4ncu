@@ -530,6 +530,10 @@
   "conversationEmptySubtitle": "发起联系后，相关对话将显示在此处。",
   "conversationEmptyAction": "发布出 / 收",
   "conversationEmptyAskAssistant": "小昌",
+  "conversationSearchHint": "搜索联系人、消息、商品或群聊",
+  "conversationSearchClear": "清除搜索",
+  "conversationSearchEmptyTitle": "没有匹配的消息",
+  "conversationSearchEmptySubtitle": "试试联系人、商品名称、最近消息或群聊名称。",
   "findClassmate": "找同学",
   "conversationWaitingCount": "等待你回应 · {count}",
   "@conversationWaitingCount": {

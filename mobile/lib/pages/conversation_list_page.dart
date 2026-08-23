@@ -38,9 +38,11 @@ class _ConversationListPageState extends State<ConversationListPage> {
   late final ChatService _chatService;
   late final UserService _userService;
   late final ChatLocalSeenStorage _localSeenStorage;
+  final TextEditingController _searchController = TextEditingController();
   StreamSubscription<WsNotification>? _wsSubscription;
   List<ChatThread> _threads = const [];
   List<_ChatSpace> _spaces = const [];
+  String _searchQuery = '';
   bool _loading = true;
   String? _error;
 
@@ -72,7 +74,37 @@ class _ConversationListPageState extends State<ConversationListPage> {
   @override
   void dispose() {
     _wsSubscription?.cancel();
+    _searchController.dispose();
     super.dispose();
+  }
+
+  void _updateSearch(String value) {
+    final normalized = value.trim().toLowerCase();
+    if (_searchQuery == normalized) return;
+    setState(() => _searchQuery = normalized);
+  }
+
+  void _clearSearch() {
+    _searchController.clear();
+    _updateSearch('');
+  }
+
+  bool _threadMatchesSearch(ChatThread thread) {
+    if (_searchQuery.isEmpty) return true;
+    return [
+      thread.peerUsername,
+      thread.latestPreview,
+      thread.latestListingTitle,
+    ].whereType<String>().any(
+      (value) => value.toLowerCase().contains(_searchQuery),
+    );
+  }
+
+  bool _spaceMatchesSearch(_ChatSpace space) {
+    if (_searchQuery.isEmpty) return true;
+    return [space.name, space.description].whereType<String>().any(
+      (value) => value.toLowerCase().contains(_searchQuery),
+    );
   }
 
   Future<void> _load({bool silent = false}) async {
@@ -267,13 +299,17 @@ class _ConversationListPageState extends State<ConversationListPage> {
     final l = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
     if (_loading) return const Center(child: CircularProgressIndicator());
-    final actionable = _threads
+    final visibleThreads = _threads.where(_threadMatchesSearch).toList();
+    final visibleSpaces = _spaces.where(_spaceMatchesSearch).toList();
+    final actionable = visibleThreads
         .where((thread) => thread.pendingCount > 0)
         .toList();
-    final regular = _threads
+    final regular = visibleThreads
         .where((thread) => thread.pendingCount == 0)
         .toList();
     final hasInboxData = _threads.isNotEmpty || _spaces.isNotEmpty;
+    final hasSearchResults =
+        visibleThreads.isNotEmpty || visibleSpaces.isNotEmpty;
     return RefreshIndicator(
       onRefresh: _refreshAll,
       child: ListView(
@@ -317,7 +353,52 @@ class _ConversationListPageState extends State<ConversationListPage> {
                 ),
               ),
             ),
-          if (_threads.isNotEmpty) ...[
+          if (_error == null && hasInboxData)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
+              child: TextField(
+                key: const Key('conversation-search-field'),
+                controller: _searchController,
+                onChanged: _updateSearch,
+                textInputAction: TextInputAction.search,
+                autocorrect: false,
+                decoration: InputDecoration(
+                  hintText: l.conversationSearchHint,
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  suffixIcon: _searchQuery.isEmpty
+                      ? null
+                      : IconButton(
+                          key: const Key('conversation-search-clear'),
+                          tooltip: l.conversationSearchClear,
+                          onPressed: _clearSearch,
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                  filled: true,
+                  fillColor: scheme.surfaceContainerLow,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ),
+          if (_error == null &&
+              hasInboxData &&
+              _searchQuery.isNotEmpty &&
+              !hasSearchResults)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: _InlineEmptyMessage(
+                icon: Icons.search_off_rounded,
+                title: l.conversationSearchEmptyTitle,
+                subtitle: l.conversationSearchEmptySubtitle,
+                action: TextButton(
+                  onPressed: _clearSearch,
+                  child: Text(l.conversationSearchClear),
+                ),
+              ),
+            ),
+          if (visibleThreads.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
               child: Text(
@@ -345,8 +426,8 @@ class _ConversationListPageState extends State<ConversationListPage> {
               onTap: () => _openThread(thread),
             ),
           ),
-          if (_threads.isNotEmpty) const SizedBox(height: 12),
-          if (_spaces.isNotEmpty) ...[
+          if (visibleThreads.isNotEmpty) const SizedBox(height: 12),
+          if (visibleSpaces.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
               child: Text(
@@ -357,7 +438,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
                 ),
               ),
             ),
-            ..._spaces.map(
+            ...visibleSpaces.map(
               (space) => _SpaceCard(
                 space: space,
                 selected: false,

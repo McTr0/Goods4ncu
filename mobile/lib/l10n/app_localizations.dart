@@ -2522,6 +2522,30 @@ abstract class AppLocalizations {
   /// **'Xiaochang'**
   String get conversationEmptyAskAssistant;
 
+  /// No description provided for @conversationSearchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search contacts, messages, items, or groups'**
+  String get conversationSearchHint;
+
+  /// No description provided for @conversationSearchClear.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear search'**
+  String get conversationSearchClear;
+
+  /// No description provided for @conversationSearchEmptyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'No matching messages'**
+  String get conversationSearchEmptyTitle;
+
+  /// No description provided for @conversationSearchEmptySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Try a contact, item, recent message, or group name.'**
+  String get conversationSearchEmptySubtitle;
+
   /// No description provided for @findClassmate.
   ///
   /// In en, this message translates to:

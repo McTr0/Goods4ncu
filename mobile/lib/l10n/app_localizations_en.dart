@@ -1309,6 +1309,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get conversationEmptyAskAssistant => 'Xiaochang';
 
   @override
+  String get conversationSearchHint =>
+      'Search contacts, messages, items, or groups';
+
+  @override
+  String get conversationSearchClear => 'Clear search';
+
+  @override
+  String get conversationSearchEmptyTitle => 'No matching messages';
+
+  @override
+  String get conversationSearchEmptySubtitle =>
+      'Try a contact, item, recent message, or group name.';
+
+  @override
   String get findClassmate => 'Find classmate';
 
   @override

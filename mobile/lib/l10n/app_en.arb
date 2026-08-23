@@ -549,6 +549,10 @@
   "conversationEmptySubtitle": "Conversations appear here after contact is initiated.",
   "conversationEmptyAction": "Post offer / wanted",
   "conversationEmptyAskAssistant": "Xiaochang",
+  "conversationSearchHint": "Search contacts, messages, items, or groups",
+  "conversationSearchClear": "Clear search",
+  "conversationSearchEmptyTitle": "No matching messages",
+  "conversationSearchEmptySubtitle": "Try a contact, item, recent message, or group name.",
   "findClassmate": "Find classmate",
   "conversationWaitingCount": "Awaiting your reply · {count}",
   "@conversationWaitingCount": {
