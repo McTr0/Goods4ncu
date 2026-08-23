@@ -29,10 +29,23 @@ void _ensureViewFactory(String modelUrl) {
       'style'.toJS,
       'width:100%;height:100%;'.toJS,
     );
-    scheduleMicrotask(() {
-      final stage = WebCubismBridge.find();
-      if (stage == null) return;
+    // The stage script may race Flutter's async bootstrap; poll instead of
+    // bailing silently, and surface a visible failure if it never arrives.
+    Future<void>.delayed(Duration.zero, () async {
+      JSObject? stage;
+      for (var i = 0; i < 40; i++) {
+        stage = WebCubismBridge.find();
+        if (stage != null) break;
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
       final containerId = (container.getProperty('id'.toJS) as JSString).toDart;
+      if (stage == null) {
+        container.setProperty(
+          'innerHTML'.toJS,
+          'Live2D runtime did not load (window.__live2dStage missing)'.toJS,
+        );
+        return;
+      }
       WebCubismBridge(stage).mount(containerId, modelUrl);
     });
     return container;
