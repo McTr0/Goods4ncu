@@ -1280,86 +1280,69 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _showHistorySheet() {
-    showModalBottomSheet(
+    showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      constraints: const BoxConstraints(maxWidth: 640),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (context) {
-        return DraggableScrollableSheet(
-          initialChildSize: 0.75,
-          minChildSize: 0.45,
-          maxChildSize: 0.95,
-          expand: false,
-          builder: (context, scrollController) {
-            final l = AppLocalizations.of(context)!;
-            return Column(
-              children: [
-                Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.symmetric(vertical: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 4,
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
+      builder: (sheetContext) {
+        final l = AppLocalizations.of(sheetContext)!;
+        final height = MediaQuery.sizeOf(sheetContext).height;
+        return FractionallySizedBox(
+          key: const Key('assistant-history-sheet'),
+          heightFactor: height < 700 ? 0.94 : 0.86,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 8, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
                         l.assistantHistorySheetTitle,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF0F766E),
-                        ),
+                        style: Theme.of(sheetContext).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.close_rounded),
-                        onPressed: () => Navigator.pop(context),
+                    ),
+                    IconButton(
+                      tooltip: l.cancel,
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () => Navigator.pop(sheetContext),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: _isLoadingHistory
+                    ? const Center(child: CircularProgressIndicator())
+                    : _messages.isEmpty
+                    ? Center(child: Text(l.assistantHistoryEmpty))
+                    : ListView.builder(
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                        itemCount: _messages.length,
+                        itemBuilder: (context, index) {
+                          final msg = _messages[index];
+                          return _ChatBubble(
+                            message: msg,
+                            isUser: msg.sender == 'user',
+                            hitlRequests: _hitlRequests,
+                            currentUserId: _currentUserId ?? '',
+                            apiService: _apiService,
+                            onHitlUpdated: _loadNegotiations,
+                          );
+                        },
                       ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: _isLoadingHistory
-                      ? const Center(child: CircularProgressIndicator())
-                      : _messages.isEmpty
-                      ? Center(
-                          child: Text(
-                            l.assistantHistoryEmpty,
-                            style: TextStyle(color: Colors.grey),
-                          ),
-                        )
-                      : ListView.builder(
-                          controller: scrollController,
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _messages.length,
-                          itemBuilder: (context, index) {
-                            final msg = _messages[index];
-                            return _ChatBubble(
-                              message: msg,
-                              isUser: msg.sender == 'user',
-                              hitlRequests: _hitlRequests,
-                              currentUserId: _currentUserId ?? '',
-                              apiService: _apiService,
-                              onHitlUpdated: _loadNegotiations,
-                            );
-                          },
-                        ),
-                ),
-              ],
-            );
-          },
+              ),
+            ],
+          ),
         );
       },
     );

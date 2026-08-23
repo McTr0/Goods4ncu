@@ -803,6 +803,8 @@ void main() {
   testWidgets('group discussion requires a topic before replies', (
     tester,
   ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final service = _FakeChatService();
     await tester.pumpWidget(
       MaterialApp(
@@ -830,9 +832,26 @@ void main() {
     expect(find.byKey(const Key('unified-message-composer')), findsNothing);
     await tester.tap(find.byKey(const Key('group-start-topic')));
     await tester.pumpAndSettle();
+    final sheet = find.byKey(const Key('group-topic-sheet'));
+    expect(sheet, findsOneWidget);
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(tester.getSize(sheet).width, lessThanOrEqualTo(390));
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('group-topic-create')))
+          .onPressed,
+      isNull,
+    );
     await tester.enterText(
       find.byKey(const Key('group-topic-field')),
       '周三图书馆复习安排',
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('group-topic-create')))
+          .onPressed,
+      isNotNull,
     );
     await tester.tap(find.byKey(const Key('group-topic-create')));
     await tester.pumpAndSettle();

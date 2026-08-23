@@ -1490,42 +1490,17 @@ class _SpaceDetailPaneState extends State<_SpaceDetailPane> {
 
   Future<void> _createTopic() async {
     final l = AppLocalizations.of(context)!;
-    var draft = '';
-    final content = await showDialog<String>(
+    final content = await showModalBottomSheet<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(l.startGroupTopic),
-        content: TextField(
-          key: const Key('group-topic-field'),
-          autofocus: true,
-          maxLength: 140,
-          maxLines: 3,
-          textInputAction: TextInputAction.done,
-          decoration: InputDecoration(
-            hintText: l.groupTopicTitleHint,
-            helperText: l.groupTopicCreateHint,
-          ),
-          onChanged: (value) => draft = value,
-          onSubmitted: (value) {
-            final text = value.trim();
-            if (text.isNotEmpty) Navigator.pop(dialogContext, text);
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: Text(l.cancel),
-          ),
-          FilledButton(
-            key: const Key('group-topic-create'),
-            onPressed: () {
-              final text = draft.trim();
-              if (text.isNotEmpty) Navigator.pop(dialogContext, text);
-            },
-            child: Text(l.createTopicAction),
-          ),
-        ],
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      constraints: const BoxConstraints(maxWidth: 640),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
+      builder: (_) => const _CreateTopicSheet(),
     );
     if (content == null || !mounted) return;
     setState(() => _sending = true);
@@ -1823,6 +1798,105 @@ class _TopicReplyCard extends StatelessWidget {
             Text(
               _formatSpaceTime(message.createdAt),
               style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 11),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CreateTopicSheet extends StatefulWidget {
+  const _CreateTopicSheet();
+
+  @override
+  State<_CreateTopicSheet> createState() => _CreateTopicSheetState();
+}
+
+class _CreateTopicSheetState extends State<_CreateTopicSheet> {
+  final TextEditingController _controller = TextEditingController();
+
+  bool get _canCreate => _controller.text.trim().isNotEmpty;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final text = _controller.text.trim();
+    if (text.isNotEmpty) Navigator.pop(context, text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    return AnimatedPadding(
+      key: const Key('group-topic-sheet'),
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: SingleChildScrollView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    l.startGroupTopic,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: l.cancel,
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('group-topic-field'),
+              controller: _controller,
+              autofocus: true,
+              maxLength: 140,
+              minLines: 2,
+              maxLines: 4,
+              textCapitalization: TextCapitalization.sentences,
+              textInputAction: TextInputAction.done,
+              decoration: InputDecoration(
+                hintText: l.groupTopicTitleHint,
+                helperText: l.groupTopicCreateHint,
+                alignLabelWithHint: true,
+              ),
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) => _submit(),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(l.cancel),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    key: const Key('group-topic-create'),
+                    onPressed: _canCreate ? _submit : null,
+                    child: Text(l.createTopicAction),
+                  ),
+                ),
+              ],
             ),
           ],
         ),

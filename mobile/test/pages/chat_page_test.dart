@@ -133,6 +133,41 @@ void main() {
     expect(find.byKey(const Key('composer-tool-assistant-estimate')), findsOne);
   });
 
+  testWidgets('assistant history opens as a mobile-width bottom sheet', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      _buildTestApp(
+        ChatPage(
+          apiService: _FakeApiService(),
+          chatService: _FakeChatService(),
+          sseService: SseService(),
+          uploadService: _FakeUploadService(),
+          postService: _FakePostService(),
+          embedded: true,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
+    await tester.tap(find.byTooltip(l.assistantHistoryTooltip));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    final sheet = find.byKey(const Key('assistant-history-sheet'));
+    expect(sheet, findsOneWidget);
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(
+      find.descendant(of: sheet, matching: find.text('欢迎回来')),
+      findsOneWidget,
+    );
+    expect(tester.getSize(sheet).width, lessThanOrEqualTo(390));
+  });
+
   testWidgets('a reversible write offers an undo affordance with a countdown', (
     tester,
   ) async {
