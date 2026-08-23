@@ -1643,15 +1643,13 @@ class _ChatPageState extends State<ChatPage> {
             },
             onSubmitted: (_) => _sendMessage(),
             onSend: _sendMessage,
-            primaryActions: [
+            expandedActions: [
               MessageComposerAction(
                 id: 'image',
                 icon: Icons.image_outlined,
                 label: l.composerImageAction,
                 onPressed: _pickImage,
               ),
-            ],
-            expandedActions: [
               MessageComposerAction(
                 id: 'assistant-find',
                 icon: Icons.search_rounded,

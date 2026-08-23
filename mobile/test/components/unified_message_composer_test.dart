@@ -151,6 +151,12 @@ void main() {
 
     await tester.tap(find.byKey(const Key('composer-dictation')));
     await tester.pump();
+    expect(
+      tester.getCenter(find.byKey(const Key('composer-dictation'))).dx,
+      greaterThan(
+        tester.getTopRight(find.byKey(const Key('composer-text-field'))).dx,
+      ),
+    );
     expect(dictation.locale, 'zh');
     expect(find.textContaining('正在听写'), findsOneWidget);
 

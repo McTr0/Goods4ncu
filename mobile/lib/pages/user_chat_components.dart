@@ -960,12 +960,6 @@ class UserChatInputArea extends StatelessWidget {
       statusContent: status,
       contextContent: contextContent,
       primaryActions: [
-        MessageComposerAction(
-          id: 'image',
-          icon: Icons.image_outlined,
-          label: l.composerImageAction,
-          onPressed: onPickImage,
-        ),
         if (isEditing)
           MessageComposerAction(
             id: 'cancel-edit',
@@ -975,6 +969,12 @@ class UserChatInputArea extends StatelessWidget {
           ),
       ],
       expandedActions: [
+        MessageComposerAction(
+          id: 'image',
+          icon: Icons.image_outlined,
+          label: l.composerImageAction,
+          onPressed: onPickImage,
+        ),
         if (onPickQuote != null)
           MessageComposerAction(
             id: 'quote',

@@ -910,6 +910,7 @@ void main() {
       await tester.tap(find.byKey(const Key('composer-tools-toggle')));
       await tester.pumpAndSettle();
 
+      expect(find.text('图片'), findsOneWidget);
       expect(find.text('语音通话'), findsOneWidget);
       expect(find.text('视频通话'), findsOneWidget);
     });

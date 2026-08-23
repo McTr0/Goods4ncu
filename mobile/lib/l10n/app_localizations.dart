@@ -707,7 +707,7 @@ abstract class AppLocalizations {
   /// No description provided for @homeTab.
   ///
   /// In en, this message translates to:
-  /// **'Home'**
+  /// **'For You'**
   String get homeTab;
 
   /// No description provided for @language.

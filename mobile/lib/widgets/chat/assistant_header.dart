@@ -1,9 +1,4 @@
 import 'package:flutter/material.dart';
-
-import 'package:go_router/go_router.dart';
-
-import '../../companion/companion_config.dart';
-import '../../components/xiaochang_avatar.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/models.dart';
 
@@ -15,55 +10,19 @@ class AssistantDigitalHumanHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        border: Border(
-          bottom: BorderSide(color: Theme.of(context).dividerColor),
+    return AppBar(
+      key: const Key('assistant-header'),
+      primary: false,
+      automaticallyImplyLeading: false,
+      leading: const SizedBox.shrink(),
+      title: Text(l.assistantName),
+      actions: [
+        IconButton(
+          tooltip: l.assistantHistoryTooltip,
+          icon: const Icon(Icons.history_rounded),
+          onPressed: onOpenHistory,
         ),
-      ),
-      child: Row(
-        children: [
-          const XiaochangAvatar(size: 36),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                l.assistantHeaderName,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              Text(
-                l.assistantHeaderTagline,
-                style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
-              ),
-            ],
-          ),
-          const Spacer(),
-          IconButton(
-            tooltip: l.assistantHistoryTooltip,
-            icon: const Icon(Icons.history_rounded, color: Color(0xFF0F766E)),
-            onPressed: onOpenHistory,
-          ),
-          if (kCompanionEnabled)
-            IconButton(
-              key: const Key('assistant-open-companion-debug'),
-              tooltip: 'Companion Debug',
-              icon: const Icon(
-                Icons.bug_report_outlined,
-                color: Color(0xFF0F766E),
-              ),
-              onPressed: () => context.push('/companion/debug'),
-            ),
-          const SizedBox(width: 4),
-          const AgentStatusPill(),
-        ],
-      ),
+      ],
     );
   }
 }
@@ -117,30 +76,6 @@ class HitlChip extends StatelessWidget {
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class AgentStatusPill extends StatelessWidget {
-  const AgentStatusPill({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-        color: const Color(0xFFE1F4EF),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        l.assistantSystemBadge,
-        style: const TextStyle(
-          color: Color(0xFF0F766E),
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
         ),
       ),
     );

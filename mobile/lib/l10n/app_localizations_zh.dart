@@ -316,7 +316,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get fromGallery => '相册';
 
   @override
-  String get homeTab => '首页';
+  String get homeTab => '推荐';
 
   @override
   String get language => '语言';

@@ -332,7 +332,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get fromGallery => 'From gallery';
 
   @override
-  String get homeTab => 'Home';
+  String get homeTab => 'For You';
 
   @override
   String get language => 'Language';

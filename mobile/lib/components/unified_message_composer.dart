@@ -287,20 +287,6 @@ class _UnifiedMessageComposerState extends State<UnifiedMessageComposer> {
                     onPressed: !interactive ? null : action.onPressed,
                     icon: Icon(action.icon),
                   ),
-                if (widget.enableDictation)
-                  IconButton(
-                    key: const Key('composer-dictation'),
-                    tooltip: _isDictating
-                        ? l.dictationStopAction
-                        : l.dictationStartAction,
-                    onPressed: !interactive ? null : _toggleDictation,
-                    icon: Icon(
-                      _isDictating
-                          ? Icons.stop_circle_rounded
-                          : Icons.mic_none_rounded,
-                      color: _isDictating ? scheme.error : null,
-                    ),
-                  ),
                 Expanded(
                   child: TextField(
                     key: const Key('composer-text-field'),
@@ -331,6 +317,20 @@ class _UnifiedMessageComposerState extends State<UnifiedMessageComposer> {
                     ),
                   ),
                 ),
+                if (widget.enableDictation)
+                  IconButton(
+                    key: const Key('composer-dictation'),
+                    tooltip: _isDictating
+                        ? l.dictationStopAction
+                        : l.dictationStartAction,
+                    onPressed: !interactive ? null : _toggleDictation,
+                    icon: Icon(
+                      _isDictating
+                          ? Icons.stop_circle_rounded
+                          : Icons.mic_none_rounded,
+                      color: _isDictating ? scheme.error : null,
+                    ),
+                  ),
                 const SizedBox(width: 8),
                 IconButton.filled(
                   key: const Key('composer-send'),

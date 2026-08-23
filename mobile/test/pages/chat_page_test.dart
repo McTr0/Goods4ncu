@@ -111,9 +111,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
 
     final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
-    // The digital-human header shows 小昌's identity inside the persistent
-    // shell rather than a standalone app bar title.
-    expect(find.text('小昌 · 智能数字人'), findsOneWidget);
+    expect(find.byKey(const Key('assistant-header')), findsOneWidget);
+    expect(find.text(l.assistantName), findsOneWidget);
+    expect(find.text(l.assistantSystemBadge), findsNothing);
+    expect(
+      find.byKey(const Key('assistant-open-companion-debug')),
+      findsNothing,
+    );
     expect(find.byTooltip(l.closeConversationAction), findsNothing);
     expect(find.byKey(const Key('unified-message-composer')), findsOneWidget);
 
@@ -124,6 +128,7 @@ void main() {
       find.byKey(const Key('composer-tool-assistant-publish')),
       findsNothing,
     );
+    expect(find.byKey(const Key('composer-tool-image')), findsOne);
     expect(find.byKey(const Key('composer-tool-assistant-find')), findsOne);
     expect(find.byKey(const Key('composer-tool-assistant-estimate')), findsOne);
   });
