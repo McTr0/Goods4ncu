@@ -163,6 +163,11 @@ flutter test
 | 领域对象与状态机 | [信息模型](docs/information-model.md) |
 | Agent 权限与确认机制 | [Agent 系统设计](docs/agent-system.md) |
 | 小昌 AI 伙伴架构（Live2D + Agent） | [Agent 架构](docs/agent-architecture.md) |
+| Companion Runtime 总体架构 | [Companion 架构](docs/companion-architecture.md) |
+| 实时语音与打断 | [实时语音](docs/realtime-voice.md) |
+| 角色导演与动画系统 | [角色导演](docs/character-director.md) / [动画系统](docs/animation-system.md) |
+| 情绪 / 关系 / 记忆 / 注意力 / 主动性 | [情绪](docs/emotion-system.md) · [关系](docs/relationship-system.md) · [记忆](docs/memory-system.md) · [注意力](docs/attention-system.md) · [主动性](docs/proactive-system.md) |
+| Companion 调试（?companionDebug） | [调试指南](docs/companion-debugging.md) |
 | Agent 工具清单与扩展方法 | [Agent 工具](docs/agent-tools.md) |
 | 角色表情与交互系统 | [角色系统](docs/character-system.md) |
 | Agent 安全边界 | [Agent 安全](docs/agent-safety.md) |
