@@ -29,12 +29,17 @@ class Live2DCharacterWidget extends StatefulWidget {
 
 class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
     with SingleTickerProviderStateMixin {
+  static const _mouseGazeResetDelay = Duration(milliseconds: 1600);
+  static const _touchGazeResetDelay = Duration(milliseconds: 900);
+  static const _mouseExitResetDelay = Duration(milliseconds: 350);
+
   late final AnimationController _animController;
   Offset _touchRipplePos = Offset.zero;
   bool _showRipple = false;
   Timer? _rippleTimer;
   final List<AmbientBubble> _ambientBubbles = [];
   Timer? _ambientTimer;
+  Timer? _gazeResetTimer;
 
   @override
   void initState() {
@@ -88,6 +93,7 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
   void dispose() {
     _rippleTimer?.cancel();
     _ambientTimer?.cancel();
+    _gazeResetTimer?.cancel();
     _animController.dispose();
     super.dispose();
   }
@@ -99,6 +105,8 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
     });
 
     widget.controller.handleTap(details.localPosition, size);
+    _trackGaze(details.localPosition, size);
+    _scheduleGazeReset(_touchGazeResetDelay);
 
     _rippleTimer?.cancel();
     _rippleTimer = Timer(const Duration(milliseconds: 300), () {
@@ -113,14 +121,37 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
     widget.controller.startDrag(details.localPosition);
   }
 
-  void _onDragUpdate(DragUpdateDetails details) {
+  void _onDragUpdate(DragUpdateDetails details, Size size) {
     if (!widget.enableTouchTracking) return;
     widget.controller.updateDrag(details.localPosition);
+    _trackGaze(details.localPosition, size);
+    _gazeResetTimer?.cancel();
   }
 
   void _onDragEnd(DragEndDetails details) {
     if (!widget.enableTouchTracking) return;
     widget.controller.endDrag();
+    _scheduleGazeReset(_touchGazeResetDelay);
+  }
+
+  void _trackGaze(Offset localPosition, Size size) {
+    if (!widget.enableTouchTracking || size.width <= 0 || size.height <= 0) {
+      return;
+    }
+    final normalizedX = ((localPosition.dx / size.width) * 2 - 1).clamp(
+      -1.0,
+      1.0,
+    );
+    final normalizedY = ((localPosition.dy / size.height) * 2 - 1).clamp(
+      -1.0,
+      1.0,
+    );
+    widget.controller.lookAt(normalizedX, normalizedY);
+  }
+
+  void _scheduleGazeReset(Duration delay) {
+    _gazeResetTimer?.cancel();
+    _gazeResetTimer = Timer(delay, widget.controller.resetGaze);
   }
 
   @override
@@ -153,7 +184,8 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
                 child: GestureDetector(
                   onTapDown: (details) => _onTapDown(details, effectiveSize),
                   onPanStart: _onDragStart,
-                  onPanUpdate: _onDragUpdate,
+                  onPanUpdate: (details) =>
+                      _onDragUpdate(details, effectiveSize),
                   onPanEnd: _onDragEnd,
                   child: AnimatedBuilder(
                     animation: _animController,
@@ -347,6 +379,22 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
                   ),
                 ),
               ),
+              if (widget.enableTouchTracking)
+                Positioned(
+                  bottom: 0,
+                  width: effectiveSize.width,
+                  height: effectiveSize.height,
+                  child: MouseRegion(
+                    opaque: false,
+                    hitTestBehavior: HitTestBehavior.translucent,
+                    onHover: (event) {
+                      _trackGaze(event.localPosition, effectiveSize);
+                      _scheduleGazeReset(_mouseGazeResetDelay);
+                    },
+                    onExit: (_) => _scheduleGazeReset(_mouseExitResetDelay),
+                    child: const SizedBox.expand(),
+                  ),
+                ),
 
               // Particle effects overlay
               Positioned.fill(

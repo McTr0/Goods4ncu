@@ -67,7 +67,10 @@ inside an HtmlElementView; the self-built OpenRig sprite engine was removed.
 Non-web platforms fall back to the sprite body. Gaze maps to ParamAngleX/Y +
 BodyAngleZ + focusController; states pick expression choreography (smile/
 brows/tilt); mouth rides ParamMouthOpenY from the shared lip-sync pipeline;
-breath and blink run on an internal JS ticker.
+breath and blink run on an internal JS ticker. Pointer gaze is scoped to the
+character stage and returns to center after 1.6 seconds without mouse movement
+or 0.9 seconds after touch release; the sprite fallback follows the same reset
+behaviour.
 
 ## Flags
 

@@ -13,10 +13,25 @@
 // Flutter frame pacing.
 
 window.__live2dStage = (function () {
+  const MOUSE_IDLE_RESET_MS = 1600;
+  const TOUCH_RELEASE_RESET_MS = 900;
+  const POINTER_LEAVE_RESET_MS = 350;
+  const DIRECTOR_UNLOCK_DELTA = 0.18;
+
   let app = null;
   let model = null;
   let tickerJobs = null;
   let containerEl = null;
+  let pointerResetTimer = null;
+  let pointerTrackingActive = false;
+  let touchTrackingActive = false;
+  let centerLocked = false;
+  let lockedDirectorX = 0;
+  let lockedDirectorY = 0;
+  let directorX = 0;
+  let directorY = 0;
+  let pointerTarget = null;
+  let pointerHandlers = null;
 
   function fitAll() {
     if (!model || !containerEl) return;
@@ -57,6 +72,104 @@ window.__live2dStage = (function () {
       ? core.getParameterIndex(id)
       : -1;
     if (index >= 0) core.setParameterValueByIndex(index, v);
+  }
+
+  function clampUnit(value) {
+    return Math.max(-1, Math.min(1, Number(value) || 0));
+  }
+
+  function applyFocus(x, y) {
+    if (!model) return;
+    const normalizedX = clampUnit(x);
+    const normalizedY = clampUnit(y);
+    state.angleX = normalizedX * 30;
+    state.angleY = -normalizedY * 30;
+    setRaw("ParamAngleX", state.angleX);
+    setRaw("ParamAngleY", state.angleY);
+    setRaw("ParamBodyAngleZ", normalizedX * 10);
+    if (model.focusController) {
+      model.focusController.focus(normalizedX, -normalizedY);
+    }
+  }
+
+  function clearPointerReset() {
+    if (pointerResetTimer) clearTimeout(pointerResetTimer);
+    pointerResetTimer = null;
+  }
+
+  function resetPointerFocus() {
+    clearPointerReset();
+    pointerTrackingActive = false;
+    touchTrackingActive = false;
+    centerLocked = true;
+    lockedDirectorX = directorX;
+    lockedDirectorY = directorY;
+    applyFocus(0, 0);
+  }
+
+  function schedulePointerReset(delay) {
+    clearPointerReset();
+    pointerResetTimer = setTimeout(resetPointerFocus, delay);
+  }
+
+  function updatePointerFocus(event) {
+    if (!containerEl) return;
+    const rect = containerEl.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    pointerTrackingActive = true;
+    centerLocked = false;
+    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    const y = ((event.clientY - rect.top) / rect.height) * 2 - 1;
+    applyFocus(x, y);
+    if (event.pointerType === "mouse") {
+      schedulePointerReset(MOUSE_IDLE_RESET_MS);
+    }
+  }
+
+  function removePointerTracking() {
+    clearPointerReset();
+    if (!pointerTarget || !pointerHandlers) return;
+    Object.keys(pointerHandlers).forEach(function (eventName) {
+      pointerTarget.removeEventListener(eventName, pointerHandlers[eventName]);
+    });
+    pointerTarget = null;
+    pointerHandlers = null;
+  }
+
+  function installPointerTracking(target) {
+    removePointerTracking();
+    pointerTarget = target;
+    pointerHandlers = {
+      pointerdown: function (event) {
+        if (event.pointerType !== "mouse") touchTrackingActive = true;
+        updatePointerFocus(event);
+      },
+      pointermove: function (event) {
+        if (event.pointerType === "mouse" || touchTrackingActive) {
+          updatePointerFocus(event);
+        }
+      },
+      pointerup: function (event) {
+        if (event.pointerType !== "mouse") {
+          touchTrackingActive = false;
+          schedulePointerReset(TOUCH_RELEASE_RESET_MS);
+        }
+      },
+      pointercancel: function () {
+        touchTrackingActive = false;
+        schedulePointerReset(TOUCH_RELEASE_RESET_MS);
+      },
+      pointerleave: function (event) {
+        if (event.pointerType === "mouse") {
+          schedulePointerReset(POINTER_LEAVE_RESET_MS);
+        }
+      },
+    };
+    Object.keys(pointerHandlers).forEach(function (eventName) {
+      target.addEventListener(eventName, pointerHandlers[eventName], {
+        passive: true,
+      });
+    });
   }
 
   function startTicker() {
@@ -105,7 +218,9 @@ window.__live2dStage = (function () {
         });
         this._ro.observe(el);
       }
-      PIXI.live2d.Live2DModel.from(modelUrl).catch(function (err) {
+      PIXI.live2d.Live2DModel.from(modelUrl, {
+        autoInteract: false,
+      }).catch(function (err) {
         loadFailed = true;
         console.error('[companion] Live2D model load failed:', err);
         container.innerHTML =
@@ -118,6 +233,7 @@ window.__live2dStage = (function () {
         window.addEventListener('resize', fitAll);
         fitAll();
         app.stage.addChild(m);
+        installPointerTracking(app.view);
         startTicker();
       });
       return true;
@@ -127,15 +243,17 @@ window.__live2dStage = (function () {
       setRaw(id, v);
     },
     focus: function (x, y) {
-      if (!model) return;
-      state.angleX = x * 30;
-      state.angleY = -y * 30;
-      setRaw("ParamAngleX", state.angleX);
-      setRaw("ParamAngleY", state.angleY);
-      setRaw("ParamBodyAngleZ", x * 10);
-      if (model.focusController) {
-        model.focusController.focus(x, -y);
+      directorX = clampUnit(x);
+      directorY = clampUnit(y);
+      if (pointerTrackingActive) return;
+      if (centerLocked) {
+        const changed =
+          Math.abs(directorX - lockedDirectorX) > DIRECTOR_UNLOCK_DELTA ||
+          Math.abs(directorY - lockedDirectorY) > DIRECTOR_UNLOCK_DELTA;
+        if (!changed) return;
+        centerLocked = false;
       }
+      applyFocus(directorX, directorY);
     },
     nod: function () {
       if (!model) return;
@@ -155,8 +273,9 @@ window.__live2dStage = (function () {
       return !!loadFailed;
     },
     dispose: function () {
+      removePointerTracking();
       if (app) { app.destroy(false, { children: true }); }
-      app = null; model = null; tickerJobs = null;
+      app = null; model = null; tickerJobs = null; containerEl = null;
     },
   };
 })();
