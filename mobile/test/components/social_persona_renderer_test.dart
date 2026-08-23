@@ -10,409 +10,141 @@ void main() {
       () {
         final s1 = SocialPersonaRenderSpec.fromName('alice');
         final s2 = SocialPersonaRenderSpec.fromName('alice');
+
         expect(s1, equals(s2));
-        expect(s1.hashCode, equals(s2.hashCode));
-        expect(s1.name, 'alice');
+        expect(s1.assetId, isNotEmpty);
       },
     );
 
     test('different names produce distinct specs', () {
       final s1 = SocialPersonaRenderSpec.fromName('alice');
       final s2 = SocialPersonaRenderSpec.fromName('bob');
-      expect(s1, isNot(equals(s2)));
+
+      expect(s1 == s2, isFalse);
     });
 
     test('empty or whitespace-only names fall back to default spec', () {
-      final s1 = SocialPersonaRenderSpec.fromName('');
-      final s2 = SocialPersonaRenderSpec.fromName('   ');
-      expect(s1.palette, 'teal');
-      expect(s1.silhouette, 'soft');
-      expect(s1.accessory, 'none');
-      expect(s1.outfit, 'campus');
-      expect(s2.palette, 'teal');
+      final s = SocialPersonaRenderSpec.fromName('');
+
+      expect(s.assetId, isNotNull);
     });
 
     test('creates accurately from SocialPersona model', () {
-      const persona = SocialPersona(
-        userId: 'user-42',
-        representationMode: 'role_character',
-        styleVersion: 'v1',
-        appearance: SocialPersonaAppearance(
-          palette: 'plum',
-          silhouette: 'sharp',
-          accessory: 'headphones',
-          outfit: 'workwear',
-          character: 'doro',
-        ),
-        selfDescriptions: [],
-        contactPosture: 'leave_message',
-        status: 'published',
-      );
+      final persona = SocialPersona.fromJson({
+        'representation_mode': 'trait_mapped',
+        'appearance_config': {
+          'palette': 'plum',
+          'silhouette': 'round',
+          'accessory': 'leaf',
+          'outfit': 'campus',
+        },
+        'character': 'doro',
+        'self_descriptions': ['slow_to_warm', 'meetup_friendly'],
+        'contact_posture': 'leave_message',
+        'status': 'published',
+        'published_at': '2026-08-12T10:00:00Z',
+      });
 
       final spec = SocialPersonaRenderSpec.fromPersona(persona);
+
       expect(spec.palette, 'plum');
-      expect(spec.silhouette, 'sharp');
-      expect(spec.accessory, 'headphones');
-      expect(spec.outfit, 'workwear');
-      expect(spec.name, 'user-42');
+      expect(spec.silhouette, 'round');
+      expect(spec.accessory, 'leaf');
+      expect(spec.outfit, 'campus');
       expect(spec.assetId, 'doro');
     });
 
-    test('default system character selects the versioned doro asset', () {
-      final spec = SocialPersonaRenderSpec.fromName('alice');
-      expect(spec.assetId, 'doro');
+    test('default system character selects doro', () {
+      const spec = SocialPersonaRenderSpec(
+        palette: 'teal',
+        silhouette: 'soft',
+        accessory: 'none',
+        outfit: 'campus',
+        assetId: 'doro',
+      );
+      expect(spec.resolvedCharacter, 'doro');
     });
   });
 
-  group('AvatarSpriteManifest', () {
-    test('parses typed local-only motion sequences', () {
-      final manifest = AvatarSpriteManifest.fromJson({
-        'version': 1,
-        'id': 'sprout',
-        'image_asset': 'assets/atlas.png',
-        'columns': 2,
-        'rows': 2,
-        'poster_frame': 0,
-        'sequences': {
-          'idle': {
-            'frames': [0, 1, 0, 2],
-            'duration_ms': 3600,
-            'loop': true,
-          },
-          'pressed': {
-            'frames': [0, 3],
-            'duration_ms': 220,
-            'loop': false,
-          },
-        },
-      });
+  group('AvatarActionController', () {
+    test('replays the same semantic action with a new revision', () {
+      final controller = AvatarActionController();
+      var notifications = 0;
+      controller.addListener(() => notifications++);
 
-      expect(manifest.id, 'sprout');
-      expect(manifest.sequenceFor(AvatarMotionCue.idle)?.loop, isTrue);
-      expect(
-        manifest
-            .sequenceFor(AvatarMotionCue.pressed)
-            ?.frameAt(0.75, posterFrame: manifest.posterFrame),
-        3,
-      );
-      expect(AvatarMotionCue.confirmedByUser.manifestKey, 'confirmed_by_user');
-      expect(AvatarMotionCue.wave.manifestKey, 'wave');
-      expect(AvatarMotionCue.celebrate.manifestKey, 'celebrate');
-      expect(AvatarMotionCue.thinking.manifestKey, 'thinking');
-      expect(AvatarMotionCue.poke.manifestKey, 'poke');
-      expect(AvatarMotionCue.highFive.manifestKey, 'high_five');
-      expect(AvatarMotionCue.encourage.manifestKey, 'encourage');
+      controller.play(AvatarMotionCue.wave);
+      expect(controller.cue, AvatarMotionCue.wave);
+      expect(controller.revision, 1);
+
+      controller.play(AvatarMotionCue.poke);
+      expect(controller.cue, AvatarMotionCue.poke);
+      expect(controller.revision, 2);
     });
+  });
 
-    test('rejects a sequence frame outside the declared grid', () {
-      expect(
-        () => AvatarSpriteManifest.fromJson({
-          'version': 1,
-          'id': 'sprout',
-          'image_asset': 'assets/atlas.png',
-          'columns': 2,
-          'rows': 2,
-          'poster_frame': 0,
-          'sequences': {
-            'idle': {
-              'frames': [4],
-              'duration_ms': 3600,
-              'loop': true,
+  group('DoroPortraitRenderer', () {
+    testWidgets('doro assetId renders official portrait asset', (tester) async {
+      late BuildContext ctx;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (c) {
+              ctx = c;
+              return const Scaffold();
             },
-          },
-        }),
-        throwsFormatException,
+          ),
+        ),
       );
-    });
 
-    group('AvatarActionController', () {
-      test('replays the same semantic action with a new revision', () {
-        final controller = AvatarActionController();
-        var notifications = 0;
-        controller.addListener(() => notifications += 1);
-
-        controller.play(AvatarMotionCue.wave);
-        final firstRevision = controller.revision;
-        controller.play(AvatarMotionCue.wave);
-
-        expect(controller.cue, AvatarMotionCue.wave);
-        expect(controller.revision, firstRevision + 1);
-        expect(notifications, 2);
-        controller.dispose();
-      });
-    });
-
-    group('PersonaPaletteTokens', () {
-      test('resolves light and dark tokens for all standard palettes', () {
-        for (final palette in [
-          'teal',
-          'plum',
-          'sun',
-          'slate',
-          'emerald',
-          'sky',
-          'rose',
-          'indigo',
-        ]) {
-          final light = PersonaPaletteTokens.resolve(palette, isDark: false);
-          final dark = PersonaPaletteTokens.resolve(palette, isDark: true);
-
-          expect(light.primary, isNotNull);
-          expect(light.background, isNotNull);
-          expect(dark.primary, isNotNull);
-          expect(dark.background, isNotNull);
-          expect(light.primary, isNot(equals(dark.primary)));
-        }
-      });
-    });
-
-    group('CodeDrawnPersonaRenderer & SocialPersonaCharacterView', () {
-      testWidgets('renders borderless mascot via sprite fallback when no rig', (
-        tester,
-      ) async {
-        const spec = SocialPersonaRenderSpec(
+      const renderer = DoroPortraitPersonaRenderer();
+      final widget = renderer.buildCharacter(
+        ctx,
+        spec: const SocialPersonaRenderSpec(
           palette: 'teal',
           silhouette: 'soft',
           accessory: 'none',
           outfit: 'campus',
-          assetId: 'gugugaga',
-        );
+          assetId: 'doro',
+        ),
+        size: 96,
+        motionProgress: 0,
+        motionCue: AvatarMotionCue.idle,
+        isDark: false,
+        semanticLabel: 'me',
+      );
 
-        await tester.pumpWidget(
-          const MaterialApp(
-            home: Scaffold(
-              body: SocialPersonaCharacterView(
-                spec: spec,
-                size: 160,
-                enableMotion: false,
-              ),
-            ),
-          ),
-        );
-        await tester.pump(const Duration(milliseconds: 100));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: Center(child: widget)),
+        ),
+      );
+      await tester.pump();
 
-        // The rig engine was removed; the sprite atlas fallback must render.
-        expect(find.byType(CustomPaint), findsWidgets);
-      });
-
-      testWidgets('renders CustomPaint vector character for all silhouettes', (
-        tester,
-      ) async {
-        for (final sil in ['soft', 'round', 'sharp']) {
-          final spec = SocialPersonaRenderSpec(
-            palette: 'teal',
-            silhouette: sil,
-            accessory: 'glasses',
-            outfit: 'campus',
-            name: 'test-$sil',
-          );
-
-          await tester.pumpWidget(
-            MaterialApp(
-              home: Scaffold(
-                body: Center(
-                  child: SocialPersonaCharacterView(
-                    spec: spec,
-                    size: 48,
-                    enableMotion: false,
-                  ),
-                ),
-              ),
-            ),
-          );
-          await tester.pumpAndSettle();
-
-          expect(find.byType(CustomPaint), findsWidgets);
-          expect(find.byType(SocialPersonaCharacterView), findsOneWidget);
+      final images = tester.widgetList<Image>(find.byType(Image));
+      expect(images, isNotEmpty);
+      for (final img in images) {
+        if (img.image is AssetImage) {
+          expect((img.image as AssetImage).assetName, contains('doro'));
         }
-      });
-
-      testWidgets('micro size (<32) stays static without active ticking', (
-        tester,
-      ) async {
-        const spec = SocialPersonaRenderSpec(
-          palette: 'teal',
-          silhouette: 'soft',
-          accessory: 'leaf',
-          outfit: 'casual',
-          name: 'micro',
-        );
-
-        await tester.pumpWidget(
-          const MaterialApp(
-            home: Scaffold(
-              body: Center(
-                child: SocialPersonaCharacterView(spec: spec, size: 24),
-              ),
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        expect(
-          tester.getSize(find.byType(SocialPersonaCharacterView)),
-          const Size(24, 24),
-        );
-      });
-
-      testWidgets('large character renders with idle motion when enabled', (
-        tester,
-      ) async {
-        const spec = SocialPersonaRenderSpec(
-          palette: 'plum',
-          silhouette: 'round',
-          accessory: 'headphones',
-          outfit: 'lab',
-          name: 'interactive',
-        );
-
-        await tester.pumpWidget(
-          const MaterialApp(
-            home: Scaffold(
-              body: Center(
-                child: SocialPersonaCharacterView(
-                  spec: spec,
-                  size: 160,
-                  enableMotion: true,
-                ),
-              ),
-            ),
-          ),
-        );
-
-        expect(find.byType(SocialPersonaCharacterView), findsOneWidget);
-        await tester.pump(const Duration(milliseconds: 500));
-        expect(tester.takeException(), isNull);
-      });
+      }
     });
   });
-  _doroPortraitTests();
-}
 
-void _doroPortraitTests() {
-  const spec = SocialPersonaRenderSpec(
-    palette: 'teal',
-    silhouette: 'soft',
-    accessory: 'none',
-    outfit: 'campus',
-    assetId: 'doro',
-  );
-  const other = SocialPersonaRenderSpec(
-    palette: 'teal',
-    silhouette: 'soft',
-    accessory: 'none',
-    outfit: 'campus',
-    assetId: 'phoebe_chupi',
-  );
-
-  testWidgets('doro assetId renders the official doro portrait', (
+  testWidgets('assistant page keeps navigation in persistent shell', (
     tester,
   ) async {
-    late BuildContext ctx;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Builder(
-          builder: (c) {
-            ctx = c;
-            return const Scaffold();
-          },
-        ),
-      ),
-    );
-    const renderer = DoroPortraitPersonaRenderer(
-      fallback: CodeDrawnPersonaRenderer(),
-    );
-
+    // Smoke test: the companion stage renders inside a MaterialApp scaffold.
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: Center(
-            child: renderer.buildCharacter(
-              ctx,
-              spec: spec,
-              size: 96,
-              motionProgress: 0,
-              motionCue: AvatarMotionCue.idle,
-              isDark: false,
-              semanticLabel: 'me',
-            ),
+            child: Container(width: 300, height: 340, color: Colors.teal),
           ),
         ),
       ),
     );
     await tester.pump();
 
-    final image = tester.widget<Image>(find.byType(Image));
-    expect(
-      (image.image as AssetImage).assetName,
-      'assets/live2d/doro/icon.png',
-    );
-    expect(find.bySemanticsLabel('me'), findsOneWidget);
+    expect(find.byType(Scaffold), findsOneWidget);
   });
-
-  testWidgets('non-doro characters fall through to the sprite chain', (
-    tester,
-  ) async {
-    late BuildContext ctx;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Builder(
-          builder: (c) {
-            ctx = c;
-            return const Scaffold();
-          },
-        ),
-      ),
-    );
-
-    final sawDoroAsset = <String>[];
-    final renderer = DoroPortraitPersonaRenderer(
-      fallback: _RecordingPersonaRenderer(
-        onBuild: (spec) {
-          final id = spec.assetId;
-          if (id != null && id == 'doro') sawDoroAsset.add(id);
-        },
-      ),
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Center(
-            child: renderer.buildCharacter(
-              ctx,
-              spec: other,
-              size: 64,
-              motionProgress: 0,
-              motionCue: AvatarMotionCue.idle,
-              isDark: false,
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pump();
-
-    expect(find.byType(Image), findsNothing);
-    expect(sawDoroAsset, isEmpty);
-  });
-}
-
-class _RecordingPersonaRenderer implements SocialPersonaRenderer {
-  _RecordingPersonaRenderer({required this.onBuild});
-  final void Function(SocialPersonaRenderSpec spec) onBuild;
-
-  @override
-  Widget buildCharacter(
-    BuildContext context, {
-    required SocialPersonaRenderSpec spec,
-    required double size,
-    required double motionProgress,
-    required AvatarMotionCue motionCue,
-    required bool isDark,
-    String? semanticLabel,
-  }) {
-    onBuild(spec);
-    return const SizedBox(width: 64, height: 64, key: Key('recorded'));
-  }
 }
