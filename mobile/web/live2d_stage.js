@@ -81,6 +81,7 @@ window.__live2dStage = (function () {
     mountElement: function (el, modelUrl) {
       const container = el;
       if (!container) return false;
+      containerEl = container;
       if (!this.supported()) {
         loadFailed = true;
         container.innerHTML =
