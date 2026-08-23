@@ -8,6 +8,16 @@ import 'cubism_body_default.dart'
 export 'cubism_params.dart'
     show CubismBridge, CubismParams, gestureForTag, paramsForState;
 
+/// Active companion character (multi-character catalog).
+const String kCompanionCharacter = String.fromEnvironment(
+  'COMPANION_CHARACTER',
+  defaultValue: 'doro',
+);
+
+/// Asset url for a character's model3.json (flutter web doubles the prefix).
+String cubismModelUrlFor(String character) =>
+    '/assets/assets/live2d/\$character/\$character.model3.json';
+
 /// Whether the Cubism4 runtime is actually usable on this platform
 /// (scripts loaded AND runtime libs present). Degrades to false on any error.
 bool cubismRuntimeSupported() {
@@ -36,6 +46,7 @@ Widget? createCubismStage({
   try {
     return impl.createCubismStage(
       fallback: fallback,
+      modelUrl: cubismModelUrlFor(kCompanionCharacter),
       width: width,
       height: height,
     );

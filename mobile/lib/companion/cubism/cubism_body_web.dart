@@ -10,7 +10,6 @@ import 'cubism_bridge_web.dart';
 import 'cubism_renderer.dart';
 
 const String _viewType = 'companion-live2d-stage';
-const String _defaultModelUrl = '/assets/assets/live2d/doro/Doro.model3.json';
 
 bool _factoryRegistered = false;
 
@@ -70,9 +69,9 @@ class CubismStageWebView extends StatefulWidget {
   const CubismStageWebView({
     super.key,
     required this.fallback,
+    required this.modelUrl,
     this.width = 300,
     this.height = 360,
-    this.modelUrl = _defaultModelUrl,
   });
 
   final WidgetBuilder fallback;
@@ -170,6 +169,15 @@ CharacterRenderer createCubismRenderer() =>
 
 Widget? createCubismStage({
   required WidgetBuilder fallback,
+  required String modelUrl,
   double width = 300,
   double height = 360,
-}) => CubismStageWebView(fallback: fallback, width: width, height: height);
+}) {
+  _ensureViewFactory(modelUrl);
+  return CubismStageWebView(
+    fallback: fallback,
+    modelUrl: modelUrl,
+    width: width,
+    height: height,
+  );
+}
