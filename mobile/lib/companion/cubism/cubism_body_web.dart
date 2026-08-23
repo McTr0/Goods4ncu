@@ -54,33 +54,112 @@ void _ensureViewFactory(String modelUrl) {
 }
 
 /// Web stage: an HtmlElementView hosting the PIXI canvas with the real
-/// Cubism model (goal §72).
-class CubismStageWebView extends StatelessWidget {
+/// Cubism model. If the runtime or the model fails to load, [fallback]
+/// replaces the slot so the user never sees a blank box (goal §74).
+class CubismStageWebView extends StatefulWidget {
   const CubismStageWebView({
     super.key,
+    required this.fallback,
     this.width = 300,
     this.height = 360,
     this.modelUrl = _defaultModelUrl,
   });
 
+  final WidgetBuilder fallback;
   final double width;
   final double height;
   final String modelUrl;
 
   @override
+  State<CubismStageWebView> createState() => _CubismStageWebViewState();
+}
+
+class _CubismStageWebViewState extends State<CubismStageWebView> {
+  static const _pollInterval = Duration(milliseconds: 300);
+  static const _maxPolls = 12; // ~3.6 s
+
+  Timer? _pollTimer;
+  int _polls = 0;
+  bool? _runtimeSupported; // null = not yet probed
+
+  @override
+  void initState() {
+    super.initState();
+    _probe();
+  }
+
+  Future<void> _probe() async {
+    for (var i = 0; i < 20; i++) {
+      final stage = WebCubismBridge.find();
+      if (stage != null) {
+        final bridge = WebCubismBridge(stage);
+        // Runtime scripts may still be initializing; give them a beat.
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        if (!mounted) return;
+        setState(() => _runtimeSupported = bridge.runtimeSupported());
+        if (_runtimeSupported == true) _startFailureWatch(bridge);
+        return;
+      }
+      await Future<void>.delayed(_pollInterval);
+      if (!mounted) return;
+    }
+    if (mounted) setState(() => _runtimeSupported = false);
+  }
+
+  /// Watches for async load failure and swaps to the fallback body.
+  void _startFailureWatch(WebCubismBridge bridge) {
+    _pollTimer = Timer.periodic(_pollInterval, (timer) {
+      _polls++;
+      final failed = bridge.hasLoadFailed();
+      if (failed && mounted) {
+        timer.cancel();
+        setState(() => _runtimeSupported = false);
+      } else if (_polls >= _maxPolls) {
+        timer.cancel();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (!WebCubismBridge.isReady) return const SizedBox.shrink();
-    _ensureViewFactory(modelUrl);
+    // Unsupported / failed → legacy sprite body takes the slot.
+    if (_runtimeSupported == false) return widget.fallback(context);
+    if (_runtimeSupported == null) {
+      // Still probing: keep layout stable with an empty box of same size.
+      return SizedBox(width: widget.width, height: widget.height);
+    }
+    _ensureViewFactory(widget.modelUrl);
     return SizedBox(
-      width: width,
-      height: height,
+      width: widget.width,
+      height: widget.height,
       child: HtmlElementView(viewType: _viewType),
     );
+  }
+}
+
+/// Whether the Cubism4 runtime is actually usable right now (goal §74).
+/// Null-safe: any missing piece degrades to false.
+bool cubismRuntimeSupported() {
+  try {
+    final stage = WebCubismBridge.find();
+    if (stage == null) return false;
+    return WebCubismBridge(stage).runtimeSupported();
+  } catch (_) {
+    return false;
   }
 }
 
 CharacterRenderer createCubismRenderer() =>
     CubismCharacterRenderer(bridge: WebCubismBridge(WebCubismBridge.find()!));
 
-Widget? createCubismStage({double width = 300, double height = 360}) =>
-    CubismStageWebView(width: width, height: height);
+Widget? createCubismStage({
+  required WidgetBuilder fallback,
+  double width = 300,
+  double height = 360,
+}) => CubismStageWebView(fallback: fallback, width: width, height: height);

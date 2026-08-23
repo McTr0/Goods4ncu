@@ -17,6 +17,14 @@ class WebCubismBridge implements CubismBridge {
 
   static bool get isReady => find() != null;
 
+  /// Mirrors the stage's own supported() check (runtime libs present).
+  bool runtimeSupported() =>
+      (_stage.callMethod('supported'.toJS) as JSBoolean).toDart;
+
+  /// True when a mount/model load failed after the stage was created.
+  bool hasLoadFailed() =>
+      (_stage.callMethod('hasLoadFailed'.toJS) as JSBoolean).toDart;
+
   /// Mount the PIXI application into [containerId] with [modelUrl].
   bool mount(String containerId, String modelUrl) =>
       (_stage.callMethod('mount'.toJS, containerId.toJS, modelUrl.toJS)

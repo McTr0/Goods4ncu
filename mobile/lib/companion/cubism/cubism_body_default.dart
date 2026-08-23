@@ -2,14 +2,19 @@ import 'package:flutter/widgets.dart';
 
 import '../character_renderer.dart';
 
-/// Non-web fallback: Cubism body unavailable (graceful degradation §74).
-class CubismStageFallback extends StatelessWidget {
-  const CubismStageFallback({super.key});
+/// Whether the current platform can render the real Cubism body.
+bool cubismRuntimeSupported() => false;
 
-  @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
-}
+/// Platform-selected Cubism renderer (null ⇒ caller keeps fallback body).
+CharacterRenderer? createCubismRendererOrNull() => null;
 
-CharacterRenderer? createCubismRenderer() => null;
+/// Never called on non-web (the OrNull wrapper guards it).
+CharacterRenderer createCubismRenderer() =>
+    throw UnsupportedError('Cubism body is web-only');
 
-Widget? createCubismStage({double width = 300, double height = 360}) => null;
+/// Platform-selected stage widget with graceful fallback (§74).
+Widget? createCubismStage({
+  required WidgetBuilder fallback,
+  double width = 300,
+  double height = 360,
+}) => null;

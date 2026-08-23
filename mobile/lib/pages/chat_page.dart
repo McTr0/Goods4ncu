@@ -140,12 +140,19 @@ class _ChatPageState extends State<ChatPage> {
         context,
         listen: false,
       );
-      if (_companionHost != null) {
-        // Body takeover cut 1: the Director drives 小昌's body through the
-        // OpenRig adapter; the legacy brain is starved of page events.
-        _companionHost!.attachBody(FallbackBodyRenderer(_live2DController));
-        _live2DController.detachBrain();
+      // Body takeover cut 1: the Director drives 小昌's body. Attach the
+      // real Cubism renderer only when the runtime is actually usable;
+      // otherwise the legacy sprite adapter keeps the body alive (§74).
+      _companionOwnsBodyFlag =
+          _companionHost != null && cubismRuntimeSupported();
+      if (_companionOwnsBodyFlag) {
+        _companionHost!.attachBody(createCubismRendererOrNull()!);
+        _companionHost!.mouthSampler = () => _live2DController.mouthOpen;
+      } else {
+        _companionHost?.attachBody(FallbackBodyRenderer(_live2DController));
+        _companionHost?.mouthSampler = () => _live2DController.mouthOpen;
       }
+      _live2DController.detachBrain();
       _environmentTracker = EnvironmentTracker(
         state: EnvironmentState(),
         onMeaningfulEvent: (event) {
@@ -208,8 +215,11 @@ class _ChatPageState extends State<ChatPage> {
   /// When the companion owns the body, legacy brain feeds must stay silent.
   bool get _useLegacyBrain => !(kCompanionEnabled && _companionHost != null);
 
+  bool _companionOwnsBodyFlag = false;
+
   /// Companion owns the body AND the real Cubism model is renderable here.
-  bool get _companionOwnsBody => _useLegacyBrain == false && cubismAvailable;
+  bool get _companionOwnsBody =>
+      _useLegacyBrain == false && _companionOwnsBodyFlag;
 
   static final RegExp _thanksPattern = RegExp(
     r'谢谢|感谢|thx|thanks',
@@ -1557,9 +1567,26 @@ class _ChatPageState extends State<ChatPage> {
                 children: [
                   const SizedBox(height: 10),
                   // Body selection (§74): real Cubism model on web when the
-                  // companion owns the body; legacy sprite body otherwise.
-                  if (_companionOwnsBody && cubismAvailable)
-                    createCubismStage(width: 300, height: 340)!
+                  // runtime is usable and the companion owns the body. The
+                  // stage internally falls back to the legacy sprite body if
+                  // the model fails after mount.
+                  if (_companionOwnsBody)
+                    createCubismStage(
+                          fallback: (context) => Live2DCharacterWidget(
+                            controller: _live2DController,
+                            size: 260,
+                            showSpeechBubble: true,
+                            enableTouchTracking: true,
+                          ),
+                          width: 300,
+                          height: 340,
+                        ) ??
+                        Live2DCharacterWidget(
+                          controller: _live2DController,
+                          size: 260,
+                          showSpeechBubble: true,
+                          enableTouchTracking: true,
+                        )
                   else
                     Live2DCharacterWidget(
                       controller: _live2DController,

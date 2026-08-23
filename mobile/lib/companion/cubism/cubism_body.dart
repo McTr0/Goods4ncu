@@ -8,10 +8,11 @@ import 'cubism_body_default.dart'
 export 'cubism_params.dart'
     show CubismBridge, CubismParams, gestureForTag, paramsForState;
 
-/// Whether the current platform can render the real Cubism body.
-bool get cubismAvailable {
+/// Whether the Cubism4 runtime is actually usable on this platform
+/// (scripts loaded AND runtime libs present). Degrades to false on any error.
+bool cubismRuntimeSupported() {
   try {
-    return impl.createCubismRenderer() != null;
+    return impl.cubismRuntimeSupported();
   } catch (_) {
     return false;
   }
@@ -26,6 +27,19 @@ CharacterRenderer? createCubismRendererOrNull() {
   }
 }
 
-/// Platform-selected stage widget (null ⇒ caller hides the slot).
-Widget? createCubismStage({double width = 300, double height = 360}) =>
-    impl.createCubismStage(width: width, height: height);
+/// Platform-selected stage widget with graceful fallback.
+Widget? createCubismStage({
+  required WidgetBuilder fallback,
+  double width = 300,
+  double height = 360,
+}) {
+  try {
+    return impl.createCubismStage(
+      fallback: fallback,
+      width: width,
+      height: height,
+    );
+  } catch (_) {
+    return null;
+  }
+}
