@@ -178,26 +178,6 @@ class ApiService extends BaseService {
   Future<SocialPersonaCatalog> getSocialPersonaCatalog() =>
       _userService.getSocialPersonaCatalog();
 
-  Future<SocialPersona> upsertSocialPersona({
-    required String representationMode,
-    String? styleVersion,
-    required Map<String, String> appearanceConfig,
-    required List<String> selfDescriptions,
-    required String contactPosture,
-  }) => _userService.upsertSocialPersona(
-    representationMode: representationMode,
-    styleVersion: styleVersion,
-    appearanceConfig: appearanceConfig,
-    selfDescriptions: selfDescriptions,
-    contactPosture: contactPosture,
-  );
-
-  Future<SocialPersona> publishSocialPersona() =>
-      _userService.publishSocialPersona();
-
-  Future<SocialPersona> archiveSocialPersona() =>
-      _userService.archiveSocialPersona();
-
   Future<SocialPersona?> getPublicSocialPersona(String userId) =>
       _userService.getPublicSocialPersona(userId);
 

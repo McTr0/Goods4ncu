@@ -11,7 +11,6 @@ class _FakeApiService extends ApiService {
     this.profile, {
     this.memberships = const [],
     String? activeCampusId,
-    this.persona,
   }) : activeCampusId =
            activeCampusId ??
            (memberships.isEmpty ? null : memberships.first.campusId);
@@ -267,52 +266,6 @@ void main() {
       expect(api.switchedCampusId, 'campus-2');
       expect(find.text('第二校园'), findsOneWidget);
       expect(find.text(l.campusSwitchSuccess), findsOneWidget);
-    });
-
-    testWidgets('does not offer user-imported persona assets', (tester) async {
-      final persona = SocialPersona(
-        id: 'persona-1',
-        userId: 'student-1',
-        campusId: 'campus-1',
-        representationMode: 'role_character',
-        styleVersion: 'v1',
-        appearance: const SocialPersonaAppearance(
-          palette: 'teal',
-          silhouette: 'soft',
-          accessory: 'leaf',
-          outfit: 'campus',
-        ),
-        selfDescriptions: const ['slow_to_warm'],
-        contactPosture: 'leave_message',
-        status: 'draft',
-      );
-      final api = _FakeApiService(
-        {
-          'username': 'student',
-          'role': 'user',
-          'created_at': '2026-03-01T08:00:00Z',
-        },
-        memberships: const [
-          CampusMembership(
-            id: 'membership-1',
-            campusId: 'campus-1',
-            campusSlug: 'ncu',
-            campusNameZh: '南昌大学',
-            campusNameEn: 'Nanchang University',
-            status: 'verified',
-            role: 'member',
-          ),
-        ],
-        persona: persona,
-      );
-
-      await tester.pumpWidget(_buildTestApp(ProfilePage(apiService: api)));
-      await tester.pumpAndSettle();
-      final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
-
-      expect(find.text(l.socialPersonaTitle), findsOneWidget);
-      expect(find.text(l.socialPersonaAssetAdd), findsNothing);
-      expect(find.byIcon(Icons.add_photo_alternate_outlined), findsNothing);
     });
   });
 }

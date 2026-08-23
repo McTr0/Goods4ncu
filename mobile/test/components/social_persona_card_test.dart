@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/components/social_persona_card.dart';
-import 'package:goods4ncu_mobile/components/social_persona_renderer.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/theme/app_theme.dart';
@@ -31,62 +30,6 @@ SocialPersona _persona() => const SocialPersona(
 );
 
 void main() {
-  testWidgets('full-screen editor selects Phoebe and previews actions', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(390, 844);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    SocialPersonaDraft? saved;
-    await tester.pumpWidget(
-      _host(
-        Builder(
-          builder: (context) => FilledButton(
-            onPressed: () async {
-              saved = await showSocialPersonaEditor(context, null);
-            },
-            child: const Text('打开角色编辑器'),
-          ),
-        ),
-      ),
-    );
-
-    await tester.tap(find.text('打开角色编辑器'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
-    expect(find.text('咕咕嘎嘎'), findsOneWidget);
-    expect(find.text('Doro'), findsOneWidget);
-    expect(find.text('菲比啾比'), findsOneWidget);
-    expect(find.text('默认角色'), findsNothing);
-    expect(find.text('打招呼'), findsOneWidget);
-    expect(find.text('庆祝'), findsOneWidget);
-    expect(find.text('思考'), findsOneWidget);
-
-    await tester.tap(
-      find.ancestor(of: find.text('打招呼'), matching: find.byType(ActionChip)),
-    );
-    await tester.pump(const Duration(milliseconds: 100));
-    final animatedAvatar = tester.widget<SocialPersonaAvatar>(
-      find.byType(SocialPersonaAvatar).first,
-    );
-    expect(animatedAvatar.motionCue, AvatarMotionCue.wave);
-
-    await tester.tap(
-      find.byKey(const ValueKey('persona_character_phoebe_chupi')),
-    );
-    await tester.pump(const Duration(milliseconds: 220));
-    await tester.scrollUntilVisible(
-      find.text('保存草稿'),
-      300,
-      scrollable: find.byType(Scrollable).last,
-    );
-    await tester.tap(find.text('保存草稿'));
-    await tester.pumpAndSettle();
-
-    expect(saved?.appearanceConfig['character'], 'phoebe_chupi');
-  });
-
   testWidgets(
     'preview renders explicit identity choices without attention claims',
     (tester) async {

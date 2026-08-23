@@ -153,66 +153,6 @@ class UserService extends BaseService {
     );
   }
 
-  /// Save a private role presentation draft.
-  /// PUT /api/user/persona
-  Future<SocialPersona> upsertSocialPersona({
-    required String representationMode,
-    String? styleVersion,
-    required Map<String, String> appearanceConfig,
-    required List<String> selfDescriptions,
-    required String contactPosture,
-  }) async {
-    final headers = await authHeaders();
-    final response = await put(
-      Uri.parse('$baseUrl/api/user/persona'),
-      headers,
-      jsonEncode({
-        'representation_mode': representationMode,
-        'style_version': styleVersion,
-        'appearance_config': appearanceConfig,
-        'self_descriptions': selfDescriptions,
-        'contact_posture': contactPosture,
-      }),
-    );
-    return _parseSocialPersonaEnvelope(response);
-  }
-
-  /// Explicitly publish the saved role presentation.
-  /// POST /api/user/persona/publish
-  Future<SocialPersona> publishSocialPersona() async {
-    final headers = await authHeaders();
-    final response = await post(
-      Uri.parse('$baseUrl/api/user/persona/publish'),
-      headers,
-      '{}',
-    );
-    return _parseSocialPersonaEnvelope(response);
-  }
-
-  /// Stop publishing the role presentation and return to the default system Avatar.
-  /// POST /api/user/persona/archive
-  Future<SocialPersona> archiveSocialPersona() async {
-    final headers = await authHeaders();
-    final response = await post(
-      Uri.parse('$baseUrl/api/user/persona/archive'),
-      headers,
-      '{}',
-    );
-    return _parseSocialPersonaEnvelope(response);
-  }
-
-  SocialPersona _parseSocialPersonaEnvelope(dynamic response) {
-    final data = handleResponse(
-      response,
-      (value) => value as Map<String, dynamic>,
-    );
-    final persona = data['persona'];
-    if (persona is! Map) {
-      throw ServerException(200, '服务器未返回角色呈现');
-    }
-    return SocialPersona.fromJson(persona.cast<String, dynamic>());
-  }
-
   /// Get another user's published role presentation in the resolved campus.
   /// GET /api/users/{id}/persona
   Future<SocialPersona?> getPublicSocialPersona(String userId) async {
