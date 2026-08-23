@@ -23,6 +23,29 @@ class ChatService extends BaseService {
         .toList();
   }
 
+  /// GET /api/companion/relationship — current relationship snapshot.
+  Future<Map<String, dynamic>> getCompanionRelationship() async {
+    final headers = await authHeaders();
+    final response = await get(
+      Uri.parse('$baseUrl/api/companion/relationship'),
+      headers,
+    );
+    return handleResponse(response, (d) => d as Map<String, dynamic>);
+  }
+
+  /// POST /api/companion/relationship/events — record one interaction event.
+  Future<Map<String, dynamic>> recordCompanionRelationshipEvent(
+    String event,
+  ) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/companion/relationship/events'),
+      headers,
+      jsonEncode({'event': event}),
+    );
+    return handleResponse(response, (d) => d as Map<String, dynamic>);
+  }
+
   /// GET /api/agent/runs — recent safe AgentRun envelopes for this user.
   /// Prompts, transcripts, tool arguments and provider errors are never
   /// returned by this endpoint.

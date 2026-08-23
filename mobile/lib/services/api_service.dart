@@ -359,6 +359,13 @@ class ApiService extends BaseService {
 
   Future<void> cancelAgentPlan(String id) => _chatService.cancelAgentPlan(id);
 
+  Future<Map<String, dynamic>> getCompanionRelationship() =>
+      _chatService.getCompanionRelationship();
+
+  /// Fire-and-forget friendly: errors are the caller's concern.
+  Future<Map<String, dynamic>> recordCompanionRelationshipEvent(String event) =>
+      _chatService.recordCompanionRelationshipEvent(event);
+
   Future<List<UndoableAction>> getUndoableActions() =>
       _chatService.getUndoableActions();
 

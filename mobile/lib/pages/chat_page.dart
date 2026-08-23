@@ -19,6 +19,7 @@ import '../companion/companion_config.dart';
 import '../companion/companion_events.dart';
 import '../companion/environment.dart';
 import '../companion/working_memory.dart';
+import '../companion/relationship_signals.dart';
 import '../companion/runtime_host.dart';
 import '../companion/attention.dart';
 import '../companion/state_machine.dart';
@@ -111,6 +112,8 @@ class _ChatPageState extends State<ChatPage> {
   CompanionRuntimeHost? _companionHost;
   EnvironmentTracker? _environmentTracker;
   final WorkingMemory _workingMemory = WorkingMemory();
+  final CompanionRelationshipSignals _relationshipSignals =
+      CompanionRelationshipSignals();
 
   @override
   void initState() {
@@ -142,6 +145,10 @@ class _ChatPageState extends State<ChatPage> {
         },
       );
       _syncEnvironmentTracker();
+      // §14: returning to the companion counts once per session.
+      _apiService
+          .recordCompanionRelationshipEvent('user_returns')
+          .catchError((_) => <String, dynamic>{});
     }
     _controller.addListener(_onComposerChanged);
     _connectWs();
@@ -185,6 +192,23 @@ class _ChatPageState extends State<ChatPage> {
     if (listingId != null || postId != null) {
       tracker.trackPostOpened(postId: postId, listingId: listingId);
     }
+  }
+
+  static final RegExp _thanksPattern = RegExp(
+    r'谢谢|感谢|thx|thanks',
+    caseSensitive: false,
+  );
+
+  void _recordRelationshipEvent(String event) {
+    _apiService
+        .recordCompanionRelationshipEvent(event)
+        .then(
+          (_) => _companionHost?.bus.emit(
+            CompanionEventType.relationshipChanged,
+            {'event': event},
+          ),
+        )
+        .catchError((_) => <String, dynamic>{});
   }
 
   void _companionTurnStart() {
@@ -1047,6 +1071,10 @@ class _ChatPageState extends State<ChatPage> {
 
       _live2DController.brain.onMessageSent(userMsg.content);
       _companionTurnStart();
+      _relationshipSignals.onTurnStart();
+      if (_thanksPattern.hasMatch(userMsg.content)) {
+        _recordRelationshipEvent('user_thanks');
+      }
       _environmentTracker?.track(
         EnvironmentEvent(EnvironmentEventType.messageSent),
       );
@@ -1069,6 +1097,7 @@ class _ChatPageState extends State<ChatPage> {
           final activity = token.toolActivity!;
           _live2DController.brain.onToolStarted(activity);
           _companionOnTool(activity);
+          _relationshipSignals.onToolActivity();
           _environmentTracker?.track(
             EnvironmentEvent(EnvironmentEventType.postListUpdated),
           );
@@ -1107,6 +1136,12 @@ class _ChatPageState extends State<ChatPage> {
       }
       _lipSyncDriver.onStreamComplete();
       _companionOnStreamEnd(failed: false);
+      final relationshipEvent = _relationshipSignals.eventForCompletedTurn(
+        userMsg.content,
+      );
+      if (relationshipEvent != null) {
+        _recordRelationshipEvent(relationshipEvent);
+      }
       if (_turnStartedAt != null) {
         _lastTurnLatency = DateTime.now().difference(_turnStartedAt!);
       }
@@ -1364,7 +1399,10 @@ class _ChatPageState extends State<ChatPage> {
                           ),
                         ),
                         TextButton(
-                          onPressed: () => _cancelAgentPlan(plan),
+                          onPressed: () {
+                            _cancelAgentPlan(plan);
+                            _recordRelationshipEvent('user_cancels_action');
+                          },
                           child: Text(l.cancel),
                         ),
                         FilledButton(
