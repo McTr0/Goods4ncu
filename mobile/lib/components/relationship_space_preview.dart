@@ -761,17 +761,6 @@ class _SharedObjectRail extends StatelessWidget {
                   fontWeight: FontWeight.w800,
                 ),
               ),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  l.relationshipSpaceSharedObjectsReadOnly,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    fontSize: 10,
-                  ),
-                ),
-              ),
             ],
           ),
           const SizedBox(height: 5),

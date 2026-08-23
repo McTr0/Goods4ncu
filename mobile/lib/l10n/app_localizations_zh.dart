@@ -1469,7 +1469,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get contactModeMailTitle => '留言';
 
   @override
-  String get contactModeMailDescription => '直接发送，不显示在线、输入中和已读状态';
+  String get contactModeMailDescription => '直接发送留言，对方打开即可查看';
 
   @override
   String get contactOpeningRequired => '请输入首条消息';
@@ -1777,9 +1777,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get relationshipSpaceSharedObjectsTitle => '共享内容';
-
-  @override
-  String get relationshipSpaceSharedObjectsReadOnly => '从原处分享，只在这里查看';
 
   @override
   String get relationshipSpaceObjectFile => '文件';
@@ -2402,9 +2399,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get mailFallbackTitle => '留言';
-
-  @override
-  String get mailProtocolSubtitle => '异步发送 · 不显示在线、输入中和已读状态';
 
   @override
   String get incomingRealtimeTitle => '收到实时对话邀请';

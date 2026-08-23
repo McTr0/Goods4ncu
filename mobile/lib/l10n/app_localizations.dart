@@ -2901,7 +2901,7 @@ abstract class AppLocalizations {
   /// No description provided for @contactModeMailDescription.
   ///
   /// In en, this message translates to:
-  /// **'Send it directly without online, typing, or read indicators.'**
+  /// **'Send messages directly; visible as soon as they open the app.'**
   String get contactModeMailDescription;
 
   /// No description provided for @contactOpeningRequired.
@@ -3479,12 +3479,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Shared content'**
   String get relationshipSpaceSharedObjectsTitle;
-
-  /// No description provided for @relationshipSpaceSharedObjectsReadOnly.
-  ///
-  /// In en, this message translates to:
-  /// **'Shared from the original; view it here'**
-  String get relationshipSpaceSharedObjectsReadOnly;
 
   /// No description provided for @relationshipSpaceObjectFile.
   ///
@@ -4607,12 +4601,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Mail'**
   String get mailFallbackTitle;
-
-  /// No description provided for @mailProtocolSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Async sending · no online, typing, or read status'**
-  String get mailProtocolSubtitle;
 
   /// No description provided for @incomingRealtimeTitle.
   ///

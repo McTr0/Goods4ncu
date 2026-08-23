@@ -566,7 +566,6 @@ void main() {
       expect(find.text('共享内容'), findsOneWidget);
       expect(find.textContaining('商品 · 数据库教材'), findsOneWidget);
       expect(find.textContaining('链接 · 交接地点'), findsOneWidget);
-      expect(find.textContaining('从原处分享，只在这里查看'), findsOneWidget);
       // Local doro portraits allowed; network images are not.
       final images = tester.widgetList<Image>(find.byType(Image));
       for (final image in images) {

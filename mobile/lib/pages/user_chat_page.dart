@@ -1047,7 +1047,7 @@ class _ConversationProtocolBanner extends StatelessWidget {
         color: const Color(0xFFC66B32),
         icon: Icons.mark_email_unread_outlined,
         title: conversation.subject ?? l.mailFallbackTitle,
-        subtitle: l.mailProtocolSubtitle,
+        subtitle: l.contactModeMailDescription,
       );
     }
     final remaining = _remaining(context, conversation.expiresAt);

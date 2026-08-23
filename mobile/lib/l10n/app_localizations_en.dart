@@ -1529,7 +1529,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get contactModeMailDescription =>
-      'Send it directly without online, typing, or read indicators.';
+      'Send messages directly; visible as soon as they open the app.';
 
   @override
   String get contactOpeningRequired => 'Enter an opening message.';
@@ -1855,10 +1855,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get relationshipSpaceSharedObjectsTitle => 'Shared content';
-
-  @override
-  String get relationshipSpaceSharedObjectsReadOnly =>
-      'Shared from the original; view it here';
 
   @override
   String get relationshipSpaceObjectFile => 'File';
@@ -2515,10 +2511,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get mailFallbackTitle => 'Mail';
-
-  @override
-  String get mailProtocolSubtitle =>
-      'Async sending · no online, typing, or read status';
 
   @override
   String get incomingRealtimeTitle =>
