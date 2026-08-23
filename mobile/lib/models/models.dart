@@ -1462,13 +1462,8 @@ class SocialPersonaAppearance {
   final String character;
 
   factory SocialPersonaAppearance.fromJson(Map<String, dynamic>? json) {
-    final rawChar = json?['character']?.toString();
-    final character = switch (rawChar) {
-      'ncu_doro' => 'doro',
-      'ncu_gugugaga' => 'gugugaga',
-      'ncu_phoebe_chupi' => 'phoebe_chupi',
-      _ => rawChar ?? 'doro',
-    };
+    // Only doro ships a Cubism model today; any stored value resolves to it.
+    final character = 'doro';
     return SocialPersonaAppearance(
       palette: json?['palette']?.toString() ?? 'teal',
       silhouette: json?['silhouette']?.toString() ?? 'soft',
@@ -1949,8 +1944,8 @@ class AvatarInteractionPayload {
       choreography: choreography,
       animationPackVersion:
           (json['animation_pack_version'] as num?)?.toInt() ?? 1,
-      actorCharacter: json['actor_character']?.toString() ?? 'classic',
-      recipientCharacter: json['recipient_character']?.toString() ?? 'classic',
+      actorCharacter: json['actor_character']?.toString() ?? 'doro',
+      recipientCharacter: json['recipient_character']?.toString() ?? 'doro',
     );
   }
 }

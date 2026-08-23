@@ -3574,7 +3574,7 @@ async fn published_persona_character(
     .await
     .map_err(db_error)?
     .flatten();
-    Ok(character.unwrap_or_else(|| "classic".to_string()))
+    Ok(character.unwrap_or_else(|| "doro".to_string()))
 }
 
 /// Decide whether a realtime invite may interrupt the recipient.

@@ -24,19 +24,11 @@ const PALETTES: &[&str] = &["teal", "plum", "sun", "slate"];
 const SILHOUETTES: &[&str] = &["soft", "round", "sharp"];
 const ACCESSORIES: &[&str] = &["none", "glasses", "headphones", "leaf"];
 const OUTFITS: &[&str] = &["campus", "workwear", "casual", "lab"];
-// `classic` remains readable for personas created by older clients, but is no
-// longer advertised as a selectable character. New editors only offer the
-// campus character catalog below.
-const CHARACTERS: &[&str] = &[
-    "classic",
-    "doro",
-    "gugugaga",
-    "phoebe_chupi",
-    "ncu_doro",
-    "ncu_gugugaga",
-    "ncu_phoebe_chupi",
-];
-const CATALOG_CHARACTERS: &[&str] = &["doro", "gugugaga", "phoebe_chupi"];
+// Only doro ships a Cubism model today. Legacy tokens (classic, gugugaga,
+// phoebe_chupi, ncu_*-prefixed ids) are no longer accepted on write; clients
+// resolve any stored legacy value to doro at render time.
+const CHARACTERS: &[&str] = &["doro"];
+const CATALOG_CHARACTERS: &[&str] = &["doro"];
 
 /// The only persona choices exposed to clients.  These values are deliberately
 /// compiled into the server contract: a client can select a catalog token, but
@@ -945,7 +937,7 @@ fn normalize_appearance(value: Value) -> Result<Value, ApiError> {
     );
     output.insert(
         "character".to_string(),
-        Value::String(read_token(&input, "character", CHARACTERS, "classic")?),
+        Value::String(read_token(&input, "character", CHARACTERS, "doro")?),
     );
     Ok(Value::Object(output))
 }
@@ -997,7 +989,7 @@ mod tests {
         assert_eq!(normalized.style_version, "v1");
         assert_eq!(normalized.appearance_config["silhouette"], "soft");
         assert_eq!(normalized.appearance_config["outfit"], "campus");
-        assert_eq!(normalized.appearance_config["character"], "classic");
+        assert_eq!(normalized.appearance_config["character"], "doro");
     }
 
     #[test]
@@ -1026,14 +1018,7 @@ mod tests {
                 "lab".to_string()
             ]
         );
-        assert_eq!(
-            catalog.appearance["character"],
-            vec![
-                "doro".to_string(),
-                "gugugaga".to_string(),
-                "phoebe_chupi".to_string()
-            ]
-        );
+        assert_eq!(catalog.appearance["character"], vec!["doro".to_string()]);
         assert!(!catalog.appearance.contains_key("image_url"));
     }
 

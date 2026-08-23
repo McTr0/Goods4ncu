@@ -3056,117 +3056,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get socialPersonaTitle => 'Role presentation';
 
   @override
-  String get socialPersonaDescription =>
-      'Show how you want to be approached with choices you made; it never represents online, read, or inferred attention state.';
-
-  @override
-  String get socialPersonaCreate => 'Create role presentation';
-
-  @override
-  String get socialPersonaEdit => 'Edit role presentation';
-
-  @override
-  String get socialPersonaDraft => 'Draft · visible only to you';
-
-  @override
-  String get socialPersonaPublished => 'Published · visible on this campus';
-
-  @override
-  String get socialPersonaArchived =>
-      'Archived · default system Avatar is shown';
-
-  @override
-  String get socialPersonaRepresentationMode => 'Representation';
-
-  @override
-  String get socialPersonaTraitMapped => 'Trait mapped';
-
-  @override
-  String get socialPersonaRoleCharacter => 'Role character';
-
-  @override
   String get socialPersonaCharacter => 'Avatar character';
 
   @override
-  String get socialPersonaCharacterClassic => 'Classic';
-
-  @override
-  String get socialPersonaCharacterGugugaga => 'Gugugaga';
-
-  @override
   String get socialPersonaCharacterDoro => 'Doro';
-
-  @override
-  String get socialPersonaCharacterPhoebeChupi => 'Phoebe Chupi';
-
-  @override
-  String get socialPersonaActionWave => 'Wave';
-
-  @override
-  String get socialPersonaActionCelebrate => 'Celebrate';
-
-  @override
-  String get socialPersonaActionThinking => 'Think';
-
-  @override
-  String get socialPersonaPalette => 'Palette';
-
-  @override
-  String get socialPersonaPaletteTeal => 'Teal';
-
-  @override
-  String get socialPersonaPalettePlum => 'Plum';
-
-  @override
-  String get socialPersonaPaletteSun => 'Sun';
-
-  @override
-  String get socialPersonaPaletteSlate => 'Slate';
-
-  @override
-  String get socialPersonaSilhouette => 'Silhouette';
-
-  @override
-  String get socialPersonaSilhouetteSoft => 'Soft';
-
-  @override
-  String get socialPersonaSilhouetteRound => 'Round';
-
-  @override
-  String get socialPersonaSilhouetteSharp => 'Sharp';
-
-  @override
-  String get socialPersonaAccessory => 'Accessory';
-
-  @override
-  String get socialPersonaAccessoryNone => 'None';
-
-  @override
-  String get socialPersonaAccessoryGlasses => 'Glasses';
-
-  @override
-  String get socialPersonaAccessoryHeadphones => 'Headphones';
-
-  @override
-  String get socialPersonaAccessoryLeaf => 'Leaf';
-
-  @override
-  String get socialPersonaOutfit => 'Outfit';
-
-  @override
-  String get socialPersonaOutfitCampus => 'Campus';
-
-  @override
-  String get socialPersonaOutfitWorkwear => 'Simple';
-
-  @override
-  String get socialPersonaOutfitCasual => 'Casual';
-
-  @override
-  String get socialPersonaOutfitLab => 'Lab';
-
-  @override
-  String get socialPersonaContactPosture => 'How others can approach you';
 
   @override
   String get socialPersonaLeaveMessage =>
@@ -3181,9 +3074,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get socialPersonaLater => 'Will look later';
-
-  @override
-  String get socialPersonaLabels => 'Self-description (up to three)';
 
   @override
   String get socialPersonaLabelSlowToWarm => 'Slow to warm';
@@ -3204,108 +3094,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get socialPersonaLabelTechEnthusiast => 'Tech enthusiast';
 
   @override
-  String get socialPersonaSaveDraft => 'Save draft';
-
-  @override
-  String get socialPersonaPublish => 'Publish presentation';
-
-  @override
-  String get socialPersonaArchive => 'Archive and use default Avatar';
-
-  @override
-  String get socialPersonaRestore => 'Edit and publish again';
-
-  @override
-  String get socialPersonaPublishConfirmTitle => 'Publish role presentation?';
-
-  @override
-  String get socialPersonaPublishConfirmBody =>
-      'People on this campus will be able to see it. It never means online, read, typing, or any other attention state.';
-
-  @override
-  String get socialPersonaSaved => 'Role presentation draft saved';
-
-  @override
-  String get socialPersonaPublishedToast => 'Role presentation published';
-
-  @override
-  String get socialPersonaArchivedToast =>
-      'Archived; default system Avatar is shown';
-
-  @override
   String get socialPersonaPreviewRole => 'Role preview';
-
-  @override
-  String get socialPersonaSelectHint =>
-      'Choices are restricted to the current style version.';
-
-  @override
-  String get socialPersonaAssetsTitle => 'Role assets';
-
-  @override
-  String get socialPersonaAssetsDescription =>
-      'Images are presentation only. They become public only after server verification and review; a failed load still falls back to the static role.';
-
-  @override
-  String get socialPersonaAssetsEmpty => 'No role assets uploaded yet.';
-
-  @override
-  String get socialPersonaAssetAdd => 'Add image';
-
-  @override
-  String get socialPersonaAssetIllustration => 'Role illustration';
-
-  @override
-  String get socialPersonaAssetPhotoStylized => 'Stylized photo';
-
-  @override
-  String get socialPersonaAssetPendingUpload => 'Upload still needs completion';
-
-  @override
-  String get socialPersonaAssetPendingReview => 'Under review; not public';
-
-  @override
-  String get socialPersonaAssetReady => 'Approved and ready';
-
-  @override
-  String get socialPersonaAssetRejected => 'Review rejected';
-
-  @override
-  String get socialPersonaAssetRevoked => 'Revoked';
-
-  @override
-  String get socialPersonaAssetDeleted => 'Cleaned up';
-
-  @override
-  String get socialPersonaAssetUse => 'Use';
-
-  @override
-  String get socialPersonaAssetRetry => 'Retry verification';
-
-  @override
-  String get socialPersonaAssetRevoke => 'Revoke this asset';
-
-  @override
-  String get socialPersonaAssetSizeInvalid =>
-      'The image is empty or larger than 10 MB.';
-
-  @override
-  String get socialPersonaAssetUploadTargetMissing =>
-      'The server did not return a safe upload target.';
-
-  @override
-  String get socialPersonaAssetUploadFailed => 'Role asset upload failed';
-
-  @override
-  String get socialPersonaAssetSelected =>
-      'Asset selected; publish the role presentation again.';
-
-  @override
-  String get socialPersonaAssetRevokeConfirmTitle => 'Revoke this role asset?';
-
-  @override
-  String get socialPersonaAssetRevokeConfirmBody =>
-      'It will stop being public immediately and enter remote cleanup. Conversation history is unchanged.';
 
   @override
   String get composerMoreTools => 'More tools';

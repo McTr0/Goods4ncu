@@ -2917,116 +2917,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get socialPersonaTitle => '角色化呈现';
 
   @override
-  String get socialPersonaDescription =>
-      '用你主动选择的角色、标签和接近方式表达自己；不代表在线、已读或任何推测状态。';
-
-  @override
-  String get socialPersonaCreate => '创建角色化呈现';
-
-  @override
-  String get socialPersonaEdit => '编辑角色化呈现';
-
-  @override
-  String get socialPersonaDraft => '草稿 · 仅自己可见';
-
-  @override
-  String get socialPersonaPublished => '已发布 · 同校园可见';
-
-  @override
-  String get socialPersonaArchived => '已归档 · 当前展示默认系统 Avatar';
-
-  @override
-  String get socialPersonaRepresentationMode => '呈现方式';
-
-  @override
-  String get socialPersonaTraitMapped => '特征映射';
-
-  @override
-  String get socialPersonaRoleCharacter => '角色形象';
-
-  @override
   String get socialPersonaCharacter => '角色选择';
 
   @override
-  String get socialPersonaCharacterClassic => '经典角色';
-
-  @override
-  String get socialPersonaCharacterGugugaga => '咕咕嘎嘎';
-
-  @override
   String get socialPersonaCharacterDoro => 'Doro';
-
-  @override
-  String get socialPersonaCharacterPhoebeChupi => '菲比啾比';
-
-  @override
-  String get socialPersonaActionWave => '打招呼';
-
-  @override
-  String get socialPersonaActionCelebrate => '庆祝';
-
-  @override
-  String get socialPersonaActionThinking => '思考';
-
-  @override
-  String get socialPersonaPalette => '主色';
-
-  @override
-  String get socialPersonaPaletteTeal => '深青';
-
-  @override
-  String get socialPersonaPalettePlum => '梅紫';
-
-  @override
-  String get socialPersonaPaletteSun => '暖阳';
-
-  @override
-  String get socialPersonaPaletteSlate => '石板灰';
-
-  @override
-  String get socialPersonaSilhouette => '轮廓';
-
-  @override
-  String get socialPersonaSilhouetteSoft => '柔和';
-
-  @override
-  String get socialPersonaSilhouetteRound => '圆润';
-
-  @override
-  String get socialPersonaSilhouetteSharp => '利落';
-
-  @override
-  String get socialPersonaAccessory => '配饰';
-
-  @override
-  String get socialPersonaAccessoryNone => '无';
-
-  @override
-  String get socialPersonaAccessoryGlasses => '眼镜';
-
-  @override
-  String get socialPersonaAccessoryHeadphones => '耳机';
-
-  @override
-  String get socialPersonaAccessoryLeaf => '叶片';
-
-  @override
-  String get socialPersonaOutfit => '服装';
-
-  @override
-  String get socialPersonaOutfitCampus => '校园';
-
-  @override
-  String get socialPersonaOutfitWorkwear => '简洁';
-
-  @override
-  String get socialPersonaOutfitCasual => '休闲';
-
-  @override
-  String get socialPersonaOutfitLab => '实验室';
-
-  @override
-  String get socialPersonaContactPosture => '别人可以怎样接近你';
 
   @override
   String get socialPersonaLeaveMessage => '可以留言，不保证即时回复';
@@ -3039,9 +2933,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get socialPersonaLater => '稍后处理';
-
-  @override
-  String get socialPersonaLabels => '自我描述（最多三个）';
 
   @override
   String get socialPersonaLabelSlowToWarm => '慢热';
@@ -3062,103 +2953,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get socialPersonaLabelTechEnthusiast => '技术宅';
 
   @override
-  String get socialPersonaSaveDraft => '保存草稿';
-
-  @override
-  String get socialPersonaPublish => '发布呈现';
-
-  @override
-  String get socialPersonaArchive => '归档并使用默认 Avatar';
-
-  @override
-  String get socialPersonaRestore => '重新编辑并发布';
-
-  @override
-  String get socialPersonaPublishConfirmTitle => '发布角色化呈现？';
-
-  @override
-  String get socialPersonaPublishConfirmBody =>
-      '发布后，同一校园的用户可以看到它。它不会表示在线、已读、正在输入或其他注意力状态。';
-
-  @override
-  String get socialPersonaSaved => '角色化呈现草稿已保存';
-
-  @override
-  String get socialPersonaPublishedToast => '角色化呈现已发布';
-
-  @override
-  String get socialPersonaArchivedToast => '已归档，当前展示默认系统 Avatar';
-
-  @override
   String get socialPersonaPreviewRole => '角色预览';
-
-  @override
-  String get socialPersonaSelectHint => '这些选项会被严格限制在当前风格版本内。';
-
-  @override
-  String get socialPersonaAssetsTitle => '角色素材';
-
-  @override
-  String get socialPersonaAssetsDescription =>
-      '图片只作为角色呈现；服务器验证并审核通过后才会公开，加载失败仍会回退静态角色。';
-
-  @override
-  String get socialPersonaAssetsEmpty => '还没有上传角色素材。';
-
-  @override
-  String get socialPersonaAssetAdd => '添加图片';
-
-  @override
-  String get socialPersonaAssetIllustration => '角色插画';
-
-  @override
-  String get socialPersonaAssetPhotoStylized => '风格化照片';
-
-  @override
-  String get socialPersonaAssetPendingUpload => '等待完成上传';
-
-  @override
-  String get socialPersonaAssetPendingReview => '审核中，暂不公开';
-
-  @override
-  String get socialPersonaAssetReady => '已通过审核，可使用';
-
-  @override
-  String get socialPersonaAssetRejected => '未通过审核';
-
-  @override
-  String get socialPersonaAssetRevoked => '已撤销';
-
-  @override
-  String get socialPersonaAssetDeleted => '已清理';
-
-  @override
-  String get socialPersonaAssetUse => '使用';
-
-  @override
-  String get socialPersonaAssetRetry => '重试确认';
-
-  @override
-  String get socialPersonaAssetRevoke => '撤销此素材';
-
-  @override
-  String get socialPersonaAssetSizeInvalid => '图片为空或超过 10 MB。';
-
-  @override
-  String get socialPersonaAssetUploadTargetMissing => '服务器没有返回安全的上传目标。';
-
-  @override
-  String get socialPersonaAssetUploadFailed => '角色素材上传失败';
-
-  @override
-  String get socialPersonaAssetSelected => '已选择素材；请重新发布角色化呈现。';
-
-  @override
-  String get socialPersonaAssetRevokeConfirmTitle => '撤销这份角色素材？';
-
-  @override
-  String get socialPersonaAssetRevokeConfirmBody =>
-      '撤销后它会立即停止公开展示，并进入远端清理。历史沟通不会被修改。';
 
   @override
   String get composerMoreTools => '更多工具';

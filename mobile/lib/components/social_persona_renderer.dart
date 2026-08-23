@@ -28,10 +28,7 @@ class SocialPersonaRenderSpec {
     String? name,
   }) {
     final rawChar = persona.appearance.character;
-    final character = switch (rawChar) {
-      'classic' || '' => 'doro',
-      _ => rawChar,
-    };
+    final character = rawChar.isEmpty ? 'doro' : rawChar;
     return SocialPersonaRenderSpec(
       palette: persona.appearance.palette,
       silhouette: persona.appearance.silhouette,
