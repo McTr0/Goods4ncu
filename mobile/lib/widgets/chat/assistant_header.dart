@@ -3,9 +3,14 @@ import '../../l10n/app_localizations.dart';
 import '../../models/models.dart';
 
 class AssistantDigitalHumanHeader extends StatelessWidget {
-  const AssistantDigitalHumanHeader({super.key, required this.onOpenHistory});
+  const AssistantDigitalHumanHeader({
+    super.key,
+    required this.onOpenHistory,
+    this.onOpenMemoryPanel,
+  });
 
   final VoidCallback onOpenHistory;
+  final VoidCallback? onOpenMemoryPanel;
 
   @override
   Widget build(BuildContext context) {
@@ -22,6 +27,13 @@ class AssistantDigitalHumanHeader extends StatelessWidget {
           icon: const Icon(Icons.history_rounded),
           onPressed: onOpenHistory,
         ),
+        if (onOpenMemoryPanel != null)
+          IconButton(
+            key: const Key('assistant-memory-entry'),
+            tooltip: l.assistantMemoryEntry,
+            icon: const Icon(Icons.psychology_outlined),
+            onPressed: onOpenMemoryPanel,
+          ),
       ],
     );
   }

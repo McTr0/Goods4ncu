@@ -524,6 +524,82 @@ class AppLocalizationsEn extends AppLocalizations {
   String get priceLabel => 'Price';
 
   @override
+  String get assistantMemoryPanelTitle => 'Memory & skills';
+
+  @override
+  String get memoryInstructionsTitle => 'Long-term instructions';
+
+  @override
+  String get memoryInstructionsHint =>
+      'Tell the assistant your standing preferences, e.g. \'prefer textbooks under ¥50\'.';
+
+  @override
+  String get memoryEnabledTitle => 'Enable memory';
+
+  @override
+  String get memoryEnabledSubtitle =>
+      'When off, past memories and personalization are ignored';
+
+  @override
+  String get memoriesListTitle => 'Remembered';
+
+  @override
+  String get memoriesEmpty =>
+      'Nothing remembered yet. Preferences expressed in chat show up here.';
+
+  @override
+  String get memoryClearAllTitle => 'Clear all memories?';
+
+  @override
+  String get memoryClearAllBody =>
+      'The assistant will forget everything it has learned. This cannot be undone.';
+
+  @override
+  String get memoryClearAllAction => 'Clear all';
+
+  @override
+  String get memoryClearedToast => 'Memories cleared';
+
+  @override
+  String get memorySavedToast => 'Instructions saved';
+
+  @override
+  String get skillsTitle => 'My skills';
+
+  @override
+  String get skillNameLabel => 'Skill name';
+
+  @override
+  String get skillInstructionsLabel => 'Skill instructions';
+
+  @override
+  String get skillAddAction => 'Add / update skill';
+
+  @override
+  String get skillMissingFields => 'Fill in both name and instructions';
+
+  @override
+  String get skillSavedToast => 'Skill saved';
+
+  @override
+  String get skillsImportTitle => 'Import skills (JSON)';
+
+  @override
+  String get skillsImportHint =>
+      '[｛\"name\": \"Bargain helper\", \"instructions\": \"Negotiate politely\", \"chip_label\": \"Bargain\"｝]';
+
+  @override
+  String get skillsImportAction => 'Import';
+
+  @override
+  String skillsImported(Object count) {
+    return 'Imported $count skills';
+  }
+
+  @override
+  String get skillImportBadJson => 'Invalid JSON format';
+
+  @override
   String get wantedBudgetShort => 'Budget';
 
   @override
@@ -3000,6 +3076,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get assistantHistoryTooltip => 'Conversation history';
+
+  @override
+  String get assistantToolsTooltip => 'Assistant tools';
+
+  @override
+  String get assistantMemoryEntry => 'Memory & skills';
 
   @override
   String get assistantConfirmSendReply => 'Confirm posting reply';

@@ -1076,6 +1076,144 @@ abstract class AppLocalizations {
   /// **'Price'**
   String get priceLabel;
 
+  /// No description provided for @assistantMemoryPanelTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Memory & skills'**
+  String get assistantMemoryPanelTitle;
+
+  /// No description provided for @memoryInstructionsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Long-term instructions'**
+  String get memoryInstructionsTitle;
+
+  /// No description provided for @memoryInstructionsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Tell the assistant your standing preferences, e.g. \'prefer textbooks under ¥50\'.'**
+  String get memoryInstructionsHint;
+
+  /// No description provided for @memoryEnabledTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable memory'**
+  String get memoryEnabledTitle;
+
+  /// No description provided for @memoryEnabledSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'When off, past memories and personalization are ignored'**
+  String get memoryEnabledSubtitle;
+
+  /// No description provided for @memoriesListTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Remembered'**
+  String get memoriesListTitle;
+
+  /// No description provided for @memoriesEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing remembered yet. Preferences expressed in chat show up here.'**
+  String get memoriesEmpty;
+
+  /// No description provided for @memoryClearAllTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear all memories?'**
+  String get memoryClearAllTitle;
+
+  /// No description provided for @memoryClearAllBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The assistant will forget everything it has learned. This cannot be undone.'**
+  String get memoryClearAllBody;
+
+  /// No description provided for @memoryClearAllAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear all'**
+  String get memoryClearAllAction;
+
+  /// No description provided for @memoryClearedToast.
+  ///
+  /// In en, this message translates to:
+  /// **'Memories cleared'**
+  String get memoryClearedToast;
+
+  /// No description provided for @memorySavedToast.
+  ///
+  /// In en, this message translates to:
+  /// **'Instructions saved'**
+  String get memorySavedToast;
+
+  /// No description provided for @skillsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'My skills'**
+  String get skillsTitle;
+
+  /// No description provided for @skillNameLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Skill name'**
+  String get skillNameLabel;
+
+  /// No description provided for @skillInstructionsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Skill instructions'**
+  String get skillInstructionsLabel;
+
+  /// No description provided for @skillAddAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Add / update skill'**
+  String get skillAddAction;
+
+  /// No description provided for @skillMissingFields.
+  ///
+  /// In en, this message translates to:
+  /// **'Fill in both name and instructions'**
+  String get skillMissingFields;
+
+  /// No description provided for @skillSavedToast.
+  ///
+  /// In en, this message translates to:
+  /// **'Skill saved'**
+  String get skillSavedToast;
+
+  /// No description provided for @skillsImportTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Import skills (JSON)'**
+  String get skillsImportTitle;
+
+  /// Example JSON payload shown as hint text
+  ///
+  /// In en, this message translates to:
+  /// **'[｛\"name\": \"Bargain helper\", \"instructions\": \"Negotiate politely\", \"chip_label\": \"Bargain\"｝]'**
+  String get skillsImportHint;
+
+  /// No description provided for @skillsImportAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Import'**
+  String get skillsImportAction;
+
+  /// No description provided for @skillsImported.
+  ///
+  /// In en, this message translates to:
+  /// **'Imported {count} skills'**
+  String skillsImported(Object count);
+
+  /// No description provided for @skillImportBadJson.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid JSON format'**
+  String get skillImportBadJson;
+
   /// No description provided for @wantedBudgetShort.
   ///
   /// In en, this message translates to:
@@ -5513,6 +5651,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Conversation history'**
   String get assistantHistoryTooltip;
+
+  /// No description provided for @assistantToolsTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Assistant tools'**
+  String get assistantToolsTooltip;
+
+  /// No description provided for @assistantMemoryEntry.
+  ///
+  /// In en, this message translates to:
+  /// **'Memory & skills'**
+  String get assistantMemoryEntry;
 
   /// No description provided for @assistantConfirmSendReply.
   ///

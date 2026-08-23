@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import '../components/assistant_memory_panel.dart';
 import '../components/price_tag.dart';
 import '../l10n/app_localizations.dart';
 import 'package:image_picker/image_picker.dart';
@@ -1405,7 +1406,10 @@ class _ChatPageState extends State<ChatPage> {
     final agentResults = _agentResultsStrip;
     final page = Column(
       children: [
-        AssistantDigitalHumanHeader(onOpenHistory: _showHistorySheet),
+        AssistantDigitalHumanHeader(
+          onOpenHistory: _showHistorySheet,
+          onOpenMemoryPanel: () => AssistantMemoryPanel.show(context),
+        ),
         ?agentResults,
         if (_historyError != null)
           Container(

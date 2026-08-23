@@ -508,6 +508,78 @@ class AppLocalizationsZh extends AppLocalizations {
   String get priceLabel => '价格';
 
   @override
+  String get assistantMemoryPanelTitle => '小昌的记忆与技能';
+
+  @override
+  String get memoryInstructionsTitle => '长期指令';
+
+  @override
+  String get memoryInstructionsHint => '告诉小昌你的长期偏好，例如「优先推荐教材类，价格 50 元以内」。';
+
+  @override
+  String get memoryEnabledTitle => '启用记忆';
+
+  @override
+  String get memoryEnabledSubtitle => '关闭后小昌不再参考历史记忆与个性化设置';
+
+  @override
+  String get memoriesListTitle => '已记住的内容';
+
+  @override
+  String get memoriesEmpty => '还没有记忆。聊天中表达的偏好会自动记在这里。';
+
+  @override
+  String get memoryClearAllTitle => '清空全部记忆？';
+
+  @override
+  String get memoryClearAllBody => '小昌将忘记所有已记录的偏好与历史，此操作不可撤销。';
+
+  @override
+  String get memoryClearAllAction => '清空记忆';
+
+  @override
+  String get memoryClearedToast => '记忆已清空';
+
+  @override
+  String get memorySavedToast => '长期指令已保存';
+
+  @override
+  String get skillsTitle => '我的技能';
+
+  @override
+  String get skillNameLabel => '技能名称';
+
+  @override
+  String get skillInstructionsLabel => '技能指令';
+
+  @override
+  String get skillAddAction => '添加 / 更新技能';
+
+  @override
+  String get skillMissingFields => '请填写技能名称与指令';
+
+  @override
+  String get skillSavedToast => '技能已保存';
+
+  @override
+  String get skillsImportTitle => '导入技能（JSON）';
+
+  @override
+  String get skillsImportHint =>
+      '［｛＂name＂：＂砍价助手＂，＂instructions＂：＂帮我用友善语气砍价＂，＂chip_label＂：＂帮我砍价＂｝］ 的 JSON 数组';
+
+  @override
+  String get skillsImportAction => '导入';
+
+  @override
+  String skillsImported(Object count) {
+    return '已导入 $count 个技能';
+  }
+
+  @override
+  String get skillImportBadJson => 'JSON 格式不正确';
+
+  @override
   String get wantedBudgetShort => '预算';
 
   @override
@@ -2864,6 +2936,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get assistantHistoryTooltip => '历史对话';
+
+  @override
+  String get assistantToolsTooltip => '小昌工具';
+
+  @override
+  String get assistantMemoryEntry => '记忆与技能';
 
   @override
   String get assistantConfirmSendReply => '确认发送回复';
