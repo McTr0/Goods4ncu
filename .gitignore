@@ -30,7 +30,6 @@ mobile/ios/Runner/*
 mobile/linux/
 mobile/macos/
 mobile/windows/
-mobile/web/
 
 # === IDE ===
 .idea/

@@ -25,10 +25,16 @@ class WebCubismBridge implements CubismBridge {
   bool hasLoadFailed() =>
       (_stage.callMethod('hasLoadFailed'.toJS) as JSBoolean).toDart;
 
-  /// Mount the PIXI application into [containerId] with [modelUrl].
+  /// Mount by element id (legacy convenience).
   bool mount(String containerId, String modelUrl) =>
       (_stage.callMethod('mount'.toJS, containerId.toJS, modelUrl.toJS)
               as JSBoolean)
+          .toDart;
+
+  /// Mount by passing the container ELEMENT directly (goal §8 of the
+  /// debugging session): no DOM lookup timing race.
+  bool mountElement(JSObject el, String modelUrl) =>
+      (_stage.callMethod('mountElement'.toJS, el, modelUrl.toJS) as JSBoolean)
           .toDart;
 
   void disposeStage() => _stage.callMethod('dispose'.toJS);
