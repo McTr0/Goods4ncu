@@ -114,6 +114,17 @@ pub struct CreateMemoryInput<'a> {
 }
 
 #[derive(Clone)]
+/// A user-authored companion skill row.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct AgentSkillRow {
+    pub id: Uuid,
+    pub name: String,
+    pub instructions: String,
+    pub chip_label: Option<String>,
+    pub enabled: bool,
+    pub sort_order: i32,
+}
+
 pub struct AgentMemoryService {
     db: PgPool,
 }
@@ -480,6 +491,111 @@ impl AgentMemoryService {
         Ok(result.rows_affected())
     }
 
+    /// List the user's skills in stable order.
+    pub async fn list_skills(&self, user_id: &str) -> Result<Vec<AgentSkillRow>> {
+        let skills = sqlx::query_as::<_, AgentSkillRow>(
+            "SELECT id, name, instructions, chip_label, enabled, sort_order
+             FROM user_agent_skills WHERE user_id = $1
+             ORDER BY sort_order ASC, created_at ASC",
+        )
+        .bind(user_id)
+        .fetch_all(&self.db)
+        .await?;
+        Ok(skills)
+    }
+
+    /// Create a skill, or replace instructions/chip when the name matches.
+    pub async fn upsert_skill(
+        &self,
+        user_id: &str,
+        input: &crate::api::agent_skills::UpsertSkillRequest,
+    ) -> Result<AgentSkillRow> {
+        let row = sqlx::query_as::<_, AgentSkillRow>(
+            "INSERT INTO user_agent_skills (user_id, name, instructions, chip_label, enabled, sort_order)
+             VALUES ($1, $2, $3, $4, $5, COALESCE($6, (
+                 SELECT COALESCE(MAX(sort_order), 0) + 1 FROM user_agent_skills WHERE user_id = $1)))
+             ON CONFLICT (user_id, name) DO UPDATE SET
+                instructions = EXCLUDED.instructions,
+                chip_label = EXCLUDED.chip_label,
+                enabled = EXCLUDED.enabled,
+                updated_at = NOW()
+             RETURNING id, name, instructions, chip_label, enabled, sort_order",
+        )
+        .bind(user_id)
+        .bind(&input.name)
+        .bind(&input.instructions)
+        .bind(&input.chip_label)
+        .bind(input.enabled)
+        .bind(input.sort_order)
+        .fetch_one(&self.db)
+        .await?;
+        Ok(row)
+    }
+
+    /// Partially update one skill; returns None when the id is not owned by the user.
+    pub async fn patch_skill(
+        &self,
+        user_id: &str,
+        skill_id: Uuid,
+        input: &crate::api::agent_skills::PatchSkillRequest,
+    ) -> Result<Option<AgentSkillRow>> {
+        let existing = sqlx::query_as::<_, AgentSkillRow>(
+            "SELECT id, name, instructions, chip_label, enabled, sort_order
+             FROM user_agent_skills WHERE id = $1 AND user_id = $2",
+        )
+        .bind(skill_id)
+        .bind(user_id)
+        .fetch_optional(&self.db)
+        .await?;
+        let Some(current) = existing else {
+            return Ok(None);
+        };
+        let instructions = input.instructions.clone().unwrap_or(current.instructions);
+        if instructions.trim().is_empty() {
+            return Err(anyhow::anyhow!("技能指令不能为空"));
+        }
+        let chip_label = match &input.chip_label {
+            Some(value) => value.clone(),
+            None => current.chip_label,
+        };
+        let enabled = input.enabled.unwrap_or(current.enabled);
+        let sort_order = input.sort_order.unwrap_or(current.sort_order);
+        let row = sqlx::query_as::<_, AgentSkillRow>(
+            "UPDATE user_agent_skills
+             SET instructions = $3, chip_label = $4, enabled = $5, sort_order = $6, updated_at = NOW()
+             WHERE id = $1 AND user_id = $2
+             RETURNING id, name, instructions, chip_label, enabled, sort_order",
+        )
+        .bind(skill_id)
+        .bind(user_id)
+        .bind(&instructions)
+        .bind(&chip_label)
+        .bind(enabled)
+        .bind(sort_order)
+        .fetch_one(&self.db)
+        .await?;
+        Ok(Some(row))
+    }
+
+    /// Delete one skill; reports whether a row was removed.
+    pub async fn delete_skill(&self, user_id: &str, skill_id: Uuid) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM user_agent_skills WHERE id = $1 AND user_id = $2")
+            .bind(skill_id)
+            .bind(user_id)
+            .execute(&self.db)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Remove every skill for the user.
+    pub async fn clear_skills(&self, user_id: &str) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM user_agent_skills WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&self.db)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
     fn page_context_lines(page_context: Option<&serde_json::Value>) -> Vec<String> {
         let Some(ctx) = page_context else {
             return Vec::new();
@@ -566,6 +682,21 @@ impl AgentMemoryService {
         if let Some(custom) = &profile.custom_instructions {
             if !custom.trim().is_empty() {
                 lines.push(format!("- **用户个性化要求**：{}", custom.trim()));
+            }
+        }
+
+        // Enabled user-authored skills ride at the same level as custom
+        // instructions: below the system policy, above episodic recall.
+        let skills = self.list_skills(user_id).await.unwrap_or_default();
+        let enabled: Vec<&AgentSkillRow> = skills.iter().filter(|s| s.enabled).collect();
+        if !enabled.is_empty() {
+            lines.push("### 用户自定义技能：".to_string());
+            for skill in enabled {
+                lines.push(format!(
+                    "- **技能「{}」**：{}",
+                    skill.name,
+                    skill.instructions.replace('\n', " ")
+                ));
             }
         }
 

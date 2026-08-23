@@ -16,6 +16,7 @@ pub mod admin;
 pub mod agent_memory;
 pub mod agent_plans;
 pub mod agent_runs;
+pub mod agent_skills;
 pub mod agreements;
 pub mod auth;
 pub mod campuses;
@@ -810,6 +811,17 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .route(
             "/api/agent/memories/{id}",
             axum::routing::delete(agent_memory::delete_memory),
+        )
+        .route(
+            "/api/agent/skills",
+            get(agent_skills::list_skills)
+                .post(agent_skills::upsert_skill)
+                .delete(agent_skills::clear_skills),
+        )
+        .route(
+            "/api/agent/skills/{id}",
+            axum::routing::patch(agent_skills::patch_skill)
+                .merge(axum::routing::delete(agent_skills::delete_skill)),
         )
         .route(
             "/api/agent/plans/{id}/confirm",
