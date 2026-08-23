@@ -175,9 +175,12 @@ final GoRouter appRouter = GoRouter(
         ),
         GoRoute(
           path: '/users/:id',
-          builder: (context, state) {
+          pageBuilder: (context, state) {
             final id = state.pathParameters['id']!;
-            return UserHomePage(userId: id);
+            return NoTransitionPage(
+              key: state.pageKey,
+              child: UserHomePage(userId: id),
+            );
           },
         ),
         GoRoute(
@@ -193,7 +196,7 @@ final GoRouter appRouter = GoRouter(
           pageBuilder: (context, state) {
             final recipientId = state.pathParameters['recipientId']!;
             final extra = state.extra as Map<String, dynamic>?;
-            return MaterialPage<Conversation>(
+            return NoTransitionPage<Conversation>(
               key: state.pageKey,
               restorationId: state.pageKey.value,
               child: ContactConversationPage(
@@ -219,7 +222,7 @@ final GoRouter appRouter = GoRouter(
             final extra = state.extra as Map<String, dynamic>?;
             final otherUserId = extra?['otherUserId'] as String? ?? '';
             final otherUsername = extra?['otherUsername'] as String? ?? '';
-            return MaterialPage<void>(
+            return NoTransitionPage<void>(
               key: state.pageKey,
               restorationId: state.pageKey.value,
               child: UserChatPage(
@@ -236,7 +239,7 @@ final GoRouter appRouter = GoRouter(
           pageBuilder: (context, state) {
             final id = state.pathParameters['peerUserId']!;
             final extra = state.extra as Map<String, dynamic>?;
-            return MaterialPage<void>(
+            return NoTransitionPage<void>(
               key: state.pageKey,
               restorationId: state.pageKey.value,
               child: ChatThreadPage(
@@ -252,7 +255,7 @@ final GoRouter appRouter = GoRouter(
           pageBuilder: (context, state) {
             final id = state.pathParameters['spaceId']!;
             final extra = state.extra as Map<String, dynamic>?;
-            return MaterialPage<void>(
+            return NoTransitionPage<void>(
               key: state.pageKey,
               restorationId: state.pageKey.value,
               child: SpaceChatPage(spaceId: id, initialSpace: extra),
