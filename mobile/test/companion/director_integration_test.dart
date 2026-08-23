@@ -24,7 +24,7 @@ void main() {
       expect(host.scheduler.isBusy, isTrue);
       expect(host.currentMotion, 'thinking');
       expect(
-        host.mock!.lastMotionTag,
+        host.mock.lastMotionTag,
         isNull,
         reason: 'thinking is procedural — no clip, gaze/tilt only',
       );
@@ -122,13 +122,14 @@ void main() {
     );
     expect(host.machine.state, CompanionState.idle);
   });
+  _proactiveTests();
 }
 
 void _proactiveTests() {
   test(
     'post-opened environment event triggers a gesture-only reaction',
     () async {
-      final host = CompanionRuntimeHost();
+      final host = CompanionRuntimeHost(environmentDebounce: Duration.zero);
       addTearDown(host.dispose);
 
       // Idle body, nothing scheduled.
@@ -150,7 +151,10 @@ void _proactiveTests() {
   );
 
   test('burst of environment chatter is debounced to one reaction', () async {
-    final host = CompanionRuntimeHost(startTicker: false);
+    final host = CompanionRuntimeHost(
+      startTicker: false,
+      environmentDebounce: Duration.zero,
+    );
     addTearDown(host.dispose);
 
     for (var i = 0; i < 5; i++) {
@@ -165,5 +169,4 @@ void _proactiveTests() {
     // cooldown and are dropped.
     expect(host.proactive.consider(ProactiveTriggerKey.postOpened), isNull);
   });
-  _proactiveTests();
 }

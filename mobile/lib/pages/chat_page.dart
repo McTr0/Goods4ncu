@@ -20,6 +20,7 @@ import '../companion/companion_events.dart';
 import '../companion/environment.dart';
 import '../companion/working_memory.dart';
 import '../companion/relationship_signals.dart';
+import '../companion/open_rig_adapter.dart';
 import '../companion/runtime_host.dart';
 import '../companion/attention.dart';
 import '../companion/state_machine.dart';
@@ -135,6 +136,12 @@ class _ChatPageState extends State<ChatPage> {
         context,
         listen: false,
       );
+      if (_companionHost != null) {
+        // Body takeover cut 1: the Director drives 小昌's body through the
+        // OpenRig adapter; the legacy brain is starved of page events.
+        _companionHost!.attachBody(OpenRigCharacterRenderer(_live2DController));
+        _live2DController.detachBrain();
+      }
       _environmentTracker = EnvironmentTracker(
         state: EnvironmentState(),
         onMeaningfulEvent: (event) {
@@ -193,6 +200,9 @@ class _ChatPageState extends State<ChatPage> {
       tracker.trackPostOpened(postId: postId, listingId: listingId);
     }
   }
+
+  /// When the companion owns the body, legacy brain feeds must stay silent.
+  bool get _useLegacyBrain => !(kCompanionEnabled && _companionHost != null);
 
   static final RegExp _thanksPattern = RegExp(
     r'谢谢|感谢|thx|thanks',
@@ -260,12 +270,14 @@ class _ChatPageState extends State<ChatPage> {
   void _syncBrainWithPageContext() {
     final pageContext = widget.pageContext;
     if (pageContext == null) {
-      _live2DController.brain.onPageChanged('chat');
+      if (_useLegacyBrain) _live2DController.brain.onPageChanged('chat');
       return;
     }
     final page = pageContext['page']?.toString() ?? 'chat';
     final listingId = pageContext['listingId']?.toString();
-    _live2DController.brain.onPageChanged(page, listingId: listingId);
+    if (_useLegacyBrain) {
+      _live2DController.brain.onPageChanged(page, listingId: listingId);
+    }
   }
 
   void _handleUiAction(Map<String, dynamic> action) {
@@ -289,7 +301,7 @@ class _ChatPageState extends State<ChatPage> {
       case 'HIGHLIGHT_POST' || 'SCROLL_TO_POST':
         final postId = payload['postId']?.toString();
         if (postId != null && postId.isNotEmpty) {
-          _live2DController.brain.onFocusPost(postId);
+          if (_useLegacyBrain) _live2DController.brain.onFocusPost(postId);
           _loadFocusedAgentPost(postId);
         }
       case 'OPEN_POST':
@@ -308,7 +320,7 @@ class _ChatPageState extends State<ChatPage> {
         if (commentDraft != null &&
             targetPostId != null &&
             targetPostId.isNotEmpty) {
-          _live2DController.brain.onDraftReady();
+          if (_useLegacyBrain) _live2DController.brain.onDraftReady();
           _showCommentDraftConfirmation(commentDraft, targetPostId);
         }
       case 'OPEN_MESSAGE_DRAFT':
@@ -316,7 +328,7 @@ class _ChatPageState extends State<ChatPage> {
         final listingId = payload['listingId']?.toString();
         final receiverId = payload['receiverId']?.toString();
         if (draftText != null && listingId != null && receiverId != null) {
-          _live2DController.brain.onDraftReady();
+          if (_useLegacyBrain) _live2DController.brain.onDraftReady();
           _showDraftConfirmation(draftText, listingId, receiverId);
         }
     }
@@ -383,10 +395,12 @@ class _ChatPageState extends State<ChatPage> {
         ..addAll(posts.whereType<post.CampusPost>());
       _focusedAgentPostId = null;
     });
-    _live2DController.brain.onSearchResultsShown(
-      count: _agentResultPosts.length,
-      relatedToPostId: relatedToPostId,
-    );
+    if (_useLegacyBrain) {
+      _live2DController.brain.onSearchResultsShown(
+        count: _agentResultPosts.length,
+        relatedToPostId: relatedToPostId,
+      );
+    }
   }
 
   Future<post.CampusPost?> _loadAgentPost(String id) async {
@@ -635,13 +649,17 @@ class _ChatPageState extends State<ChatPage> {
       await _postService.createReply(postId, body: text);
       if (!mounted) return;
       final l = AppLocalizations.of(context)!;
-      _live2DController.brain.onDraftSendComplete(succeeded: true);
+      if (_useLegacyBrain) {
+        _live2DController.brain.onDraftSendComplete(succeeded: true);
+      }
       _live2DController.setExpression(Live2DExpression.happy);
       _live2DController.showSpeechBubble(l.assistantSentBubble);
     } catch (e) {
       if (!mounted) return;
       final l = AppLocalizations.of(context)!;
-      _live2DController.brain.onDraftSendComplete(succeeded: false);
+      if (_useLegacyBrain) {
+        _live2DController.brain.onDraftSendComplete(succeeded: false);
+      }
       _live2DController.setExpression(Live2DExpression.surprised);
       _live2DController.showSpeechBubble(l.assistantSendFailedBubble);
     }
@@ -656,23 +674,34 @@ class _ChatPageState extends State<ChatPage> {
       await _chatService.sendMessage('listing:$listingId', content: text);
       if (!mounted) return;
       final l = AppLocalizations.of(context)!;
-      _live2DController.brain.onDraftSendComplete(succeeded: true);
+      if (_useLegacyBrain) {
+        _live2DController.brain.onDraftSendComplete(succeeded: true);
+      }
       _live2DController.setExpression(Live2DExpression.happy);
       _live2DController.showSpeechBubble(l.assistantSentBubble);
     } catch (e) {
       if (!mounted) return;
       final l = AppLocalizations.of(context)!;
-      _live2DController.brain.onDraftSendComplete(succeeded: false);
+      if (_useLegacyBrain) {
+        _live2DController.brain.onDraftSendComplete(succeeded: false);
+      }
       _live2DController.setExpression(Live2DExpression.surprised);
       _live2DController.showSpeechBubble(l.assistantSendFailedBubble);
     }
   }
 
   void _onComposerChanged() {
-    _live2DController.brain.onUserTyping();
+    if (_useLegacyBrain) {
+      _live2DController.brain.onUserTyping();
+    } else {
+      _companionHost?.attention.lookAt(
+        AttentionTarget.chat,
+        lockFor: const Duration(seconds: 1),
+      );
+    }
     _typingDebounce?.cancel();
     _typingDebounce = Timer(const Duration(milliseconds: 1500), () {
-      _live2DController.brain.onUserTypingStopped();
+      if (_useLegacyBrain) _live2DController.brain.onUserTypingStopped();
     });
   }
 
@@ -1069,7 +1098,9 @@ class _ChatPageState extends State<ChatPage> {
         return;
       }
 
-      _live2DController.brain.onMessageSent(userMsg.content);
+      if (_useLegacyBrain) {
+        _live2DController.brain.onMessageSent(userMsg.content);
+      }
       _companionTurnStart();
       _relationshipSignals.onTurnStart();
       if (_thanksPattern.hasMatch(userMsg.content)) {
@@ -1095,7 +1126,9 @@ class _ChatPageState extends State<ChatPage> {
         }
         if (token.toolActivity != null) {
           final activity = token.toolActivity!;
-          _live2DController.brain.onToolStarted(activity);
+          if (_useLegacyBrain) {
+            _live2DController.brain.onToolStarted(activity);
+          }
           _companionOnTool(activity);
           _relationshipSignals.onToolActivity();
           _environmentTracker?.track(
@@ -1122,7 +1155,9 @@ class _ChatPageState extends State<ChatPage> {
           _firstTokenLatency = DateTime.now().difference(_turnStartedAt!);
         }
         _lipSyncDriver.feedStreamingChunk(token.token);
-        _live2DController.brain.onResponseToken(token.token);
+        if (_useLegacyBrain) {
+          _live2DController.brain.onResponseToken(token.token);
+        }
         fullReply += token.token;
         _live2DController.showSpeechBubble(fullReply);
         setState(() {
@@ -1145,10 +1180,12 @@ class _ChatPageState extends State<ChatPage> {
       if (_turnStartedAt != null) {
         _lastTurnLatency = DateTime.now().difference(_turnStartedAt!);
       }
-      _live2DController.brain.onResponseComplete(
-        isError: false,
-        reply: fullReply,
-      );
+      if (_useLegacyBrain) {
+        _live2DController.brain.onResponseComplete(
+          isError: false,
+          reply: fullReply,
+        );
+      }
       _live2DController.showSpeechBubble(
         fullReply.isEmpty
             ? (localizations?.assistantIdleReplyBubble ?? '')
@@ -1203,7 +1240,9 @@ class _ChatPageState extends State<ChatPage> {
           );
         });
       }
-      _live2DController.brain.onResponseComplete(isError: true);
+      if (_useLegacyBrain) {
+        _live2DController.brain.onResponseComplete(isError: true);
+      }
     } finally {
       await _sseService.disconnect();
       if (mounted) {
@@ -1543,7 +1582,9 @@ class _ChatPageState extends State<ChatPage> {
             focusNode: _composerFocusNode,
             hintText: l.assistantComposerHint,
             isSending: _isStreaming,
-            onChanged: (_) => _live2DController.brain.onUserTyping(),
+            onChanged: (_) {
+              if (_useLegacyBrain) _live2DController.brain.onUserTyping();
+            },
             onSubmitted: (_) => _sendMessage(),
             onSend: _sendMessage,
             primaryActions: [

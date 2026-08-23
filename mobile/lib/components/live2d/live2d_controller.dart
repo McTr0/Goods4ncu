@@ -15,6 +15,14 @@ enum Live2DHitZone { head, belly, none }
 /// Controller that coordinates Live2D parameter state, motions, lip-sync, and LookAt tracking.
 class Live2DController extends ChangeNotifier {
   final XiaochangBrain brain = XiaochangBrain();
+  bool _brainDetached = false;
+
+  /// Companion takeover: stop routing XiaochangBrain into this body so the
+  /// CharacterDirector has exclusive control (goal §113).
+  void detachBrain() {
+    brain.removeListener(_onBrainChanged);
+    _brainDetached = true;
+  }
 
   // LookAt target coordinates (-1.0 to 1.0)
   double _lookAtX = 0.0;
@@ -159,7 +167,7 @@ class Live2DController extends ChangeNotifier {
   void endDrag() {
     if (!_isDragging) return;
     _isDragging = false;
-    brain.onPhysicalInteraction('drag');
+    if (!_brainDetached) brain.onPhysicalInteraction('drag');
     // Spawn particles at release point proportional to drag distance
     final dist = _dragOffset.distance;
     if (dist > 15) {
@@ -208,7 +216,7 @@ class Live2DController extends ChangeNotifier {
     if (relativeY <= 0.45) {
       // Tapped Head
       _lastHitZone = Live2DHitZone.head;
-      brain.onPhysicalInteraction('head');
+      if (!_brainDetached) brain.onPhysicalInteraction('head');
       playMotion('tap_head');
       setExpression(Live2DExpression.shy);
       showSpeechBubble(_randomHeadGreeting());
@@ -221,7 +229,7 @@ class Live2DController extends ChangeNotifier {
     } else {
       // Tapped Belly / Body
       _lastHitZone = Live2DHitZone.belly;
-      brain.onPhysicalInteraction('belly');
+      if (!_brainDetached) brain.onPhysicalInteraction('belly');
       playMotion('poke_belly');
       setExpression(Live2DExpression.surprised);
       showSpeechBubble(_randomBellyGreeting());

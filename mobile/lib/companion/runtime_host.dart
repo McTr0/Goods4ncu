@@ -25,6 +25,7 @@ class CompanionRuntimeHost extends ChangeNotifier {
   CompanionRuntimeHost({
     bool startTicker = true,
     CharacterRenderer? customRenderer,
+    this.environmentDebounce = const Duration(seconds: 2),
   }) {
     bus = CompanionEventBus();
     machine = CompanionStateMachine(
@@ -35,24 +36,17 @@ class CompanionRuntimeHost extends ChangeNotifier {
     );
     emotions = EmotionEngine(bus: bus);
     attention = AttentionController(bus: bus);
-    renderer = customRenderer ?? MockCharacterRenderer();
+    _defaultMock = MockCharacterRenderer();
+    renderer = customRenderer ?? _defaultMock;
     timeline.attachTo(bus);
     _busSub = bus.stream.listen(_onEvent);
 
     planner = const BehaviorPlanner();
-    final body = renderer;
     scheduler = AnimationScheduler(
       bus: bus,
-      onPlayClip: (clip) {
-        final rig = rigAdapter;
-        if (rig != null) {
-          rig.playMotionClip(clip);
-        } else {
-          unawaited(body.playMotion(clip));
-        }
-      },
+      onPlayClip: _playClip,
       onGaze: (x, y) => _gaze.setTarget(x, y),
-      onHeadTilt: (degrees) => body.setParameter('headTilt', degrees),
+      onHeadTilt: (degrees) => setParameter('headTilt', degrees),
     );
 
     proactive = ProactiveEngine();
@@ -77,19 +71,25 @@ class CompanionRuntimeHost extends ChangeNotifier {
   late final EmotionEngine emotions;
   late final AttentionController attention;
   late final CharacterRenderer renderer;
+  late final MockCharacterRenderer _defaultMock;
+  MockCharacterRenderer get mock => _defaultMock;
   OpenRigCharacterRenderer? get rigAdapter => switch (renderer) {
     OpenRigCharacterRenderer r => r,
-    _ => null,
-  };
-  MockCharacterRenderer? get mock => switch (renderer) {
-    MockCharacterRenderer m => m,
     _ => null,
   };
 
   late final BehaviorPlanner planner;
   late final AnimationScheduler scheduler;
   late final ProactiveEngine proactive;
-  DateTime _lastEnvironmentSignalAt = DateTime.now();
+
+  /// Minimum gap between proactive evaluations of environment chatter.
+  final Duration environmentDebounce;
+
+  /// Seeded far in the past so the very first environment event is not
+  /// debounced.
+  DateTime _lastEnvironmentSignalAt = DateTime.now().subtract(
+    const Duration(days: 1),
+  );
   final CompanionTimeline timeline = CompanionTimeline();
   StreamSubscription<CompanionEvent>? _busSub;
   StreamSubscription<CompanionEvent>? _environmentSub;
@@ -172,11 +172,41 @@ class CompanionRuntimeHost extends ChangeNotifier {
   // Director internals
   // ---------------------------------------------------------------------------
 
+  // ---------------------------------------------------------------------------
+  // Body attachment (Phase 3/§71): a real body can be attached after
+  // construction — e.g. OpenRigCharacterRenderer over the page's own
+  // Live2DController. Until then the mock records everything.
+  // ---------------------------------------------------------------------------
+
+  CharacterRenderer? _bodyOverride;
+
+  /// Late-attach a real renderer; it replaces the mock for all body output.
+  void attachBody(CharacterRenderer body) {
+    _bodyOverride = body;
+    unawaited(body.load());
+    notifyListeners();
+  }
+
+  void detachBody() {
+    _bodyOverride = null;
+    notifyListeners();
+  }
+
+  /// Effective body: attached real renderer or the built-in mock.
+  CharacterRenderer get _effectiveBody => _bodyOverride ?? _defaultMock;
+
+  void _playClip(String clip) {
+    unawaited(_effectiveBody.playMotion(clip));
+  }
+
+  void setParameter(String name, double value) =>
+      _effectiveBody.setParameter(name, value);
+
   void _onEvent(CompanionEvent event) {
     if (_disposed) return;
     switch (event.type) {
       case CompanionEventType.characterStateChanged:
-        renderer.setCharacterState(machine.state);
+        (_bodyOverride ?? renderer).setCharacterState(machine.state);
         _planForStateChange(event.data['to'] as String? ?? machine.state.name);
         break;
       case CompanionEventType.motionStarted:
@@ -268,8 +298,8 @@ class CompanionRuntimeHost extends ChangeNotifier {
 
     emotions.tick(elapsed);
     _gaze.tick(elapsed);
-    renderer.setGaze(_gaze.x, _gaze.y);
-    mouthOpen = mouthSampler?.call() ?? mock?.mouthOpen ?? 0;
+    _effectiveBody.setGaze(_gaze.x, _gaze.y);
+    mouthOpen = mouthSampler?.call() ?? mock.mouthOpen;
 
     if (machine.state == CompanionState.idle &&
         !scheduler.isBusy &&
