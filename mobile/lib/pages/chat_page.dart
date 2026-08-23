@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import '../components/price_tag.dart';
 import '../l10n/app_localizations.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
@@ -94,6 +96,7 @@ class _ChatPageState extends State<ChatPage> {
   // separate from _agentPlans: those await the user, these have happened.
   List<UndoableAction> _undoableActions = [];
   final List<post.CampusPost> _agentResultPosts = [];
+  final ScrollController _agentResultsController = ScrollController();
   String? _focusedAgentPostId;
   Timer? _undoTicker;
 
@@ -481,65 +484,31 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
           SizedBox(
-            height: 150,
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              scrollDirection: Axis.horizontal,
-              itemCount: _agentResultPosts.length,
-              itemBuilder: (context, index) {
-                final post = _agentResultPosts[index];
-                final focused = post.id == _focusedAgentPostId;
-                return SizedBox(
-                  width: 220,
-                  child: Card(
-                    margin: const EdgeInsets.only(right: 8),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      side: BorderSide(
-                        color: focused
-                            ? const Color(0xFF0F766E)
-                            : Colors.transparent,
-                        width: focused ? 2 : 0,
-                      ),
-                    ),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(14),
-                      onTap: post.listingId != null
-                          ? () => context.push('/listing/${post.listingId}')
-                          : () => context.push('/posts/${post.id}'),
-                      child: Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              post.title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13,
-                              ),
-                            ),
-                            const Spacer(),
-                            Text(
-                              post.displayBody.isEmpty
-                                  ? post.category ?? l.assistantFallbackCategory
-                                  : post.displayBody,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.grey.shade700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
+            height: 172,
+            child: ScrollConfiguration(
+              behavior: ScrollConfiguration.of(context).copyWith(
+                dragDevices: const {
+                  PointerDeviceKind.mouse,
+                  PointerDeviceKind.touch,
+                  PointerDeviceKind.stylus,
+                  PointerDeviceKind.trackpad,
+                },
+              ),
+              child: Scrollbar(
+                controller: _agentResultsController,
+                thumbVisibility: false,
+                child: ListView.builder(
+                  controller: _agentResultsController,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _agentResultPosts.length,
+                  itemBuilder: (context, index) {
+                    final post = _agentResultPosts[index];
+                    final focused = post.id == _focusedAgentPostId;
+                    return _AgentResultCard(item: post, focused: focused);
+                  },
+                ),
+              ),
             ),
           ),
         ],
@@ -1011,6 +980,7 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _agentResultsController.dispose();
     CompanionCharacterService.instance.removeListener(
       _onCompanionCharacterChanged,
     );
@@ -1732,6 +1702,116 @@ class _ChatPageState extends State<ChatPage> {
       ),
     );
   }
+}
+
+/// Image-first result card for agent recommendation strips.
+class _AgentResultCard extends StatelessWidget {
+  const _AgentResultCard({required this.item, required this.focused});
+
+  final post.CampusPost item;
+  final bool focused;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    final scheme = Theme.of(context).colorScheme;
+    final price = item.listing?.suggestedPriceCny;
+
+    return SizedBox(
+      key: ValueKey('agent-result-card-${item.id}'),
+      width: 220,
+      child: Card(
+        margin: const EdgeInsets.only(right: 8),
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(
+            color: focused ? const Color(0xFF0F766E) : Colors.transparent,
+            width: focused ? 2 : 0,
+          ),
+        ),
+        child: InkWell(
+          onTap: item.listingId != null && item.listingId!.isNotEmpty
+              ? () => context.push('/listing/${item.listingId}')
+              : () => context.push('/posts/${item.id}'),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                height: 84,
+                child:
+                    item.coverImageUrl != null && item.coverImageUrl!.isNotEmpty
+                    ? Image.network(
+                        item.coverImageUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) =>
+                            _placeholder(scheme),
+                      )
+                    : _placeholder(scheme),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const Spacer(),
+                    Row(
+                      children: [
+                        if (price != null)
+                          PriceTag(priceCny: price, fontSize: 12)
+                        else
+                          Expanded(
+                            child: Text(
+                              item.category ?? l.assistantFallbackCategory,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey.shade700,
+                              ),
+                            ),
+                          ),
+                        if (item.rankReason != null &&
+                            item.rankReason!.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              item.rankReason!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.end,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _placeholder(ColorScheme scheme) => ColoredBox(
+    color: scheme.primary.withValues(alpha: 0.08),
+    child: Icon(Icons.inventory_2_outlined, color: scheme.primary, size: 28),
+  );
 }
 
 class _ChatBubble extends StatelessWidget {
