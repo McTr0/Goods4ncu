@@ -38,7 +38,6 @@ void _ensureViewFactory(String modelUrl) {
         if (stage != null) break;
         await Future<void>.delayed(const Duration(milliseconds: 50));
       }
-      final containerId = (container.getProperty('id'.toJS) as JSString).toDart;
       if (stage == null) {
         container.setProperty(
           'innerHTML'.toJS,
@@ -46,7 +45,18 @@ void _ensureViewFactory(String modelUrl) {
         );
         return;
       }
-      WebCubismBridge(stage).mount(containerId, modelUrl);
+      // Pass the ELEMENT directly and retry until accepted — no DOM lookup
+      // race, no silent false. Final failure writes a visible diagnostic.
+      final bridge = WebCubismBridge(stage);
+      for (var attempt = 0; attempt < 50; attempt++) {
+        if (bridge.mountElement(container, modelUrl)) return;
+        if (bridge.hasLoadFailed()) return;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      container.setProperty(
+        'innerHTML'.toJS,
+        'Live2D mount failed after retries — see console'.toJS,
+      );
     });
     return container;
   });
