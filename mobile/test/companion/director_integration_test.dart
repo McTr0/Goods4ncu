@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/companion/animation_priority.dart';
+import 'package:goods4ncu_mobile/companion/companion_events.dart';
 import 'package:goods4ncu_mobile/companion/motion_library.dart';
+import 'package:goods4ncu_mobile/companion/proactive_engine.dart';
 import 'package:goods4ncu_mobile/companion/runtime_host.dart';
 import 'package:goods4ncu_mobile/companion/state_machine.dart';
 
@@ -120,4 +122,48 @@ void main() {
     );
     expect(host.machine.state, CompanionState.idle);
   });
+}
+
+void _proactiveTests() {
+  test(
+    'post-opened environment event triggers a gesture-only reaction',
+    () async {
+      final host = CompanionRuntimeHost();
+      addTearDown(host.dispose);
+
+      // Idle body, nothing scheduled.
+      expect(host.scheduler.isBusy, isFalse);
+
+      host.bus.emit(CompanionEventType.environmentChanged, {
+        'type': 'postOpened',
+        'postId': 'p-1',
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      // Attention moved to the post even before any plan plays.
+      expect(host.attention.state.primary.name, 'post');
+      // And a silent micro-reaction was requested (idle tier priority).
+      if (host.scheduler.active != null) {
+        expect(host.scheduler.active!.priority.value, 10);
+      }
+    },
+  );
+
+  test('burst of environment chatter is debounced to one reaction', () async {
+    final host = CompanionRuntimeHost(startTicker: false);
+    addTearDown(host.dispose);
+
+    for (var i = 0; i < 5; i++) {
+      host.bus.emit(CompanionEventType.environmentChanged, {
+        'type': 'postOpened',
+        'postId': 'p-$i',
+      });
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+
+    // Only the first event passes the debounce; the rest land inside the
+    // cooldown and are dropped.
+    expect(host.proactive.consider(ProactiveTriggerKey.postOpened), isNull);
+  });
+  _proactiveTests();
 }

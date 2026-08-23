@@ -14,6 +14,7 @@ import 'gaze.dart';
 import 'mock_renderer.dart';
 import 'motion_library.dart';
 import 'open_rig_adapter.dart';
+import 'proactive_engine.dart';
 import 'state_machine.dart';
 
 /// Owns the companion runtime singletons and exposes one snapshot stream.
@@ -54,6 +55,14 @@ class CompanionRuntimeHost extends ChangeNotifier {
       onHeadTilt: (degrees) => body.setParameter('headTilt', degrees),
     );
 
+    proactive = ProactiveEngine();
+    _environmentSub =
+        bus.on(
+              CompanionEventType.environmentChanged,
+              (event) => _considerProactive(event),
+            )
+            as StreamSubscription<CompanionEvent>?;
+
     if (startTicker) {
       _lastTick = DateTime.now();
       _ticker = Timer.periodic(
@@ -79,8 +88,11 @@ class CompanionRuntimeHost extends ChangeNotifier {
 
   late final BehaviorPlanner planner;
   late final AnimationScheduler scheduler;
+  late final ProactiveEngine proactive;
+  DateTime _lastEnvironmentSignalAt = DateTime.now();
   final CompanionTimeline timeline = CompanionTimeline();
   StreamSubscription<CompanionEvent>? _busSub;
+  StreamSubscription<CompanionEvent>? _environmentSub;
   bool _disposed = false;
 
   /// Real bodies drive their own mouth via the lip-sync driver; the host
@@ -215,6 +227,39 @@ class CompanionRuntimeHost extends ChangeNotifier {
     }
   }
 
+  /// Maps meaningful environment events onto proactive triggers. Busy-user
+  /// detection keeps reactions gesture-only while a turn is in flight.
+  void _considerProactive(CompanionEvent event) {
+    if (_disposed || event.type != CompanionEventType.environmentChanged) {
+      return;
+    }
+    final now = DateTime.now();
+    if (now.difference(_lastEnvironmentSignalAt) < const Duration(seconds: 2)) {
+      return; // debounce bursts of environment chatter.
+    }
+    final trigger = switch (event.data['type']) {
+      'postOpened' => ProactiveTriggerKey.postOpened,
+      'searchPerformed' ||
+      'postListUpdated' => ProactiveTriggerKey.searchResults,
+      'messageReceived' => ProactiveTriggerKey.messageReceived,
+      _ => null,
+    };
+    _lastEnvironmentSignalAt = now;
+    if (trigger == null) return;
+
+    final userIsBusy = switch (machine.state) {
+      CompanionState.speaking ||
+      CompanionState.thinking ||
+      CompanionState.toolUsing => true,
+      _ => false,
+    };
+    final decision = proactive.consider(trigger, userIsBusy: userIsBusy);
+    attention.lookAt(proactive.gazeTargetFor(trigger));
+    if (decision != null && !userIsBusy) {
+      scheduler.request(planForTag(decision.tag, AnimationPriority.idle));
+    }
+  }
+
   void _tick() {
     if (_disposed) return;
     final now = DateTime.now();
@@ -264,6 +309,7 @@ class CompanionRuntimeHost extends ChangeNotifier {
     _disposed = true;
     _ticker?.cancel();
     unawaited(_busSub?.cancel());
+    unawaited(_environmentSub?.cancel());
     super.dispose();
   }
 }
