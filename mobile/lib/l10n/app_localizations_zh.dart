@@ -1447,9 +1447,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationChooseSubtitle => '实时会话与留言都会在这里保持各自清晰的边界。';
 
   @override
-  String get contactModePromptTitle => '选择联系方式';
-
-  @override
   String get contactPageModeHint => '这是完整的联系页面。选择实时联系或留言，返回时仍会保留原页面上下文。';
 
   @override
@@ -1470,15 +1467,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get contactFallbackUser => '这位同学';
-
-  @override
-  String get contactModeRealtimeTitle => '实时对话';
-
-  @override
-  String get contactModeRealtimeDescription => '发起 10 分钟实时邀请，对方接通后开始本次会话';
-
-  @override
-  String get contactModeMailTitle => '留言';
 
   @override
   String get contactModeMailDescription => '直接发送留言，对方打开即可查看';
@@ -1697,9 +1685,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationCreateGroupSuccess => '群组已创建，已放入消息列表';
 
   @override
-  String get conversationCreateChannelSuccess => '频道已创建，已放入消息列表';
-
-  @override
   String conversationCreateFailed(String error) {
     return '创建失败：$error';
   }
@@ -1709,11 +1694,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get conversationThreadLoading => '正在加载';
-
-  @override
-  String conversationThreadStats(int realtime, int mail, int count) {
-    return '连接 $realtime · 留言 $mail · 共 $count 段';
-  }
 
   @override
   String get conversationReconnect => '再联系';
@@ -1851,25 +1831,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get relationshipSpaceEventDefault => '留下了新记录';
 
   @override
-  String conversationRealtimeCount(int count) {
-    return '连接 $count';
-  }
-
-  @override
-  String conversationMailCount(int count) {
-    return '留言 $count';
-  }
-
-  @override
-  String conversationSegmentCount(int count) {
-    return '共 $count 段';
-  }
-
-  @override
   String get createGroup => '创建群组';
-
-  @override
-  String get createChannel => '创建频道';
 
   @override
   String get spaceNameLabel => '名称';
@@ -1912,18 +1874,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get spaceMessagesLoadFailedTitle => '空间消息暂时没加载出来';
 
   @override
-  String get spaceChannelCreatedTitle => '频道已创建';
-
-  @override
-  String get spaceGroupCreatedTitle => '群组已创建';
-
-  @override
-  String get spaceChannelEmptySubtitle => '公告会出现在这里；频道成员可以阅读、反应和举报。';
-
-  @override
-  String get spaceGroupEmptySubtitle => '先发起一个话题，再在话题下讨论。';
-
-  @override
   String get replyAction => '回复';
 
   @override
@@ -1932,17 +1882,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get spaceChannelReadOnlyNotice =>
-      '你是频道成员，可以阅读、反应和举报；只有频道 owner/admin 可以发布公告。';
-
-  @override
   String get cancelReply => '取消回复';
-
-  @override
-  String get channelComposerHint => '发布一条公告...';
-
-  @override
-  String get groupComposerHint => '在话题下讨论...';
 
   @override
   String get groupTopicsTitle => '群聊话题';
@@ -1993,13 +1933,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get spaceKindChannelLong => '公告频道';
-
-  @override
   String get spaceKindGroupLong => '校园讨论群';
-
-  @override
-  String get spaceKindChannel => '频道';
 
   @override
   String get spaceKindGroup => '群组';

@@ -647,7 +647,6 @@
   "conversationStateClosed": "本次沟通已结束",
   "conversationChooseTitle": "选择一段会话",
   "conversationChooseSubtitle": "实时会话与留言都会在这里保持各自清晰的边界。",
-  "contactModePromptTitle": "选择联系方式",
   "contactPageModeHint": "这是完整的联系页面。选择实时联系或留言，返回时仍会保留原页面上下文。",
   "contactBackAction": "返回选择联系方式",
   "contactContextUser": "联系 {username}",
@@ -668,9 +667,6 @@
     }
   },
   "contactFallbackUser": "这位同学",
-  "contactModeRealtimeTitle": "实时对话",
-  "contactModeRealtimeDescription": "发起 10 分钟实时邀请，对方接通后开始本次会话",
-  "contactModeMailTitle": "留言",
   "contactModeMailDescription": "直接发送留言，对方打开即可查看",
   "contactOpeningRequired": "请输入首条消息",
   "contactMailSubjectRequired": "留言需要一个主题",
@@ -761,7 +757,6 @@
   "conversationSectionSpaces": "校园群聊",
   "conversationSectionTools": "小昌",
   "conversationCreateGroupSuccess": "群组已创建，已放入消息列表",
-  "conversationCreateChannelSuccess": "频道已创建，已放入消息列表",
   "conversationCreateFailed": "创建失败：{error}",
   "@conversationCreateFailed": {
     "placeholders": {
@@ -772,20 +767,6 @@
   },
   "conversationPeerFallback": "同学",
   "conversationThreadLoading": "正在加载",
-  "conversationThreadStats": "连接 {realtime} · 留言 {mail} · 共 {count} 段",
-  "@conversationThreadStats": {
-    "placeholders": {
-      "realtime": {
-        "type": "int"
-      },
-      "mail": {
-        "type": "int"
-      },
-      "count": {
-        "type": "int"
-      }
-    }
-  },
   "conversationReconnect": "再联系",
   "conversationThreadLoadFailedTitle": "联系人会话加载失败",
   "conversationThreadEmptyTitle": "暂无沟通记录",
@@ -850,32 +831,7 @@
   "relationshipSpaceEventAcknowledgementChanged": "回应了留言",
   "relationshipSpaceEventSharedObjectChanged": "共享内容有变化",
   "relationshipSpaceEventDefault": "留下了新记录",
-  "conversationRealtimeCount": "连接 {count}",
-  "@conversationRealtimeCount": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "conversationMailCount": "留言 {count}",
-  "@conversationMailCount": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "conversationSegmentCount": "共 {count} 段",
-  "@conversationSegmentCount": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
   "createGroup": "创建群组",
-  "createChannel": "创建频道",
   "spaceNameLabel": "名称",
   "spaceDescriptionOptionalLabel": "简介（可选）",
   "createAction": "创建",
@@ -905,10 +861,6 @@
     }
   },
   "spaceMessagesLoadFailedTitle": "空间消息暂时没加载出来",
-  "spaceChannelCreatedTitle": "频道已创建",
-  "spaceGroupCreatedTitle": "群组已创建",
-  "spaceChannelEmptySubtitle": "公告会出现在这里；频道成员可以阅读、反应和举报。",
-  "spaceGroupEmptySubtitle": "先发起一个话题，再在话题下讨论。",
   "replyAction": "回复",
   "replyPreviewMissing": "回复了一条消息 #{messageId}",
   "@replyPreviewMissing": {
@@ -918,10 +870,7 @@
       }
     }
   },
-  "spaceChannelReadOnlyNotice": "你是频道成员，可以阅读、反应和举报；只有频道 owner/admin 可以发布公告。",
   "cancelReply": "取消回复",
-  "channelComposerHint": "发布一条公告...",
-  "groupComposerHint": "在话题下讨论...",
   "groupTopicsTitle": "群聊话题",
   "groupTopicsSubtitle": "群聊不设公共消息流，选择一个话题进入讨论。",
   "startGroupTopic": "发起话题",
@@ -960,9 +909,7 @@
       }
     }
   },
-  "spaceKindChannelLong": "公告频道",
   "spaceKindGroupLong": "校园讨论群",
-  "spaceKindChannel": "频道",
   "spaceKindGroup": "群组",
   "spaceRoleOwner": "创建者",
   "spaceRoleAdmin": "管理员",

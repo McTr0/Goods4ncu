@@ -1504,9 +1504,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'Realtime conversations and mail threads stay clearly separated here.';
 
   @override
-  String get contactModePromptTitle => 'Select contact method';
-
-  @override
   String get contactPageModeHint =>
       'This is a full contact page. Choose realtime contact or mail; going back preserves the previous page.';
 
@@ -1528,16 +1525,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get contactFallbackUser => 'this classmate';
-
-  @override
-  String get contactModeRealtimeTitle => 'Realtime conversation';
-
-  @override
-  String get contactModeRealtimeDescription =>
-      'Send a 10-minute realtime invite. The conversation starts once they connect.';
-
-  @override
-  String get contactModeMailTitle => 'Message';
 
   @override
   String get contactModeMailDescription =>
@@ -1769,10 +1756,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'Group created and added to Messages';
 
   @override
-  String get conversationCreateChannelSuccess =>
-      'Channel created and added to Messages';
-
-  @override
   String conversationCreateFailed(String error) {
     return 'Create failed: $error';
   }
@@ -1782,11 +1765,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get conversationThreadLoading => 'Loading';
-
-  @override
-  String conversationThreadStats(int realtime, int mail, int count) {
-    return 'Connections $realtime · Mail $mail · $count segments';
-  }
 
   @override
   String get conversationReconnect => 'Contact again';
@@ -1933,25 +1911,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get relationshipSpaceEventDefault => 'Added a new record';
 
   @override
-  String conversationRealtimeCount(int count) {
-    return 'Connections $count';
-  }
-
-  @override
-  String conversationMailCount(int count) {
-    return 'Mail $count';
-  }
-
-  @override
-  String conversationSegmentCount(int count) {
-    return '$count segments';
-  }
-
-  @override
   String get createGroup => 'Create group';
-
-  @override
-  String get createChannel => 'Create channel';
 
   @override
   String get spaceNameLabel => 'Name';
@@ -1995,20 +1955,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get spaceMessagesLoadFailedTitle => 'Space messages could not load';
 
   @override
-  String get spaceChannelCreatedTitle => 'Channel created';
-
-  @override
-  String get spaceGroupCreatedTitle => 'Group created';
-
-  @override
-  String get spaceChannelEmptySubtitle =>
-      'Announcements will appear here. Channel members can read, react, and report.';
-
-  @override
-  String get spaceGroupEmptySubtitle =>
-      'Start a topic before discussing it with the group.';
-
-  @override
   String get replyAction => 'Reply';
 
   @override
@@ -2017,17 +1963,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get spaceChannelReadOnlyNotice =>
-      'You are a channel member. You can read, react, and report; only channel owners/admins can post announcements.';
-
-  @override
   String get cancelReply => 'Cancel reply';
-
-  @override
-  String get channelComposerHint => 'Post an announcement...';
-
-  @override
-  String get groupComposerHint => 'Discuss inside this topic...';
 
   @override
   String get groupTopicsTitle => 'Group topics';
@@ -2081,13 +2017,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get spaceKindChannelLong => 'Announcement channel';
-
-  @override
   String get spaceKindGroupLong => 'Campus group';
-
-  @override
-  String get spaceKindChannel => 'Channel';
 
   @override
   String get spaceKindGroup => 'Group';

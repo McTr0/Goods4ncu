@@ -2862,12 +2862,6 @@ abstract class AppLocalizations {
   /// **'Realtime conversations and mail threads stay clearly separated here.'**
   String get conversationChooseSubtitle;
 
-  /// No description provided for @contactModePromptTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Select contact method'**
-  String get contactModePromptTitle;
-
   /// No description provided for @contactPageModeHint.
   ///
   /// In en, this message translates to:
@@ -2903,24 +2897,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'this classmate'**
   String get contactFallbackUser;
-
-  /// No description provided for @contactModeRealtimeTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Realtime conversation'**
-  String get contactModeRealtimeTitle;
-
-  /// No description provided for @contactModeRealtimeDescription.
-  ///
-  /// In en, this message translates to:
-  /// **'Send a 10-minute realtime invite. The conversation starts once they connect.'**
-  String get contactModeRealtimeDescription;
-
-  /// No description provided for @contactModeMailTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Message'**
-  String get contactModeMailTitle;
 
   /// No description provided for @contactModeMailDescription.
   ///
@@ -3336,12 +3312,6 @@ abstract class AppLocalizations {
   /// **'Group created and added to Messages'**
   String get conversationCreateGroupSuccess;
 
-  /// No description provided for @conversationCreateChannelSuccess.
-  ///
-  /// In en, this message translates to:
-  /// **'Channel created and added to Messages'**
-  String get conversationCreateChannelSuccess;
-
   /// No description provided for @conversationCreateFailed.
   ///
   /// In en, this message translates to:
@@ -3359,12 +3329,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Loading'**
   String get conversationThreadLoading;
-
-  /// No description provided for @conversationThreadStats.
-  ///
-  /// In en, this message translates to:
-  /// **'Connections {realtime} · Mail {mail} · {count} segments'**
-  String conversationThreadStats(int realtime, int mail, int count);
 
   /// No description provided for @conversationReconnect.
   ///
@@ -3624,35 +3588,11 @@ abstract class AppLocalizations {
   /// **'Added a new record'**
   String get relationshipSpaceEventDefault;
 
-  /// No description provided for @conversationRealtimeCount.
-  ///
-  /// In en, this message translates to:
-  /// **'Connections {count}'**
-  String conversationRealtimeCount(int count);
-
-  /// No description provided for @conversationMailCount.
-  ///
-  /// In en, this message translates to:
-  /// **'Mail {count}'**
-  String conversationMailCount(int count);
-
-  /// No description provided for @conversationSegmentCount.
-  ///
-  /// In en, this message translates to:
-  /// **'{count} segments'**
-  String conversationSegmentCount(int count);
-
   /// No description provided for @createGroup.
   ///
   /// In en, this message translates to:
   /// **'Create group'**
   String get createGroup;
-
-  /// No description provided for @createChannel.
-  ///
-  /// In en, this message translates to:
-  /// **'Create channel'**
-  String get createChannel;
 
   /// No description provided for @spaceNameLabel.
   ///
@@ -3726,30 +3666,6 @@ abstract class AppLocalizations {
   /// **'Space messages could not load'**
   String get spaceMessagesLoadFailedTitle;
 
-  /// No description provided for @spaceChannelCreatedTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Channel created'**
-  String get spaceChannelCreatedTitle;
-
-  /// No description provided for @spaceGroupCreatedTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Group created'**
-  String get spaceGroupCreatedTitle;
-
-  /// No description provided for @spaceChannelEmptySubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Announcements will appear here. Channel members can read, react, and report.'**
-  String get spaceChannelEmptySubtitle;
-
-  /// No description provided for @spaceGroupEmptySubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Start a topic before discussing it with the group.'**
-  String get spaceGroupEmptySubtitle;
-
   /// No description provided for @replyAction.
   ///
   /// In en, this message translates to:
@@ -3762,29 +3678,11 @@ abstract class AppLocalizations {
   /// **'Replied to message #{messageId}'**
   String replyPreviewMissing(int messageId);
 
-  /// No description provided for @spaceChannelReadOnlyNotice.
-  ///
-  /// In en, this message translates to:
-  /// **'You are a channel member. You can read, react, and report; only channel owners/admins can post announcements.'**
-  String get spaceChannelReadOnlyNotice;
-
   /// No description provided for @cancelReply.
   ///
   /// In en, this message translates to:
   /// **'Cancel reply'**
   String get cancelReply;
-
-  /// No description provided for @channelComposerHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Post an announcement...'**
-  String get channelComposerHint;
-
-  /// No description provided for @groupComposerHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Discuss inside this topic...'**
-  String get groupComposerHint;
 
   /// No description provided for @groupTopicsTitle.
   ///
@@ -3870,23 +3768,11 @@ abstract class AppLocalizations {
   /// **'{count} members · {kind}'**
   String spaceFallbackDescription(int count, String kind);
 
-  /// No description provided for @spaceKindChannelLong.
-  ///
-  /// In en, this message translates to:
-  /// **'Announcement channel'**
-  String get spaceKindChannelLong;
-
   /// No description provided for @spaceKindGroupLong.
   ///
   /// In en, this message translates to:
   /// **'Campus group'**
   String get spaceKindGroupLong;
-
-  /// No description provided for @spaceKindChannel.
-  ///
-  /// In en, this message translates to:
-  /// **'Channel'**
-  String get spaceKindChannel;
 
   /// No description provided for @spaceKindGroup.
   ///

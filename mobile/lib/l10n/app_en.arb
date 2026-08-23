@@ -666,7 +666,6 @@
   "conversationStateClosed": "This conversation is closed",
   "conversationChooseTitle": "Choose a conversation",
   "conversationChooseSubtitle": "Realtime conversations and mail threads stay clearly separated here.",
-  "contactModePromptTitle": "Select contact method",
   "contactPageModeHint": "This is a full contact page. Choose realtime contact or mail; going back preserves the previous page.",
   "contactBackAction": "Back to contact methods",
   "contactContextUser": "Contact {username}",
@@ -687,9 +686,6 @@
     }
   },
   "contactFallbackUser": "this classmate",
-  "contactModeRealtimeTitle": "Realtime conversation",
-  "contactModeRealtimeDescription": "Send a 10-minute realtime invite. The conversation starts once they connect.",
-  "contactModeMailTitle": "Message",
   "contactModeMailDescription": "Send messages directly; visible as soon as they open the app.",
   "contactOpeningRequired": "Enter an opening message.",
   "contactMailSubjectRequired": "Mail needs a subject.",
@@ -780,7 +776,6 @@
   "conversationSectionSpaces": "Campus group chats",
   "conversationSectionTools": "Xiaochang",
   "conversationCreateGroupSuccess": "Group created and added to Messages",
-  "conversationCreateChannelSuccess": "Channel created and added to Messages",
   "conversationCreateFailed": "Create failed: {error}",
   "@conversationCreateFailed": {
     "placeholders": {
@@ -791,20 +786,6 @@
   },
   "conversationPeerFallback": "Classmate",
   "conversationThreadLoading": "Loading",
-  "conversationThreadStats": "Connections {realtime} · Mail {mail} · {count} segments",
-  "@conversationThreadStats": {
-    "placeholders": {
-      "realtime": {
-        "type": "int"
-      },
-      "mail": {
-        "type": "int"
-      },
-      "count": {
-        "type": "int"
-      }
-    }
-  },
   "conversationReconnect": "Contact again",
   "conversationThreadLoadFailedTitle": "Contact conversation failed to load",
   "conversationThreadEmptyTitle": "No communication records",
@@ -869,32 +850,7 @@
   "relationshipSpaceEventAcknowledgementChanged": "Responded to a message",
   "relationshipSpaceEventSharedObjectChanged": "Shared content changed",
   "relationshipSpaceEventDefault": "Added a new record",
-  "conversationRealtimeCount": "Connections {count}",
-  "@conversationRealtimeCount": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "conversationMailCount": "Mail {count}",
-  "@conversationMailCount": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "conversationSegmentCount": "{count} segments",
-  "@conversationSegmentCount": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
   "createGroup": "Create group",
-  "createChannel": "Create channel",
   "spaceNameLabel": "Name",
   "spaceDescriptionOptionalLabel": "Description (optional)",
   "createAction": "Create",
@@ -924,10 +880,6 @@
     }
   },
   "spaceMessagesLoadFailedTitle": "Space messages could not load",
-  "spaceChannelCreatedTitle": "Channel created",
-  "spaceGroupCreatedTitle": "Group created",
-  "spaceChannelEmptySubtitle": "Announcements will appear here. Channel members can read, react, and report.",
-  "spaceGroupEmptySubtitle": "Start a topic before discussing it with the group.",
   "replyAction": "Reply",
   "replyPreviewMissing": "Replied to message #{messageId}",
   "@replyPreviewMissing": {
@@ -937,10 +889,7 @@
       }
     }
   },
-  "spaceChannelReadOnlyNotice": "You are a channel member. You can read, react, and report; only channel owners/admins can post announcements.",
   "cancelReply": "Cancel reply",
-  "channelComposerHint": "Post an announcement...",
-  "groupComposerHint": "Discuss inside this topic...",
   "groupTopicsTitle": "Group topics",
   "groupTopicsSubtitle": "There is no shared message stream. Open a topic to join its discussion.",
   "startGroupTopic": "Start a topic",
@@ -979,9 +928,7 @@
       }
     }
   },
-  "spaceKindChannelLong": "Announcement channel",
   "spaceKindGroupLong": "Campus group",
-  "spaceKindChannel": "Channel",
   "spaceKindGroup": "Group",
   "spaceRoleOwner": "Owner",
   "spaceRoleAdmin": "Admin",
