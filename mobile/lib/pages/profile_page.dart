@@ -109,15 +109,6 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  String _formatDate(String? createdAt) {
-    if (createdAt == null || createdAt.isEmpty) return '';
-    try {
-      return createdAt.substring(0, 10);
-    } catch (_) {
-      return '';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
@@ -149,7 +140,6 @@ class _ProfilePageState extends State<ProfilePage> {
     }
 
     final username = _profile?['username'] ?? l.profile;
-    final createdAt = _profile?['created_at'];
     final isAdmin = _profile?['role'] == 'admin';
     final userId = _profile?['user_id']?.toString();
     CampusMembership? campusMembership;
@@ -187,16 +177,6 @@ class _ProfilePageState extends State<ProfilePage> {
               username,
               style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
-            if (createdAt != null && createdAt.toString().isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                l.memberSince(_formatDate(createdAt.toString())),
-                style: const TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 13,
-                ),
-              ),
-            ],
             const SizedBox(height: AppTheme.sp32),
 
             _MenuCard(
