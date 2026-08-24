@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/post.dart';
@@ -190,6 +191,22 @@ class PostDiscoveryCard extends StatelessWidget {
                             ),
                           ),
                         ),
+                        const SizedBox(width: 6),
+                        Icon(
+                          Icons.schedule_rounded,
+                          size: 13,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          _lastActivityLabel(context, post.lastActivityAt),
+                          style: TextStyle(
+                            color: scheme.onSurfaceVariant,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
                         Icon(
                           Icons.mode_comment_outlined,
                           size: 14,
@@ -277,4 +294,18 @@ class _TypePill extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Compact recent-activity stamp for discovery tiles.
+String _lastActivityLabel(BuildContext context, DateTime? value) {
+  if (value == null) return '';
+  final locale = Localizations.localeOf(context).toLanguageTag();
+  final local = value.toLocal();
+  final now = DateTime.now();
+  final diff = now.difference(local);
+  if (diff.inMinutes < 1) return '刚刚';
+  if (diff.inHours < 24) return '${diff.inHours}小时前';
+  if (diff.inDays < 7) return '${diff.inDays}天前';
+  if (local.year == now.year) return DateFormat.MMMd(locale).format(local);
+  return DateFormat.yMMMd(locale).format(local);
 }

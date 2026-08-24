@@ -142,7 +142,7 @@ void main() {
     await tester.pumpWidget(_app(posts: posts));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('post-filter-all')), findsOneWidget);
+    expect(find.byKey(const ValueKey('post-filter-picker')), findsOneWidget);
     expect(find.byKey(const ValueKey('home-create-post')), findsNothing);
     expect(posts.calls, 1);
   });
@@ -321,15 +321,18 @@ void main() {
     await tester.pumpWidget(_app(posts: posts));
     await tester.pumpAndSettle();
 
-    expect(find.text('All'), findsOneWidget);
     expect(find.text('For you'), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('post-filter-offer')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('post-filter-wanted')));
-    await tester.pumpAndSettle();
+    Future<void> pickFilter(String key) async {
+      await tester.tap(find.byKey(const ValueKey('post-filter-picker')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(ValueKey('picker-$key')));
+      await tester.pumpAndSettle();
+    }
 
-    expect(posts.categories, ['all', 'offer', 'wanted']);
+    await pickFilter('offer');
+    await pickFilter('wanted');
+
     expect(posts.categories, ['all', 'offer', 'wanted']);
   });
 

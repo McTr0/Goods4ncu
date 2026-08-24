@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
+import '../components/searchable_picker_sheet.dart';
 import '../l10n/app_localizations.dart';
+import '../models/post_taxonomy.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
 import '../components/feed_feedback_menu.dart';
@@ -493,33 +495,25 @@ class _PostSectionTitle extends StatelessWidget {
           ],
         ),
         const SizedBox(height: AppTheme.sp12),
-        Wrap(
-          spacing: AppTheme.sp8,
-          runSpacing: AppTheme.sp8,
+        Row(
           children: [
-            _PostFilterChip(
-              key: const ValueKey('post-filter-all'),
-              label: l.listingDirectionAll,
-              selected: selectedType == 'all',
-              onSelected: () => onTypeChanged('all'),
-            ),
-            _PostFilterChip(
-              key: const ValueKey('post-filter-discussion'),
-              label: l.postFilterDiscussion,
-              selected: selectedType == 'discussion',
-              onSelected: () => onTypeChanged('discussion'),
-            ),
-            _PostFilterChip(
-              key: const ValueKey('post-filter-offer'),
-              label: l.listingDirectionOffer,
-              selected: selectedType == 'offer',
-              onSelected: () => onTypeChanged('offer'),
-            ),
-            _PostFilterChip(
-              key: const ValueKey('post-filter-wanted'),
-              label: l.listingDirectionWanted,
-              selected: selectedType == 'wanted',
-              onSelected: () => onTypeChanged('wanted'),
+            Expanded(
+              child: InkWell(
+                key: const ValueKey('post-filter-picker'),
+                borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                onTap: () => _pickCategory(context, selectedType, onTypeChanged),
+                child: InputDecorator(
+                  decoration: InputDecoration(
+                    labelText: l.category,
+                    suffixIcon: const Icon(Icons.expand_more_rounded),
+                    isDense: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                    ),
+                  ),
+                  child: Text(_filterLabel(selectedType)),
+                ),
+              ),
             ),
           ],
         ),
@@ -528,28 +522,37 @@ class _PostSectionTitle extends StatelessWidget {
   }
 }
 
-class _PostFilterChip extends StatelessWidget {
-  const _PostFilterChip({
-    super.key,
-    required this.label,
-    required this.selected,
-    required this.onSelected,
-  });
+String _filterLabel(String type) {
+  if (type == 'all') return '全部';
+  return postCategoryByKey(type)?.label ?? type;
+}
 
-  final String label;
-  final bool selected;
-  final VoidCallback onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: (_) => onSelected(),
-      showCheckmark: false,
-      labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-    );
-  }
+Future<void> _pickCategory(
+  BuildContext context,
+  String selectedType,
+  ValueChanged<String> onTypeChanged,
+) async {
+  final selected = await showSearchablePickerSheet<String>(
+    context: context,
+    title: '选择分区',
+    options: [
+      PickerOption(
+        value: 'all',
+        label: '全部',
+        keywords: ['all', '全部'],
+      ),
+      for (final category in kPostCategories)
+        PickerOption(
+          value: category.key,
+          label: category.label,
+          keywords: [category.key],
+        ),
+    ],
+    initiallySelected: [selectedType],
+  );
+  if (selected == null || selected.isEmpty) return;
+  final next = selected.first;
+  if (next != selectedType) onTypeChanged(next);
 }
 
 class _PostEmptyState extends StatelessWidget {
