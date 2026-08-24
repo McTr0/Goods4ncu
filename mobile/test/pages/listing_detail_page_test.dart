@@ -432,14 +432,15 @@ void main() {
 
       expect(
         find.byKey(const ValueKey('listing-inline-discussion')),
-        findsOneWidget);
-    // The thread jumps back to the unified discussion page instead of
-    // rendering an embedded second comment surface.
-    expect(
-      find.byKey(const ValueKey('listing-open-discussion')),
-      findsOneWidget,
-    );
-    expect(find.byKey(const ValueKey('post-reply-field')), findsNothing);
+        findsOneWidget,
+      );
+      // The thread jumps back to the unified discussion page instead of
+      // rendering an embedded second comment surface.
+      expect(
+        find.byKey(const ValueKey('listing-open-discussion')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('post-reply-field')), findsNothing);
     },
   );
 

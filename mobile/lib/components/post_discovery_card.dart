@@ -59,7 +59,7 @@ class PostDiscoveryCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (hasImage || isGoods)
+              if (hasImage)
                 AspectRatio(
                   aspectRatio: isGoods ? 1.05 : 1.35,
                   child: Stack(
@@ -91,12 +91,12 @@ class PostDiscoveryCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (!hasImage && !isGoods)
+                    if (!hasImage)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 8),
                         child: Row(
                           children: [
-                            _TypePill(label: typeLabel, isListing: false),
+                            _TypePill(label: typeLabel, isListing: isGoods),
                             const Spacer(),
                             if (headTag != null) _TagPill(tagKey: headTag),
                           ],

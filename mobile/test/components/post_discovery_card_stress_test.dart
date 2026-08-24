@@ -63,4 +63,32 @@ void main() {
     expect(find.text('❓ 提问'), findsOneWidget);
   });
 
+  testWidgets('imageless goods posts render text-first without an empty slot', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final post = CampusPost.fromJson({
+      'id': 'errand-1',
+      'category': 'offer',
+      'title': '每天下午代取快递 北门菜鸟驿站',
+      'body': '课少时间多，5 元一件送到宿舍楼下。',
+      'tags': ['help', 'qianhuNorth'],
+      'author': {'id': 'u2', 'username': 'runner'},
+      'reply_count': 2,
+      'status': 'active',
+    });
+
+    await tester.pumpWidget(_app(PostDiscoveryCard(post: post, onTap: () {})));
+    await tester.pump();
+
+    // No reserved image slot for goods posts without photos.
+    expect(find.byKey(const ValueKey('post-cover-errand-1')), findsNothing);
+    expect(tester.takeException(), isNull);
+    // Header pills still identify category and first tag.
+    expect(find.text('商品出'), findsOneWidget);
+    expect(find.text('📍 前湖北院'), findsOneWidget);
+  });
 }

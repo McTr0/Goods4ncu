@@ -228,7 +228,9 @@ void main() {
     expect(find.text('assistant post-1'), findsOneWidget);
   });
 
-  testWidgets('renders a listing-bound post as a normal thread', (tester) async {
+  testWidgets('renders a listing-bound post as a normal thread', (
+    tester,
+  ) async {
     final postService = _ListingPostService();
     final router = GoRouter(
       initialLocation: '/posts/listing-post-1',
