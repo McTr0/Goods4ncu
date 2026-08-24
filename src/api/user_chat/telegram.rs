@@ -8,11 +8,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
-use crate::api::session::VerifiedTenant;
 use crate::api::{ws, AppState};
-use crate::services::location_space::{
-    LocationPresenceView, LocationRecommendation, LocationSpaceService, LocationSpaceTree,
-};
 
 use super::{authenticated_session, authenticated_user, moderate_text};
 
@@ -34,26 +30,8 @@ pub struct SpaceView {
     pub my_role: String,
     pub member_count: i64,
     pub online_count: i64,
-    pub is_location_space: bool,
     pub created_at: String,
     pub updated_at: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RecommendLocationSpaceBody {
-    pub latitude: f64,
-    pub longitude: f64,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CreateLocationChildBody {
-    pub name: String,
-    pub description: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct LocationPresenceBody {
-    pub active: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -273,101 +251,6 @@ pub async fn get_space(
     let (user_id, campus_id) = verified_space_user(&state, &headers, space_id).await?;
     ensure_space_chat_access(&state, campus_id, space_id, &user_id).await?;
     Ok(Json(load_space_view(&state, space_id, &user_id).await?))
-}
-
-pub async fn list_location_spaces(
-    State(state): State<AppState>,
-    tenant: VerifiedTenant,
-) -> Result<Json<LocationSpaceTree>, ApiError> {
-    let tree = LocationSpaceService::new(state.infra.db.clone())
-        .tree(tenant.campus_id, &tenant.session.user_id)
-        .await?;
-    Ok(Json(tree))
-}
-
-pub async fn recommend_location_space(
-    State(state): State<AppState>,
-    tenant: VerifiedTenant,
-    Json(body): Json<RecommendLocationSpaceBody>,
-) -> Result<Json<LocationRecommendation>, ApiError> {
-    let recommendation = LocationSpaceService::new(state.infra.db.clone())
-        .recommend(
-            tenant.campus_id,
-            &tenant.session.user_id,
-            body.latitude,
-            body.longitude,
-        )
-        .await?;
-    Ok(Json(recommendation))
-}
-
-pub async fn join_location_space(
-    State(state): State<AppState>,
-    tenant: VerifiedTenant,
-    Path(space_id): Path<Uuid>,
-) -> Result<Json<SpaceView>, ApiError> {
-    LocationSpaceService::new(state.infra.db.clone())
-        .join(tenant.campus_id, &tenant.session.user_id, space_id)
-        .await?;
-    Ok(Json(
-        load_space_view(&state, space_id, &tenant.session.user_id).await?,
-    ))
-}
-
-pub async fn get_location_presence(
-    State(state): State<AppState>,
-    tenant: VerifiedTenant,
-    Path(space_id): Path<Uuid>,
-) -> Result<Json<LocationPresenceView>, ApiError> {
-    let presence = LocationSpaceService::new(state.infra.db.clone())
-        .presence(tenant.campus_id, &tenant.session.user_id, space_id)
-        .await?;
-    Ok(Json(presence))
-}
-
-pub async fn heartbeat_location_presence(
-    State(state): State<AppState>,
-    tenant: VerifiedTenant,
-    Path(space_id): Path<Uuid>,
-    Json(body): Json<LocationPresenceBody>,
-) -> Result<Json<LocationPresenceView>, ApiError> {
-    let presence = LocationSpaceService::new(state.infra.db.clone())
-        .heartbeat_presence(
-            tenant.campus_id,
-            &tenant.session.user_id,
-            space_id,
-            body.active.unwrap_or(true),
-        )
-        .await?;
-    broadcast_location_presence_event(&state, tenant.campus_id, space_id, presence.online_count)
-        .await?;
-    Ok(Json(presence))
-}
-
-pub async fn create_location_child(
-    State(state): State<AppState>,
-    tenant: VerifiedTenant,
-    Path(parent_space_id): Path<Uuid>,
-    Json(body): Json<CreateLocationChildBody>,
-) -> Result<Json<SpaceView>, ApiError> {
-    let moderated = format!(
-        "{}\n{}",
-        body.name,
-        body.description.as_deref().unwrap_or_default()
-    );
-    moderate_text(&state, &moderated)?;
-    let space_id = LocationSpaceService::new(state.infra.db.clone())
-        .create_child(
-            tenant.campus_id,
-            &tenant.session.user_id,
-            parent_space_id,
-            &body.name,
-            body.description.as_deref(),
-        )
-        .await?;
-    Ok(Json(
-        load_space_view(&state, space_id, &tenant.session.user_id).await?,
-    ))
 }
 
 pub async fn add_space_member(
@@ -769,7 +652,6 @@ async fn load_space_view(
                            AND banned.user_id = presence.user_id
                            AND banned.role = 'banned'
                     )) AS online_count,
-                (s.origin IN ('campus_location', 'location_child')) AS is_location_space,
                 s.created_at, s.updated_at
          FROM chat_spaces s
          LEFT JOIN chat_space_members m ON m.space_id = s.id AND m.user_id = $2
@@ -792,7 +674,6 @@ async fn load_space_view(
             .unwrap_or_else(|| "visitor".to_string()),
         member_count: row.get("member_count"),
         online_count: row.get("online_count"),
-        is_location_space: row.get("is_location_space"),
         created_at: row
             .get::<chrono::DateTime<chrono::Utc>, _>("created_at")
             .to_rfc3339(),
@@ -825,23 +706,20 @@ async fn ensure_space_member(
 
 async fn ensure_space_chat_access(
     state: &AppState,
-    campus_id: Uuid,
+    _campus_id: Uuid,
     space_id: Uuid,
     user_id: &str,
 ) -> Result<String, ApiError> {
-    if LocationSpaceService::new(state.infra.db.clone())
-        .has_transient_chat_access(campus_id, user_id, space_id)
-        .await?
-    {
-        let role = sqlx::query_scalar::<_, String>(
-            "SELECT role FROM chat_space_members WHERE space_id = $1 AND user_id = $2",
-        )
-        .bind(space_id)
-        .bind(user_id)
-        .fetch_optional(&state.infra.db)
-        .await
-        .map_err(db_error)?;
-        return Ok(role.unwrap_or_else(|| "visitor".to_string()));
+    let existing_role = sqlx::query_scalar::<_, String>(
+        "SELECT role FROM chat_space_members WHERE space_id = $1 AND user_id = $2",
+    )
+    .bind(space_id)
+    .bind(user_id)
+    .fetch_optional(&state.infra.db)
+    .await
+    .map_err(db_error)?;
+    if let Some(role) = existing_role {
+        return Ok(role);
     }
     ensure_space_member(state, space_id, user_id).await
 }
@@ -921,48 +799,6 @@ async fn broadcast_space_event(
     .to_string();
     for row in rows {
         ws::broadcast_to_user(row.get::<String, _>("user_id").as_str(), &payload);
-    }
-    Ok(())
-}
-
-async fn broadcast_location_presence_event(
-    state: &AppState,
-    campus_id: Uuid,
-    space_id: Uuid,
-    online_count: i64,
-) -> Result<(), ApiError> {
-    let rows = sqlx::query(
-        "SELECT user_id
-           FROM chat_space_members
-          WHERE space_id = $1 AND role <> 'banned'
-         UNION
-         SELECT user_id
-           FROM chat_space_presence presence
-          WHERE presence.space_id = $1
-            AND presence.expires_at > NOW()
-            AND NOT EXISTS (
-                SELECT 1 FROM chat_space_members banned
-                 WHERE banned.space_id = presence.space_id
-                   AND banned.user_id = presence.user_id
-                   AND banned.role = 'banned'
-            )",
-    )
-    .bind(space_id)
-    .fetch_all(&state.infra.db)
-    .await
-    .map_err(db_error)?;
-    let payload = serde_json::json!({
-        "event": "space_presence_changed",
-        "space_id": space_id,
-        "online_count": online_count,
-    })
-    .to_string();
-    for row in rows {
-        ws::broadcast_to_user_in_campus(
-            row.get::<String, _>("user_id").as_str(),
-            campus_id,
-            &payload,
-        );
     }
     Ok(())
 }

@@ -12,9 +12,9 @@ CREATE TABLE IF NOT EXISTS chat_space_presence (
     expires_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (space_id, user_id),
-    CONSTRAINT chat_space_presence_space_campus_fk
-        FOREIGN KEY (space_id, campus_id)
-        REFERENCES chat_spaces(id, campus_id) ON DELETE CASCADE
+    CONSTRAINT chat_space_presence_space_fk
+        FOREIGN KEY (space_id)
+        REFERENCES chat_spaces(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_space_presence_active

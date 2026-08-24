@@ -8,9 +8,6 @@
 --     pointer into inventory (SET NULL on listing delete); no sync trigger,
 --     no UNIQUE, no mirrored rows.
 --   * `space_id` scopes a post to one chat space (group); NULL = campus-wide.
---   * Errand (跑腿互助) is a catalog tag on offer/wanted posts; its payload
---     lives in `errand_metadata` and the resolution lifecycle only applies
---     to posts carrying that tag.
 
 CREATE TABLE posts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -30,26 +27,12 @@ CREATE TABLE posts (
     image_url TEXT,
     images_moderation_status TEXT NOT NULL DEFAULT 'pending'
         CHECK (images_moderation_status IN ('pending', 'approved', 'rejected', 'failed')),
-    errand_metadata JSONB NOT NULL DEFAULT '{}'::jsonb
-        CHECK (jsonb_typeof(errand_metadata) = 'object'),
-    resolution_status TEXT NOT NULL DEFAULT 'open'
-        CHECK (resolution_status IN ('open', 'resolved', 'closed')),
     status TEXT NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'locked', 'archived', 'deleted')),
     reply_count INTEGER NOT NULL DEFAULT 0 CHECK (reply_count >= 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (id, campus_id),
-    CONSTRAINT post_space_campus_fk
-        FOREIGN KEY (space_id, campus_id) REFERENCES chat_spaces(id, campus_id)
-            ON DELETE CASCADE,
-    CONSTRAINT posts_errand_payload_shape CHECK (
-        errand_metadata = '{}'::jsonb OR tags @> '"errand"'::jsonb
-    ),
-    CONSTRAINT posts_resolution_shape CHECK (
-        tags @> '"errand"'::jsonb OR resolution_status = 'open'
-    )
+    last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_posts_campus_activity
@@ -78,9 +61,8 @@ CREATE TABLE post_replies (
         CHECK (status IN ('active', 'deleted')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (id, post_id, campus_id),
-    CONSTRAINT post_replies_post_campus_fk
-        FOREIGN KEY (post_id, campus_id) REFERENCES posts(id, campus_id)
+    CONSTRAINT post_replies_post_fk
+        FOREIGN KEY (post_id) REFERENCES posts(id)
             ON DELETE CASCADE,
     CONSTRAINT post_replies_parent_fk
         FOREIGN KEY (reply_to_id) REFERENCES post_replies(id) ON DELETE SET NULL

@@ -1175,27 +1175,6 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             "/api/chat/spaces/{id}/messages",
             get(user_chat::list_space_messages).post(user_chat::send_space_message),
         )
-        .route(
-            "/api/chat/location-spaces/tree",
-            get(user_chat::list_location_spaces),
-        )
-        .route(
-            "/api/chat/location-spaces/recommend",
-            post(user_chat::recommend_location_space),
-        )
-        .route("/api/chat/location-spaces/{id}", get(user_chat::get_space))
-        .route(
-            "/api/chat/location-spaces/{id}/join",
-            post(user_chat::join_location_space),
-        )
-        .route(
-            "/api/chat/location-spaces/{id}/presence",
-            get(user_chat::get_location_presence).post(user_chat::heartbeat_location_presence),
-        )
-        .route(
-            "/api/chat/location-spaces/{id}/children",
-            post(user_chat::create_location_child),
-        )
         .route("/api/chat/calls", post(user_chat::create_call))
         .route("/api/chat/calls/{id}/answer", post(user_chat::answer_call))
         .route("/api/chat/calls/{id}/end", post(user_chat::end_call))
