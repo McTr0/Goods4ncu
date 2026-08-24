@@ -7,10 +7,12 @@ import 'brand/app_brand.dart';
 import 'router/app_router.dart';
 import 'theme/app_theme.dart';
 import 'services/locale_service.dart';
+import 'bootstrap/platform_config.dart';
 import 'providers/service_providers.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  configurePlatform();
   GoRouter.optionURLReflectsImperativeAPIs = true;
   await LocaleService.init();
   ErrorWidget.builder = (details) => _FallbackErrorWidget(details: details);

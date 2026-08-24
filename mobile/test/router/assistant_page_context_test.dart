@@ -4,7 +4,7 @@ import 'package:goods4ncu_mobile/router/app_router.dart';
 void main() {
   group('assistantPageContext', () {
     test('is null for general assistant chat', () {
-      final context = assistantPageContext(Uri(path: '/chat'));
+      final context = assistantPageContext(Uri(path: '/agent'));
 
       expect(context, isNull);
     });
@@ -12,7 +12,7 @@ void main() {
     test('keeps listing and normalized post ids', () {
       final context = assistantPageContext(
         Uri(
-          path: '/chat',
+          path: '/agent',
           queryParameters: {'listingId': 'listing-7', 'prompt': 'summarize'},
         ),
       );
@@ -26,7 +26,7 @@ void main() {
 
     test('uses discussion post ids without inventing a listing id', () {
       final context = assistantPageContext(
-        Uri(path: '/chat', queryParameters: {'postId': 'post-9'}),
+        Uri(path: '/agent', queryParameters: {'postId': 'post-9'}),
       );
 
       expect(context, {'page': 'post_detail', 'postId': 'post-9'});

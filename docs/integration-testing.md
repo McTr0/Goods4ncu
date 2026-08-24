@@ -89,7 +89,7 @@ GOOD4NCU_API_BASE=http://127.0.0.1:3000 \
 
 每次浏览器验收都按同一个节奏走：
 
-1. 打开 `http://localhost:3001/#/login`。
+1. 打开 `http://localhost:3001/login`（path 路由，无 `#`）。
 2. 登录 `buyer1 / Test1234`。
 3. 打开 `http://localhost:3001/#/`，确认首页出/收信息流加载。
 4. 打开 `http://localhost:3001/#/conversations`，确认消息入口加载。

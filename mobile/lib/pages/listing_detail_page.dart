@@ -386,7 +386,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
       );
       if (!mounted || conversation == null) return;
       router.pushNamed(
-        'user-chat',
+        'dm',
         pathParameters: {'conversationId': conversation.id},
         extra: {
           'conversationId': conversation.id,
@@ -660,7 +660,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
             key: const Key('listing-ask-assistant'),
             tooltip: l.assistantAskAboutPage,
             onPressed: () => context.push(
-              '/chat?listingId=${Uri.encodeComponent(widget.listingId)}',
+              '/agent?listingId=${Uri.encodeComponent(widget.listingId)}',
             ),
             icon: const Icon(Icons.auto_awesome_outlined),
           ),

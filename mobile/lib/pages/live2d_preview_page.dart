@@ -263,7 +263,7 @@ class _Live2DPreviewPageState extends State<Live2DPreviewPage> {
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  onPressed: () => context.push('/chat'),
+                  onPressed: () => context.push('/agent'),
                   icon: const Icon(Icons.chat_bubble_outline_rounded),
                   label: const Text('打开小昌实时对话'),
                   style: OutlinedButton.styleFrom(

@@ -76,7 +76,7 @@ Future<void> _pumpWith(WidgetTester tester, AppNotification item) async {
         ),
       ),
       GoRoute(
-        path: '/user-chat/:id',
+        path: '/dm/:id',
         builder: (context, state) =>
             Text('conversation ${state.pathParameters['id']}'),
       ),

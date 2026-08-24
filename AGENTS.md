@@ -16,7 +16,7 @@ DB-backed backend tests need PostgreSQL with `pgvector` plus local secrets such 
 
 If the user says Codex was restarted, assume local long-running processes may have been killed. Before continuing GUI work or integration validation, check and restart the relevant services, typically the Rust backend on `127.0.0.1:3000` and the Flutter Web/static frontend on `127.0.0.1:3001`.
 
-For Codex Browser GUI validation after a restart, do not trust port listeners alone. A stale process can still appear in `lsof` while returning `Empty reply from server` or failing inside the in-app browser. Always verify the backend with a real health/login request such as `GET /api/health` and, when auth matters, `POST /api/auth/login`; verify the frontend by actually loading `http://localhost:3001` in Codex Browser. If either service gives an empty response, stop the stale process and restart from the current workspace code. For Flutter Web static validation, rebuild `mobile/build/web` after UI edits and serve it with a host binding that Codex Browser can reach, for example `python3 -m http.server 3001 --bind 0.0.0.0` from `mobile/build/web`.
+For Codex Browser GUI validation after a restart, do not trust port listeners alone. A stale process can still appear in `lsof` while returning `Empty reply from server` or failing inside the in-app browser. Always verify the backend with a real health/login request such as `GET /api/health` and, when auth matters, `POST /api/auth/login`; verify the frontend by actually loading `http://localhost:3001` in Codex Browser. If either service gives an empty response, stop the stale process and restart from the current workspace code. For Flutter Web static validation, rebuild `mobile/build/web` after UI edits and serve it with `python3 scripts/serve_web.py` (repo root) — it serves `mobile/build/web` on :3001 **with SPA fallback**, required since the web app uses path URLs (`usePathUrlStrategy`, routes like `/agent` must fall back to index.html).
 
 ### Flutter Web stale-bundle trap (learned twice, 2026-08-23)
 
@@ -28,7 +28,7 @@ After any frontend change, before claiming the served UI is updated:
 2. Decode before searching — e.g. Python:
    `re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1),16)), js)` — then assert expected strings are present and removed strings are gone.
 3. Compare hashes between the local `build/web/main.dart.js` and what `http://127.0.0.1:3001/main.dart.js` actually serves (`sha256sum` both). A mismatch means :3001 is serving a stale build; rebuild or restart the server.
-4. Remember `python3 -m http.server` serves live from disk, but browsers cache aggressively — tell the user to hard-reload (Cmd+Shift+R) after bundle swaps.
+4. Remember `scripts/serve_web.py` serves live from disk, but browsers cache aggressively — tell the user to hard-reload (Cmd+Shift+R) after bundle swaps.
 
 Never report frontend verification based on undecoded greps of compiled JS.
 

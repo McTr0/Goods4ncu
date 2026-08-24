@@ -273,8 +273,8 @@ class _PostDetailPageState extends State<PostDetailPage> {
         tooltip: l.assistantAskAboutPage,
         onPressed: () => context.push(
           widget.listingId != null
-              ? '/chat?listingId=${Uri.encodeComponent(widget.listingId!)}'
-              : '/chat?postId=${Uri.encodeComponent(post.id)}',
+              ? '/agent?listingId=${Uri.encodeComponent(widget.listingId!)}'
+              : '/agent?postId=${Uri.encodeComponent(post.id)}',
         ),
         icon: const Icon(Icons.auto_awesome_outlined),
       );

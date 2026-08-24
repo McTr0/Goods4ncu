@@ -156,7 +156,7 @@ class _UserHomePageState extends State<UserHomePage> {
       );
       if (!mounted || conversation == null) return;
       context.pushNamed(
-        'user-chat',
+        'dm',
         pathParameters: {'conversationId': conversation.id},
         extra: {
           'otherUserId': conversation.otherUserId,
@@ -174,7 +174,7 @@ class _UserHomePageState extends State<UserHomePage> {
   void _openChatHistory() {
     if (_isSelfProfile) return;
     context.pushNamed(
-      'chat-thread',
+      'dm-peer',
       pathParameters: {'peerUserId': widget.userId},
     );
   }

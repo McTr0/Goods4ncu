@@ -203,7 +203,7 @@ void main() {
           ),
         ),
         GoRoute(
-          path: '/chat',
+          path: '/agent',
           builder: (context, state) =>
               Text('assistant ${state.uri.queryParameters['postId']}'),
         ),

@@ -361,10 +361,10 @@ void main() {
       ],
     );
     final router = GoRouter(
-      initialLocation: '/conversations',
+      initialLocation: '/messages',
       routes: [
         GoRoute(
-          path: '/conversations',
+          path: '/messages',
           builder: (context, state) => ConversationListPage(
             chatService: service,
             userService: _FakeUserService(),
@@ -481,8 +481,8 @@ void main() {
             ),
           ),
           GoRoute(
-            name: 'user-chat',
-            path: '/user-chat/:conversationId',
+            name: 'dm',
+            path: '/dm/:conversationId',
             builder: (context, state) => Scaffold(
               body: Text('opened ${state.pathParameters['conversationId']}'),
             ),

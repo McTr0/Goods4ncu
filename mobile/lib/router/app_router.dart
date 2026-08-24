@@ -88,14 +88,17 @@ final GoRouter appRouter = GoRouter(
       }
       if (loggedIn && onAuthRoute) {
         WsService.instance.connect();
-        return '/';
+        return '/agent';
+      }
+      if (loggedIn && state.matchedLocation == '/') {
+        return '/agent';
       }
       if (loggedIn) {
         WsService.instance.connect();
       }
       if (state.matchedLocation == '/admin') {
         final hasAdminAccess = await _hasAdminAccess(userService);
-        if (!hasAdminAccess) return '/';
+        if (!hasAdminAccess) return '/feed';
       }
     } catch (e) {
       if (state.matchedLocation != '/login') {
@@ -173,7 +176,7 @@ final GoRouter appRouter = GoRouter(
           path: '/chat/:conversationId',
           redirect: (context, state) {
             final id = state.pathParameters['conversationId']!;
-            return Uri(pathSegments: ['user-chat', id]).toString();
+            return Uri(pathSegments: ['dm', id]).toString();
           },
         ),
         GoRoute(
@@ -201,8 +204,13 @@ final GoRouter appRouter = GoRouter(
           },
         ),
         GoRoute(
-          name: 'user-chat',
           path: '/user-chat/:conversationId',
+          redirect: (context, state) =>
+              '/dm/${state.pathParameters['conversationId']}',
+        ),
+        GoRoute(
+          name: 'dm',
+          path: '/dm/:conversationId',
           pageBuilder: (context, state) {
             final id = state.pathParameters['conversationId']!;
             final extra = state.extra as Map<String, dynamic>?;
@@ -220,8 +228,8 @@ final GoRouter appRouter = GoRouter(
           },
         ),
         GoRoute(
-          name: 'chat-thread',
-          path: '/chat/threads/:peerUserId',
+          name: 'dm-peer',
+          path: '/dm/peer/:peerUserId',
           pageBuilder: (context, state) {
             final id = state.pathParameters['peerUserId']!;
             final extra = state.extra as Map<String, dynamic>?;
@@ -260,14 +268,22 @@ final GoRouter appRouter = GoRouter(
           },
         ),
         GoRoute(
-          path: '/',
+          path: '/feed',
           pageBuilder: (context, state) =>
               const NoTransitionPage(child: HomePage()),
         ),
         GoRoute(
-          path: '/conversations',
+          path: '/',
+          redirect: (context, state) => '/agent',
+        ),
+        GoRoute(
+          path: '/messages',
           pageBuilder: (context, state) =>
               const NoTransitionPage(child: ConversationListPage()),
+        ),
+        GoRoute(
+          path: '/conversations',
+          redirect: (context, state) => '/messages',
         ),
         GoRoute(
           path: PublishNavigation.hub,
@@ -330,7 +346,8 @@ final GoRouter appRouter = GoRouter(
               const NoTransitionPage(child: MyOrdersPage()),
         ),
         GoRoute(
-          path: '/chat',
+          name: 'agent',
+          path: '/agent',
           pageBuilder: (context, state) {
             final prompt = state.uri.queryParameters['prompt'];
             final pageContext = assistantPageContext(state.uri);
@@ -338,6 +355,13 @@ final GoRouter appRouter = GoRouter(
               key: state.pageKey,
               child: ChatPage(initialPrompt: prompt, pageContext: pageContext),
             );
+          },
+        ),
+        GoRoute(
+          path: '/chat',
+          redirect: (context, state) {
+            final query = state.uri.query;
+            return query.isEmpty ? '/agent' : '/agent?$query';
           },
         ),
       ],
@@ -357,22 +381,22 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
   int _currentIndex = 0;
 
   static const _routes = [
-    '/',
-    '/conversations',
-    '/chat',
+    '/feed',
+    '/messages',
+    '/agent',
     PublishNavigation.hub,
     '/profile',
   ];
 
   int _tabIndexForLocation(String location) {
-    if (location == '/') return 0;
-    if (location == '/conversations' ||
-        location.startsWith('/user-chat/') ||
-        location.startsWith('/chat/threads/') ||
+    if (location == '/feed') return 0;
+    if (location == '/messages' ||
+        location.startsWith('/dm/') ||
+        location.startsWith('/contact/') ||
         location.startsWith('/spaces/')) {
       return 1;
     }
-    if (location == '/chat') return 2;
+    if (location == '/agent') return 2;
     if (location == PublishNavigation.hub ||
         location.startsWith('${PublishNavigation.hub}/')) {
       return 3;

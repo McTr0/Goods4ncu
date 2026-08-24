@@ -804,7 +804,7 @@ class _ChatThreadDetailPaneState extends State<_ChatThreadDetailPane> {
 
   void _openConversation(Conversation conversation) {
     context.pushNamed(
-      'user-chat',
+      'dm',
       pathParameters: {'conversationId': conversation.id},
       extra: {
         'otherUserId': conversation.otherUserId,

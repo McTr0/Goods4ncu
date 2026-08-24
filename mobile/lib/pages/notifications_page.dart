@@ -222,7 +222,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
     // you, and a dead tap on one of those is worse than not sending it.
     final conversation = item.relatedConversationId;
     if (conversation != null && conversation.isNotEmpty) {
-      context.push('/user-chat/$conversation');
+      context.push('/dm/$conversation');
       return;
     }
 

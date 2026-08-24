@@ -664,7 +664,7 @@ class _UserChatPageState extends State<UserChatPage> {
     );
     if (!mounted || next == null) return;
     context.goNamed(
-      'user-chat',
+      'dm',
       pathParameters: {'conversationId': next.id},
       extra: {
         'otherUserId': next.otherUserId,
