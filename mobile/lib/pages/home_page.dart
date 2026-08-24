@@ -61,14 +61,8 @@ class _HomePageState extends State<HomePage> {
       final response = await _postService.getPosts(
         limit: 20,
         offset: reset ? 0 : _posts.length,
-        postType: switch (_postTypeFilter) {
-          'offer' || 'wanted' => 'listing',
-          _ => _postTypeFilter,
-        },
-        direction: switch (_postTypeFilter) {
-          'offer' || 'wanted' => _postTypeFilter,
-          _ => null,
-        },
+        // Unified posts: filter value IS the post category.
+        category: _postTypeFilter,
         search: _searchQuery,
         sort: _postSort,
       );
@@ -109,7 +103,7 @@ class _HomePageState extends State<HomePage> {
 
   void _openPost(CampusPost post) {
     final listingId = post.listingId;
-    final location = post.isListing && listingId != null
+    final location = post.category != 'discussion' && listingId != null
         ? '/listing/${Uri.encodeComponent(listingId)}'
         : '/posts/${Uri.encodeComponent(post.id)}';
     context.push(location);

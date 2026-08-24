@@ -47,7 +47,7 @@ void main() {
           'items': [
             {
               'id': 'post-1',
-              'post_type': 'listing',
+              'category': 'offer',
               'title': 'Textbook',
               'body_excerpt': 'Good condition',
               'tags': [],
@@ -66,17 +66,15 @@ void main() {
       );
 
     final response = await service.getPosts(
-      postType: 'listing',
-      direction: 'wanted',
+      category: 'wanted',
       sort: 'replies',
     );
 
     expect(service.lastMethod, 'GET');
     expect(service.lastUri?.path, '/api/posts');
-    expect(service.lastUri?.queryParameters['post_type'], 'listing');
-    expect(service.lastUri?.queryParameters['direction'], 'wanted');
+    expect(service.lastUri?.queryParameters['category'], 'wanted');
     expect(service.lastUri?.queryParameters['sort'], 'replies');
-    expect(response.items.single.isListing, isTrue);
+    expect(response.items.single.isOffer, isTrue);
     expect(response.items.single.listingId, 'listing-1');
   });
 
@@ -125,6 +123,7 @@ void main() {
     final post = await service.createPost(
       title: 'Campus market',
       body: 'Tonight',
+      category: 'discussion',
       coverImageUrl: 'https://cdn.test/market.jpg',
     );
 

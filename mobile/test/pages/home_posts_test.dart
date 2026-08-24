@@ -13,23 +13,21 @@ class _FakePostService extends PostService {
 
   final PostsResponse response;
   int calls = 0;
-  final List<String> postTypes = [];
-  final List<String?> directions = [];
+  final List<String> categories = [];
+  
   final List<String?> searches = [];
 
   @override
   Future<PostsResponse> getPosts({
     int limit = 20,
     int offset = 0,
-    String postType = 'all',
-    String? direction,
-    String? category,
+    String category = 'all',
+    String? spaceId,
     String? search,
     String sort = 'for_you',
   }) async {
     calls += 1;
-    postTypes.add(postType);
-    directions.add(direction);
+    categories.add(category);
     searches.add(search);
     return response;
   }
@@ -60,9 +58,8 @@ class _PagingPostService extends PostService {
   Future<PostsResponse> getPosts({
     int limit = 20,
     int offset = 0,
-    String postType = 'all',
-    String? direction,
-    String? category,
+    String category = 'all',
+    String? spaceId,
     String? search,
     String sort = 'for_you',
   }) async {
@@ -85,9 +82,8 @@ class _FailingPostService extends PostService {
   Future<PostsResponse> getPosts({
     int limit = 20,
     int offset = 0,
-    String postType = 'all',
-    String? direction,
-    String? category,
+    String category = 'all',
+    String? spaceId,
     String? search,
     String sort = 'for_you',
   }) async {
@@ -166,7 +162,7 @@ void main() {
         items: [
           CampusPost.fromJson({
             'id': 'post-listing-1',
-            'post_type': 'listing',
+            'category': 'offer',
             'title': 'Calculus textbook',
             'body_excerpt': 'Used for one semester',
             'listing_id': 'listing-1',
@@ -213,7 +209,7 @@ void main() {
         items: [
           CampusPost.fromJson({
             'id': 'post-listing-route',
-            'post_type': 'listing',
+            'category': 'offer',
             'title': 'Calculus textbook',
             'listing_id': 'listing-route',
             'author': {'id': 'u-1', 'username': 'mira'},
@@ -333,8 +329,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('post-filter-wanted')));
     await tester.pumpAndSettle();
 
-    expect(posts.postTypes, ['all', 'listing', 'listing']);
-    expect(posts.directions, [null, 'offer', 'wanted']);
+    expect(posts.categories, ['all', 'offer', 'wanted']);
+    expect(posts.categories, ['all', 'offer', 'wanted']);
   });
 
   testWidgets('keeps waterfall results and retries a failed next page', (

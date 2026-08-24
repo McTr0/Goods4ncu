@@ -111,7 +111,7 @@ class _FakeListingService extends ListingService {}
 class _ListingPostService extends _FakePostService {
   final listingPost = CampusPost.fromJson({
     'id': 'listing-post-1',
-    'post_type': 'listing',
+    'category': 'offer',
     'listing_id': 'listing-1',
     'title': 'Desk lamp',
     'body': 'Warm light, pickup on campus.',

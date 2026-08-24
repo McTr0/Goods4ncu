@@ -246,6 +246,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get createListingPriceLabel => 'Price (CNY) *';
 
   @override
+  String get publishBrandLabel => 'Brand / source (optional)';
+
+  @override
   String get createListingPriceRequired => 'Please enter a price';
 
   @override
@@ -3178,6 +3181,24 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get postTagsLabel => 'Tags (optional)';
+
+  @override
+  String get publishCategoryOffer => 'Offer';
+
+  @override
+  String get publishCategoryWanted => 'Wanted';
+
+  @override
+  String get publishCategoryDiscussion => 'Discussion';
+
+  @override
+  String get publishGoodsSection => 'Item details (creates a listing)';
+
+  @override
+  String get publishErrandSwitch => 'Errand help';
+
+  @override
+  String get publishPriceRequired => 'Enter a valid price';
 
   @override
   String get postTagsHint => 'Separate up to five tags with spaces or commas';

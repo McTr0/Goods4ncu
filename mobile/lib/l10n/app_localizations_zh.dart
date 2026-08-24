@@ -232,6 +232,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get createListingPriceLabel => '价格（元） *';
 
   @override
+  String get publishBrandLabel => '品牌 / 来源（选填）';
+
+  @override
   String get createListingPriceRequired => '请输入价格';
 
   @override
@@ -3035,6 +3038,24 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get postTagsLabel => '标签（选填）';
+
+  @override
+  String get publishCategoryOffer => '出';
+
+  @override
+  String get publishCategoryWanted => '收';
+
+  @override
+  String get publishCategoryDiscussion => '讨论';
+
+  @override
+  String get publishGoodsSection => '商品信息（将同步创建商品）';
+
+  @override
+  String get publishErrandSwitch => '跑腿互助';
+
+  @override
+  String get publishPriceRequired => '请输入有效价格';
 
   @override
   String get postTagsHint => '空格或逗号分隔，最多五个';

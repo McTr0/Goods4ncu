@@ -21,7 +21,7 @@ void main() {
       'last_activity_at': '2026-08-15T10:04:00Z',
     });
 
-    expect(post.isListing, isFalse);
+    expect(post.isOffer, isFalse);
     expect(post.displayBody, 'The library is closed.');
     expect(post.coverImageUrl, 'https://cdn.test/printing.jpg');
     expect(post.author.username, 'mira');
@@ -44,7 +44,7 @@ void main() {
       ),
     );
 
-    expect(post.isListing, isTrue);
+    expect(post.isOffer, isTrue);
     expect(post.listingId, 'listing-1');
     expect(post.listing?.suggestedPriceCny, 20);
     expect(post.author.id, 'user-2');
@@ -67,8 +67,8 @@ void main() {
   test('parses mutual-aid lifecycle and author capability', () {
     final post = CampusPost.fromJson({
       'id': 'mutual-1',
-      'post_type': 'discussion',
-      'post_kind': 'mutual_aid',
+      'category': 'wanted',
+      'tags': ['errand'],
       'title': 'Pickup help',
       'author': {'id': 'user-1', 'username': 'mira'},
       'reply_count': 0,
@@ -76,16 +76,16 @@ void main() {
       'is_locked': false,
       'resolution_status': 'resolved',
       'can_update_resolution': true,
-      'mutual_aid_metadata': {
+      'errand_metadata': {
         'service_direction': 'wanted',
         'service_mode': 'pickup',
       },
     });
 
-    expect(post.postKind, 'mutual_aid');
+    expect(post.category, 'wanted');
     expect(post.resolutionStatus, 'resolved');
     expect(post.canUpdateResolution, isTrue);
-    expect(post.mutualAidMetadata['service_mode'], 'pickup');
+    expect(post.errandMetadata['service_mode'], 'pickup');
   });
 
   test('parses a server listing preview and ranking explanation', () {

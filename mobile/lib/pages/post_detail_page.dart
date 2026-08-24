@@ -112,7 +112,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
           : await _postService.getPostByListing(widget.listingId!);
       final repliesFuture = _postService.getReplies(post.id, limit: 50);
       final listingFuture =
-          post.isListing &&
+          post.category != 'discussion' &&
               post.listingId != null &&
               !widget.omitOriginalPost &&
               _listingService != null
@@ -134,7 +134,9 @@ class _PostDetailPageState extends State<PostDetailPage> {
       // widget test or an isolated embed) has no router and retains the local
       // thread rendering as a safe fallback.
       final router = widget.embedded ? null : GoRouter.maybeOf(context);
-      if (post.isListing && post.listingId != null && router != null) {
+      if (post.category != 'discussion' &&
+          post.listingId != null &&
+          router != null) {
         router.go('/listing/${Uri.encodeComponent(post.listingId!)}');
         return;
       }
@@ -248,7 +250,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
 
   Future<void> _setResolution(String value) async {
     final post = _post;
-    if (post == null || post.postKind != 'mutual_aid') return;
+    if (post == null || !post.isErrand) return;
     try {
       final updated = await _postService.updateResolution(post.id, value);
       if (mounted) setState(() => _post = updated);
@@ -299,7 +301,11 @@ class _PostDetailPageState extends State<PostDetailPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          post?.isListing == true ? l.postTypeListing : l.postDetailTitle,
+          post != null && post.category != 'discussion'
+              ? (post.category == 'wanted'
+                    ? l.publishCategoryWanted
+                    : l.publishCategoryOffer)
+              : l.postDetailTitle,
         ),
         leading: IconButton(
           onPressed: () => context.canPop() ? context.pop() : context.go('/'),
@@ -513,7 +519,7 @@ class _ThreadPostCard extends StatelessWidget {
               ],
             ),
           ),
-          if (!post.isListing && post.coverImageUrl != null)
+          if (post.category == 'discussion' && post.coverImageUrl != null)
             AspectRatio(
               aspectRatio: 4 / 3,
               child: Image.network(
@@ -571,7 +577,7 @@ class _ThreadPostCard extends StatelessWidget {
                     ),
                   ),
                 ],
-                if (post.postKind == 'mutual_aid') ...[
+                if (post.isErrand) ...[
                   const SizedBox(height: AppTheme.sp16),
                   _MutualAidSummary(post: post),
                   const SizedBox(height: AppTheme.sp8),
@@ -611,7 +617,7 @@ class _ThreadPostCard extends StatelessWidget {
                           ),
                   ),
                 ],
-                if (post.isListing) ...[
+                if (post.listing != null) ...[
                   const SizedBox(height: AppTheme.sp20),
                   _LinkedListingCard(listing: listing),
                 ],
@@ -654,9 +660,9 @@ class _MutualAidSummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
-    final metadata = post.mutualAidMetadata;
+    final metadata = post.errandMetadata;
     final details = <String>[
-      if (metadata['service_direction'] == 'offer')
+      if (post.category == 'offer')
         l.postMutualAidOffer
       else
         l.postMutualAidWanted,
@@ -1076,7 +1082,11 @@ class _PostTypeChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     return Chip(
-      label: Text(post.isListing ? l.postTypeListing : l.postTypeDiscussion),
+      label: Text(switch (post.category) {
+        'wanted' => l.publishCategoryWanted,
+        'offer' => l.publishCategoryOffer,
+        _ => l.publishCategoryDiscussion,
+      }),
       visualDensity: VisualDensity.compact,
       side: BorderSide.none,
     );

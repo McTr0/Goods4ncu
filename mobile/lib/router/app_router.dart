@@ -6,7 +6,6 @@ import '../l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 import '../pages/home_page.dart';
 import '../pages/listing_detail_page.dart';
-import '../pages/create_listing_page.dart';
 import '../pages/my_listings_page.dart';
 import '../pages/profile_page.dart';
 import '../pages/chat_page.dart';
@@ -33,7 +32,6 @@ import '../pages/trust_page.dart';
 import '../pages/post_detail_page.dart';
 import '../pages/create_post_page.dart';
 import '../pages/live2d_preview_page.dart';
-import '../pages/publish_hub_page.dart';
 import '../services/token_storage.dart';
 import '../services/ws_service.dart';
 import '../theme/app_theme.dart';
@@ -274,27 +272,28 @@ final GoRouter appRouter = GoRouter(
         ),
         GoRoute(
           path: PublishNavigation.hub,
-          pageBuilder: (context, state) =>
-              const NoTransitionPage(child: PublishHubPage()),
-        ),
-        GoRoute(
-          path: PublishNavigation.discussion,
           pageBuilder: (context, state) => NoTransitionPage(
             key: state.pageKey,
-            child: const CreatePostPage(),
+            child: CreatePostPage(
+              initialCategory:
+                  state.uri.queryParameters['category'] ?? 'discussion',
+            ),
           ),
         ),
         GoRoute(
+          path: PublishNavigation.discussion,
+          redirect: (context, state) => PublishNavigation.hub,
+        ),
+        GoRoute(
           path: PublishNavigation.listingPath,
-          pageBuilder: (context, state) {
-            final direction = state.uri.queryParameters['direction'];
-            return NoTransitionPage(
-              key: state.pageKey,
-              child: CreateListingPage(
-                initialDirection: direction == 'wanted' ? 'wanted' : 'offer',
-                showBackButton: true,
-              ),
-            );
+          redirect: (context, state) {
+            final direction = state.uri.queryParameters['direction'] == 'wanted'
+                ? 'wanted'
+                : 'offer';
+            return Uri(
+              path: PublishNavigation.hub,
+              queryParameters: {'category': direction},
+            ).toString();
           },
         ),
         GoRoute(

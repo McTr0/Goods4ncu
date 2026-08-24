@@ -33,11 +33,12 @@ class _FakePostService extends PostService {
   Future<CampusPost> createPost({
     required String title,
     required String body,
-    String? category,
+    required String category,
     List<String> tags = const [],
     String? coverImageUrl,
-    String postKind = 'discussion',
-    Map<String, dynamic> mutualAidMetadata = const {},
+    String? listingId,
+    String? spaceId,
+    Map<String, dynamic> errandMetadata = const {},
   }) async {
     this.coverImageUrl = coverImageUrl;
     return CampusPost.fromJson({

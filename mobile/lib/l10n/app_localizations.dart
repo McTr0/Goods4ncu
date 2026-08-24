@@ -536,6 +536,12 @@ abstract class AppLocalizations {
   /// **'Price (CNY) *'**
   String get createListingPriceLabel;
 
+  /// No description provided for @publishBrandLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Brand / source (optional)'**
+  String get publishBrandLabel;
+
   /// No description provided for @createListingPriceRequired.
   ///
   /// In en, this message translates to:
@@ -5849,6 +5855,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Tags (optional)'**
   String get postTagsLabel;
+
+  /// No description provided for @publishCategoryOffer.
+  ///
+  /// In en, this message translates to:
+  /// **'Offer'**
+  String get publishCategoryOffer;
+
+  /// No description provided for @publishCategoryWanted.
+  ///
+  /// In en, this message translates to:
+  /// **'Wanted'**
+  String get publishCategoryWanted;
+
+  /// No description provided for @publishCategoryDiscussion.
+  ///
+  /// In en, this message translates to:
+  /// **'Discussion'**
+  String get publishCategoryDiscussion;
+
+  /// No description provided for @publishGoodsSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Item details (creates a listing)'**
+  String get publishGoodsSection;
+
+  /// No description provided for @publishErrandSwitch.
+  ///
+  /// In en, this message translates to:
+  /// **'Errand help'**
+  String get publishErrandSwitch;
+
+  /// No description provided for @publishPriceRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a valid price'**
+  String get publishPriceRequired;
 
   /// No description provided for @postTagsHint.
   ///

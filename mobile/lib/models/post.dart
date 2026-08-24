@@ -1,20 +1,5 @@
 import 'models.dart';
 
-enum PostType {
-  discussion('discussion'),
-  listing('listing');
-
-  const PostType(this.wireValue);
-
-  final String wireValue;
-
-  static PostType fromWire(dynamic value) {
-    return value?.toString().toLowerCase() == listing.wireValue
-        ? listing
-        : discussion;
-  }
-}
-
 class PostAuthor {
   const PostAuthor({required this.id, required this.username, this.avatarUrl});
 
@@ -34,26 +19,24 @@ class PostAuthor {
   }
 }
 
-/// A campus discussion or a marketplace listing projected into the shared
-/// discovery stream. Listings keep their existing API and business lifecycle;
-/// [listingId] is the stable bridge back to those commerce screens.
+/// Unified campus post. [category] IS the kind: offer(出) / wanted(收) /
+/// discussion(讨论). Listings are optional references via [listingId].
 class CampusPost {
   const CampusPost({
     required this.id,
-    required this.postType,
-    this.postKind = 'discussion',
+    required this.category,
     required this.title,
     required this.author,
     required this.replyCount,
     required this.status,
     required this.isLocked,
-    this.mutualAidMetadata = const {},
+    this.errandMetadata = const {},
     this.resolutionStatus = 'open',
     this.canUpdateResolution = false,
     required this.createdAt,
     required this.updatedAt,
     required this.lastActivityAt,
-    this.category,
+    this.spaceId,
     this.body,
     this.bodyExcerpt,
     this.tags = const [],
@@ -66,9 +49,10 @@ class CampusPost {
   });
 
   final String id;
-  final PostType postType;
-  final String postKind;
-  final String? category;
+
+  /// offer | wanted | discussion.
+  final String category;
+  final String? spaceId;
   final String title;
   final String? body;
   final String? bodyExcerpt;
@@ -79,7 +63,7 @@ class CampusPost {
   final int replyCount;
   final String status;
   final bool isLocked;
-  final Map<String, dynamic> mutualAidMetadata;
+  final Map<String, dynamic> errandMetadata;
   final String resolutionStatus;
   final bool canUpdateResolution;
   final DateTime? createdAt;
@@ -93,7 +77,9 @@ class CampusPost {
   final String? rankSource;
   final double? rankingScore;
 
-  bool get isListing => postType == PostType.listing;
+  bool get isOffer => category == 'offer';
+  bool get isWanted => category == 'wanted';
+  bool get isErrand => tags.contains('errand');
 
   String get displayBody {
     final text = (body ?? bodyExcerpt ?? '').trim();
@@ -108,20 +94,19 @@ class CampusPost {
   /// reply count is refreshed.
   CampusPost copyWith({
     String? id,
-    PostType? postType,
-    String? postKind,
     String? category,
     String? title,
     String? body,
     String? bodyExcerpt,
     List<String>? tags,
     String? listingId,
+    String? spaceId,
     String? coverImageUrl,
     PostAuthor? author,
     int? replyCount,
     String? status,
     bool? isLocked,
-    Map<String, dynamic>? mutualAidMetadata,
+    Map<String, dynamic>? errandMetadata,
     String? resolutionStatus,
     bool? canUpdateResolution,
     DateTime? createdAt,
@@ -134,20 +119,19 @@ class CampusPost {
   }) {
     return CampusPost(
       id: id ?? this.id,
-      postType: postType ?? this.postType,
-      postKind: postKind ?? this.postKind,
       category: category ?? this.category,
       title: title ?? this.title,
       body: body ?? this.body,
       bodyExcerpt: bodyExcerpt ?? this.bodyExcerpt,
       tags: tags ?? this.tags,
       listingId: listingId ?? this.listingId,
+      spaceId: spaceId ?? this.spaceId,
       coverImageUrl: coverImageUrl ?? this.coverImageUrl,
       author: author ?? this.author,
       replyCount: replyCount ?? this.replyCount,
       status: status ?? this.status,
       isLocked: isLocked ?? this.isLocked,
-      mutualAidMetadata: mutualAidMetadata ?? this.mutualAidMetadata,
+      errandMetadata: errandMetadata ?? this.errandMetadata,
       resolutionStatus: resolutionStatus ?? this.resolutionStatus,
       canUpdateResolution: canUpdateResolution ?? this.canUpdateResolution,
       createdAt: createdAt ?? this.createdAt,
@@ -165,11 +149,16 @@ class CampusPost {
     final listing = listingJson is Map
         ? Listing.fromJson(Map<String, dynamic>.from(listingJson))
         : null;
+    // Unified wire: category IS the kind; default keeps old test fixtures working.
+    final category = (json['category']?.toString() ?? 'discussion').trim();
+    final resolvedCategory =
+        const {'offer', 'wanted', 'discussion'}.contains(category)
+        ? category
+        : 'discussion';
     return CampusPost(
       id: json['id']?.toString() ?? '',
-      postType: PostType.fromWire(json['post_type']),
-      postKind: json['post_kind']?.toString() ?? 'discussion',
-      category: _nullableString(json['category']),
+      category: resolvedCategory,
+      spaceId: _nullableString(json['space_id']),
       title: json['title']?.toString() ?? '',
       body: _nullableString(json['body']),
       bodyExcerpt: _nullableString(json['body_excerpt']),
@@ -184,8 +173,8 @@ class CampusPost {
       replyCount: (json['reply_count'] as num?)?.toInt() ?? 0,
       status: json['status']?.toString() ?? 'active',
       isLocked: json['is_locked'] == true,
-      mutualAidMetadata: json['mutual_aid_metadata'] is Map
-          ? Map<String, dynamic>.from(json['mutual_aid_metadata'] as Map)
+      errandMetadata: json['errand_metadata'] is Map
+          ? Map<String, dynamic>.from(json['errand_metadata'] as Map)
           : const {},
       resolutionStatus: json['resolution_status']?.toString() ?? 'open',
       canUpdateResolution: json['can_update_resolution'] == true,
@@ -206,9 +195,7 @@ class CampusPost {
     final createdAt = _dateTime(listing.createdAt);
     return CampusPost(
       id: 'listing-${listing.id}',
-      postType: PostType.listing,
-      postKind: 'discussion',
-      category: listing.category,
+      category: listing.direction == 'wanted' ? 'wanted' : 'offer',
       title: listing.title,
       bodyExcerpt: listing.description,
       tags: [

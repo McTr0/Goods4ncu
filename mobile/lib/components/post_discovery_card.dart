@@ -27,18 +27,16 @@ class PostDiscoveryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
-    final cover = post.coverImageUrl == null
-        ? null
-        : resolveDisplayUrl(post.coverImageUrl!);
+    final rawCover = post.coverImageUrl;
+    final cover = rawCover == null ? null : resolveDisplayUrl(rawCover);
     final hasCover = cover != null && cover.isNotEmpty;
     final listing = post.listing;
-    final typeLabel = post.isListing
-        ? switch (listing?.direction) {
-            'wanted' => l.listingDirectionWanted,
-            'offer' => l.listingDirectionOffer,
-            _ => l.postTypeListing,
-          }
-        : l.postTypeDiscussion;
+    final isGoods = post.category != 'discussion';
+    final typeLabel = switch (post.category) {
+      'wanted' => l.publishCategoryWanted,
+      'offer' => l.publishCategoryOffer,
+      _ => l.publishCategoryDiscussion,
+    };
     final reason =
         (post.rankReason ?? '').isNotEmpty || (post.rankSource ?? '').isNotEmpty
         ? localizedFeedReason(l, post.rankReason, source: post.rankSource)
@@ -62,9 +60,9 @@ class PostDiscoveryCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (hasCover || post.isListing)
+              if (hasCover || isGoods)
                 AspectRatio(
-                  aspectRatio: post.isListing ? 1.05 : 1.35,
+                  aspectRatio: isGoods ? 1.05 : 1.35,
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
@@ -74,17 +72,14 @@ class PostDiscoveryCard extends StatelessWidget {
                           key: ValueKey('post-cover-${post.id}'),
                           fit: BoxFit.cover,
                           errorBuilder: (_, _, _) =>
-                              _PostCoverFallback(isListing: post.isListing),
+                              _PostCoverFallback(isListing: isGoods),
                         )
                       else
-                        _PostCoverFallback(isListing: post.isListing),
+                        _PostCoverFallback(isListing: isGoods),
                       Positioned(
                         left: AppTheme.sp8,
                         top: AppTheme.sp8,
-                        child: _TypePill(
-                          label: typeLabel,
-                          isListing: post.isListing,
-                        ),
+                        child: _TypePill(label: typeLabel, isListing: isGoods),
                       ),
                     ],
                   ),
@@ -94,13 +89,10 @@ class PostDiscoveryCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (!hasCover && !post.isListing)
+                    if (!hasCover && !isGoods)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 8),
-                        child: _TypePill(
-                          label: l.postTypeDiscussion,
-                          isListing: false,
-                        ),
+                        child: _TypePill(label: typeLabel, isListing: false),
                       ),
                     Text(
                       post.title,
@@ -117,7 +109,7 @@ class PostDiscoveryCard extends StatelessWidget {
                       const SizedBox(height: 6),
                       Text(
                         post.displayBody,
-                        maxLines: post.isListing ? 2 : 3,
+                        maxLines: isGoods ? 2 : 3,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: scheme.onSurfaceVariant,
@@ -126,7 +118,7 @@ class PostDiscoveryCard extends StatelessWidget {
                         ),
                       ),
                     ],
-                    if (post.postKind == 'mutual_aid') ...[
+                    if (post.isErrand) ...[
                       const SizedBox(height: 8),
                       Wrap(
                         spacing: 5,
@@ -140,17 +132,7 @@ class PostDiscoveryCard extends StatelessWidget {
                             }),
                             visualDensity: VisualDensity.compact,
                           ),
-                          if (post.mutualAidMetadata['service_direction'] !=
-                              null)
-                            Chip(
-                              label: Text(
-                                post.mutualAidMetadata['service_direction'] ==
-                                        'offer'
-                                    ? l.postMutualAidOffer
-                                    : l.postMutualAidWanted,
-                              ),
-                              visualDensity: VisualDensity.compact,
-                            ),
+                          Chip(label: Text(l.publishErrandSwitch)),
                         ],
                       ),
                     ],

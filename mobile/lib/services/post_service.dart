@@ -9,9 +9,10 @@ class PostService extends BaseService {
   Future<PostsResponse> getPosts({
     int limit = 20,
     int offset = 0,
-    String postType = 'all',
-    String? direction,
-    String? category,
+
+    /// offer | wanted | discussion | all
+    String category = 'all',
+    String? spaceId,
     String? search,
     String sort = 'for_you',
   }) async {
@@ -19,12 +20,9 @@ class PostService extends BaseService {
     final params = <String, String>{
       'limit': limit.clamp(1, 100).toString(),
       'offset': offset.clamp(0, 1 << 31).toString(),
-      'post_type': postType,
+      'category': category,
+      if (spaceId != null) 'space_id': spaceId,
       'sort': sort,
-      if (direction != null && direction.trim().isNotEmpty)
-        'direction': direction.trim(),
-      if (category != null && category.trim().isNotEmpty)
-        'category': category.trim(),
       if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
     };
     final uri = Uri.parse(
@@ -95,11 +93,12 @@ class PostService extends BaseService {
   Future<CampusPost> createPost({
     required String title,
     required String body,
-    String? category,
+    required String category,
     List<String> tags = const [],
     String? coverImageUrl,
-    String postKind = 'discussion',
-    Map<String, dynamic> mutualAidMetadata = const {},
+    String? listingId,
+    String? spaceId,
+    Map<String, dynamic> errandMetadata = const {},
   }) async {
     final headers = await authHeaders();
     final response = await post(
@@ -108,12 +107,12 @@ class PostService extends BaseService {
       jsonEncode({
         'title': title.trim(),
         'body': body.trim(),
-        if (category != null && category.trim().isNotEmpty)
-          'category': category.trim(),
+        'category': category,
         if (coverImageUrl != null && coverImageUrl.trim().isNotEmpty)
           'cover_image_url': coverImageUrl.trim(),
-        'post_kind': postKind,
-        'mutual_aid_metadata': mutualAidMetadata,
+        'listing_id': ?listingId,
+        'space_id': ?spaceId,
+        'errand_metadata': errandMetadata,
         'tags': tags
             .map((tag) => tag.trim())
             .where((tag) => tag.isNotEmpty)
@@ -158,8 +157,7 @@ class PostService extends BaseService {
     String? category,
     List<String>? tags,
     bool? locked,
-    String? postKind,
-    Map<String, dynamic>? mutualAidMetadata,
+    Map<String, dynamic>? errandMetadata,
   }) async {
     final headers = await authHeaders();
     final response = await put(
@@ -171,8 +169,7 @@ class PostService extends BaseService {
         if (category != null) 'category': category.trim(),
         'tags': ?tags,
         'locked': ?locked,
-        'post_kind': ?postKind,
-        'mutual_aid_metadata': ?mutualAidMetadata,
+        'errand_metadata': ?errandMetadata,
       }),
     );
     return handleResponse(
