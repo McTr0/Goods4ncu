@@ -20,8 +20,6 @@ pub struct Post {
     pub author_avatar_url: Option<String>,
     pub reply_count: i32,
     pub status: String,
-    pub errand_metadata: serde_json::Value,
-    pub resolution_status: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub last_activity_at: chrono::DateTime<chrono::Utc>,
@@ -72,7 +70,6 @@ pub struct NewPost {
     pub image_url: Option<String>,
     pub listing_id: Option<String>,
     pub space_id: Option<Uuid>,
-    pub errand_metadata: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -82,7 +79,6 @@ pub struct UpdatePostInput {
     pub category: Option<String>,
     pub tags: Option<Vec<String>>,
     pub locked: Option<bool>,
-    pub errand_metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -157,14 +153,6 @@ pub trait PostRepository: Send + Sync {
         author_id: &str,
     ) -> Result<bool, ApiError>;
 
-    async fn update_resolution(
-        &self,
-        campus_id: Uuid,
-        id: Uuid,
-        author_id: &str,
-        resolution_status: &str,
-    ) -> Result<bool, ApiError>;
-
     async fn list_replies(
         &self,
         campus_id: Uuid,
@@ -219,8 +207,7 @@ impl PostgresPostRepository {
 
     fn post_columns() -> &'static str {
         r#"p.id, p.campus_id, p.category, p.space_id, p.title, p.body,
-           p.tags, p.listing_id, p.reply_count, p.status, p.errand_metadata,
-           p.resolution_status, p.created_at,
+           p.tags, p.listing_id, p.reply_count, p.status, p.created_at,
            p.updated_at, p.last_activity_at,
            author.id AS author_id, author.username AS author_username,
            CASE WHEN author.avatar_moderation_status = 'approved'
@@ -275,10 +262,6 @@ impl PostgresPostRepository {
     }
 }
 
-fn errand_pin() -> &'static str {
-    "CASE WHEN p.tags @> '\"errand\"'::jsonb AND p.resolution_status = 'open' THEN 0 ELSE 1 END"
-}
-
 /// Group posts are visible only to unbanned members; anonymous viewers and
 /// non-members see campus-public posts only.
 const MEMBER_VISIBILITY_SQL: &str =
@@ -301,14 +284,13 @@ impl PostRepository for PostgresPostRepository {
             .as_deref()
             .map(escape_like_pattern)
             .map(|value| format!("%{value}%"));
-        let pin = errand_pin();
         let order_by = match filter.sort {
-            PostSort::Latest => format!("{pin}, p.created_at DESC, p.id DESC"),
-            PostSort::Active => format!("{pin}, p.last_activity_at DESC, p.id DESC"),
+            PostSort::Latest => format!("p.created_at DESC, p.id DESC"),
+            PostSort::Active => format!("p.last_activity_at DESC, p.id DESC"),
             PostSort::Replies => {
-                format!("{pin}, p.reply_count DESC, p.last_activity_at DESC, p.id DESC")
+                format!("p.reply_count DESC, p.last_activity_at DESC, p.id DESC")
             }
-            PostSort::ForYou => format!("{pin}, p.last_activity_at DESC, p.id DESC"),
+            PostSort::ForYou => format!("p.last_activity_at DESC, p.id DESC"),
         };
         let visibility = format!(
             "p.campus_id = $1
@@ -449,8 +431,6 @@ impl PostRepository for PostgresPostRepository {
                         ELSE 'recency'
                       END AS rank_source,
                       (
-                        CASE WHEN p.tags @> '"errand"'::jsonb AND p.resolution_status = 'open' THEN 1.5 ELSE 0.0 END
-                        +
                         CASE WHEN pref.personalization_enabled
                              THEN COALESCE(affinity.weight, 0) * 3.0
                                   - COALESCE(less_like.weight, 0) * 4.0
@@ -486,12 +466,7 @@ impl PostRepository for PostgresPostRepository {
                                AND exact_feedback.resource_id = p.listing_id)
                          )
                      ))
-               ORDER BY CASE
-                          WHEN p.tags @> '"errand"'::jsonb
-                               AND p.resolution_status = 'open' THEN 0
-                          ELSE 1
-                        END,
-                        ranking_score DESC, p.last_activity_at DESC, p.id DESC
+               ORDER BY ranking_score DESC, p.last_activity_at DESC, p.id DESC
                LIMIT $6 OFFSET $7"#,
             columns = Self::post_columns(),
             relations = Self::post_relations(),
@@ -622,12 +597,12 @@ impl PostRepository for PostgresPostRepository {
         let id: Uuid = sqlx::query_scalar(
             "INSERT INTO posts (
                  campus_id, author_id, category, title, body, tags,
-                 errand_metadata, image_url, images_moderation_status,
+                 image_url, images_moderation_status,
                  listing_id, space_id
              ) VALUES (
-                 $1, $2, $3, $4, $5, $6, $7, $8,
-                 CASE WHEN $8::text IS NULL THEN 'approved' ELSE 'pending' END,
-                 $9, $10
+                 $1, $2, $3, $4, $5, $6, $7,
+                 CASE WHEN $7::text IS NULL THEN 'approved' ELSE 'pending' END,
+                 $8, $9
              )
              RETURNING id",
         )
@@ -637,7 +612,6 @@ impl PostRepository for PostgresPostRepository {
         .bind(&input.title)
         .bind(&input.body)
         .bind(serde_json::json!(input.tags))
-        .bind(&input.errand_metadata)
         .bind(input.image_url.as_deref())
         .bind(input.listing_id.as_deref())
         .bind(input.space_id)
@@ -662,22 +636,14 @@ impl PostRepository for PostgresPostRepository {
                  body = COALESCE($5, body),
                  category = COALESCE($6, category),
                  tags = COALESCE($7, tags),
-                 errand_metadata = CASE
-                     WHEN $8::jsonb IS NULL THEN errand_metadata
-                     ELSE $8
-                 END,
                  status = CASE
-                     WHEN $9::boolean IS NULL THEN status
-                     WHEN $9 THEN 'locked'
+                     WHEN $8::boolean IS NULL THEN status
+                     WHEN $8 THEN 'locked'
                      ELSE 'active'
                  END,
                  updated_at = NOW()
              WHERE id = $1 AND campus_id = $2 AND author_id = $3
-               AND status IN ('active', 'locked')
-               AND NOT (
-                     COALESCE($7, tags) @> '\"errand\"'::jsonb
-                     AND COALESCE($6, category) NOT IN ('offer', 'wanted')
-               )",
+               AND status IN ('active', 'locked')",
         )
         .bind(id)
         .bind(campus_id)
@@ -686,7 +652,6 @@ impl PostRepository for PostgresPostRepository {
         .bind(input.body.as_deref())
         .bind(input.category.as_deref())
         .bind(input.tags.as_ref().map(|tags| serde_json::json!(tags)))
-        .bind(input.errand_metadata.as_ref())
         .bind(input.locked)
         .execute(&self.pool)
         .await
@@ -712,29 +677,6 @@ impl PostRepository for PostgresPostRepository {
         .await
         .map_err(db_error)?;
         Ok(deleted.rows_affected() == 1)
-    }
-
-    async fn update_resolution(
-        &self,
-        campus_id: Uuid,
-        id: Uuid,
-        author_id: &str,
-        resolution_status: &str,
-    ) -> Result<bool, ApiError> {
-        let updated = sqlx::query(
-            "UPDATE posts SET resolution_status = $4, updated_at = NOW()
-             WHERE id = $1 AND campus_id = $2 AND author_id = $3
-               AND tags @> '\"errand\"'::jsonb
-               AND status IN ('active', 'locked')",
-        )
-        .bind(id)
-        .bind(campus_id)
-        .bind(author_id)
-        .bind(resolution_status)
-        .execute(&self.pool)
-        .await
-        .map_err(db_error)?;
-        Ok(updated.rows_affected() == 1)
     }
 
     async fn list_replies(
@@ -914,12 +856,6 @@ fn post_from_row(row: &PgRow) -> Post {
         author_avatar_url: row.get("author_avatar_url"),
         reply_count: row.get("reply_count"),
         status: row.get("status"),
-        errand_metadata: row
-            .try_get("errand_metadata")
-            .unwrap_or_else(|_| serde_json::json!({})),
-        resolution_status: row
-            .try_get("resolution_status")
-            .unwrap_or_else(|_| "open".to_string()),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
         last_activity_at: row.get("last_activity_at"),

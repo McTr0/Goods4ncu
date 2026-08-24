@@ -59,9 +59,6 @@ pub fn is_valid_post_category(value: &str) -> bool {
     POST_CATEGORIES.contains(&value)
 }
 
-/// Special catalog tag unlocking the errand payload + resolution lifecycle.
-pub const ERRAND_TAG_KEY: &str = "errand";
-
 #[cfg(test)]
 mod tests {
     use super::*;

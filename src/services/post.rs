@@ -1,7 +1,7 @@
 //! Business rules for discussion/listing posts and threaded replies.
 
 use crate::api::error::ApiError;
-use crate::categories::{is_valid_post_category, ERRAND_TAG_KEY};
+use crate::categories::is_valid_post_category;
 use crate::repositories::{
     NewPost, Post, PostFilter, PostReply, PostRepository, PostgresPostRepository, UpdatePostInput,
 };
@@ -30,7 +30,6 @@ pub struct CreatePost {
     pub listing_id: Option<String>,
     /// Group scope; when set the post is visible to space members only.
     pub space_id: Option<Uuid>,
-    pub errand_metadata: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -40,7 +39,6 @@ pub struct EditPost {
     pub category: Option<String>,
     pub tags: Option<Vec<String>>,
     pub locked: Option<bool>,
-    pub errand_metadata: Option<serde_json::Value>,
 }
 
 #[derive(Clone)]
@@ -213,7 +211,6 @@ impl PostService {
         let body = required_text(input.body, "body", MAX_POST_BODY_CHARS)?;
         let category = normalize_post_category(Some(input.category))?;
         let tags = self.normalize_tags(input.tags, &category).await?;
-        let errand_metadata = normalize_errand_metadata(&tags, &category, input.errand_metadata)?;
         let cover_image_url = normalize_cover_image_url(input.cover_image_url)?;
         if let Some(space_id) = input.space_id {
             ensure_space_member(&self.pool, input.author_id.as_str(), space_id).await?;
@@ -231,7 +228,6 @@ impl PostService {
                 image_url: cover_image_url.clone(),
                 listing_id: input.listing_id,
                 space_id: input.space_id,
-                errand_metadata,
             })
             .await?;
         if let Some(image_url) = cover_image_url {
@@ -261,7 +257,6 @@ impl PostService {
             && input.category.is_none()
             && input.tags.is_none()
             && input.locked.is_none()
-            && input.errand_metadata.is_none()
         {
             return Err(ApiError::BadRequest("没有要更新的字段".to_string()));
         }
@@ -292,20 +287,6 @@ impl PostService {
             ),
             None => None,
         };
-        let effective_tags = tags.clone().unwrap_or_else(|| existing.tags.clone());
-        let errand_metadata = match input.errand_metadata {
-            Some(value) => Some(normalize_errand_metadata(
-                &effective_tags,
-                &effective_category,
-                value,
-            )?),
-            None if tags.is_some() => Some(normalize_errand_metadata(
-                &effective_tags,
-                &effective_category,
-                existing.errand_metadata.clone(),
-            )?),
-            None => None,
-        };
         self.ensure_text_allowed(&format!(
             "{}\n{}\n{}",
             title.as_deref().unwrap_or_default(),
@@ -324,7 +305,6 @@ impl PostService {
                     category,
                     tags,
                     locked: input.locked,
-                    errand_metadata,
                 },
             )
             .await?;
@@ -348,35 +328,6 @@ impl PostService {
         } else {
             Err(ApiError::NotFound)
         }
-    }
-
-    pub async fn update_resolution(
-        &self,
-        campus_id: Uuid,
-        id: Uuid,
-        author_id: &str,
-        resolution_status: String,
-    ) -> Result<Post, ApiError> {
-        let existing = self.get(campus_id, id).await?;
-        if !existing.tags.iter().any(|tag| tag == ERRAND_TAG_KEY) {
-            return Err(ApiError::BadRequest(
-                "只有带跑腿互助标签的帖子可以更新解决状态".to_string(),
-            ));
-        }
-        if existing.author_id != author_id {
-            return Err(ApiError::Forbidden);
-        }
-        if !matches!(resolution_status.as_str(), "open" | "resolved" | "closed") {
-            return Err(ApiError::BadRequest("resolution_status 无效".to_string()));
-        }
-        if !self
-            .repository
-            .update_resolution(campus_id, id, author_id, &resolution_status)
-            .await?
-        {
-            return Err(ApiError::NotFound);
-        }
-        self.get(campus_id, id).await
     }
 
     pub async fn list_replies(
@@ -529,86 +480,6 @@ fn normalize_post_category(value: Option<String>) -> Result<String, ApiError> {
     Ok(value)
 }
 
-/// Validate errand payload: only meaningful when the post carries the errand
-/// tag AND the category is offer/wanted. Field rules inherited from the old
-/// mutual-aid metadata contract (service_direction is now the category).
-fn normalize_errand_metadata(
-    tags: &[String],
-    category: &str,
-    value: serde_json::Value,
-) -> Result<serde_json::Value, ApiError> {
-    let has_errand = tags.iter().any(|tag| tag == ERRAND_TAG_KEY);
-    if !has_errand {
-        if value.as_object().is_some_and(|object| !object.is_empty()) {
-            return Err(ApiError::BadRequest(
-                "errand_metadata 仅在携带跑腿互助标签时可用".to_string(),
-            ));
-        }
-        return Ok(serde_json::json!({}));
-    }
-    if category == "discussion" {
-        return Err(ApiError::BadRequest(
-            "跑腿互助标签仅适用于出/收帖子".to_string(),
-        ));
-    }
-    let object = value
-        .as_object()
-        .ok_or_else(|| ApiError::BadRequest("errand_metadata 必须是对象".to_string()))?;
-    let allowed = [
-        "service_mode",
-        "pickup_place",
-        "dropoff_place",
-        "time_hint",
-        "reward_cents",
-        "valid_until",
-        "notes",
-    ];
-    if object.keys().any(|key| !allowed.contains(&key.as_str())) {
-        return Err(ApiError::BadRequest(
-            "errand_metadata 包含未知字段".to_string(),
-        ));
-    }
-    for field in ["pickup_place", "dropoff_place", "time_hint", "notes"] {
-        if let Some(value) = object.get(field) {
-            let text = value
-                .as_str()
-                .ok_or_else(|| ApiError::BadRequest(format!("{field} 必须是文本")))?;
-            if text.chars().count() > 120 {
-                return Err(ApiError::BadRequest(format!("{field} 不能超过 120 个字符")));
-            }
-        }
-    }
-    if let Some(mode) = object.get("service_mode") {
-        const MODES: &[&str] = &["pickup", "buy", "queue", "print", "return", "other"];
-        if !mode.as_str().is_some_and(|value| MODES.contains(&value)) {
-            return Err(ApiError::BadRequest("service_mode 无效".to_string()));
-        }
-    }
-    if let Some(reward) = object.get("reward_cents") {
-        if reward
-            .as_i64()
-            .is_none_or(|value| !(0..=10_000_000).contains(&value))
-        {
-            return Err(ApiError::BadRequest("reward_cents 无效".to_string()));
-        }
-    }
-    if let Some(valid_until) = object.get("valid_until") {
-        let raw = valid_until
-            .as_str()
-            .ok_or_else(|| ApiError::BadRequest("valid_until 必须是时间文本".to_string()))?;
-        let parsed = chrono::DateTime::parse_from_rfc3339(raw)
-            .map_err(|_| ApiError::BadRequest("valid_until 格式无效".to_string()))?
-            .with_timezone(&chrono::Utc);
-        let now = chrono::Utc::now();
-        if parsed <= now || parsed > now + chrono::Duration::days(365) {
-            return Err(ApiError::BadRequest(
-                "valid_until 必须在未来一年内".to_string(),
-            ));
-        }
-    }
-    Ok(value)
-}
-
 async fn ensure_space_member(
     pool: &sqlx::PgPool,
     user_id: &str,
@@ -679,48 +550,5 @@ mod tests {
         );
         assert_eq!(normalize_post_category(None).unwrap(), "discussion");
         assert!(normalize_post_category(Some("listing".into())).is_err());
-    }
-
-    #[test]
-    fn errand_metadata_requires_errand_tag() {
-        let metadata = serde_json::json!({"service_mode": "pickup", "reward_cents": 1200});
-        // Without the tag the payload is rejected...
-        assert!(
-            normalize_errand_metadata(&["urgent".to_string()], "wanted", metadata.clone()).is_err()
-        );
-        // ...and discussion can never carry it.
-        assert!(
-            normalize_errand_metadata(&["errand".to_string()], "discussion", metadata.clone())
-                .is_err()
-        );
-        // With the tag on a wanted post it passes and normalizes.
-        assert_eq!(
-            normalize_errand_metadata(
-                &["errand".to_string(), "urgent".to_string()],
-                "wanted",
-                metadata
-            )
-            .unwrap(),
-            serde_json::json!({"service_mode": "pickup", "reward_cents": 1200})
-        );
-    }
-
-    #[test]
-    fn errand_metadata_rejects_unknown_fields_and_bad_values() {
-        let tags = ["errand".to_string()];
-        assert!(
-            normalize_errand_metadata(&tags, "offer", serde_json::json!({"mystery_field": 1}))
-                .is_err()
-        );
-        assert!(normalize_errand_metadata(
-            &tags,
-            "offer",
-            serde_json::json!({"valid_until": "not-a-date"})
-        )
-        .is_err());
-        assert!(
-            normalize_errand_metadata(&tags, "offer", serde_json::json!({"reward_cents": -1}))
-                .is_err()
-        );
     }
 }

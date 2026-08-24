@@ -1,5 +1,5 @@
 //! Integration coverage for unified posts (offer/wanted/discussion),
-//! curated tags, errand posts, group visibility and threaded replies.
+//! curated tags, category taxonomy, group visibility and threaded replies.
 
 use goods4ncu::api::error::ApiError;
 use goods4ncu::config::AppConfig;
@@ -57,109 +57,6 @@ async fn join_group(pool: &sqlx::PgPool, space_id: Uuid, user_id: &str) {
 }
 
 #[tokio::test]
-async fn errand_posts_pin_in_feed_and_resolution_is_author_owned() {
-    with_test_pool(|pool| async move {
-        let campus_id = campus(&pool).await;
-        let owner = user(&pool, "errand-owner").await;
-        let other = user(&pool, "errand-other").await;
-        let service = service(&pool);
-
-        let resolved = service
-            .create(CreatePost {
-                campus_id,
-                author_id: owner.clone(),
-                category: "wanted".to_string(),
-                title: "帮忙从图书馆取打印材料".to_string(),
-                body: "今晚六点前在修贤广场交接。".to_string(),
-                tags: vec!["errand".to_string(), "urgent".to_string()],
-                cover_image_url: None,
-                listing_id: None,
-                space_id: None,
-                errand_metadata: serde_json::json!({
-                    "service_mode": "pickup",
-                    "pickup_place": "图书馆",
-                    "dropoff_place": "修贤广场",
-                    "reward_cents": 500,
-                    "valid_until": (chrono::Utc::now() + chrono::Duration::days(1)).to_rfc3339(),
-                }),
-            })
-            .await
-            .expect("create errand post");
-        assert_eq!(resolved.category, "wanted");
-        assert_eq!(resolved.resolution_status, "open");
-        assert_eq!(resolved.errand_metadata["service_mode"], "pickup");
-
-        // errand metadata without the tag is rejected.
-        assert!(service
-            .create(CreatePost {
-                campus_id,
-                author_id: owner.clone(),
-                category: "wanted".to_string(),
-                title: "没有标签不能带互助负载".to_string(),
-                body: "正文".to_string(),
-                tags: vec![],
-                cover_image_url: None,
-                listing_id: None,
-                space_id: None,
-                errand_metadata: serde_json::json!({"service_mode": "pickup"}),
-            })
-            .await
-            .is_err());
-
-        assert!(matches!(
-            service
-                .update_resolution(campus_id, resolved.id, &other, "resolved".to_string())
-                .await,
-            Err(ApiError::Forbidden)
-        ));
-        let resolved = service
-            .update_resolution(campus_id, resolved.id, &owner, "resolved".to_string())
-            .await
-            .expect("resolve errand post");
-        assert_eq!(resolved.resolution_status, "resolved");
-
-        let open = service
-            .create(CreatePost {
-                campus_id,
-                author_id: owner,
-                category: "offer".to_string(),
-                title: "可以帮忙代取快递".to_string(),
-                body: "有需要的同学在帖子下留言。".to_string(),
-                tags: vec!["errand".to_string()],
-                cover_image_url: None,
-                listing_id: None,
-                space_id: None,
-                errand_metadata: serde_json::json!({"service_mode": "pickup"}),
-            })
-            .await
-            .expect("create open errand post");
-
-        for sort in [PostSort::Active, PostSort::ForYou] {
-            let (items, _) = service
-                .list_for_viewer(
-                    campus_id,
-                    None,
-                    &PostFilter {
-                        sort,
-                        ..Default::default()
-                    },
-                    50,
-                    0,
-                )
-                .await
-                .expect("list unified posts");
-            let open_position = items.iter().position(|post| post.id == open.id).unwrap();
-            let resolved_position = items
-                .iter()
-                .position(|post| post.id == resolved.id)
-                .unwrap();
-            assert!(open_position < resolved_position);
-        }
-    })
-    .await;
-}
-
-#[tokio::test]
 async fn tags_must_come_from_the_catalog_and_match_the_category() {
     with_test_pool(|pool| async move {
         let campus_id = campus(&pool).await;
@@ -178,7 +75,6 @@ async fn tags_must_come_from_the_catalog_and_match_the_category() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                errand_metadata: serde_json::json!({}),
             })
             .await;
         assert!(matches!(unknown, Err(ApiError::BadRequest(_))));
@@ -195,7 +91,6 @@ async fn tags_must_come_from_the_catalog_and_match_the_category() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                errand_metadata: serde_json::json!({}),
             })
             .await;
         assert!(matches!(wrong_kind, Err(ApiError::BadRequest(_))));
@@ -212,7 +107,6 @@ async fn tags_must_come_from_the_catalog_and_match_the_category() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                errand_metadata: serde_json::json!({}),
             })
             .await
             .expect("catalog tags accepted");
@@ -245,7 +139,6 @@ async fn group_posts_are_hidden_from_non_members_and_feeds() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: Some(space_id),
-                errand_metadata: serde_json::json!({}),
             })
             .await
             .expect("create group post");
@@ -321,7 +214,6 @@ async fn discussion_policy_rejection_happens_before_persistence() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                errand_metadata: serde_json::json!({}),
             })
             .await;
         assert!(matches!(result, Err(ApiError::ContentViolation(_))));
@@ -358,7 +250,6 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                errand_metadata: serde_json::json!({}),
             })
             .await
             .expect("create discussion");
@@ -373,7 +264,6 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                errand_metadata: serde_json::json!({}),
             })
             .await
             .expect("create second discussion");
@@ -511,7 +401,6 @@ async fn discussion_images_stay_private_until_moderation_approval() {
                 cover_image_url: Some(image_url.to_string()),
                 listing_id: None,
                 space_id: None,
-                errand_metadata: serde_json::json!({}),
             })
             .await
             .expect("create discussion with image");
@@ -591,7 +480,6 @@ async fn listings_are_references_and_marketplace_filters_follow_category() {
                 cover_image_url: None,
                 listing_id: Some(listing_id.clone()),
                 space_id: None,
-                errand_metadata: serde_json::json!({}),
             })
             .await
             .expect("create offer post with reference");
@@ -700,7 +588,6 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                errand_metadata: serde_json::json!({}),
             })
             .await
             .expect("relevant post");
@@ -715,7 +602,6 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                errand_metadata: serde_json::json!({}),
             })
             .await
             .expect("unrelated post");
@@ -730,7 +616,6 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                errand_metadata: serde_json::json!({}),
             })
             .await
             .expect("same tag post");
@@ -745,7 +630,6 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                errand_metadata: serde_json::json!({}),
             })
             .await
             .expect("viewer post");

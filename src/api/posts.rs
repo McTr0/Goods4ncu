@@ -5,11 +5,13 @@
 
 use axum::{
     extract::{Path, Query, State},
+    response::Response,
     Json,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::api::agent_plans::no_store_json;
 use crate::api::error::ApiError;
 use crate::api::session::{OptionalSession, VerifiedTenant};
 use crate::api::{normalize_platform_media_url, AppState};
@@ -17,7 +19,7 @@ use crate::repositories::{ListingPostPreview, Post, PostFilter, PostReply, PostS
 use crate::services::campus::CampusService;
 use crate::services::post::{CreatePost, EditPost, PostService};
 
-pub const UNIFIED_POST_RANKING_VERSION: &str = "2026.08-unified-post-v1";
+pub const UNIFIED_POST_RANKING_VERSION: &str = "2026.08-post-v2";
 
 #[derive(Debug, Deserialize)]
 pub struct PostListQuery {
@@ -47,8 +49,6 @@ pub struct CreatePostRequest {
     pub cover_image_url: Option<String>,
     pub listing_id: Option<String>,
     pub space_id: Option<Uuid>,
-    #[serde(default)]
-    pub errand_metadata: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,12 +58,6 @@ pub struct UpdatePostRequest {
     pub category: Option<String>,
     pub tags: Option<Vec<String>>,
     pub locked: Option<bool>,
-    pub errand_metadata: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpdateResolutionRequest {
-    pub resolution_status: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,9 +91,6 @@ pub struct PostSummary {
     pub author: PostAuthor,
     pub reply_count: i32,
     pub status: String,
-    pub errand_metadata: serde_json::Value,
-    pub resolution_status: String,
-    pub can_update_resolution: bool,
     pub is_locked: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -123,9 +114,6 @@ pub struct PostDetail {
     pub author: PostAuthor,
     pub reply_count: i32,
     pub status: String,
-    pub errand_metadata: serde_json::Value,
-    pub resolution_status: String,
-    pub can_update_resolution: bool,
     pub is_locked: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -246,9 +234,7 @@ fn clamp_page(limit: Option<i64>, offset: Option<i64>) -> (i64, i64) {
     (limit.unwrap_or(20).clamp(1, 50), offset.unwrap_or(0).max(0))
 }
 
-fn summary_view(state: &AppState, post: Post, viewer_id: Option<&str>) -> PostSummary {
-    let can_update_resolution =
-        is_errand_post(&post) && viewer_id.is_some_and(|viewer_id| viewer_id == post.author_id);
+fn summary_view(state: &AppState, post: Post, _viewer_id: Option<&str>) -> PostSummary {
     let listing = post
         .listing
         .map(|listing| listing_preview_view(state, listing));
@@ -269,9 +255,6 @@ fn summary_view(state: &AppState, post: Post, viewer_id: Option<&str>) -> PostSu
         reply_count: post.reply_count,
         is_locked: post.status == "locked",
         status: post.status,
-        errand_metadata: post.errand_metadata.clone(),
-        resolution_status: post.resolution_status.clone(),
-        can_update_resolution,
         created_at: post.created_at,
         updated_at: post.updated_at,
         last_activity_at: post.last_activity_at,
@@ -282,15 +265,12 @@ fn summary_view(state: &AppState, post: Post, viewer_id: Option<&str>) -> PostSu
     }
 }
 
-pub(crate) fn detail_view(state: &AppState, post: Post, viewer_id: Option<&str>) -> PostDetail {
-    let can_update_resolution =
-        is_errand_post(&post) && viewer_id.is_some_and(|viewer_id| viewer_id == post.author_id);
+pub(crate) fn detail_view(state: &AppState, post: Post, _viewer_id: Option<&str>) -> PostDetail {
     let listing = post
         .listing
         .map(|listing| listing_preview_view(state, listing));
     PostDetail {
         id: post.id,
-        can_update_resolution,
         category: post.category,
         space_id: post.space_id,
         title: post.title,
@@ -306,8 +286,6 @@ pub(crate) fn detail_view(state: &AppState, post: Post, viewer_id: Option<&str>)
         reply_count: post.reply_count,
         is_locked: post.status == "locked",
         status: post.status,
-        errand_metadata: post.errand_metadata,
-        resolution_status: post.resolution_status,
         created_at: post.created_at,
         updated_at: post.updated_at,
         last_activity_at: post.last_activity_at,
@@ -347,10 +325,6 @@ fn reply_view(state: &AppState, reply: PostReply) -> ReplyView {
     }
 }
 
-fn is_errand_post(post: &Post) -> bool {
-    post.tags.iter().any(|tag| tag == "errand")
-}
-
 fn excerpt(body: &str, max_chars: usize) -> String {
     let mut chars = body.chars();
     let excerpt: String = chars.by_ref().take(max_chars).collect();
@@ -362,6 +336,31 @@ fn excerpt(body: &str, max_chars: usize) -> String {
 }
 
 /// GET /api/posts — public campus topic feed.
+/// GET /api/posts/categories — enabled taxonomy for pickers (extensible).
+pub async fn list_categories(State(state): State<AppState>) -> Result<Response, ApiError> {
+    let rows: Vec<(String, String, String, String, i32)> = sqlx::query_as(
+        "SELECT key, label_zh, label_en, kind, sort_order
+         FROM post_categories WHERE enabled ORDER BY sort_order ASC",
+    )
+    .fetch_all(&state.infra.db)
+    .await
+    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
+    let categories: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|(key, label_zh, label_en, kind, _sort)| {
+            serde_json::json!({
+                "key": key,
+                "label_zh": label_zh,
+                "label_en": label_en,
+                "kind": kind,
+            })
+        })
+        .collect();
+    Ok(no_store_json(
+        serde_json::json!({ "categories": categories }),
+    ))
+}
+
 pub async fn list_posts(
     State(state): State<AppState>,
     session: OptionalSession,
@@ -433,7 +432,6 @@ pub async fn create_post(
             cover_image_url,
             listing_id: payload.listing_id,
             space_id: payload.space_id,
-            errand_metadata: payload.errand_metadata,
         })
         .await?;
     Ok(Json(detail_view(
@@ -461,30 +459,7 @@ pub async fn update_post(
                 category: payload.category,
                 tags: payload.tags,
                 locked: payload.locked,
-                errand_metadata: payload.errand_metadata,
             },
-        )
-        .await?;
-    Ok(Json(detail_view(
-        &state,
-        post,
-        Some(&tenant.session.user_id),
-    )))
-}
-
-/// PATCH /api/posts/:id/resolution — owner-only mutual-aid lifecycle update.
-pub async fn update_resolution(
-    State(state): State<AppState>,
-    tenant: VerifiedTenant,
-    Path(id): Path<Uuid>,
-    Json(payload): Json<UpdateResolutionRequest>,
-) -> Result<Json<PostDetail>, ApiError> {
-    let post = post_service(&state)
-        .update_resolution(
-            tenant.campus_id,
-            id,
-            &tenant.session.user_id,
-            payload.resolution_status,
         )
         .await?;
     Ok(Json(detail_view(

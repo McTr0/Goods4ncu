@@ -746,6 +746,7 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             "/api/posts",
             get(posts::list_posts).post(posts::create_post),
         )
+        .route("/api/posts/categories", get(posts::list_categories))
         .route(
             "/api/posts/by-listing/{listing_id}",
             get(posts::get_post_by_listing),
@@ -755,10 +756,6 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             get(posts::get_post)
                 .put(posts::update_post)
                 .delete(posts::delete_post),
-        )
-        .route(
-            "/api/posts/{id}/resolution",
-            patch(posts::update_resolution),
         )
         .route(
             "/api/posts/{id}/replies",
