@@ -38,7 +38,7 @@ class _FakePostService extends PostService {
     String? coverImageUrl,
     String? listingId,
     String? spaceId,
-    Map<String, dynamic> errandMetadata = const {},
+    Map<String, dynamic> attributes = const {},
   }) async {
     this.coverImageUrl = coverImageUrl;
     return CampusPost.fromJson({

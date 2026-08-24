@@ -27,7 +27,11 @@ const List<PostCategory> kPostCategories = [
   PostCategory(key: 'offer', label: '商品出', kind: 'goods'),
   PostCategory(key: 'wanted', label: '商品收', kind: 'goods'),
   PostCategory(key: 'discussion', label: '话题讨论', kind: 'discussion'),
+  PostCategory(key: 'event', label: '活动', kind: 'discussion'),
+  PostCategory(key: 'announcement', label: '公告', kind: 'discussion'),
 ];
+
+bool categoryHasAttributes(String key) => key == 'event';
 
 PostCategory? postCategoryByKey(String key) {
   for (final category in kPostCategories) {
@@ -38,34 +42,40 @@ PostCategory? postCategoryByKey(String key) {
 
 /// Curated tag catalog — mirrors migrations/0100_post_taxonomy.sql.
 class PostTag {
-  const PostTag({
-    required this.key,
-    required this.label,
-    required this.categories,
-  });
+  const PostTag({required this.key, required this.label, required this.group});
 
   final String key;
   final String label;
-  final List<String> categories;
 
-  bool allowedIn(String categoryKey) =>
-      categories.isEmpty || categories.contains(categoryKey);
+  /// Grouped tags allow one pick per group and don't count against the
+  /// free-tag budget; null group = free multi-select.
+  final String? group;
+
+  bool get exclusive => group != null;
 }
 
 const List<PostTag> kPostTags = [
-  PostTag(key: 'question', label: '提问', categories: []),
-  PostTag(key: 'share', label: '分享', categories: []),
-  PostTag(key: 'help', label: '求助', categories: []),
-  PostTag(key: 'urgent', label: '急', categories: []),
-  PostTag(key: 'longterm', label: '长期有效', categories: []),
-  PostTag(key: 'event', label: '活动', categories: []),
-  PostTag(key: 'negotiable', label: '可议价', categories: ['offer']),
-  PostTag(key: 'freeShipping', label: '包邮', categories: ['offer']),
-  PostTag(key: 'pickupOnly', label: '仅自提', categories: ['offer']),
-  PostTag(key: 'brandNew', label: '全新', categories: ['offer']),
-  PostTag(key: 'likeNew', label: '九成新', categories: ['offer']),
-  PostTag(key: 'sellFast', label: '急出', categories: ['offer']),
-  PostTag(key: 'budgetFlexible', label: '预算可议', categories: ['wanted']),
-  PostTag(key: 'topPrice', label: '高价收', categories: ['wanted']),
-  PostTag(key: 'usedOk', label: '接受二手', categories: ['wanted']),
+  // Free multi-select.
+  PostTag(key: 'question', label: '提问', group: null),
+  PostTag(key: 'help', label: '求助·有偿', group: null),
+  PostTag(key: 'share', label: '分享', group: null),
+  PostTag(key: 'free', label: '免费送', group: null),
+  PostTag(key: 'found', label: '招领', group: null),
+  PostTag(key: 'lost', label: '寻物', group: null),
+  PostTag(key: 'negotiable', label: '可议价', group: null),
+  PostTag(key: 'freeShipping', label: '包邮', group: null),
+  PostTag(key: 'pickupOnly', label: '仅自提', group: null),
+  PostTag(key: 'brandNew', label: '全新', group: null),
+  PostTag(key: 'likeNew', label: '九成新', group: null),
+  PostTag(key: 'sellFast', label: '急出', group: null),
+  PostTag(key: 'budgetFlexible', label: '预算可议', group: null),
+  PostTag(key: 'topPrice', label: '高价收', group: null),
+  PostTag(key: 'usedOk', label: '接受二手', group: null),
+  // Exclusive groups (one pick max each).
+  PostTag(key: 'urgent', label: '急', group: 'ttl'),
+  PostTag(key: 'longterm', label: '长期有效', group: 'ttl'),
+  PostTag(key: 'qianhuNorth', label: '前湖北院', group: 'location'),
+  PostTag(key: 'qianhuSouth', label: '前湖南院', group: 'location'),
+  PostTag(key: 'qingshanhu', label: '青山湖', group: 'location'),
+  PostTag(key: 'donghu', label: '东湖', group: 'location'),
 ];

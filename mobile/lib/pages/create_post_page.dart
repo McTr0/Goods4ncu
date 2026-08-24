@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../l10n/app_localizations.dart';
+import '../services/api_service.dart';
 import '../services/listing_service.dart';
 import '../services/post_service.dart';
 import '../services/upload_service.dart';
@@ -85,6 +86,9 @@ class _CreatePostPageState extends State<CreatePostPage> {
   double _conditionScore = 8;
   final _goodsPriceController = TextEditingController();
   String? _goodsCategory;
+  DateTime? _eventStartsAt;
+  final _eventPlaceController = TextEditingController();
+  bool _canAnnounce = false;
 
   @override
   void initState() {
@@ -92,6 +96,18 @@ class _CreatePostPageState extends State<CreatePostPage> {
     _postService = widget.postService ?? context.read<PostService>();
     _uploadService = widget.uploadService ?? context.read<UploadService>();
     _listingService = widget.listingService ?? ListingService();
+    _probeAnnouncePermission();
+  }
+
+  Future<void> _probeAnnouncePermission() async {
+    try {
+      // can_read on admin capabilities == operator+ on the active campus.
+      final caps = await context.read<ApiService>().getAdminCapabilities();
+      if (!mounted) return;
+      setState(() => _canAnnounce = caps['can_read'] == true);
+    } catch (_) {
+      // Announcement stays hidden without permission; never blocks publish.
+    }
   }
 
   @override
@@ -101,6 +117,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
     _goodsTitleController.dispose();
     _goodsBrandController.dispose();
     _goodsPriceController.dispose();
+    _eventPlaceController.dispose();
     super.dispose();
   }
 
@@ -112,11 +129,12 @@ class _CreatePostPageState extends State<CreatePostPage> {
       title: AppLocalizations.of(context)!.postCategoryLabel,
       options: [
         for (final category in kPostCategories)
-          PickerOption(
-            value: category.key,
-            label: category.label,
-            keywords: [category.key],
-          ),
+          if (category.key != 'announcement' || _canAnnounce)
+            PickerOption(
+              value: category.key,
+              label: category.label,
+              keywords: [category.key],
+            ),
       ],
       initiallySelected: [_category],
     );
@@ -124,31 +142,62 @@ class _CreatePostPageState extends State<CreatePostPage> {
     if (next == null || next == _category || !mounted) return;
     setState(() {
       _category = next;
-      _selectedTags.removeWhere(
-        (tag) => !(kPostTags.any((t) => t.key == tag && t.allowedIn(next))),
-      );
+      // Tags are category-agnostic now; nothing to prune on switches.
     });
   }
 
+  static const String _locationGroupLabel = '地点';
+  static const String _ttlGroupLabel = '时效';
+
   Future<void> _pickTags() async {
-    final allowed = kPostTags
-        .where((tag) => tag.allowedIn(_category))
-        .toList(growable: false);
     final selected = await showSearchablePickerSheet<String>(
       context: context,
-      title: '${AppLocalizations.of(context)!.postTagsLabel}（最多 5 个）',
+      title: '${AppLocalizations.of(context)!.postTagsLabel}（自由标签最多 5 个）',
       options: [
-        for (final tag in allowed)
-          PickerOption(value: tag.key, label: tag.label, keywords: [tag.key]),
+        for (final tag in kPostTags)
+          PickerOption(
+            value: tag.key,
+            label: tag.label,
+            subtitle: tag.group == 'location'
+                ? _locationGroupLabel
+                : tag.group == 'ttl'
+                ? _ttlGroupLabel
+                : null,
+            keywords: [if (tag.group != null) tag.group!],
+          ),
       ],
       initiallySelected: _selectedTags.toList(growable: false),
       multiSelect: true,
     );
     if (selected == null || !mounted) return;
+    final picked = selected.toSet();
+    // Enforce one-per-group and the 5 free-tag budget.
+    final chosenGroups = <String>{};
+    final freeTags = <String>[];
+    final ordered = [
+      for (final tag in kPostTags)
+        if (picked.contains(tag.key)) tag,
+    ];
+    for (final tag in ordered) {
+      if (tag.exclusive) {
+        if (chosenGroups.contains(tag.group)) continue;
+        chosenGroups.add(tag.group!);
+      } else {
+        if (freeTags.length >= 5) continue;
+        freeTags.add(tag.key);
+      }
+      picked.remove(tag.key);
+    }
+    final result = <String>{
+      ...freeTags,
+      ...ordered
+          .where((tag) => tag.exclusive && !picked.contains(tag.key))
+          .map((tag) => tag.key),
+    };
     setState(
       () => _selectedTags
         ..clear()
-        ..addAll(selected.take(5)),
+        ..addAll(result),
     );
   }
 
@@ -166,6 +215,18 @@ class _CreatePostPageState extends State<CreatePostPage> {
             );
 
       final tags = _selectedTags.toList(growable: false);
+      final attributes = <String, dynamic>{
+        if (categoryHasAttributes(_category)) ...{
+          'starts_at':
+              _eventStartsAt?.toUtc().toIso8601String() ??
+              (() {
+                throw Exception('请选择活动开始时间');
+              })(),
+          if (_eventPlaceController.text.trim().isNotEmpty)
+            'place': _eventPlaceController.text.trim(),
+        },
+      };
+
       String? listingId;
       if (_needsGoods && _goodsCategory == null) {
         if (!mounted) return;
@@ -198,6 +259,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
         coverImageUrl: coverImageUrl,
         listingId: listingId,
         spaceId: widget.spaceId,
+        attributes: attributes,
       );
       if (!mounted) return;
       context.go('/posts/${post.id}');
@@ -312,6 +374,10 @@ class _CreatePostPageState extends State<CreatePostPage> {
                 ),
                 const SizedBox(height: AppTheme.sp14),
                 _buildTagsSection(l),
+                if (_category == 'event') ...[
+                  const SizedBox(height: AppTheme.sp14),
+                  _buildEventAttributes(l),
+                ],
                 if (_needsGoods) ...[
                   const SizedBox(height: AppTheme.sp14),
                   _buildGoodsSection(l),
@@ -434,6 +500,73 @@ class _CreatePostPageState extends State<CreatePostPage> {
     );
     if (selected == null || selected.isEmpty || !mounted) return;
     setState(() => _goodsCategory = selected.first);
+  }
+
+  Widget _buildEventAttributes(AppLocalizations l) {
+    final startsAt = _eventStartsAt;
+    return Container(
+      padding: const EdgeInsets.all(AppTheme.sp16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('活动信息', style: const TextStyle(fontWeight: FontWeight.w800)),
+          const SizedBox(height: AppTheme.sp12),
+          InkWell(
+            key: const ValueKey('publish-event-starts-at'),
+            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+            onTap: () async {
+              final date = await showDatePicker(
+                context: context,
+                initialDate:
+                    startsAt ?? DateTime.now().add(const Duration(days: 1)),
+                firstDate: DateTime.now(),
+                lastDate: DateTime.now().add(const Duration(days: 365)),
+              );
+              if (date == null || !mounted) return;
+              final time = await showTimePicker(
+                context: context,
+                initialTime: TimeOfDay.fromDateTime(
+                  startsAt ?? date.add(const Duration(hours: 10)),
+                ),
+              );
+              if (!mounted) return;
+              setState(() {
+                _eventStartsAt = DateTime(
+                  date.year,
+                  date.month,
+                  date.day,
+                  time?.hour ?? 10,
+                  time?.minute ?? 0,
+                );
+              });
+            },
+            child: InputDecorator(
+              decoration: InputDecoration(
+                labelText: '开始时间 *',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                ),
+              ),
+              child: Text(
+                startsAt == null
+                    ? '请选择日期和时间'
+                    : '开始于 ${startsAt.toLocal()}'.substring(0, 22),
+              ),
+            ),
+          ),
+          const SizedBox(height: AppTheme.sp12),
+          TextFormField(
+            controller: _eventPlaceController,
+            maxLength: 120,
+            decoration: InputDecoration(labelText: '活动地点（选填）'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildGoodsSection(AppLocalizations l) {
