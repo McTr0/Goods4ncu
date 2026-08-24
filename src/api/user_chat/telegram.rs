@@ -730,7 +730,7 @@ async fn ensure_space_admin(
     user_id: &str,
 ) -> Result<(), ApiError> {
     let role = ensure_space_member(state, space_id, user_id).await?;
-    if matches!(role.as_str(), "owner" | "admin") {
+    if role == "owner" {
         Ok(())
     } else {
         Err(ApiError::Forbidden)

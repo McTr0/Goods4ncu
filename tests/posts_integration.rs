@@ -57,7 +57,7 @@ async fn join_group(pool: &sqlx::PgPool, space_id: Uuid, user_id: &str) {
 }
 
 #[tokio::test]
-async fn tags_must_come_from_the_catalog_and_match_the_category() {
+async fn tags_must_come_from_the_catalog_and_respect_groups() {
     with_test_pool(|pool| async move {
         let campus_id = campus(&pool).await;
         let author = user(&pool, "tag-author").await;
@@ -75,25 +75,44 @@ async fn tags_must_come_from_the_catalog_and_match_the_category() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                attributes: serde_json::json!({}),
             })
             .await;
         assert!(matches!(unknown, Err(ApiError::BadRequest(_))));
 
-        // Category-scoped tag on the wrong kind rejected.
-        let wrong_kind = service
+        // Two tags from the same exclusive group are rejected.
+        let duplicate_group = service
+            .create(CreatePost {
+                campus_id,
+                author_id: author.clone(),
+                category: "wanted".to_string(),
+                title: "地点标签只能选一个".to_string(),
+                body: "正文".to_string(),
+                tags: vec!["qianhuNorth".to_string(), "qianhuSouth".to_string()],
+                cover_image_url: None,
+                listing_id: None,
+                space_id: None,
+                attributes: serde_json::json!({}),
+            })
+            .await;
+        assert!(matches!(duplicate_group, Err(ApiError::BadRequest(_))));
+
+        // Structured attributes on a category that has none are rejected.
+        let stray_attributes = service
             .create(CreatePost {
                 campus_id,
                 author_id: author.clone(),
                 category: "discussion".to_string(),
-                title: "包邮是出帖标签".to_string(),
+                title: "讨论帖不带结构化属性".to_string(),
                 body: "正文".to_string(),
-                tags: vec!["freeShipping".to_string()],
+                tags: vec![],
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                attributes: serde_json::json!({"starts_at": "2026-09-01T10:00:00Z"}),
             })
             .await;
-        assert!(matches!(wrong_kind, Err(ApiError::BadRequest(_))));
+        assert!(matches!(stray_attributes, Err(ApiError::BadRequest(_))));
 
         // Valid global tag passes.
         let ok = service
@@ -107,6 +126,7 @@ async fn tags_must_come_from_the_catalog_and_match_the_category() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                attributes: serde_json::json!({}),
             })
             .await
             .expect("catalog tags accepted");
@@ -135,10 +155,11 @@ async fn group_posts_are_hidden_from_non_members_and_feeds() {
                 category: "discussion".to_string(),
                 title: "本群内部公告".to_string(),
                 body: "只有群成员可以看到这条。".to_string(),
-                tags: vec!["event".to_string()],
+                tags: vec!["share".to_string()],
                 cover_image_url: None,
                 listing_id: None,
                 space_id: Some(space_id),
+                attributes: serde_json::json!({}),
             })
             .await
             .expect("create group post");
@@ -214,6 +235,7 @@ async fn discussion_policy_rejection_happens_before_persistence() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                attributes: serde_json::json!({}),
             })
             .await;
         assert!(matches!(result, Err(ApiError::ContentViolation(_))));
@@ -250,6 +272,7 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                attributes: serde_json::json!({}),
             })
             .await
             .expect("create discussion");
@@ -264,6 +287,7 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                attributes: serde_json::json!({}),
             })
             .await
             .expect("create second discussion");
@@ -401,6 +425,7 @@ async fn discussion_images_stay_private_until_moderation_approval() {
                 cover_image_url: Some(image_url.to_string()),
                 listing_id: None,
                 space_id: None,
+                attributes: serde_json::json!({}),
             })
             .await
             .expect("create discussion with image");
@@ -480,6 +505,7 @@ async fn listings_are_references_and_marketplace_filters_follow_category() {
                 cover_image_url: None,
                 listing_id: Some(listing_id.clone()),
                 space_id: None,
+                attributes: serde_json::json!({}),
             })
             .await
             .expect("create offer post with reference");
@@ -588,6 +614,7 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                attributes: serde_json::json!({}),
             })
             .await
             .expect("relevant post");
@@ -598,10 +625,11 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 category: "discussion".to_string(),
                 title: "周末球局".to_string(),
                 body: "周末一起打球。".to_string(),
-                tags: vec!["event".to_string()],
+                tags: vec!["share".to_string()],
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                attributes: serde_json::json!({}),
             })
             .await
             .expect("unrelated post");
@@ -616,6 +644,7 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                attributes: serde_json::json!({}),
             })
             .await
             .expect("same tag post");
@@ -630,6 +659,7 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                attributes: serde_json::json!({}),
             })
             .await
             .expect("viewer post");

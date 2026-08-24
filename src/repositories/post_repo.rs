@@ -20,6 +20,7 @@ pub struct Post {
     pub author_avatar_url: Option<String>,
     pub reply_count: i32,
     pub status: String,
+    pub attributes: serde_json::Value,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub last_activity_at: chrono::DateTime<chrono::Utc>,
@@ -70,6 +71,7 @@ pub struct NewPost {
     pub image_url: Option<String>,
     pub listing_id: Option<String>,
     pub space_id: Option<Uuid>,
+    pub attributes: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -79,6 +81,7 @@ pub struct UpdatePostInput {
     pub category: Option<String>,
     pub tags: Option<Vec<String>>,
     pub locked: Option<bool>,
+    pub attributes: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -207,7 +210,7 @@ impl PostgresPostRepository {
 
     fn post_columns() -> &'static str {
         r#"p.id, p.campus_id, p.category, p.space_id, p.title, p.body,
-           p.tags, p.listing_id, p.reply_count, p.status, p.created_at,
+           p.tags, p.listing_id, p.reply_count, p.status, p.attributes, p.created_at,
            p.updated_at, p.last_activity_at,
            author.id AS author_id, author.username AS author_username,
            CASE WHEN author.avatar_moderation_status = 'approved'
@@ -598,11 +601,11 @@ impl PostRepository for PostgresPostRepository {
             "INSERT INTO posts (
                  campus_id, author_id, category, title, body, tags,
                  image_url, images_moderation_status,
-                 listing_id, space_id
+                 listing_id, space_id, attributes
              ) VALUES (
                  $1, $2, $3, $4, $5, $6, $7,
                  CASE WHEN $7::text IS NULL THEN 'approved' ELSE 'pending' END,
-                 $8, $9
+                 $8, $9, $10
              )
              RETURNING id",
         )
@@ -615,6 +618,7 @@ impl PostRepository for PostgresPostRepository {
         .bind(input.image_url.as_deref())
         .bind(input.listing_id.as_deref())
         .bind(input.space_id)
+        .bind(&input.attributes)
         .fetch_one(&self.pool)
         .await
         .map_err(db_error)?;
@@ -636,6 +640,7 @@ impl PostRepository for PostgresPostRepository {
                  body = COALESCE($5, body),
                  category = COALESCE($6, category),
                  tags = COALESCE($7, tags),
+                 attributes = COALESCE($9, attributes),
                  status = CASE
                      WHEN $8::boolean IS NULL THEN status
                      WHEN $8 THEN 'locked'
@@ -653,6 +658,7 @@ impl PostRepository for PostgresPostRepository {
         .bind(input.category.as_deref())
         .bind(input.tags.as_ref().map(|tags| serde_json::json!(tags)))
         .bind(input.locked)
+        .bind(input.attributes.as_ref())
         .execute(&self.pool)
         .await
         .map_err(db_error)?;
@@ -856,6 +862,9 @@ fn post_from_row(row: &PgRow) -> Post {
         author_avatar_url: row.get("author_avatar_url"),
         reply_count: row.get("reply_count"),
         status: row.get("status"),
+        attributes: row
+            .try_get("attributes")
+            .unwrap_or_else(|_| serde_json::json!({})),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
         last_activity_at: row.get("last_activity_at"),

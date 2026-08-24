@@ -49,6 +49,8 @@ pub struct CreatePostRequest {
     pub cover_image_url: Option<String>,
     pub listing_id: Option<String>,
     pub space_id: Option<Uuid>,
+    #[serde(default)]
+    pub attributes: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +60,7 @@ pub struct UpdatePostRequest {
     pub category: Option<String>,
     pub tags: Option<Vec<String>>,
     pub locked: Option<bool>,
+    pub attributes: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -91,6 +94,7 @@ pub struct PostSummary {
     pub author: PostAuthor,
     pub reply_count: i32,
     pub status: String,
+    pub attributes: serde_json::Value,
     pub is_locked: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -114,6 +118,7 @@ pub struct PostDetail {
     pub author: PostAuthor,
     pub reply_count: i32,
     pub status: String,
+    pub attributes: serde_json::Value,
     pub is_locked: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -254,7 +259,8 @@ fn summary_view(state: &AppState, post: Post, _viewer_id: Option<&str>) -> PostS
         },
         reply_count: post.reply_count,
         is_locked: post.status == "locked",
-        status: post.status,
+        status: post.status.clone(),
+        attributes: post.attributes.clone(),
         created_at: post.created_at,
         updated_at: post.updated_at,
         last_activity_at: post.last_activity_at,
@@ -285,7 +291,8 @@ pub(crate) fn detail_view(state: &AppState, post: Post, _viewer_id: Option<&str>
         },
         reply_count: post.reply_count,
         is_locked: post.status == "locked",
-        status: post.status,
+        status: post.status.clone(),
+        attributes: post.attributes.clone(),
         created_at: post.created_at,
         updated_at: post.updated_at,
         last_activity_at: post.last_activity_at,
@@ -432,6 +439,7 @@ pub async fn create_post(
             cover_image_url,
             listing_id: payload.listing_id,
             space_id: payload.space_id,
+            attributes: payload.attributes,
         })
         .await?;
     Ok(Json(detail_view(
@@ -459,6 +467,7 @@ pub async fn update_post(
                 category: payload.category,
                 tags: payload.tags,
                 locked: payload.locked,
+                attributes: payload.attributes,
             },
         )
         .await?;

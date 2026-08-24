@@ -133,7 +133,7 @@ async fn require_admin_scope(
         .fetch_optional(&state.infra.db)
         .await
         .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
-        if !matches!(membership_role.as_deref(), Some("operator" | "admin")) {
+        if !matches!(membership_role.as_deref(), Some("operator")) {
             return Err(ApiError::Forbidden);
         }
     }
