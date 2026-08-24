@@ -4,6 +4,7 @@ import '../l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
+import '../models/post.dart';
 import '../services/api_service.dart';
 import '../services/base_service.dart';
 import '../services/recommendation_service.dart';
@@ -24,7 +25,6 @@ import '../services/feed_feedback_service.dart';
 import '../components/user_avatar.dart';
 import '../utils/platform_utils.dart';
 import '../services/post_service.dart';
-import 'post_detail_page.dart';
 
 class ListingDetailPage extends StatefulWidget {
   final String listingId;
@@ -1055,11 +1055,31 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
             ),
           ),
           const SizedBox(height: AppTheme.sp16),
-          PostDetailPage(
-            listingId: widget.listingId,
-            postService: postService,
-            embedded: true,
-            omitOriginalPost: true,
+          FutureBuilder<CampusPost>(
+            future: postService.getPostByListing(widget.listingId),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(8),
+                    child: SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                );
+              }
+              final post = snapshot.data;
+              if (post == null) return const SizedBox.shrink();
+              return FilledButton.icon(
+                key: const ValueKey('listing-open-discussion'),
+                onPressed: () =>
+                    context.push('/posts/${Uri.encodeComponent(post.id)}'),
+                icon: const Icon(Icons.forum_rounded),
+                label: Text(l.postRepliesTitle),
+              );
+            },
           ),
         ],
       ),

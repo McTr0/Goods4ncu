@@ -9,6 +9,7 @@ import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../models/post.dart';
 import '../models/post_taxonomy.dart';
+import '../utils/category_utils.dart';
 import '../services/listing_service.dart';
 import '../services/post_service.dart';
 import '../theme/app_theme.dart';
@@ -627,7 +628,10 @@ class _LinkedListingCard extends StatelessWidget {
               spacing: AppTheme.sp12,
               runSpacing: AppTheme.sp6,
               children: [
-                _ListingFact(label: l.categoryLabel, value: listing!.category),
+                _ListingFact(
+                  label: l.categoryLabel,
+                  value: localizedCategoryLabel(context, listing!.category),
+                ),
                 _ListingFact(label: l.brandLabel, value: listing!.brand),
                 _ListingFact(
                   label: l.conditionLabel,

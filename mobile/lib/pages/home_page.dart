@@ -191,12 +191,8 @@ class _HomePageState extends State<HomePage> {
     final scheme = theme.colorScheme;
     final dark = theme.brightness == Brightness.dark;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          l.appTitle,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-      ),
+      appBar: AppBar(title: Text(l.homeTab)),
+
       body: DecoratedBox(
         decoration: BoxDecoration(
           gradient: LinearGradient(
