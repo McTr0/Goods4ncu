@@ -129,17 +129,24 @@ class _CreatePostPageState extends State<CreatePostPage> {
       title: AppLocalizations.of(context)!.postCategoryLabel,
       options: [
         for (final category in kPostCategories)
-          if (category.key != 'announcement' || _canAnnounce)
-            PickerOption(
-              value: category.key,
-              label: category.label,
-              keywords: [category.key],
-            ),
+          PickerOption(
+            value: category.key,
+            label: category.key == 'announcement' && !_canAnnounce
+                ? '${category.label} · 仅运营'
+                : category.label,
+            keywords: [category.key],
+          ),
       ],
       initiallySelected: [_category],
     );
     final next = selected?.isEmpty == false ? selected!.first : null;
     if (next == null || next == _category || !mounted) return;
+    if (next == 'announcement' && !_canAnnounce) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('公告仅限运营发布')));
+      return;
+    }
     setState(() {
       _category = next;
       // Tags are category-agnostic now; nothing to prune on switches.

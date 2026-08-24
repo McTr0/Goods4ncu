@@ -229,7 +229,7 @@ INSERT INTO posts (
  NULL, NULL,
  '关于期末季图书馆占座现象的讨论',
  '近期收到不少反馈。想听听大家的声音：你更接受"离座超 30 分钟可收走物品"这种规则吗？理性发言。',
- '["event","question"]'::jsonb, 'active', 9,
+ '["question"]'::jsonb, 'active', 9,
  now() - interval '3 days', now() - interval '7 hours', now() - interval '7 hours',
  '{}'),
 
@@ -249,7 +249,7 @@ INSERT INTO posts (
  NULL, NULL,
  '百团大战社团招新时间线整理',
  '下周一开始主摊位招新，整理了各热门社团的面试安排，滑到图里看完整表格。',
- '["event","share"]'::jsonb, 'active', 4,
+ '["share"]'::jsonb, 'active', 4,
  now() - interval '2 days', now() - interval '12 hours', now() - interval '12 hours',
  '{}'),
 
