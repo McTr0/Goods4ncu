@@ -285,12 +285,12 @@ impl PostRepository for PostgresPostRepository {
             .map(escape_like_pattern)
             .map(|value| format!("%{value}%"));
         let order_by = match filter.sort {
-            PostSort::Latest => format!("p.created_at DESC, p.id DESC"),
-            PostSort::Active => format!("p.last_activity_at DESC, p.id DESC"),
+            PostSort::Latest => "p.created_at DESC, p.id DESC".to_string(),
+            PostSort::Active => "p.last_activity_at DESC, p.id DESC".to_string(),
             PostSort::Replies => {
-                format!("p.reply_count DESC, p.last_activity_at DESC, p.id DESC")
+                "p.reply_count DESC, p.last_activity_at DESC, p.id DESC".to_string()
             }
-            PostSort::ForYou => format!("p.last_activity_at DESC, p.id DESC"),
+            PostSort::ForYou => "p.last_activity_at DESC, p.id DESC".to_string(),
         };
         let visibility = format!(
             "p.campus_id = $1
