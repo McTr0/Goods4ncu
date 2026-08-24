@@ -14,6 +14,7 @@ class PostService extends BaseService {
     String category = 'all',
     String? spaceId,
     String? search,
+    List<String> tags = const [],
     String sort = 'for_you',
   }) async {
     final headers = await authHeaders();
@@ -22,6 +23,7 @@ class PostService extends BaseService {
       'offset': offset.clamp(0, 1 << 31).toString(),
       'category': category,
       'space_id': ?spaceId,
+      if (tags.isNotEmpty) 'tags': tags.join(','),
       'sort': sort,
       if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
     };
@@ -148,6 +150,7 @@ class PostService extends BaseService {
           'cover_image_url': coverImageUrl.trim(),
         'listing_id': ?listingId,
         'space_id': ?spaceId,
+        if (tags.isNotEmpty) 'tags': tags.join(','),
         'attributes': attributes,
         'tags': tags
             .map((tag) => tag.trim())

@@ -13,7 +13,6 @@ use uuid::Uuid;
 pub const MAX_POST_TITLE_CHARS: usize = 300;
 pub const MAX_POST_BODY_CHARS: usize = 50_000;
 pub const MAX_REPLY_BODY_CHARS: usize = 20_000;
-pub const MAX_TAGS: usize = 5;
 pub const MAX_TAG_CHARS: usize = 32;
 
 #[derive(Debug, Clone)]
@@ -78,11 +77,6 @@ impl PostService {
             if seen.insert(tag.clone()) {
                 normalized.push(tag);
             }
-        }
-        if normalized.len() > MAX_TAGS {
-            return Err(ApiError::BadRequest(format!(
-                "每个帖子最多 {MAX_TAGS} 个标签"
-            )));
         }
         if normalized.is_empty() {
             return Ok(normalized);

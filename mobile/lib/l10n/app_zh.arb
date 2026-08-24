@@ -1467,7 +1467,7 @@
   "postBodyLabel": "正文",
   "postBodyHint": "补充能帮助同学理解和回复的背景",
   "postBodyRequired": "请输入正文",
-  "postCategoryLabel": "分区（选填）",
+  "postCategoryLabel": "分区",
   "postCategoryHint": "例如：校园生活",
   "postTagsLabel": "标签（选填）",
   "publishCategoryOffer": "出",

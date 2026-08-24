@@ -3065,7 +3065,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get postBodyRequired => '请输入正文';
 
   @override
-  String get postCategoryLabel => '分区（选填）';
+  String get postCategoryLabel => '分区';
 
   @override
   String get postCategoryHint => '例如：校园生活';

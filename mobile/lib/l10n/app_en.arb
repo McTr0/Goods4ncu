@@ -1486,7 +1486,7 @@
   "postBodyLabel": "Details",
   "postBodyHint": "Add context that will help classmates respond",
   "postBodyRequired": "Add some details",
-  "postCategoryLabel": "Category (optional)",
+  "postCategoryLabel": "Category",
   "postCategoryHint": "For example: Campus life",
   "postTagsLabel": "Tags (optional)",
   "publishCategoryOffer": "Offer",

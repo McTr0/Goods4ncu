@@ -11,11 +11,10 @@ CampusPost _postWithManyTags() {
     'urgent',
     'qianhuNorth',
     'question',
-    'free',
-    'found',
+    'share',
+    'help',
     'negotiable',
-    'freeShipping',
-    'brandNew',
+    'pickupOnly',
     'topPrice',
   ];
   return CampusPost.fromJson({

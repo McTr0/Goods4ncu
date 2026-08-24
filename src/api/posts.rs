@@ -30,6 +30,8 @@ pub struct PostListQuery {
     pub space_id: Option<Uuid>,
     pub search: Option<String>,
     pub sort: Option<String>,
+    #[serde(default)]
+    pub tags: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -212,6 +214,15 @@ fn normalize_filter(query: &PostListQuery) -> Result<PostFilter, ApiError> {
         category,
         space_id: query.space_id,
         search: normalized_optional_query(&query.search, "search", 200)?,
+        tags: query
+            .tags
+            .as_deref()
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|tag| !tag.is_empty())
+            .map(str::to_string)
+            .collect(),
         sort,
     })
 }
@@ -587,6 +598,7 @@ mod tests {
             category: Some("offer".to_string()),
             space_id: None,
             search: None,
+            tags: None,
             sort: Some("replies".to_string()),
         })
         .unwrap();
@@ -599,6 +611,7 @@ mod tests {
             category: Some("all".to_string()),
             space_id: None,
             search: None,
+            tags: None,
             sort: Some("for_you".to_string()),
         })
         .unwrap();
@@ -611,6 +624,7 @@ mod tests {
             category: Some("listing".to_string()),
             space_id: None,
             search: None,
+            tags: None,
             sort: None,
         });
         assert!(invalid.is_err());

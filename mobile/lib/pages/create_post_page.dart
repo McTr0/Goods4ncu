@@ -152,7 +152,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
   Future<void> _pickTags() async {
     final selected = await showSearchablePickerSheet<String>(
       context: context,
-      title: '${AppLocalizations.of(context)!.postTagsLabel}（自由标签最多 5 个）',
+      title: AppLocalizations.of(context)!.postTagsLabel,
       options: [
         for (final tag in kPostTags)
           PickerOption(
@@ -171,29 +171,17 @@ class _CreatePostPageState extends State<CreatePostPage> {
     );
     if (selected == null || !mounted) return;
     final picked = selected.toSet();
-    // Enforce one-per-group and the 5 free-tag budget.
+    // One pick per exclusive group; free tags are unlimited.
     final chosenGroups = <String>{};
-    final freeTags = <String>[];
-    final ordered = [
-      for (final tag in kPostTags)
-        if (picked.contains(tag.key)) tag,
-    ];
-    for (final tag in ordered) {
+    final result = <String>{};
+    for (final tag in kPostTags) {
+      if (!picked.contains(tag.key)) continue;
       if (tag.exclusive) {
         if (chosenGroups.contains(tag.group)) continue;
         chosenGroups.add(tag.group!);
-      } else {
-        if (freeTags.length >= 5) continue;
-        freeTags.add(tag.key);
       }
-      picked.remove(tag.key);
+      result.add(tag.key);
     }
-    final result = <String>{
-      ...freeTags,
-      ...ordered
-          .where((tag) => tag.exclusive && !picked.contains(tag.key))
-          .map((tag) => tag.key),
-    };
     setState(
       () => _selectedTags
         ..clear()
@@ -460,7 +448,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
           child: InputDecorator(
             decoration: InputDecoration(
               labelText: l.postTagsLabel,
-              helperText: '可搜索，最多选 5 个',
+              helperText: '可多选；地点/时效各限一个',
               suffixIcon: const Icon(Icons.sell_outlined),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(AppTheme.radiusMd),

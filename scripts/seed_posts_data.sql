@@ -50,7 +50,7 @@ INSERT INTO posts (
  'l0000000-0000-0000-0000-000000000001', NULL,
  '出 iPhone 14 Pro Max 256G 深空黑',
  '去年十月购入，电池效率 91%，全程贴膜带壳。毕业回老家急出，可小刀，支持前湖校区内面交。',
- '["negotiable","freeShipping"]'::jsonb, 'active', 3,
+ '["negotiable"]'::jsonb, 'active', 3,
  now() - interval '2 days', now() - interval '5 hours', now() - interval '5 hours',
  '{}'),
 
@@ -60,7 +60,7 @@ INSERT INTO posts (
  'l0000000-0000-0000-0000-000000000002', NULL,
  '高等数学第七版上下册 同济版',
  '大一大二用完九成新，笔记都在便签上没写在书里。45 两本打包，天健操场附近可自取。',
- '["likeNew","pickupOnly"]'::jsonb, 'active', 1,
+ '["pickupOnly","sellFast"]'::jsonb, 'active', 1,
  now() - interval '4 days', now() - interval '1 day', now() - interval '1 day',
  '{}'),
 
@@ -101,7 +101,7 @@ INSERT INTO posts (
  NULL, NULL,
  '全新未拆封蓝牙键盘（多买了一个）',
  '双十一凑单手滑买了两个，全新未拆。原价 89 现在 55 出。',
- '["brandNew","freeShipping"]'::jsonb, 'archived', 0,
+ '["sellFast"]'::jsonb, 'archived', 0,
  now() - interval '6 days', now() - interval '2 days', now() - interval '2 days',
  '{}'),
 
@@ -112,7 +112,7 @@ INSERT INTO posts (
  NULL, NULL,
  '收一辆二手自行车 预算 150 内',
  '代步上课用，刹车灵就行，不追求外观。前湖校区内自取。',
- '["usedOk","budgetFlexible"]'::jsonb, 'active', 2,
+ '["budgetFlexible"]'::jsonb, 'active', 2,
  now() - interval '30 hours', now() - interval '3 hours', now() - interval '3 hours',
  '{}'),
 
@@ -142,7 +142,7 @@ INSERT INTO posts (
  NULL, NULL,
  '收一把羽毛球拍 新手入门级',
  '想约同学打球但自己没拍，尤尼克斯或者胜利的入门款都可以，100 左右。',
- '["usedOk"]'::jsonb, 'active', 0,
+ '[]'::jsonb, 'active', 0,
  now() - interval '14 hours', now() - interval '14 hours', now() - interval '14 hours',
  '{}'),
 

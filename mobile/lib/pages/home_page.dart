@@ -35,6 +35,7 @@ class _HomePageState extends State<HomePage> {
   bool _feedLoading = false;
   String _postTypeFilter = 'all';
   bool _canAnnounce = false;
+  final Set<String> _selectedTagFilters = {};
   String _postSort = 'for_you';
   String? _searchQuery;
   String? _loadError;
@@ -78,6 +79,7 @@ class _HomePageState extends State<HomePage> {
         offset: reset ? 0 : _posts.length,
         // Unified posts: filter value IS the post category.
         category: _postTypeFilter,
+        tags: _selectedTagFilters.toList(growable: false),
         search: _searchQuery,
         sort: _postSort,
       );
@@ -164,10 +166,20 @@ class _HomePageState extends State<HomePage> {
         selectedType: _postTypeFilter,
         selectedSort: _postSort,
         canAnnounce: _canAnnounce,
+        selectedTags: _selectedTagFilters.toList(growable: false),
         onTypeChanged: (value) {
           if (_postTypeFilter == value) return;
           setState(() {
             _postTypeFilter = value;
+            _feedHasMore = true;
+          });
+          _loadRecommendations(reset: true);
+        },
+        onTagsChanged: (tags) {
+          setState(() {
+            _selectedTagFilters
+              ..clear()
+              ..addAll(tags);
             _feedHasMore = true;
           });
           _loadRecommendations(reset: true);
@@ -432,15 +444,49 @@ class _PostSectionTitle extends StatelessWidget {
     required this.selectedType,
     required this.selectedSort,
     required this.canAnnounce,
+    required this.selectedTags,
     required this.onTypeChanged,
+    required this.onTagsChanged,
     required this.onSortChanged,
   });
 
   final String selectedType;
   final String selectedSort;
   final bool canAnnounce;
+  final List<String> selectedTags;
   final ValueChanged<String> onTypeChanged;
+  final ValueChanged<List<String>> onTagsChanged;
   final ValueChanged<String> onSortChanged;
+
+  Future<void> _pickTags(BuildContext context) async {
+    final selected = await showSearchablePickerSheet<String>(
+      context: context,
+      title: '按标签筛选（可多选）',
+      options: [
+        for (final tag in kPostTags)
+          PickerOption(
+            value: tag.key,
+            label: postTagLabel(context, tag.key),
+            keywords: [tag.key, if (tag.group != null) tag.group!],
+          ),
+      ],
+      initiallySelected: selectedTags,
+      multiSelect: true,
+    );
+    if (selected == null) return;
+    // One pick per exclusive group.
+    final chosenGroups = <String>{};
+    final result = <String>{};
+    for (final tag in kPostTags) {
+      if (!selected.contains(tag.key)) continue;
+      if (tag.exclusive) {
+        if (chosenGroups.contains(tag.group)) continue;
+        chosenGroups.add(tag.group!);
+      }
+      result.add(tag.key);
+    }
+    onTagsChanged(result.toList(growable: false));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -507,6 +553,48 @@ class _PostSectionTitle extends StatelessWidget {
                     const SizedBox(width: 5),
                     Text(
                       _filterLabel(selectedType),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Tag filter — middle, multi-select.
+            InkWell(
+              key: const ValueKey('post-tag-filter'),
+              borderRadius: BorderRadius.circular(999),
+              onTap: () => _pickTags(context),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: selectedTags.isEmpty
+                        ? scheme.outlineVariant
+                        : scheme.primary,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.sell_outlined,
+                      size: 16,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      selectedTags.isEmpty
+                          ? '标签'
+                          : '标签 · ${selectedTags.length}',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,

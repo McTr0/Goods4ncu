@@ -14,6 +14,7 @@ class _FakePostService extends PostService {
   final PostsResponse response;
   int calls = 0;
   final List<String> categories = [];
+  final List<List<String>> tagFilters = [];
 
   final List<String?> searches = [];
 
@@ -25,9 +26,11 @@ class _FakePostService extends PostService {
     String? spaceId,
     String? search,
     String sort = 'for_you',
+    List<String> tags = const [],
   }) async {
     calls += 1;
     categories.add(category);
+    tagFilters.add(tags);
     searches.add(search);
     return response;
   }
@@ -62,6 +65,7 @@ class _PagingPostService extends PostService {
     String? spaceId,
     String? search,
     String sort = 'for_you',
+    List<String> tags = const [],
   }) async {
     offsets.add(offset);
     if (offset == 20 && failNextPage) {
@@ -86,6 +90,7 @@ class _FailingPostService extends PostService {
     String? spaceId,
     String? search,
     String sort = 'for_you',
+    List<String> tags = const [],
   }) async {
     throw Exception('posts_unavailable');
   }

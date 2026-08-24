@@ -3209,7 +3209,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get postBodyRequired => 'Add some details';
 
   @override
-  String get postCategoryLabel => 'Category (optional)';
+  String get postCategoryLabel => 'Category';
 
   @override
   String get postCategoryHint => 'For example: Campus life';

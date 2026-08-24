@@ -91,6 +91,8 @@ pub struct PostFilter {
     pub category: Option<String>,
     pub space_id: Option<Uuid>,
     pub search: Option<String>,
+    /// Match posts carrying ANY of these tags.
+    pub tags: Vec<String>,
     pub sort: PostSort,
 }
 
@@ -307,11 +309,12 @@ impl PostRepository for PostgresPostRepository {
               AND ($4::uuid IS NULL OR p.space_id = $4)
               AND ($5::text IS NULL OR p.title ILIKE $5
                    OR p.body ILIKE $5)
+              AND (cardinality($6::text[]) = 0 OR p.tags ?| $6::text[])
               AND (p.listing_id IS NULL OR NOT listing_has_active_restriction(p.listing_id))
               {MEMBER_VISIBILITY_SQL}"
         );
         let query = format!(
-            "{} WHERE {} ORDER BY {} LIMIT $6 OFFSET $7",
+            "{} WHERE {} ORDER BY {} LIMIT $7 OFFSET $8",
             Self::post_select(),
             visibility,
             order_by
@@ -322,6 +325,7 @@ impl PostRepository for PostgresPostRepository {
             .bind(filter.category.as_deref())
             .bind(filter.space_id)
             .bind(search.as_deref())
+            .bind(&filter.tags)
             .bind(limit)
             .bind(offset)
             .fetch_all(&self.pool)
@@ -338,6 +342,7 @@ impl PostRepository for PostgresPostRepository {
             .bind(filter.category.as_deref())
             .bind(filter.space_id)
             .bind(search.as_deref())
+            .bind(&filter.tags)
             .fetch_one(&self.pool)
             .await
             .map_err(db_error)?;
@@ -459,6 +464,7 @@ impl PostRepository for PostgresPostRepository {
                  AND ($4::uuid IS NULL OR p.space_id = $4)
                  AND ($5::text IS NULL OR p.title ILIKE $5
                       OR p.body ILIKE $5)
+                 AND (cardinality($6::text[]) = 0 OR p.tags ?| $6::text[])
                  AND ($2::text IS NULL OR p.author_id <> $2)
                  AND (p.listing_id IS NULL
                       OR NOT listing_has_active_restriction(p.listing_id))
@@ -476,7 +482,7 @@ impl PostRepository for PostgresPostRepository {
                          )
                      ))
                ORDER BY ranking_score DESC, p.last_activity_at DESC, p.id DESC
-               LIMIT $6 OFFSET $7"#,
+               LIMIT $7 OFFSET $8"#,
             columns = Self::post_columns(),
             relations = Self::post_relations(),
             member_visibility = MEMBER_VISIBILITY_SQL,
@@ -487,6 +493,7 @@ impl PostRepository for PostgresPostRepository {
             .bind(filter.category.as_deref())
             .bind(filter.space_id)
             .bind(search.as_deref())
+            .bind(&filter.tags)
             .bind(limit)
             .bind(offset)
             .fetch_all(&self.pool)
@@ -502,6 +509,7 @@ impl PostRepository for PostgresPostRepository {
                  AND ($4::uuid IS NULL OR p.space_id = $4)
                  AND ($5::text IS NULL OR p.title ILIKE $5
                       OR p.body ILIKE $5)
+                 AND (cardinality($6::text[]) = 0 OR p.tags ?| $6::text[])
                  AND (p.listing_id IS NULL
                       OR NOT listing_has_active_restriction(p.listing_id))
                  AND ($2::text IS NULL OR NOT EXISTS (
@@ -522,6 +530,7 @@ impl PostRepository for PostgresPostRepository {
             .bind(filter.category.as_deref())
             .bind(filter.space_id)
             .bind(search.as_deref())
+            .bind(&filter.tags)
             .fetch_one(&self.pool)
             .await
             .map_err(db_error)?;

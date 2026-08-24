@@ -5907,7 +5907,7 @@ abstract class AppLocalizations {
   /// No description provided for @postCategoryLabel.
   ///
   /// In en, this message translates to:
-  /// **'Category (optional)'**
+  /// **'Category'**
   String get postCategoryLabel;
 
   /// No description provided for @postCategoryHint.
