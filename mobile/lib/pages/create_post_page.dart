@@ -12,8 +12,9 @@ import '../services/post_service.dart';
 import '../services/upload_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
+import '../components/searchable_picker_sheet.dart';
+import '../models/post_taxonomy.dart';
 import '../utils/category_utils.dart';
-import '../utils/mutual_aid_utils.dart';
 
 class PickedPostImage {
   const PickedPostImage({
@@ -28,27 +29,6 @@ class PickedPostImage {
 }
 
 typedef PostImagePicker = Future<PickedPostImage?> Function();
-
-/// Curated tag catalog — mirrors migrations/0100_post_taxonomy.sql.
-const _tagCatalog = <String, ({String label, List<String> categories})>{
-  'question': (label: '提问', categories: []),
-  'share': (label: '分享', categories: []),
-  'help': (label: '求助', categories: []),
-  'urgent': (label: '急', categories: []),
-  'longterm': (label: '长期有效', categories: []),
-  'event': (label: '活动', categories: []),
-  'negotiable': (label: '可议价', categories: ['offer']),
-  'freeShipping': (label: '包邮', categories: ['offer']),
-  'pickupOnly': (label: '仅自提', categories: ['offer']),
-  'brandNew': (label: '全新', categories: ['offer']),
-  'likeNew': (label: '九成新', categories: ['offer']),
-  'sellFast': (label: '急出', categories: ['offer']),
-  'budgetFlexible': (label: '预算可议', categories: ['wanted']),
-  'topPrice': (label: '高价收', categories: ['wanted']),
-  'usedOk': (label: '接受二手', categories: ['wanted']),
-  // Special: unlocks the structured errand payload on offer/wanted posts.
-  'errand': (label: '跑腿互助', categories: ['offer', 'wanted']),
-};
 
 const _listingCategoryKeys = [
   'electronics',
@@ -89,11 +69,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _bodyController = TextEditingController();
-  final _pickupController = TextEditingController();
-  final _dropoffController = TextEditingController();
-  final _timeController = TextEditingController();
-  final _rewardController = TextEditingController();
-  final _notesController = TextEditingController();
   late final PostService _postService;
   late final UploadService _uploadService;
   late final ListingService _listingService;
@@ -103,11 +78,8 @@ class _CreatePostPageState extends State<CreatePostPage> {
 
   late String _category = widget.initialCategory;
   final Set<String> _selectedTags = {};
-  bool _errand = false;
-  String _serviceMode = 'other';
-  int _validForDays = 1;
 
-  // Goods fields (offer/wanted without errand).
+  // Goods fields (offer/wanted attach a listing).
   final _goodsTitleController = TextEditingController();
   final _goodsBrandController = TextEditingController();
   double _conditionScore = 8;
@@ -119,42 +91,64 @@ class _CreatePostPageState extends State<CreatePostPage> {
     _postService = widget.postService ?? context.read<PostService>();
     _uploadService = widget.uploadService ?? context.read<UploadService>();
     _listingService = widget.listingService ?? ListingService();
-    if (_category != 'discussion') _errand = true;
   }
 
   @override
   void dispose() {
     _titleController.dispose();
     _bodyController.dispose();
-    _pickupController.dispose();
-    _dropoffController.dispose();
-    _timeController.dispose();
-    _rewardController.dispose();
-    _notesController.dispose();
     _goodsTitleController.dispose();
     _goodsBrandController.dispose();
     _goodsPriceController.dispose();
     super.dispose();
   }
 
-  bool get _needsGoods =>
-      (_category == 'offer' || _category == 'wanted') && !_errand;
+  bool get _needsGoods => postCategoryByKey(_category)?.isGoods ?? false;
 
-  void _toggleTag(String key) {
+  Future<void> _pickCategory() async {
+    final selected = await showSearchablePickerSheet<String>(
+      context: context,
+      title: AppLocalizations.of(context)!.postCategoryLabel,
+      options: [
+        for (final category in kPostCategories)
+          PickerOption(
+            value: category.key,
+            label: category.label,
+            keywords: [category.key],
+          ),
+      ],
+      initiallySelected: [_category],
+    );
+    final next = selected?.isEmpty == false ? selected!.first : null;
+    if (next == null || next == _category || !mounted) return;
     setState(() {
-      if (_selectedTags.contains(key)) {
-        _selectedTags.remove(key);
-        if (key == 'errand') {
-          _errand = false;
-        }
-      } else {
-        if (_selectedTags.length >= 5) return;
-        _selectedTags.add(key);
-        if (key == 'errand') {
-          _errand = true;
-        }
-      }
+      _category = next;
+      _selectedTags.removeWhere(
+        (tag) => !(kPostTags.any((t) => t.key == tag && t.allowedIn(next))),
+      );
     });
+  }
+
+  Future<void> _pickTags() async {
+    final allowed = kPostTags
+        .where((tag) => tag.allowedIn(_category))
+        .toList(growable: false);
+    final selected = await showSearchablePickerSheet<String>(
+      context: context,
+      title: '${AppLocalizations.of(context)!.postTagsLabel}（最多 5 个）',
+      options: [
+        for (final tag in allowed)
+          PickerOption(value: tag.key, label: tag.label, keywords: [tag.key]),
+      ],
+      initiallySelected: _selectedTags.toList(growable: false),
+      multiSelect: true,
+    );
+    if (selected == null || !mounted) return;
+    setState(
+      () => _selectedTags
+        ..clear()
+        ..addAll(selected.take(5)),
+    );
   }
 
   Future<void> _submit() async {
@@ -187,26 +181,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
         );
       }
 
-      final Map<String, dynamic> errandMetadata = _errand
-          ? {
-              'service_mode': _serviceMode,
-              if (_pickupController.text.trim().isNotEmpty)
-                'pickup_place': _pickupController.text.trim(),
-              if (_dropoffController.text.trim().isNotEmpty)
-                'dropoff_place': _dropoffController.text.trim(),
-              if (_timeController.text.trim().isNotEmpty)
-                'time_hint': _timeController.text.trim(),
-              if (int.tryParse(_rewardController.text.trim()) != null)
-                'reward_cents': int.parse(_rewardController.text.trim()) * 100,
-              if (_notesController.text.trim().isNotEmpty)
-                'notes': _notesController.text.trim(),
-              'valid_until': DateTime.now()
-                  .toUtc()
-                  .add(Duration(days: _validForDays))
-                  .toIso8601String(),
-            }
-          : const {};
-
       final post = await _postService.createPost(
         title: _titleController.text,
         body: _bodyController.text,
@@ -215,7 +189,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
         coverImageUrl: coverImageUrl,
         listingId: listingId,
         spaceId: widget.spaceId,
-        errandMetadata: errandMetadata,
       );
       if (!mounted) return;
       context.go('/posts/${post.id}');
@@ -282,33 +255,22 @@ class _CreatePostPageState extends State<CreatePostPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SegmentedButton<String>(
+                InkWell(
                   key: const ValueKey('publish-category-segment'),
-                  showSelectedIcon: false,
-                  segments: [
-                    ButtonSegment(
-                      value: 'offer',
-                      label: Text(l.publishCategoryOffer),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                  onTap: _submitting ? null : _pickCategory,
+                  child: InputDecorator(
+                    decoration: InputDecoration(
+                      labelText: l.postCategoryLabel,
+                      suffixIcon: const Icon(Icons.expand_more_rounded),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                      ),
                     ),
-                    ButtonSegment(
-                      value: 'wanted',
-                      label: Text(l.publishCategoryWanted),
+                    child: Text(
+                      postCategoryByKey(_category)?.label ?? _category,
                     ),
-                    ButtonSegment(
-                      value: 'discussion',
-                      label: Text(l.publishCategoryDiscussion),
-                    ),
-                  ],
-                  selected: {_category},
-                  onSelectionChanged: _submitting
-                      ? null
-                      : (values) => setState(() {
-                          _category = values.first;
-                          if (_category == 'discussion') {
-                            _selectedTags.remove('errand');
-                            _errand = false;
-                          }
-                        }),
+                  ),
                 ),
                 const SizedBox(height: AppTheme.sp14),
                 TextFormField(
@@ -344,10 +306,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
                 if (_needsGoods) ...[
                   const SizedBox(height: AppTheme.sp14),
                   _buildGoodsSection(l),
-                ],
-                if (_category != 'discussion') ...[
-                  const SizedBox(height: AppTheme.sp14),
-                  _buildErrandFields(l),
                 ],
                 const SizedBox(height: AppTheme.sp14),
                 if (_coverImage == null)
@@ -412,37 +370,44 @@ class _CreatePostPageState extends State<CreatePostPage> {
   }
 
   Widget _buildTagsSection(AppLocalizations l) {
-    final visibleTags = _tagCatalog.entries
-        .where(
-          (entry) =>
-              entry.value.categories.isEmpty ||
-              entry.value.categories.contains(_category),
-        )
-        .toList();
+    final selectedLabels = [
+      for (final key in _selectedTags)
+        if (kPostTags.any((t) => t.key == key))
+          kPostTags.firstWhere((t) => t.key == key).label,
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          l.postTagsLabel,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            color: Theme.of(context).hintColor,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final entry in visibleTags)
-              FilterChip(
-                key: ValueKey('publish-tag-${entry.key}'),
-                label: Text(entry.value.label),
-                selected: _selectedTags.contains(entry.key),
-                onSelected: _submitting ? (_) {} : (_) => _toggleTag(entry.key),
+        InkWell(
+          key: const ValueKey('publish-tags-picker'),
+          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+          onTap: _submitting ? null : _pickTags,
+          child: InputDecorator(
+            decoration: InputDecoration(
+              labelText: l.postTagsLabel,
+              helperText: '可搜索，最多选 5 个',
+              suffixIcon: const Icon(Icons.sell_outlined),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusMd),
               ),
-          ],
+            ),
+            child: selectedLabels.isEmpty
+                ? Text(
+                    l.postTagsLabel,
+                    style: TextStyle(color: Theme.of(context).hintColor),
+                  )
+                : Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final label in selectedLabels)
+                        Chip(
+                          label: Text(label),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                    ],
+                  ),
+          ),
         ),
       ],
     );
@@ -506,98 +471,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
                 ),
               ),
             ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrandFields(AppLocalizations l) {
-    return Container(
-      padding: const EdgeInsets.all(AppTheme.sp16),
-      decoration: BoxDecoration(
-        color: Theme.of(
-          context,
-        ).colorScheme.secondaryContainer.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SwitchListTile(
-            key: const ValueKey('publish-errand-switch'),
-            contentPadding: EdgeInsets.zero,
-            title: Text(l.publishErrandSwitch),
-            value: _errand,
-            onChanged: (value) => setState(() {
-              _errand = value;
-              value
-                  ? _selectedTags.add('errand')
-                  : _selectedTags.remove('errand');
-            }),
-          ),
-          DropdownButtonFormField<String>(
-            initialValue: _serviceMode,
-            decoration: InputDecoration(labelText: l.postMutualAidMode),
-            items: [
-              for (final mode in [
-                'pickup',
-                'buy',
-                'queue',
-                'print',
-                'return',
-                'other',
-              ])
-                DropdownMenuItem(
-                  value: mode,
-                  child: Text(mutualAidModeLabel(l, mode)),
-                ),
-            ],
-            onChanged: (value) =>
-                setState(() => _serviceMode = value ?? 'other'),
-          ),
-          const SizedBox(height: AppTheme.sp12),
-          TextFormField(
-            controller: _pickupController,
-            maxLength: 120,
-            decoration: InputDecoration(labelText: l.postMutualAidPickup),
-          ),
-          const SizedBox(height: AppTheme.sp12),
-          TextFormField(
-            controller: _dropoffController,
-            maxLength: 120,
-            decoration: InputDecoration(labelText: l.postMutualAidDropoff),
-          ),
-          const SizedBox(height: AppTheme.sp12),
-          TextFormField(
-            controller: _timeController,
-            maxLength: 120,
-            decoration: InputDecoration(labelText: l.postMutualAidTime),
-          ),
-          const SizedBox(height: AppTheme.sp12),
-          TextFormField(
-            controller: _rewardController,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(labelText: l.postMutualAidReward),
-            validator: (value) {
-              final raw = (value ?? '').trim();
-              if (raw.isEmpty) return null;
-              final yuan = int.tryParse(raw);
-              return yuan == null || yuan < 0 || yuan > 100000
-                  ? l.postMutualAidRewardInvalid
-                  : null;
-            },
-          ),
-          const SizedBox(height: AppTheme.sp12),
-          DropdownButtonFormField<int>(
-            initialValue: _validForDays,
-            decoration: InputDecoration(labelText: l.postMutualAidValidity),
-            items: [
-              DropdownMenuItem(value: 1, child: Text(l.postMutualAidOneDay)),
-              DropdownMenuItem(value: 3, child: Text(l.postMutualAidThreeDays)),
-              DropdownMenuItem(value: 7, child: Text(l.postMutualAidSevenDays)),
-            ],
-            onChanged: (value) => setState(() => _validForDays = value ?? 1),
           ),
         ],
       ),

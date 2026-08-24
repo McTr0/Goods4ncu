@@ -67,7 +67,7 @@ Widget _app(_RecordingUserService service) {
             Scaffold(body: Text('detail-${state.pathParameters['id']}')),
       ),
       GoRoute(
-        path: '/create',
+        path: '/my-listings/new',
         builder: (context, state) =>
             const Scaffold(body: Text('structured-create')),
       ),

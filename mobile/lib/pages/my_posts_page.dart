@@ -228,10 +228,6 @@ class _MyPostsPageState extends State<MyPostsPage> {
                         color: AppTheme.textSecondary,
                       ),
                     ),
-                    if (post.isErrand) ...[
-                      const SizedBox(width: 6),
-                      const Icon(Icons.directions_run_rounded, size: 14),
-                    ],
                   ],
                 ),
               ),

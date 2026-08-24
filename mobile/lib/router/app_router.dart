@@ -28,6 +28,7 @@ import '../services/user_service.dart';
 import '../services/admin_role_cache.dart';
 import '../pages/trust_page.dart';
 import '../pages/post_detail_page.dart';
+import '../pages/create_listing_page.dart';
 import '../pages/create_post_page.dart';
 import '../pages/live2d_preview_page.dart';
 import '../services/token_storage.dart';
@@ -359,6 +360,16 @@ final GoRouter appRouter = GoRouter(
               const NoTransitionPage(child: MyPostsPage()),
         ),
         GoRoute(
+          path: '/my-listings/new',
+          pageBuilder: (context, state) => NoTransitionPage(
+            key: state.pageKey,
+            child: CreateListingPage(
+              initialDirection:
+                  state.uri.queryParameters['direction'] ?? 'offer',
+            ),
+          ),
+        ),
+        GoRoute(
           path: '/my-listings',
           pageBuilder: (context, state) =>
               const NoTransitionPage(child: MyListingsPage()),
@@ -425,6 +436,7 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
       return 3;
     }
     if (location == '/profile' ||
+        location == '/my-listings/new' ||
         location == '/my-listings' ||
         location == '/orders' ||
         location.startsWith('/orders/') ||

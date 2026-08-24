@@ -117,24 +117,6 @@ class PostDiscoveryCard extends StatelessWidget {
                         ),
                       ),
                     ],
-                    if (post.isErrand) ...[
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 5,
-                        runSpacing: 5,
-                        children: [
-                          Chip(
-                            label: Text(switch (post.resolutionStatus) {
-                              'resolved' => l.postResolutionResolved,
-                              'closed' => l.postResolutionClosed,
-                              _ => l.postResolutionOpen,
-                            }),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          Chip(label: Text(l.publishErrandSwitch)),
-                        ],
-                      ),
-                    ],
                     if (listing != null) ...[
                       const SizedBox(height: 8),
                       PriceTag(

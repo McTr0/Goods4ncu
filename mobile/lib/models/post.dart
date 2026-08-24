@@ -30,9 +30,6 @@ class CampusPost {
     required this.replyCount,
     required this.status,
     required this.isLocked,
-    this.errandMetadata = const {},
-    this.resolutionStatus = 'open',
-    this.canUpdateResolution = false,
     required this.createdAt,
     required this.updatedAt,
     required this.lastActivityAt,
@@ -63,9 +60,6 @@ class CampusPost {
   final int replyCount;
   final String status;
   final bool isLocked;
-  final Map<String, dynamic> errandMetadata;
-  final String resolutionStatus;
-  final bool canUpdateResolution;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final DateTime? lastActivityAt;
@@ -79,8 +73,6 @@ class CampusPost {
 
   bool get isOffer => category == 'offer';
   bool get isWanted => category == 'wanted';
-  bool get isErrand => tags.contains('errand');
-
   String get displayBody {
     final text = (body ?? bodyExcerpt ?? '').trim();
     return text;
@@ -106,9 +98,6 @@ class CampusPost {
     int? replyCount,
     String? status,
     bool? isLocked,
-    Map<String, dynamic>? errandMetadata,
-    String? resolutionStatus,
-    bool? canUpdateResolution,
     DateTime? createdAt,
     DateTime? updatedAt,
     DateTime? lastActivityAt,
@@ -131,9 +120,6 @@ class CampusPost {
       replyCount: replyCount ?? this.replyCount,
       status: status ?? this.status,
       isLocked: isLocked ?? this.isLocked,
-      errandMetadata: errandMetadata ?? this.errandMetadata,
-      resolutionStatus: resolutionStatus ?? this.resolutionStatus,
-      canUpdateResolution: canUpdateResolution ?? this.canUpdateResolution,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       lastActivityAt: lastActivityAt ?? this.lastActivityAt,
@@ -173,11 +159,6 @@ class CampusPost {
       replyCount: (json['reply_count'] as num?)?.toInt() ?? 0,
       status: json['status']?.toString() ?? 'active',
       isLocked: json['is_locked'] == true,
-      errandMetadata: json['errand_metadata'] is Map
-          ? Map<String, dynamic>.from(json['errand_metadata'] as Map)
-          : const {},
-      resolutionStatus: json['resolution_status']?.toString() ?? 'open',
-      canUpdateResolution: json['can_update_resolution'] == true,
       createdAt: _dateTime(json['created_at']),
       updatedAt: _dateTime(json['updated_at']),
       lastActivityAt: _dateTime(json['last_activity_at']),

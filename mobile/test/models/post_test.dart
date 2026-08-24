@@ -63,30 +63,6 @@ void main() {
     expect(reply.author.username, 'lee');
   });
 
-  test('parses mutual-aid lifecycle and author capability', () {
-    final post = CampusPost.fromJson({
-      'id': 'mutual-1',
-      'category': 'wanted',
-      'tags': ['errand'],
-      'title': 'Pickup help',
-      'author': {'id': 'user-1', 'username': 'mira'},
-      'reply_count': 0,
-      'status': 'active',
-      'is_locked': false,
-      'resolution_status': 'resolved',
-      'can_update_resolution': true,
-      'errand_metadata': {
-        'service_direction': 'wanted',
-        'service_mode': 'pickup',
-      },
-    });
-
-    expect(post.category, 'wanted');
-    expect(post.resolutionStatus, 'resolved');
-    expect(post.canUpdateResolution, isTrue);
-    expect(post.errandMetadata['service_mode'], 'pickup');
-  });
-
   test('parses a server listing preview and ranking explanation', () {
     final post = CampusPost.fromJson({
       'id': 'post-listing-1',

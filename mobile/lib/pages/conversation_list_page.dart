@@ -2970,12 +2970,6 @@ class _SpacePostsScreenState extends State<SpacePostsScreen> {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      trailing: post.isErrand
-                          ? Chip(
-                              label: Text(l.publishErrandSwitch),
-                              visualDensity: VisualDensity.compact,
-                            )
-                          : null,
                       onTap: () => context.push('/posts/${post.id}'),
                     ),
                   );

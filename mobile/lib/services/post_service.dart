@@ -111,7 +111,6 @@ class PostService extends BaseService {
     String? coverImageUrl,
     String? listingId,
     String? spaceId,
-    Map<String, dynamic> errandMetadata = const {},
   }) async {
     final headers = await authHeaders();
     final response = await post(
@@ -125,7 +124,6 @@ class PostService extends BaseService {
           'cover_image_url': coverImageUrl.trim(),
         'listing_id': ?listingId,
         'space_id': ?spaceId,
-        'errand_metadata': errandMetadata,
         'tags': tags
             .map((tag) => tag.trim())
             .where((tag) => tag.isNotEmpty)
@@ -170,7 +168,6 @@ class PostService extends BaseService {
     String? category,
     List<String>? tags,
     bool? locked,
-    Map<String, dynamic>? errandMetadata,
   }) async {
     final headers = await authHeaders();
     final response = await put(
@@ -181,8 +178,6 @@ class PostService extends BaseService {
         if (body != null) 'body': body.trim(),
         if (category != null) 'category': category.trim(),
         'tags': ?tags,
-        'locked': ?locked,
-        'errand_metadata': ?errandMetadata,
       }),
     );
     return handleResponse(
@@ -190,22 +185,6 @@ class PostService extends BaseService {
       (data) => CampusPost.fromJson(
         Map<String, dynamic>.from((data as Map)['post'] ?? data),
       ),
-    );
-  }
-
-  Future<CampusPost> updateResolution(
-    String id,
-    String resolutionStatus,
-  ) async {
-    final headers = await authHeaders();
-    final response = await patch(
-      Uri.parse('$baseUrl/api/posts/${Uri.encodeComponent(id)}/resolution'),
-      headers,
-      jsonEncode({'resolution_status': resolutionStatus}),
-    );
-    return handleResponse(
-      response,
-      (data) => CampusPost.fromJson(Map<String, dynamic>.from(data as Map)),
     );
   }
 

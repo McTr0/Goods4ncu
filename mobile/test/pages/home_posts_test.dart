@@ -14,7 +14,7 @@ class _FakePostService extends PostService {
   final PostsResponse response;
   int calls = 0;
   final List<String> categories = [];
-  
+
   final List<String?> searches = [];
 
   @override
