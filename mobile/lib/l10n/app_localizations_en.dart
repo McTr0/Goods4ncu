@@ -420,6 +420,34 @@ class AppLocalizationsEn extends AppLocalizations {
   String get myListings => 'My Listings';
 
   @override
+  String get myPosts => 'My posts';
+
+  @override
+  String get myPostsMenu => 'Manage your offer/wanted/discussion posts';
+
+  @override
+  String get myPostsEmpty => 'Nothing published yet';
+
+  @override
+  String get myPostsDeleteConfirmTitle => 'Delete this post?';
+
+  @override
+  String get myPostsDeleteConfirmBody =>
+      'The post will be marked deleted. This cannot be undone.';
+
+  @override
+  String get postStatusActive => 'Active';
+
+  @override
+  String get postStatusLocked => 'Locked';
+
+  @override
+  String get postStatusArchived => 'Archived';
+
+  @override
+  String get postStatusDeleted => 'Deleted';
+
+  @override
   String get myListingsMenu => 'View and manage your listings';
 
   @override

@@ -974,6 +974,7 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             post(user::confirm_campus_verification),
         )
         .route("/api/user/listings", get(user::get_user_listings))
+        .route("/api/user/posts", get(user::get_user_posts))
         .route("/api/users/search", get(user::search_users))
         .route("/api/users/lookup", get(user::lookup_users))
         .route(

@@ -872,6 +872,60 @@ abstract class AppLocalizations {
   /// **'My Listings'**
   String get myListings;
 
+  /// No description provided for @myPosts.
+  ///
+  /// In en, this message translates to:
+  /// **'My posts'**
+  String get myPosts;
+
+  /// No description provided for @myPostsMenu.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage your offer/wanted/discussion posts'**
+  String get myPostsMenu;
+
+  /// No description provided for @myPostsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing published yet'**
+  String get myPostsEmpty;
+
+  /// No description provided for @myPostsDeleteConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete this post?'**
+  String get myPostsDeleteConfirmTitle;
+
+  /// No description provided for @myPostsDeleteConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The post will be marked deleted. This cannot be undone.'**
+  String get myPostsDeleteConfirmBody;
+
+  /// No description provided for @postStatusActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get postStatusActive;
+
+  /// No description provided for @postStatusLocked.
+  ///
+  /// In en, this message translates to:
+  /// **'Locked'**
+  String get postStatusLocked;
+
+  /// No description provided for @postStatusArchived.
+  ///
+  /// In en, this message translates to:
+  /// **'Archived'**
+  String get postStatusArchived;
+
+  /// No description provided for @postStatusDeleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted'**
+  String get postStatusDeleted;
+
   /// No description provided for @myListingsMenu.
   ///
   /// In en, this message translates to:

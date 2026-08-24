@@ -149,6 +149,20 @@ impl PostService {
         }
     }
 
+    /// Author-scoped listing for the 我的发布 manager (includes deleted).
+    pub async fn list_by_author(
+        &self,
+        campus_id: Uuid,
+        author_id: &str,
+        status: Option<&str>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<(Vec<Post>, i64), ApiError> {
+        self.repository
+            .list_by_author(campus_id, author_id, status, limit, offset)
+            .await
+    }
+
     pub async fn get(&self, campus_id: Uuid, id: Uuid) -> Result<Post, ApiError> {
         self.repository
             .find_by_id(campus_id, id)

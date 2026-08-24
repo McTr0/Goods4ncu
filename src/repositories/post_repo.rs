@@ -125,6 +125,15 @@ pub trait PostRepository: Send + Sync {
 
     async fn find_by_id(&self, campus_id: Uuid, id: Uuid) -> Result<Option<Post>, ApiError>;
 
+    async fn list_by_author(
+        &self,
+        campus_id: Uuid,
+        author_id: &str,
+        status: Option<&str>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<(Vec<Post>, i64), ApiError>;
+
     async fn find_by_listing_id(
         &self,
         campus_id: Uuid,
@@ -532,6 +541,44 @@ impl PostRepository for PostgresPostRepository {
             .fetch_one(&self.pool)
             .await
             .map_err(db_error)?;
+        Ok((rows.iter().map(post_from_row).collect(), total))
+    }
+
+    async fn list_by_author(
+        &self,
+        campus_id: Uuid,
+        author_id: &str,
+        status: Option<&str>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<(Vec<Post>, i64), ApiError> {
+        let visibility = "p.campus_id = $1 AND p.author_id = $2
+              AND ($3::text IS NULL OR p.status = $3)";
+        let query = format!(
+            "{} WHERE {} ORDER BY p.created_at DESC, p.id DESC LIMIT $4 OFFSET $5",
+            Self::post_select(),
+            visibility
+        );
+        let rows = sqlx::query(&query)
+            .bind(campus_id)
+            .bind(author_id)
+            .bind(status)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        let total: i64 = sqlx::query_scalar(&format!(
+            "SELECT COUNT(*) {} WHERE {}",
+            Self::post_relations(),
+            visibility
+        ))
+        .bind(campus_id)
+        .bind(author_id)
+        .bind(status)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(db_error)?;
         Ok((rows.iter().map(post_from_row).collect(), total))
     }
 

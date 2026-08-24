@@ -282,7 +282,7 @@ fn summary_view(state: &AppState, post: Post, viewer_id: Option<&str>) -> PostSu
     }
 }
 
-fn detail_view(state: &AppState, post: Post, viewer_id: Option<&str>) -> PostDetail {
+pub(crate) fn detail_view(state: &AppState, post: Post, viewer_id: Option<&str>) -> PostDetail {
     let can_update_resolution =
         is_errand_post(&post) && viewer_id.is_some_and(|viewer_id| viewer_id == post.author_id);
     let listing = post

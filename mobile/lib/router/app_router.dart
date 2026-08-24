@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../pages/home_page.dart';
 import '../pages/listing_detail_page.dart';
 import '../pages/my_listings_page.dart';
+import '../pages/my_posts_page.dart';
 import '../pages/profile_page.dart';
 import '../pages/chat_page.dart';
 import '../pages/companion_debug_console.dart';
@@ -315,6 +316,10 @@ final GoRouter appRouter = GoRouter(
           path: '/profile',
           pageBuilder: (context, state) =>
               const NoTransitionPage(child: ProfilePage()),
+        ),
+        GoRoute(
+          path: '/my-posts',
+          builder: (context, state) => const MyPostsPage(),
         ),
         GoRoute(
           path: '/my-listings',

@@ -13,8 +13,9 @@ use crate::api::AppState;
 use crate::repositories::{
     Listing, UserLookupMethod, UserLookupResult, UserProfile, UserRepository,
 };
+use crate::services::campus::CampusService;
 use crate::services::campus::{
-    CampusMembershipView, CampusMembershipsResponse, CampusService, VerificationRequestResponse,
+    CampusMembershipView, CampusMembershipsResponse, VerificationRequestResponse,
 };
 
 pub(crate) async fn resolve_public_request_campus(
@@ -737,6 +738,54 @@ pub async fn get_public_user_listings(
         limit,
         offset,
     }))
+}
+
+/// GET /api/user/posts — the caller's unified posts across all categories.
+pub async fn get_user_posts(
+    State(state): State<AppState>,
+    Session(session): Session,
+    Query(params): Query<PaginationParams>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let limit = params.limit.unwrap_or(50).clamp(1, 100);
+    let offset = params.offset.unwrap_or(0).max(0);
+    let status_filter = params.status.as_deref().unwrap_or("all");
+    if !["active", "locked", "archived", "deleted", "all"].contains(&status_filter) {
+        return Err(ApiError::BadRequest("status 无效".into()));
+    }
+    let campus = CampusService::new(state.infra.db.clone());
+    let campus_id = campus
+        .resolve_session_campus(&session.user_id, session.campus_id)
+        .await?;
+    let service = crate::services::post::PostService::new(
+        state.infra.db.clone(),
+        state.infra.moderation.clone(),
+    );
+    let (posts, total) = service
+        .list_by_author(
+            campus_id,
+            &session.user_id,
+            if status_filter == "all" {
+                None
+            } else {
+                Some(status_filter)
+            },
+            limit,
+            offset,
+        )
+        .await?;
+
+    use crate::api::posts::{detail_view, PostDetail};
+    let items: Vec<PostDetail> = posts
+        .into_iter()
+        .map(|post| detail_view(&state, post, Some(session.user_id.as_str())))
+        .collect();
+
+    Ok(Json(serde_json::json!({
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    })))
 }
 
 #[cfg(test)]

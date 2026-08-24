@@ -38,6 +38,19 @@ class PostService extends BaseService {
     );
   }
 
+  /// GET /api/user/posts — the caller's unified posts (manager view).
+  Future<Map<String, dynamic>> getUserPosts({
+    String status = 'all',
+    int limit = 100,
+  }) async {
+    final headers = await authHeaders();
+    final uri = Uri.parse(
+      '$baseUrl/api/user/posts',
+    ).replace(queryParameters: {'status': status, 'limit': '$limit'});
+    final response = await get(uri, headers);
+    return handleResponse(response, (d) => d as Map<String, dynamic>);
+  }
+
   Future<CampusPost> getPost(String id) async {
     return _getPostAt(
       Uri.parse('$baseUrl/api/posts/${Uri.encodeComponent(id)}'),

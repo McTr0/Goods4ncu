@@ -404,6 +404,33 @@ class AppLocalizationsZh extends AppLocalizations {
   String get myListings => '我的商品';
 
   @override
+  String get myPosts => '我的发布';
+
+  @override
+  String get myPostsMenu => '管理你发布的出/收/讨论帖';
+
+  @override
+  String get myPostsEmpty => '还没有发布过内容';
+
+  @override
+  String get myPostsDeleteConfirmTitle => '删除这条发布？';
+
+  @override
+  String get myPostsDeleteConfirmBody => '帖子将进入已删除状态，不可恢复。';
+
+  @override
+  String get postStatusActive => '发布中';
+
+  @override
+  String get postStatusLocked => '已锁定';
+
+  @override
+  String get postStatusArchived => '已下架';
+
+  @override
+  String get postStatusDeleted => '已删除';
+
+  @override
   String get myListingsMenu => '查看和管理你的商品';
 
   @override

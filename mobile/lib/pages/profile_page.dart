@@ -361,6 +361,12 @@ class _ProfilePageState extends State<ProfilePage> {
             const SizedBox(height: AppTheme.sp32),
 
             _MenuCard(
+              icon: Icons.article_outlined,
+              title: l.myPosts,
+              subtitle: l.myPostsMenu,
+              onTap: () => context.push('/my-posts'),
+            ),
+            _MenuCard(
               icon: Icons.inventory_2_outlined,
               title: l.myListings,
               subtitle: l.myListingsMenu,
