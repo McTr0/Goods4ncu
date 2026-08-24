@@ -616,8 +616,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get skillsImportTitle => 'Import skills (JSON)';
 
   @override
-  String get skillsImportHint =>
-      '[｛\"name\": \"Bargain helper\", \"instructions\": \"Negotiate politely\", \"chip_label\": \"Bargain\"｝]';
+  String skillsImportHint(Object example) {
+    return 'A JSON array in the form $example';
+  }
 
   @override
   String get skillsImportAction => 'Import';

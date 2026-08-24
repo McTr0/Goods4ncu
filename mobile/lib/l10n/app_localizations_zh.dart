@@ -595,8 +595,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get skillsImportTitle => '导入技能（JSON）';
 
   @override
-  String get skillsImportHint =>
-      '［｛＂name＂：＂砍价助手＂，＂instructions＂：＂帮我用友善语气砍价＂，＂chip_label＂：＂帮我砍价＂｝］ 的 JSON 数组';
+  String skillsImportHint(Object example) {
+    return '$example 形式的 JSON 数组';
+  }
 
   @override
   String get skillsImportAction => '导入';

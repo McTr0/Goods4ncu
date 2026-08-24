@@ -15,6 +15,7 @@ import '../services/chat_service.dart';
 import '../services/companion_character_service.dart';
 import '../services/sse_service.dart';
 import '../services/upload_service.dart';
+import '../services/companion_memory_service.dart';
 import '../services/post_service.dart';
 import '../services/ws_service.dart';
 import '../models/models.dart';
@@ -99,7 +100,34 @@ class _ChatPageState extends State<ChatPage> {
   final ScrollController _agentResultsController = ScrollController();
   _PendingReference? _pendingReference;
   bool _stageExpanded = true;
-  final ScrollController _messageListController = ScrollController();
+  final ScrollController _messageListController =
+      ScrollController(); // listener attached in initState
+
+  /// Whether the viewport is hugging the bottom edge; only then does the
+  /// list auto-jump on rebuild, so streaming never yanks the user upward.
+  bool _pinnedToBottom = true;
+
+  /// Quick-suggestion labels pulled from the user's enabled skills.
+  List<String> _skillChips = const [];
+
+  String? _chipLabelOf(Map<String, dynamic> skill) {
+    if (skill['enabled'] != true) return null;
+    final chip = (skill['chip_label'] as String?)?.trim();
+    return (chip == null || chip.isEmpty) ? null : chip;
+  }
+
+  Future<void> _loadSkillChips() async {
+    try {
+      final skills = await context.read<CompanionMemoryService>().listSkills();
+      if (!mounted) return;
+      setState(() {
+        _skillChips = [for (final skill in skills) ?_chipLabelOf(skill)];
+      });
+    } catch (_) {
+      // Suggestion chips are cosmetic; never block chat on this.
+    }
+  }
+
   String? _focusedAgentPostId;
   Timer? _undoTicker;
 
@@ -117,7 +145,9 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void initState() {
     super.initState();
+    _messageListController.addListener(_onMessageScroll);
     _live2DController = Live2DController();
+    _loadSkillChips();
     CompanionCharacterService.instance
       ..load()
       ..addListener(_onCompanionCharacterChanged);
@@ -948,9 +978,19 @@ class _ChatPageState extends State<ChatPage> {
     if (mounted) setState(() {});
   }
 
+  void _onMessageScroll() {
+    final position = _messageListController.position;
+    if (!position.hasContentDimensions) return;
+    final atBottom = position.maxScrollExtent - position.pixels < 120;
+    if (atBottom != _pinnedToBottom && mounted) {
+      setState(() => _pinnedToBottom = atBottom);
+    }
+  }
+
   @override
   void dispose() {
     _agentResultsController.dispose();
+    _messageListController.removeListener(_onMessageScroll);
     _messageListController.dispose();
     CompanionCharacterService.instance.removeListener(
       _onCompanionCharacterChanged,
@@ -1029,9 +1069,10 @@ class _ChatPageState extends State<ChatPage> {
       );
 
       final reference = _pendingReference;
-      final effectiveText = reference == null || text.isEmpty
-          ? text
-          : '[${reference.kind == 'listing' ? '引用商品' : '引用帖子'}：${reference.title} (${reference.refId})]\n\n$text';
+      final referencePrefix = reference == null
+          ? ''
+          : '[${reference.kind == 'listing' ? '引用商品' : '引用帖子'}：${reference.title} (${reference.refId})]\n\n';
+      final effectiveText = '$referencePrefix$text';
 
       final userMsg = ChatMessage(
         sender: 'user',
@@ -1246,14 +1287,16 @@ class _ChatPageState extends State<ChatPage> {
         ),
       );
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_messageListController.hasClients &&
-          _messageListController.position.maxScrollExtent > 0) {
-        _messageListController.jumpTo(
-          _messageListController.position.maxScrollExtent,
-        );
-      }
-    });
+    if (_pinnedToBottom) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_messageListController.hasClients &&
+            _messageListController.position.maxScrollExtent > 0) {
+          _messageListController.jumpTo(
+            _messageListController.position.maxScrollExtent,
+          );
+        }
+      });
+    }
     return ListView.builder(
       key: const Key('assistant-message-list'),
       controller: _messageListController,
@@ -1387,6 +1430,7 @@ class _ChatPageState extends State<ChatPage> {
   Widget _buildQuickSuggestionChips() {
     final l = AppLocalizations.of(context)!;
     final chips = [
+      ..._skillChips.take(3),
       l.assistantSuggestionVehicles,
       l.assistantSuggestionTextbooks,
       l.assistantSuggestionGadgets,
@@ -2106,6 +2150,7 @@ class _ReferencePickerSheetState extends State<_ReferencePickerSheet> {
   final TextEditingController _searchController = TextEditingController();
   List<post.CampusPost>? _results;
   bool _searching = false;
+  int _searchGeneration = 0;
   String? _error;
 
   @override
@@ -2121,12 +2166,20 @@ class _ReferencePickerSheetState extends State<_ReferencePickerSheet> {
   }
 
   Future<void> _loadRecent() async {
+    final generation = ++_searchGeneration;
     final posts = await Future.wait([
       for (final id in widget.recentIds.take(6)) _safeLoad(id),
     ]);
+    if (!mounted ||
+        generation != _searchGeneration ||
+        _searchController.text.isNotEmpty) {
+      return;
+    }
     final loaded = posts.whereType<post.CampusPost>().toList(growable: false);
-    if (!mounted || _searchController.text.isNotEmpty) return;
-    setState(() => _results = loaded);
+    setState(() {
+      _results = loaded;
+      _error = null;
+    });
   }
 
   Future<post.CampusPost?> _safeLoad(String id) async {
@@ -2139,7 +2192,15 @@ class _ReferencePickerSheetState extends State<_ReferencePickerSheet> {
 
   Future<void> _runSearch(String query) async {
     final trimmed = query.trim();
+    final generation = ++_searchGeneration;
     if (trimmed.isEmpty) {
+      // Reset spinner/error synchronously so clearing the field never shows
+      // stale search state while "recent" reloads.
+      setState(() {
+        _searching = false;
+        _results = null;
+        _error = null;
+      });
       await _loadRecent();
       return;
     }
@@ -2152,13 +2213,13 @@ class _ReferencePickerSheetState extends State<_ReferencePickerSheet> {
         search: trimmed,
         limit: 12,
       );
-      if (!mounted) return;
+      if (!mounted || generation != _searchGeneration) return;
       setState(() {
         _results = response.items;
         _searching = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _searchGeneration) return;
       setState(() {
         _searching = false;
         _error = error.toString();

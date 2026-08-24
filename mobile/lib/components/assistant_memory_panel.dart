@@ -29,6 +29,10 @@ class AssistantMemoryPanel extends StatefulWidget {
   State<AssistantMemoryPanel> createState() => _AssistantMemoryPanelState();
 }
 
+/// Copy-paste-safe import sample (half-width JSON punctuation only).
+const String kSkillImportExample =
+    '[{"name": "砍价助手", "instructions": "帮我用友善语气砍价", "chip_label": "帮我砍价"}]';
+
 class _AssistantMemoryPanelState extends State<AssistantMemoryPanel> {
   late final CompanionMemoryService _service =
       widget.service ?? CompanionMemoryService();
@@ -297,7 +301,9 @@ class _AssistantMemoryPanelState extends State<AssistantMemoryPanel> {
                     Expanded(child: _buildSectionTitle(l.memoriesListTitle)),
                     TextButton.icon(
                       key: const Key('memory-clear-all'),
-                      onPressed: _memories.isEmpty ? null : _clearMemories,
+                      // Session memory can exist without long-term entries,
+                      // so clearing must stay reachable either way.
+                      onPressed: _clearMemories,
                       icon: const Icon(Icons.delete_sweep_outlined, size: 18),
                       label: Text(l.memoryClearAllAction),
                       style: TextButton.styleFrom(
@@ -397,7 +403,7 @@ class _AssistantMemoryPanelState extends State<AssistantMemoryPanel> {
                   minLines: 3,
                   maxLines: 6,
                   decoration: InputDecoration(
-                    hintText: l.skillsImportHint,
+                    hintText: l.skillsImportHint(kSkillImportExample),
                     border: const OutlineInputBorder(),
                   ),
                 ),

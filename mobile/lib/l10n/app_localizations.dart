@@ -1253,8 +1253,8 @@ abstract class AppLocalizations {
   /// Example JSON payload shown as hint text
   ///
   /// In en, this message translates to:
-  /// **'[｛\"name\": \"Bargain helper\", \"instructions\": \"Negotiate politely\", \"chip_label\": \"Bargain\"｝]'**
-  String get skillsImportHint;
+  /// **'A JSON array in the form {example}'**
+  String skillsImportHint(Object example);
 
   /// No description provided for @skillsImportAction.
   ///

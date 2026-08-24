@@ -112,54 +112,79 @@ final GoRouter appRouter = GoRouter(
     ShellRoute(
       builder: (context, state, child) => _ShellScaffold(child: child),
       routes: [
-        GoRoute(path: '/trust', builder: (context, state) => const TrustPage()),
+        GoRoute(
+          path: '/trust',
+          pageBuilder: (context, state) =>
+              const NoTransitionPage(child: TrustPage()),
+        ),
         GoRoute(
           path: '/settings',
-          builder: (context, state) => const SettingsPage(),
+          pageBuilder: (context, state) =>
+              const NoTransitionPage(child: SettingsPage()),
         ),
-        GoRoute(path: '/admin', builder: (context, state) => const AdminPage()),
+        GoRoute(
+          path: '/admin',
+          pageBuilder: (context, state) =>
+              const NoTransitionPage(child: AdminPage()),
+        ),
         GoRoute(
           path: '/watchlist',
-          builder: (context, state) => const WatchlistPage(),
+          pageBuilder: (context, state) =>
+              const NoTransitionPage(child: WatchlistPage()),
         ),
         GoRoute(
           path: '/notifications',
-          builder: (context, state) => const NotificationsPage(),
+          pageBuilder: (context, state) =>
+              const NoTransitionPage(child: NotificationsPage()),
         ),
         GoRoute(
           path: '/moderation',
-          builder: (context, state) => const ModerationCasesPage(),
+          pageBuilder: (context, state) =>
+              const NoTransitionPage(child: ModerationCasesPage()),
         ),
         GoRoute(
           path: '/listing/:id/discussion',
-          builder: (context, state) {
+          pageBuilder: (context, state) {
             final id = state.pathParameters['id']!;
-            return PostDetailPage(listingId: id);
+            return NoTransitionPage(
+              key: state.pageKey,
+              child: PostDetailPage(listingId: id),
+            );
           },
         ),
         GoRoute(
           path: '/listing/:id',
-          builder: (context, state) {
+          pageBuilder: (context, state) {
             final id = state.pathParameters['id']!;
-            return ListingDetailPage(listingId: id);
+            return NoTransitionPage(
+              key: state.pageKey,
+              child: ListingDetailPage(listingId: id),
+            );
           },
         ),
         GoRoute(
           path: '/posts/:id',
-          builder: (context, state) {
+          pageBuilder: (context, state) {
             final id = state.pathParameters['id']!;
-            return PostDetailPage(postId: id);
+            return NoTransitionPage(
+              key: state.pageKey,
+              child: PostDetailPage(postId: id),
+            );
           },
         ),
         GoRoute(
           path: '/live2d-preview',
-          builder: (context, state) => const Live2DPreviewPage(),
+          pageBuilder: (context, state) =>
+              const NoTransitionPage(child: Live2DPreviewPage()),
         ),
         GoRoute(
           path: '/orders/:id',
-          builder: (context, state) {
+          pageBuilder: (context, state) {
             final id = state.pathParameters['id']!;
-            return OrderDetailPage(orderId: id);
+            return NoTransitionPage(
+              key: state.pageKey,
+              child: OrderDetailPage(orderId: id),
+            );
           },
         ),
         GoRoute(
@@ -272,10 +297,7 @@ final GoRouter appRouter = GoRouter(
           pageBuilder: (context, state) =>
               const NoTransitionPage(child: HomePage()),
         ),
-        GoRoute(
-          path: '/',
-          redirect: (context, state) => '/agent',
-        ),
+        GoRoute(path: '/', redirect: (context, state) => '/agent'),
         GoRoute(
           path: '/messages',
           pageBuilder: (context, state) =>
@@ -333,7 +355,8 @@ final GoRouter appRouter = GoRouter(
         ),
         GoRoute(
           path: '/my-posts',
-          builder: (context, state) => const MyPostsPage(),
+          pageBuilder: (context, state) =>
+              const NoTransitionPage(child: MyPostsPage()),
         ),
         GoRoute(
           path: '/my-listings',

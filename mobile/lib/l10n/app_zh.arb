@@ -227,7 +227,10 @@
   "skillMissingFields": "请填写技能名称与指令",
   "skillSavedToast": "技能已保存",
   "skillsImportTitle": "导入技能（JSON）",
-  "skillsImportHint": "［｛＂name＂：＂砍价助手＂，＂instructions＂：＂帮我用友善语气砍价＂，＂chip_label＂：＂帮我砍价＂｝］ 的 JSON 数组",
+  "skillsImportHint": "{example} 形式的 JSON 数组",
+  "@skillsImportHint": {
+    "description": "Example JSON payload shown as hint text"
+  },
   "skillsImportAction": "导入",
   "skillsImported": "已导入 {count} 个技能",
   "skillImportBadJson": "JSON 格式不正确",
@@ -1525,8 +1528,5 @@
   "postEmptyTitle": "这里还没有内容",
   "postEmptyBody": "发起一个有用的校园讨论，和同学一起把楼盖起来吧。",
   "postEmptyListingBody": "暂时没有符合筛选条件的商品帖子。",
-  "postStartAction": "发起讨论",
-  "@skillsImportHint": {
-    "description": "Example JSON payload shown as hint text"
-  }
+  "postStartAction": "发起讨论"
 }
