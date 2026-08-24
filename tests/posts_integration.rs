@@ -501,7 +501,7 @@ async fn listings_are_references_and_marketplace_filters_follow_category() {
                 category: "offer".to_string(),
                 title: "出二手显示器，可小刀".to_string(),
                 body: "自提优先，宿舍楼下交易。".to_string(),
-                tags: vec!["likeNew".to_string(), "negotiable".to_string()],
+                tags: vec!["pickupOnly".to_string(), "negotiable".to_string()],
                 cover_image_url: None,
                 listing_id: Some(listing_id.clone()),
                 space_id: None,
