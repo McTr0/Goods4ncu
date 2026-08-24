@@ -228,9 +228,7 @@ void main() {
     expect(find.text('assistant post-1'), findsOneWidget);
   });
 
-  testWidgets('canonicalizes a listing post link to the unified listing page', (
-    tester,
-  ) async {
+  testWidgets('renders a listing-bound post as a normal thread', (tester) async {
     final postService = _ListingPostService();
     final router = GoRouter(
       initialLocation: '/posts/listing-post-1',
@@ -264,8 +262,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Canonical listing listing-1'), findsOneWidget);
-    expect(router.state.uri.path, '/listing/listing-1');
+    // The thread renders inline; no redirect to the marketplace page.
+    expect(find.text('Desk lamp'), findsOneWidget);
+    expect(router.state.uri.path, '/posts/listing-post-1');
   });
 
   testWidgets('loads replies in stable pages instead of dropping floor 51', (

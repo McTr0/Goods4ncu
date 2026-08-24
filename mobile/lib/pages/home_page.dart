@@ -117,11 +117,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _openPost(CampusPost post) {
-    final listingId = post.listingId;
-    final location = post.category != 'discussion' && listingId != null
-        ? '/listing/${Uri.encodeComponent(listingId)}'
-        : '/posts/${Uri.encodeComponent(post.id)}';
-    context.push(location);
+    // Every post — goods included — opens the unified thread view.
+    context.push('/posts/${Uri.encodeComponent(post.id)}');
   }
 
   bool get _feedIsEmpty => _posts.isEmpty;

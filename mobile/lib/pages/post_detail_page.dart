@@ -128,18 +128,6 @@ class _PostDetailPageState extends State<PostDetailPage> {
       }
       if (!mounted || generation != _loadGeneration) return;
 
-      // A marketplace listing has one canonical detail hierarchy. Legacy
-      // links to its post projection resolve to the listing page, whose body
-      // contains this same thread inline. A plain MaterialApp (for example a
-      // widget test or an isolated embed) has no router and retains the local
-      // thread rendering as a safe fallback.
-      final router = widget.embedded ? null : GoRouter.maybeOf(context);
-      if (post.category != 'discussion' &&
-          post.listingId != null &&
-          router != null) {
-        router.go('/listing/${Uri.encodeComponent(post.listingId!)}');
-        return;
-      }
       setState(() {
         _post = post;
         _listing = listing;

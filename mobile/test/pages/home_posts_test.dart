@@ -201,7 +201,7 @@ void main() {
     );
   });
 
-  testWidgets('opens a listing post in its canonical marketplace detail', (
+  testWidgets('opens a listing-bound card in the unified thread view', (
     tester,
   ) async {
     final posts = _FakePostService(
@@ -216,16 +216,6 @@ void main() {
             'reply_count': 0,
             'status': 'active',
             'is_locked': false,
-            'listing': {
-              'id': 'listing-route',
-              'title': 'Calculus textbook',
-              'category': 'books',
-              'brand': 'Pearson',
-              'direction': 'offer',
-              'condition_score': 8,
-              'suggested_price_cny': 25,
-              'status': 'active',
-            },
           }),
         ],
         total: 1,
@@ -243,9 +233,9 @@ void main() {
           ),
         ),
         GoRoute(
-          path: '/listing/:id',
+          path: '/posts/:id',
           builder: (context, state) =>
-              Text('canonical listing ${state.pathParameters['id']}'),
+              Text('thread ${state.pathParameters['id']}'),
         ),
       ],
     );
@@ -266,7 +256,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('canonical listing listing-route'), findsOneWidget);
+    expect(find.text('thread post-listing-route'), findsOneWidget);
   });
 
   testWidgets('searches the unified post feed and can clear the query', (

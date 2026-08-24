@@ -99,11 +99,7 @@ class _MyPostsPageState extends State<MyPostsPage> {
   Future<void> _postServiceDelete(String id) => _postService.deletePost(id);
 
   void _openPost(CampusPost post) {
-    if (post.category != 'discussion' && post.listingId != null) {
-      context.push('/listing/${Uri.encodeComponent(post.listingId!)}');
-    } else {
-      context.push('/posts/${Uri.encodeComponent(post.id)}');
-    }
+    context.push('/posts/${Uri.encodeComponent(post.id)}');
   }
 
   String _statusLabel(AppLocalizations l, String status) => switch (status) {
