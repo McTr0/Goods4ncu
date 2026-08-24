@@ -216,7 +216,7 @@ void main() {
     expect(find.text('AI 助手'), findsNothing);
     expect(find.text('上次我们聊到高数教材。'), findsNothing);
     expect(find.byTooltip('问小昌'), findsNothing);
-    expect(find.text('校园发现'), findsOneWidget);
+    expect(find.text('发现'), findsOneWidget);
     expect(find.text('发布出 / 收'), findsNothing);
     expect(find.text('小昌'), findsNothing);
     expect(find.byTooltip('问小昌'), findsNothing);

@@ -713,7 +713,7 @@ abstract class AppLocalizations {
   /// No description provided for @homeTab.
   ///
   /// In en, this message translates to:
-  /// **'For You'**
+  /// **'Discover'**
   String get homeTab;
 
   /// No description provided for @language.
@@ -5787,7 +5787,7 @@ abstract class AppLocalizations {
   /// No description provided for @postDiscoveryTitle.
   ///
   /// In en, this message translates to:
-  /// **'Campus discovery'**
+  /// **'Discover'**
   String get postDiscoveryTitle;
 
   /// No description provided for @postDiscoverySubtitle.

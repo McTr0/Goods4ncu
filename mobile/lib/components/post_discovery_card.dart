@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:intl/intl.dart';
 
 import '../l10n/app_localizations.dart';
@@ -312,13 +313,26 @@ class _CardImageGalleryState extends State<_CardImageGallery> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        PageView.builder(
-          itemCount: images.length,
-          onPageChanged: (page) => setState(() => _page = page),
-          itemBuilder: (context, index) => Image.network(
-            images[index],
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => _PostCoverFallback(isListing: index > 0),
+        ScrollConfiguration(
+          // Flutter web ignores mouse drags by default; the gallery must be
+          // swipeable with a desktop pointer too.
+          behavior: ScrollConfiguration.of(context).copyWith(
+            dragDevices: const {
+              PointerDeviceKind.mouse,
+              PointerDeviceKind.touch,
+              PointerDeviceKind.stylus,
+              PointerDeviceKind.trackpad,
+            },
+          ),
+          child: PageView.builder(
+            itemCount: images.length,
+            onPageChanged: (page) => setState(() => _page = page),
+            itemBuilder: (context, index) => Image.network(
+              images[index],
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) =>
+                  _PostCoverFallback(isListing: index > 0),
+            ),
           ),
         ),
         if (images.length > 1)

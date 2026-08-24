@@ -335,7 +335,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get fromGallery => 'From gallery';
 
   @override
-  String get homeTab => 'For You';
+  String get homeTab => 'Discover';
 
   @override
   String get language => 'Language';
@@ -3147,7 +3147,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get assistantConfirmSendReply => 'Confirm posting reply';
 
   @override
-  String get postDiscoveryTitle => 'Campus discovery';
+  String get postDiscoveryTitle => 'Discover';
 
   @override
   String get postDiscoverySubtitle =>

@@ -524,8 +524,8 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
               onDestinationSelected: selectDestination,
               destinations: [
                 NavigationDestination(
-                  icon: const Icon(Icons.home_outlined),
-                  selectedIcon: const Icon(Icons.home_rounded),
+                  icon: const Icon(Icons.explore_outlined),
+                  selectedIcon: const Icon(Icons.explore_rounded),
                   label: l.homeTab,
                 ),
                 NavigationDestination(
@@ -617,8 +617,8 @@ class _DesktopNavigation extends StatelessWidget {
           ),
           destinations: [
             NavigationRailDestination(
-              icon: const Icon(Icons.home_outlined),
-              selectedIcon: const Icon(Icons.home_rounded),
+              icon: const Icon(Icons.explore_outlined),
+              selectedIcon: const Icon(Icons.explore_rounded),
               label: Text(labels[0]),
             ),
             NavigationRailDestination(

@@ -319,7 +319,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get fromGallery => '相册';
 
   @override
-  String get homeTab => '推荐';
+  String get homeTab => '发现';
 
   @override
   String get language => '语言';
@@ -3005,7 +3005,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get assistantConfirmSendReply => '确认发送回复';
 
   @override
-  String get postDiscoveryTitle => '校园发现';
+  String get postDiscoveryTitle => '发现';
 
   @override
   String get postDiscoverySubtitle => '同校同学的讨论和闲置帖子';
