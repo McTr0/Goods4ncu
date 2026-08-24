@@ -7,7 +7,7 @@
 -- the chat composer area.
 CREATE TABLE IF NOT EXISTS user_agent_skills (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     instructions TEXT NOT NULL,
     chip_label TEXT,
