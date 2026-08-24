@@ -1,6 +1,6 @@
 # Companion Runtime — Current State Audit
 
-> last-verified: 2026-08-23
+> last-verified: 2026-08-24
 
 
 > Phase 0 of the Companion master goal. Facts on the ground as of 2026-08-22,
@@ -59,7 +59,6 @@ no relationship, no event bus, no proactive engine, no turn-taking/barge-in.
 - Playback: whole-file `audioplayers`; no chunked/Web-Audio streaming.
 
 ### Debug surface
-- `?agentDebug=true` overlay on the assistant page: page context, character
   state, emotion label, current tool, tool-call log, UI actions, pending
   confirmations, first-token/turn latency.
 

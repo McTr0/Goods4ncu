@@ -30,7 +30,6 @@ import '../companion/runtime_host.dart';
 import '../companion/attention.dart';
 import '../companion/state_machine.dart';
 import 'package:provider/provider.dart' as p2;
-import '../components/agent_debug_panel.dart';
 import '../components/assistant_markdown.dart';
 import '../components/live2d/live2d_character_widget.dart';
 import '../components/live2d/live2d_controller.dart';
@@ -103,19 +102,6 @@ class _ChatPageState extends State<ChatPage> {
   final ScrollController _messageListController = ScrollController();
   String? _focusedAgentPostId;
   Timer? _undoTicker;
-
-  // Agent debug overlay observability buffers. The flag may sit before or
-  // after the hash-router fragment, so match the full URL instead of
-  // Uri.base.queryParameters (which only sees the pre-# query).
-  final bool _agentDebugEnabled = Uri.base.toString().contains(
-    'agentDebug=true',
-  );
-  final List<String> _debugToolCalls = [];
-  final List<String> _debugUiActions = [];
-  String? _lastToolActivity;
-  DateTime? _turnStartedAt;
-  Duration? _firstTokenLatency;
-  Duration? _lastTurnLatency;
 
   StreamSubscription? _wsSubscription;
 
@@ -312,9 +298,6 @@ class _ChatPageState extends State<ChatPage> {
     final type = action['type'] as String?;
     final payload = action['payload'] as Map<String, dynamic>?;
     if (payload == null) return;
-    if (_agentDebugEnabled) {
-      _recordDebugUiAction(type, payload);
-    }
     switch (type) {
       case 'SHOW_POSTS' || 'SHOW_RELATED_POSTS':
         final ids = payload['postIds'];
@@ -386,27 +369,6 @@ class _ChatPageState extends State<ChatPage> {
       default:
         return l.agentToolWorking;
     }
-  }
-
-  void _recordDebugToolCall(String tool) {
-    _debugToolCalls.add('${_debugClock()} $tool');
-    if (_debugToolCalls.length > 20) _debugToolCalls.removeAt(0);
-  }
-
-  void _recordDebugUiAction(String? type, Map<String, dynamic> payload) {
-    final detail = payload.entries
-        .take(2)
-        .map((entry) => '${entry.key}=${entry.value}')
-        .join(' ');
-    _debugUiActions.add('${type ?? 'UNKNOWN'} $detail');
-    if (_debugUiActions.length > 20) _debugUiActions.removeAt(0);
-  }
-
-  String _debugClock() {
-    final now = DateTime.now();
-    String two(int value) => value.toString().padLeft(2, '0');
-    return '${two(now.hour)}:${two(now.minute)}:'
-        '${two(now.second)}.${now.millisecond.toString().padLeft(3, '0')}';
   }
 
   Future<void> _loadAgentResultPosts(
@@ -1100,13 +1062,6 @@ class _ChatPageState extends State<ChatPage> {
       // Connect SSE stream with timeout.
       final proposalIdempotencyKey = _uuid.v4();
       bool connected;
-      if (_agentDebugEnabled) {
-        setState(() {
-          _turnStartedAt = DateTime.now();
-          _firstTokenLatency = null;
-          _lastTurnLatency = null;
-        });
-      }
       try {
         await _sseService
             .connect(
@@ -1174,8 +1129,6 @@ class _ChatPageState extends State<ChatPage> {
           _environmentTracker?.track(
             EnvironmentEvent(EnvironmentEventType.postListUpdated),
           );
-          setState(() => _lastToolActivity = activity);
-          if (_agentDebugEnabled) _recordDebugToolCall(activity);
           // Surface a friendly progress line until real reply text arrives.
           if (fullReply.isEmpty) {
             final label = _toolActivityLabel(
@@ -1188,11 +1141,6 @@ class _ChatPageState extends State<ChatPage> {
         if (!companionSawFirstToken && token.token.isNotEmpty) {
           companionSawFirstToken = true;
           _companionOnFirstToken();
-        }
-        if (token.token.isNotEmpty &&
-            _firstTokenLatency == null &&
-            _turnStartedAt != null) {
-          _firstTokenLatency = DateTime.now().difference(_turnStartedAt!);
         }
         _lipSyncDriver.feedStreamingChunk(token.token);
         if (_useLegacyBrain) {
@@ -1216,9 +1164,6 @@ class _ChatPageState extends State<ChatPage> {
       );
       if (relationshipEvent != null) {
         _recordRelationshipEvent(relationshipEvent);
-      }
-      if (_turnStartedAt != null) {
-        _lastTurnLatency = DateTime.now().difference(_turnStartedAt!);
       }
       if (_useLegacyBrain) {
         _live2DController.brain.onResponseComplete(
@@ -1788,26 +1733,7 @@ class _ChatPageState extends State<ChatPage> {
         ),
       ],
     );
-    if (!_agentDebugEnabled) return page;
-    return Stack(
-      children: [
-        page,
-        Positioned(
-          top: 12,
-          right: 12,
-          child: AgentDebugPanel(
-            brain: _live2DController.brain,
-            pageContext: _buildPageContext(),
-            toolCalls: _debugToolCalls,
-            uiActions: _debugUiActions,
-            pendingConfirmations: _hitlRequests.length + _agentPlans.length,
-            currentTool: _lastToolActivity,
-            firstTokenLatency: _firstTokenLatency,
-            lastTurnLatency: _lastTurnLatency,
-          ),
-        ),
-      ],
-    );
+    return page;
   }
 
   void _applyAssistantPrompt(String prompt) {

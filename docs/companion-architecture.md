@@ -1,6 +1,6 @@
 # Companion Architecture
 
-> last-verified: 2026-08-23
+> last-verified: 2026-08-24
 
 
 The companion is a **runtime**, not a chat window: a persistent Dart-side
@@ -21,7 +21,7 @@ agency around the existing campus marketplace.
              │           │           │
              └───────────┼───────────┘
                          ▼
-                  CompanionEventBus ──► Timeline Debugger (/companion/timeline)
+                  CompanionEventBus ──► (timeline debugger removed 2026-08-24)
                          │
                  CompanionRuntimeHost
               machine · emotions · attention

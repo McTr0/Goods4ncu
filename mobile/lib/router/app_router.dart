@@ -10,9 +10,6 @@ import '../pages/my_listings_page.dart';
 import '../pages/my_posts_page.dart';
 import '../pages/profile_page.dart';
 import '../pages/chat_page.dart';
-import '../pages/companion_debug_console.dart';
-import '../pages/companion_timeline_page.dart';
-import '../companion/companion_config.dart';
 import '../pages/conversation_list_page.dart';
 import '../pages/user_chat_page.dart';
 import '../pages/user_home_page.dart';
@@ -109,16 +106,6 @@ final GoRouter appRouter = GoRouter(
   },
   routes: [
     GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
-    if (kCompanionEnabled) ...[
-      GoRoute(
-        path: '/companion/debug',
-        builder: (context, state) => const CompanionDebugConsole(),
-      ),
-      GoRoute(
-        path: '/companion/timeline',
-        builder: (context, state) => const CompanionTimelinePage(),
-      ),
-    ],
     ShellRoute(
       builder: (context, state, child) => _ShellScaffold(child: child),
       routes: [

@@ -18,8 +18,6 @@
 
 ## 打开方式
 
-- 助手页：`http://localhost:3001/?agentDebug=true#/chat`（或直接点助手页右上角的 🐞 图标进入 `/companion/debug`）
-- 另开标签：Timeline `http://localhost:3001/#/companion/timeline`
 - 关系态重置（可选，演示"初次见面"）：
   ```bash
   psql "$DATABASE_URL" -c "DELETE FROM companion_relationships WHERE user_id='b0000000-0000-0000-0000-000000000001';"
@@ -37,7 +35,6 @@
 | 6 | 「帮我问问周末能不能面交」 | 出现 发送/编辑/取消 确认卡；**点取消前** chat_messages 无新增记录 |
 | 7 | 点【取消】 | timeline 出现 draftCancelled；关系事件 user_cancels_action 已记录 |
 | 8 | （观察）等待 ~30s 不操作 | idle 微动作持续（blink/sway），不冻结、不说话 |
-| 9 | `/companion/timeline` | 完整事件时间线含 interruptLatencyMs 字段位（若触发过打断） |
 
 ## Barge-in 专项（语音可用时）
 

@@ -44,7 +44,7 @@ Live2D AI companion. Runtime lives in `mobile/lib/companion/`; persona layers in
 
 - Flags: `AGENT_ENABLED` (server AI endpoints), `COMPANION_ENABLED` (dart-define, runtime shell). Both off ⇒ plain marketplace.
 - Tests: `flutter test test/companion` (unit) — full gates per repo rules.
-- Architecture, subsystem docs, and debugging routes (`/companion/debug`, `/companion/timeline`): see **docs/companion-architecture.md** and the linked companion-* documents.
+- Architecture and subsystem docs: see **docs/companion-architecture.md** and the linked companion-* documents. (Frontend debug surfaces — `/companion/debug`, `/companion/timeline`, `?agentDebug=true` overlay — were removed 2026-08-24; debug via server structured logs / agent_runs.)
 - Rule of thumb: when touching `mobile/lib/companion/**` or agent prompt assembly, update the matching companion doc and refresh its `last-verified:` line.
 
 ## Testing Guidelines
