@@ -173,10 +173,7 @@ class _UserHomePageState extends State<UserHomePage> {
 
   void _openChatHistory() {
     if (_isSelfProfile) return;
-    context.pushNamed(
-      'dm-peer',
-      pathParameters: {'peerUserId': widget.userId},
-    );
+    context.pushNamed('dm-peer', pathParameters: {'peerUserId': widget.userId});
   }
 
   bool get _canReportUser =>
