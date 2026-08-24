@@ -748,21 +748,16 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             get(posts::list_posts).post(posts::create_post),
         )
         .route("/api/posts/categories", get(posts::list_categories))
-        .route(
-            "/api/posts/{id}/fertilize",
-            post(camphor::fertilize_post),
-        )
-        .route(
-            "/api/camphor",
-            get(camphor::get_balance),
-        )
+        .route("/api/posts/{id}/fertilize", post(camphor::fertilize_post))
+        .route("/api/camphor", get(camphor::get_balance))
         .route(
             "/api/posts/by-listing/{listing_id}",
             get(posts::get_post_by_listing),
         )
         .route(
             "/api/posts/{id}",
-            get(posts::get_post).post(camphor::fertilize_post)
+            get(posts::get_post)
+                .post(camphor::fertilize_post)
                 .put(posts::update_post)
                 .delete(posts::delete_post),
         )

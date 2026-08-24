@@ -22,7 +22,11 @@ impl CamphorService {
     /// Settle today's login grant. Idempotent: the partial unique index
     /// swallows duplicate inserts, so calling this on every request is safe.
     /// Returns the balance after settlement.
-    pub async fn settle_daily_grant(&self, campus_id: Uuid, user_id: &str) -> Result<i64, ApiError> {
+    pub async fn settle_daily_grant(
+        &self,
+        campus_id: Uuid,
+        user_id: &str,
+    ) -> Result<i64, ApiError> {
         let result = sqlx::query(
             "INSERT INTO camphor_ledger (campus_id, user_id, amount, reason)
              VALUES ($1, $2, 1, 'daily_grant')

@@ -7,7 +7,6 @@ use goods4ncu::api::{create_router, ApiAgents, ApiInfrastructure, ApiSecrets, Ap
 use goods4ncu::services::notification::NotificationService;
 use goods4ncu::test_infra::with_test_pool;
 use serde_json::{json, Value};
-use sqlx::Row;
 use std::sync::Arc;
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -73,7 +72,8 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
             db: pool.clone(),
             event_tx,
             rate_limit: {
-                let factory = goods4ncu::middleware::rate_limit::RateLimiterFactory::new(10_000, 60);
+                let factory =
+                    goods4ncu::middleware::rate_limit::RateLimiterFactory::new(10_000, 60);
                 goods4ncu::middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
             },
             notification: NotificationService::new(pool.clone()),
@@ -108,11 +108,7 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
     }
 }
 
-async fn create_discussion_post(
-    app: &axum::Router,
-    token: &str,
-    title: &str,
-) -> String {
+async fn create_discussion_post(app: &axum::Router, token: &str, title: &str) -> String {
     let request = Request::builder()
         .method("POST")
         .uri("/api/posts")
@@ -151,12 +147,11 @@ async fn daily_grant_settles_once_and_reports_balance() {
         }
 
         // Exactly one ledger row despite three calls.
-        let grants: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM camphor_ledger WHERE reason = 'daily_grant'",
-        )
-        .fetch_one(&pool)
-        .await
-        .expect("count");
+        let grants: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM camphor_ledger WHERE reason = 'daily_grant'")
+                .fetch_one(&pool)
+                .await
+                .expect("count");
         assert_eq!(grants, 1);
     })
     .await;

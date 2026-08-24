@@ -11,12 +11,6 @@ use crate::api::session::VerifiedTenant;
 use crate::api::AppState;
 use crate::services::camphor::CamphorService;
 
-#[derive(Debug, Serialize)]
-pub struct CamphorBalanceView {
-    pub balance: i64,
-    pub granted_today: bool,
-}
-
 /// GET /api/camphor — balance; also settles today's login grant.
 pub async fn get_balance(
     State(state): State<AppState>,

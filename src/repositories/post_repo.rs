@@ -230,6 +230,9 @@ impl PostgresPostRepository {
            listing.condition_score AS listing_condition_score,
            listing.suggested_price_cny AS listing_suggested_price_cny,
            listing.status AS listing_status,
+           CASE WHEN listing.images_moderation_status = 'approved' OR
+                     listing.images_moderation_status IS NULL
+                THEN listing.image_url ELSE NULL END AS listing_image_url,
            listing.created_at AS listing_created_at"#
     }
 
@@ -847,7 +850,7 @@ fn post_from_row(row: &PgRow) -> Post {
         condition_score: row.get("listing_condition_score"),
         suggested_price_cny: row.get("listing_suggested_price_cny"),
         status: row.get("listing_status"),
-        image_url: cover_image_url.clone(),
+        image_url: row.try_get("listing_image_url").ok().flatten(),
         created_at: row.get("listing_created_at"),
     });
     Post {
