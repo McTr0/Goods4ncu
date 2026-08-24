@@ -84,6 +84,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
   final _goodsBrandController = TextEditingController();
   double _conditionScore = 8;
   final _goodsPriceController = TextEditingController();
+  String? _goodsCategory;
 
   @override
   void initState() {
@@ -166,10 +167,18 @@ class _CreatePostPageState extends State<CreatePostPage> {
 
       final tags = _selectedTags.toList(growable: false);
       String? listingId;
+      if (_needsGoods && _goodsCategory == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('请先选择商品分区')));
+        setState(() => _submitting = false);
+        return;
+      }
       if (_needsGoods) {
         listingId = await _listingService.createListing(
           title: _titleController.text.trim(),
-          category: 'other',
+          category: _goodsCategory!,
           brand: _goodsBrandController.text.trim(),
           conditionScore: _conditionScore.round(),
           suggestedPriceCny:
@@ -413,6 +422,20 @@ class _CreatePostPageState extends State<CreatePostPage> {
     );
   }
 
+  Future<void> _pickGoodsCategory() async {
+    final selected = await showSearchablePickerSheet<String>(
+      context: context,
+      title: '选择商品分区（必填）',
+      options: [
+        for (final key in _listingCategoryKeys)
+          PickerOption(value: key, label: localizedCategoryLabel(context, key)),
+      ],
+      initiallySelected: [?_goodsCategory],
+    );
+    if (selected == null || selected.isEmpty || !mounted) return;
+    setState(() => _goodsCategory = selected.first);
+  }
+
   Widget _buildGoodsSection(AppLocalizations l) {
     return Container(
       padding: const EdgeInsets.all(AppTheme.sp16),
@@ -428,17 +451,30 @@ class _CreatePostPageState extends State<CreatePostPage> {
             style: const TextStyle(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: AppTheme.sp12),
-          DropdownButtonFormField<String>(
-            initialValue: 'other',
-            decoration: InputDecoration(labelText: '${l.category} *'),
-            items: [
-              for (final key in _listingCategoryKeys)
-                DropdownMenuItem(
-                  value: key,
-                  child: Text(localizedCategoryLabel(context, key)),
+          InkWell(
+            key: const ValueKey('publish-goods-category-picker'),
+            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+            onTap: _submitting ? null : _pickGoodsCategory,
+            child: InputDecorator(
+              decoration: InputDecoration(
+                labelText: '${l.category} *',
+                helperText: '必填：选择商品分区',
+                suffixIcon: const Icon(Icons.expand_more_rounded),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppTheme.radiusMd),
                 ),
-            ],
-            onChanged: (_) {},
+              ),
+              child: Text(
+                _goodsCategory == null
+                    ? '请选择分区'
+                    : localizedCategoryLabel(context, _goodsCategory!),
+                style: TextStyle(
+                  color: _goodsCategory == null
+                      ? Theme.of(context).hintColor
+                      : null,
+                ),
+              ),
+            ),
           ),
           const SizedBox(height: AppTheme.sp12),
           TextFormField(
