@@ -1116,9 +1116,14 @@ class _SpaceChatPageState extends State<SpaceChatPage> {
             icon: const Icon(Icons.article_outlined),
             onPressed: space == null
                 ? null
-                : () => context.push(
-                    '/spaces/${widget.spaceId}/posts?name=${Uri.encodeComponent(space!.displayName(l) ?? '')}',
-                  ),
+                : () async {
+                    final name = Uri.encodeComponent(
+                      space.displayName(l) ?? '',
+                    );
+                    await context.push(
+                      '/spaces/${widget.spaceId}/posts?name=$name',
+                    );
+                  },
           ),
         ],
       ),

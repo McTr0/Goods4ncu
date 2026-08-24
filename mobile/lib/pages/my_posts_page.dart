@@ -3,7 +3,6 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../l10n/app_localizations.dart';
-import '../models/models.dart';
 import '../models/post.dart';
 import '../services/post_service.dart';
 import '../theme/app_theme.dart';

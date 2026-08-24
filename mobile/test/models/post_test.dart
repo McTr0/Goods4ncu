@@ -6,7 +6,6 @@ void main() {
   test('parses a discussion post and author projection', () {
     final post = CampusPost.fromJson({
       'id': 'post-1',
-      'post_type': 'discussion',
       'category': 'campus-life',
       'title': 'Where can I print tonight?',
       'body_excerpt': 'The library is closed.',
@@ -91,7 +90,6 @@ void main() {
   test('parses a server listing preview and ranking explanation', () {
     final post = CampusPost.fromJson({
       'id': 'post-listing-1',
-      'post_type': 'listing',
       'title': 'Calculus textbook',
       'body_excerpt': 'Used for one semester',
       'listing_id': 'listing-1',

@@ -1,18 +1,20 @@
+> last-verified: 2026-08-24
+
 # Posts API
 
-The posts domain adds LinuxDO-style topics and replies without replacing the
-marketplace API. A product listing is a special post subtype:
+Unified post structure (migration 0099/0100): one `posts` table covers
+出(offer) / 收(wanted) / 讨论(discussion). **`category` IS the kind.**
 
-- `inventory` remains authoritative for price, condition, direction and the
-  listing lifecycle.
-- every `inventory` row has exactly one `posts` row with
-  `post_type = "listing"` and `listing_id = inventory.id`;
-- a database trigger backfills and synchronizes the shared title, body,
-  category and visibility, including inventory writes from older workers;
-- clients continue to create and edit products through `/api/listings` and use
-  `/api/posts/by-listing/{listing_id}` to enter the discussion surface.
-
-This preserves all existing listing request and response shapes.
+- `post_type` / `post_kind` are gone; the inventory→post mirror trigger was
+  removed. Listings are optional references (`listing_id`, SET NULL on listing
+  delete) — a standalone listing has no post until someone writes one.
+- Tags must come from the curated `post_tag_catalog` (16 seeded keys) and
+  match the post's category. The special `errand` tag (offer/wanted only)
+  unlocks `errand_metadata` + the resolution lifecycle.
+- `space_id` scopes a post to one chat space: member-only visibility in feeds,
+  detail reads and replies; NULL means campus-wide.
+- Clients create goods inline: POST `/api/listings` first, then POST
+  `/api/posts` with the returned `listing_id`.
 
 ## Read endpoints
 
@@ -25,9 +27,8 @@ Query parameters:
 
 - `limit`: 1–50, default 20
 - `offset`: non-negative, default 0
-- `post_type`: `all`, `discussion`, or `listing`
-- `direction`: `all`, `offer`, or `wanted` (applies to listing posts)
-- `category`: exact category filter
+- `category`: `all`, `offer`, `wanted`, or `discussion`
+- `space_id`: group scoping (viewer must be an unbanned member)
 - `search`: title/body substring, up to 200 characters
 - `sort`: `active` (default), `latest`, `replies`, or `for_you`
 

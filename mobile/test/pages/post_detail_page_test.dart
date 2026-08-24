@@ -19,7 +19,6 @@ class _FakePostService extends PostService {
   final List<int> replyOffsets = [];
   final initialPost = CampusPost.fromJson({
     'id': 'post-1',
-    'post_type': 'discussion',
     'title': 'Where can I print tonight?',
     'body': 'Looking for a printer near campus.',
     'cover_image_url': 'https://cdn.test/printing.jpg',

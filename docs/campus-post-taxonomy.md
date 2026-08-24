@@ -1,3 +1,5 @@
+> last-verified: 2026-08-24 — taxonomy shipped: 3 fixed categories, curated tag catalog, errand as offer/wanted-only tag.
+
 # 校园帖子分类与关系设计
 
 校园发现流应该像一个完整社区，而不是“论坛旁边放了一个商城”。因此模型把
