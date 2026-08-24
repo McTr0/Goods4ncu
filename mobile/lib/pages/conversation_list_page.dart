@@ -9,7 +9,9 @@ import '../components/unified_message_composer.dart';
 import '../components/user_avatar.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
+import '../models/post.dart' as post_models;
 import '../services/chat_service.dart';
+import '../services/post_service.dart';
 import '../services/chat_local_seen_storage.dart';
 import '../services/user_service.dart';
 import '../services/ws_service.dart';
@@ -1107,6 +1109,18 @@ class _SpaceChatPageState extends State<SpaceChatPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(space?.displayName(l) ?? l.spaceFallbackTitle),
+        actions: [
+          IconButton(
+            key: const Key('space-posts-entry'),
+            tooltip: l.spacePostsTooltip,
+            icon: const Icon(Icons.article_outlined),
+            onPressed: space == null
+                ? null
+                : () => context.push(
+                    '/spaces/${widget.spaceId}/posts?name=${Uri.encodeComponent(space!.displayName(l) ?? '')}',
+                  ),
+          ),
+        ],
       ),
       body: Builder(
         builder: (context) {
@@ -2841,6 +2855,128 @@ class _HistoryFilterChip extends StatelessWidget {
       checkmarkColor: Colors.transparent,
       showCheckmark: false,
       visualDensity: VisualDensity.compact,
+    );
+  }
+}
+
+/// Group-scoped posts feed + publish entry (visibility = members only).
+class SpacePostsScreen extends StatefulWidget {
+  const SpacePostsScreen({
+    super.key,
+    required this.spaceId,
+    required this.spaceName,
+    this.postService,
+  });
+
+  final String spaceId;
+  final String spaceName;
+  final PostService? postService;
+
+  @override
+  State<SpacePostsScreen> createState() => _SpacePostsScreenState();
+}
+
+class _SpacePostsScreenState extends State<SpacePostsScreen> {
+  late final PostService _postService =
+      widget.postService ?? context.read<PostService>();
+  List<post_models.CampusPost> _posts = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final response = await _postService.getPosts(
+        category: 'all',
+        spaceId: widget.spaceId,
+        sort: 'active',
+      );
+      if (!mounted) return;
+      setState(() {
+        _posts = response.items;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context)!;
+    return Scaffold(
+      appBar: AppBar(title: Text(l.spacePostsTitle)),
+      floatingActionButton: FloatingActionButton.extended(
+        key: const ValueKey('space-post-create'),
+        onPressed: () async {
+          await context.push(
+            Uri(
+              path: '/publish',
+              queryParameters: {
+                'space_id': widget.spaceId,
+                'category': 'discussion',
+              },
+            ).toString(),
+          );
+          if (mounted) _load();
+        },
+        icon: const Icon(Icons.add_rounded),
+        label: Text(l.postCreateTitle),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+          ? Center(child: Text(_error!))
+          : _posts.isEmpty
+          ? Center(child: Text(l.myPostsEmpty))
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView.separated(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
+                itemCount: _posts.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final post = _posts[index];
+                  return Card(
+                    margin: EdgeInsets.zero,
+                    child: ListTile(
+                      key: ValueKey('space-post-${post.id}'),
+                      title: Text(
+                        post.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      subtitle: Text(
+                        post.displayBody,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: post.isErrand
+                          ? Chip(
+                              label: Text(l.publishErrandSwitch),
+                              visualDensity: VisualDensity.compact,
+                            )
+                          : null,
+                      onTap: () => context.push('/posts/${post.id}'),
+                    ),
+                  );
+                },
+              ),
+            ),
     );
   }
 }

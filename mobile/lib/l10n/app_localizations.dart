@@ -3990,6 +3990,18 @@ abstract class AppLocalizations {
   /// **'Group'**
   String get spaceKindGroup;
 
+  /// No description provided for @spacePostsTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Group posts'**
+  String get spacePostsTooltip;
+
+  /// No description provided for @spacePostsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Group posts'**
+  String get spacePostsTitle;
+
   /// No description provided for @spaceRoleOwner.
   ///
   /// In en, this message translates to:

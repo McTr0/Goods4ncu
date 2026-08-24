@@ -946,6 +946,8 @@
   },
   "spaceKindGroupLong": "校园讨论群",
   "spaceKindGroup": "群组",
+  "spacePostsTooltip": "群帖子",
+  "spacePostsTitle": "群帖子",
   "spaceRoleOwner": "创建者",
   "spaceRoleAdmin": "管理员",
   "spaceRoleBanned": "已限制",

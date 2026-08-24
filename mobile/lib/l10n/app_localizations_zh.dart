@@ -2047,6 +2047,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get spaceKindGroup => '群组';
 
   @override
+  String get spacePostsTooltip => '群帖子';
+
+  @override
+  String get spacePostsTitle => '群帖子';
+
+  @override
   String get spaceRoleOwner => '创建者';
 
   @override

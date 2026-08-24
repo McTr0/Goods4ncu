@@ -2137,6 +2137,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get spaceKindGroup => 'Group';
 
   @override
+  String get spacePostsTooltip => 'Group posts';
+
+  @override
+  String get spacePostsTitle => 'Group posts';
+
+  @override
   String get spaceRoleOwner => 'Owner';
 
   @override

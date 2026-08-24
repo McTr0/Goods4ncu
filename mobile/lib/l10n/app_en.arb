@@ -965,6 +965,8 @@
   },
   "spaceKindGroupLong": "Campus group",
   "spaceKindGroup": "Group",
+  "spacePostsTooltip": "Group posts",
+  "spacePostsTitle": "Group posts",
   "spaceRoleOwner": "Owner",
   "spaceRoleAdmin": "Admin",
   "spaceRoleBanned": "Restricted",

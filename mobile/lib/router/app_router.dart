@@ -262,6 +262,17 @@ final GoRouter appRouter = GoRouter(
           },
         ),
         GoRoute(
+          path: '/spaces/:spaceId/posts',
+          pageBuilder: (context, state) {
+            final spaceId = state.pathParameters['spaceId']!;
+            final name = state.uri.queryParameters['name'] ?? '';
+            return NoTransitionPage(
+              key: state.pageKey,
+              child: SpacePostsScreen(spaceId: spaceId, spaceName: name),
+            );
+          },
+        ),
+        GoRoute(
           path: '/',
           pageBuilder: (context, state) =>
               const NoTransitionPage(child: HomePage()),
