@@ -446,35 +446,65 @@ class _PostSectionTitle extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text(
+          l.postDiscoveryTitle,
+          style: TextStyle(
+            color: scheme.onSurface,
+            fontSize: 18,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.3,
+          ),
+        ),
+        const SizedBox(height: AppTheme.sp2),
+        Text(
+          l.postDiscoverySubtitle,
+          style: TextStyle(
+            color: scheme.onSurfaceVariant,
+            fontSize: 12,
+            height: 1.3,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: AppTheme.sp12),
         Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    l.postDiscoveryTitle,
-                    style: TextStyle(
-                      color: scheme.onSurface,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.3,
-                    ),
-                  ),
-                  const SizedBox(height: AppTheme.sp2),
-                  Text(
-                    l.postDiscoverySubtitle,
-                    style: TextStyle(
+            // Category picker — left.
+            InkWell(
+              key: const ValueKey('post-filter-picker'),
+              borderRadius: BorderRadius.circular(999),
+              onTap: () => _pickCategory(context, selectedType, onTypeChanged),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: scheme.outlineVariant),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.expand_more_rounded,
+                      size: 16,
                       color: scheme.onSurfaceVariant,
-                      fontSize: 12,
-                      height: 1.3,
-                      fontWeight: FontWeight.w500,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 5),
+                    Text(
+                      _filterLabel(selectedType),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
+            const Spacer(),
+            // Sort menu — right, same icon language.
             PopupMenuButton<String>(
               key: const ValueKey('post-sort-menu'),
               tooltip: sortLabel,
@@ -486,32 +516,33 @@ class _PostSectionTitle extends StatelessWidget {
                 PopupMenuItem(value: 'active', child: Text(l.postSortActive)),
                 PopupMenuItem(value: 'replies', child: Text(l.postSortReplies)),
               ],
-              child: Chip(
-                avatar: const Icon(Icons.swap_vert_rounded, size: 17),
-                label: Text(sortLabel),
-                visualDensity: VisualDensity.compact,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppTheme.sp12),
-        Row(
-          children: [
-            Expanded(
-              child: InkWell(
-                key: const ValueKey('post-filter-picker'),
-                borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-                onTap: () => _pickCategory(context, selectedType, onTypeChanged),
-                child: InputDecorator(
-                  decoration: InputDecoration(
-                    labelText: l.category,
-                    suffixIcon: const Icon(Icons.expand_more_rounded),
-                    isDense: true,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: scheme.outlineVariant),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.expand_more_rounded,
+                      size: 16,
+                      color: scheme.onSurfaceVariant,
                     ),
-                  ),
-                  child: Text(_filterLabel(selectedType)),
+                    const SizedBox(width: 5),
+                    Text(
+                      sortLabel,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -536,11 +567,7 @@ Future<void> _pickCategory(
     context: context,
     title: '选择分区',
     options: [
-      PickerOption(
-        value: 'all',
-        label: '全部',
-        keywords: ['all', '全部'],
-      ),
+      PickerOption(value: 'all', label: '全部', keywords: ['all', '全部']),
       for (final category in kPostCategories)
         PickerOption(
           value: category.key,
