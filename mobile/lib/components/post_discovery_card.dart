@@ -93,7 +93,13 @@ class PostDiscoveryCard extends StatelessWidget {
                     if (!hasImage && !isGoods)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 8),
-                        child: _TypePill(label: typeLabel, isListing: false),
+                        child: Row(
+                          children: [
+                            _TypePill(label: typeLabel, isListing: false),
+                            const Spacer(),
+                            if (headTag != null) _TagPill(tagKey: headTag),
+                          ],
+                        ),
                       ),
                     Text(
                       post.title,
