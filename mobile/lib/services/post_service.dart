@@ -21,7 +21,7 @@ class PostService extends BaseService {
       'limit': limit.clamp(1, 100).toString(),
       'offset': offset.clamp(0, 1 << 31).toString(),
       'category': category,
-      if (spaceId != null) 'space_id': spaceId,
+      'space_id': ?spaceId,
       'sort': sort,
       if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
     };

@@ -1903,7 +1903,6 @@ class _AgentResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
     final price = item.listing?.suggestedPriceCny;
 
@@ -1979,7 +1978,7 @@ class _AgentResultCard extends StatelessWidget {
                         else
                           Expanded(
                             child: Text(
-                              item.category ?? l.assistantFallbackCategory,
+                              item.category,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -2347,7 +2346,7 @@ class _ReferencePickerSheetState extends State<_ReferencePickerSheet> {
               : const Icon(Icons.article_outlined),
           title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: Text(
-            item.listing?.title ?? item.category ?? '',
+            item.listing?.title ?? '',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),

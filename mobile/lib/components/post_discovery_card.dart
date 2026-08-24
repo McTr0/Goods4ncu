@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 import '../models/post.dart';
 import '../theme/app_theme.dart';
-import '../utils/category_utils.dart';
 import '../utils/platform_utils.dart';
 import 'feed_feedback_menu.dart';
 import 'price_tag.dart';
@@ -229,19 +228,6 @@ class PostDiscoveryCard extends StatelessWidget {
                         ],
                       ],
                     ),
-                    if ((post.category ?? '').isNotEmpty) ...[
-                      const SizedBox(height: 7),
-                      Text(
-                        localizedCategoryLabel(context, post.category!),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
