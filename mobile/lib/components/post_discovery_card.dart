@@ -340,7 +340,7 @@ class _CardImageGalleryState extends State<_CardImageGallery> {
   }
 }
 
-/// Emoji tag pill for the card's top-right corner.
+/// Emoji + label tag pill for the card's top-right corner.
 class _TagPill extends StatelessWidget {
   const _TagPill({required this.tagKey});
 
@@ -348,14 +348,22 @@ class _TagPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final emoji = postTagEmoji(tagKey);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
         color: Colors.black45,
         borderRadius: BorderRadius.circular(999),
       ),
-      child: Text(emoji ?? '🏷️', style: const TextStyle(fontSize: 13)),
+      child: Text(
+        postTagLabel(context, tagKey),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     );
   }
 }

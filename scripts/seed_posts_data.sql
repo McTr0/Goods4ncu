@@ -343,4 +343,37 @@ ON CONFLICT (id) DO UPDATE SET
   reply_count = EXCLUDED.reply_count,
   updated_at = now();
 
+-- Cover/product imagery for the seeded posts and listings.
+UPDATE posts SET image_url = CASE id
+        WHEN 'd0000000-0000-4000-8000-000000000001' THEN 'https://picsum.photos/seed/iphone14/640/640'
+        WHEN 'd0000000-0000-4000-8000-000000000002' THEN 'https://picsum.photos/seed/textbooks/640/640'
+        WHEN 'd0000000-0000-4000-8000-000000000003' THEN 'https://picsum.photos/seed/miband8/640/640'
+        WHEN 'd0000000-0000-4000-8000-000000000004' THEN 'https://picsum.photos/seed/legion-y7000/640/640'
+        WHEN 'd0000000-0000-4000-8000-000000000005' THEN 'https://picsum.photos/seed/desk-shelf/640/640'
+        WHEN 'd0000000-0000-4000-8000-000000000007' THEN 'https://picsum.photos/seed/bike-commute/640/640'
+        WHEN 'd0000000-0000-4000-8000-000000000010' THEN 'https://picsum.photos/seed/badminton-racket/640/640'
+        WHEN 'd0000000-0000-4000-8000-000000000023' THEN 'https://picsum.photos/seed/board-games/640/640'
+        WHEN 'd0000000-0000-4000-8000-000000000024' THEN 'https://picsum.photos/seed/desk-lamp/640/640'
+        WHEN 'd0000000-0000-4000-8000-000000000016' THEN 'https://picsum.photos/seed/cet4-notes/640/640'
+        ELSE image_url
+END
+WHERE id IN ('d0000000-0000-4000-8000-000000000001','d0000000-0000-4000-8000-000000000002','d0000000-0000-4000-8000-000000000003','d0000000-0000-4000-8000-000000000004','d0000000-0000-4000-8000-000000000005','d0000000-0000-4000-8000-000000000007','d0000000-0000-4000-8000-000000000010','d0000000-0000-4000-8000-000000000023','d0000000-0000-4000-8000-000000000024','d0000000-0000-4000-8000-000000000016');
+
+UPDATE inventory SET image_url = CASE id
+        WHEN 'l0000000-0000-0000-0000-000000000001' THEN 'https://picsum.photos/seed/iphone14/640/640'
+        WHEN 'l0000000-0000-0000-0000-000000000002' THEN 'https://picsum.photos/seed/textbooks/640/640'
+        WHEN 'l0000000-0000-0000-0000-000000000003' THEN 'https://picsum.photos/seed/miband8/640/640'
+        WHEN 'l0000000-0000-0000-0000-000000000004' THEN 'https://picsum.photos/seed/legion-y7000/640/640'
+        WHEN 'l0000000-0000-0000-0000-000000000005' THEN 'https://picsum.photos/seed/jordan1/640/640'
+        WHEN 'l0000000-0000-0000-0000-000000000006' THEN 'https://picsum.photos/seed/ac-unit/640/640'
+        ELSE image_url
+END
+WHERE id IN ('l0000000-0000-0000-0000-000000000001','l0000000-0000-0000-0000-000000000002','l0000000-0000-0000-0000-000000000003','l0000000-0000-0000-0000-000000000004','l0000000-0000-0000-0000-000000000005','l0000000-0000-0000-0000-000000000006');
+
+-- Fertilizer counts so popular posts feel alive.
+UPDATE posts SET fertilizer_count = 12 WHERE id = 'd0000000-0000-4000-8000-000000000015';
+UPDATE posts SET fertilizer_count = 7 WHERE id = 'd0000000-0000-4000-8000-000000000018';
+UPDATE posts SET fertilizer_count = 5 WHERE id = 'd0000000-0000-4000-8000-000000000023';
+
+
 COMMIT;

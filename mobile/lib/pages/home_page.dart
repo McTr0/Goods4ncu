@@ -9,6 +9,7 @@ import '../theme/responsive.dart';
 import '../components/feed_feedback_menu.dart';
 import '../services/feed_feedback_service.dart';
 import '../models/post.dart';
+import '../services/api_service.dart';
 import '../services/post_service.dart';
 import '../components/post_discovery_card.dart';
 
@@ -33,6 +34,7 @@ class _HomePageState extends State<HomePage> {
   bool _feedHasMore = true;
   bool _feedLoading = false;
   String _postTypeFilter = 'all';
+  bool _canAnnounce = false;
   String _postSort = 'for_you';
   String? _searchQuery;
   String? _loadError;
@@ -43,10 +45,21 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _probeAnnouncePermission();
     _feedbackService =
         widget.feedbackService ?? context.read<FeedFeedbackService>();
     _postService = widget.postService ?? context.read<PostService>();
     _loadRecommendations();
+  }
+
+  Future<void> _probeAnnouncePermission() async {
+    try {
+      final caps = await context.read<ApiService>().getAdminCapabilities();
+      if (!mounted) return;
+      setState(() => _canAnnounce = caps['can_read'] == true);
+    } catch (_) {
+      // Without permission the announcement filter stays hidden.
+    }
   }
 
   Future<void> _loadRecommendations({bool reset = true}) async {
@@ -153,6 +166,7 @@ class _HomePageState extends State<HomePage> {
       child: _PostSectionTitle(
         selectedType: _postTypeFilter,
         selectedSort: _postSort,
+        canAnnounce: _canAnnounce,
         onTypeChanged: (value) {
           if (_postTypeFilter == value) return;
           setState(() {
@@ -424,12 +438,14 @@ class _PostSectionTitle extends StatelessWidget {
   const _PostSectionTitle({
     required this.selectedType,
     required this.selectedSort,
+    required this.canAnnounce,
     required this.onTypeChanged,
     required this.onSortChanged,
   });
 
   final String selectedType;
   final String selectedSort;
+  final bool canAnnounce;
   final ValueChanged<String> onTypeChanged;
   final ValueChanged<String> onSortChanged;
 
@@ -472,7 +488,12 @@ class _PostSectionTitle extends StatelessWidget {
             InkWell(
               key: const ValueKey('post-filter-picker'),
               borderRadius: BorderRadius.circular(999),
-              onTap: () => _pickCategory(context, selectedType, onTypeChanged),
+              onTap: () => _pickCategory(
+                context,
+                selectedType,
+                canAnnounce,
+                onTypeChanged,
+              ),
               child: Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 12,
@@ -561,6 +582,7 @@ String _filterLabel(String type) {
 Future<void> _pickCategory(
   BuildContext context,
   String selectedType,
+  bool canAnnounce,
   ValueChanged<String> onTypeChanged,
 ) async {
   final selected = await showSearchablePickerSheet<String>(
@@ -569,11 +591,12 @@ Future<void> _pickCategory(
     options: [
       PickerOption(value: 'all', label: '全部', keywords: ['all', '全部']),
       for (final category in kPostCategories)
-        PickerOption(
-          value: category.key,
-          label: category.label,
-          keywords: [category.key],
-        ),
+        if (category.key != 'announcement' || canAnnounce)
+          PickerOption(
+            value: category.key,
+            label: category.label,
+            keywords: [category.key],
+          ),
     ],
     initiallySelected: [selectedType],
   );
