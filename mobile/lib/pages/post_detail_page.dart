@@ -557,6 +557,12 @@ class _ThreadPostCard extends StatelessWidget {
                   const SizedBox(height: AppTheme.sp20),
                   _LinkedListingCard(listing: listing),
                 ],
+                const SizedBox(height: AppTheme.sp12),
+                _FertilizeBar(
+                  key: ValueKey('fertilize-${post.id}'),
+                  postId: post.id,
+                  initialCount: post.fertilizerCount,
+                ),
                 if (post.isLocked) ...[
                   const SizedBox(height: AppTheme.sp16),
                   Row(
@@ -1014,4 +1020,91 @@ String _formatPostDate(BuildContext context, DateTime? value) {
   if (value == null) return '';
   final locale = Localizations.localeOf(context).toLanguageTag();
   return DateFormat.MMMd(locale).add_Hm().format(value);
+}
+
+/// 施肥 bar: spend one 香樟叶 to boost this post. One shot per post.
+class _FertilizeBar extends StatefulWidget {
+  const _FertilizeBar({
+    super.key,
+    required this.postId,
+    required this.initialCount,
+  });
+
+  final String postId;
+  final int initialCount;
+
+  @override
+  State<_FertilizeBar> createState() => _FertilizeBarState();
+}
+
+class _FertilizeBarState extends State<_FertilizeBar> {
+  late int _count = widget.initialCount;
+  bool _done = false;
+  bool _sending = false;
+
+  Future<void> _fertilize() async {
+    if (_done || _sending) return;
+    setState(() => _sending = true);
+    try {
+      final result = await context.read<PostService>().fertilizePost(
+        widget.postId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _count = result['fertilizer_count'] as int;
+        _done = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('施肥成功，剩余香樟叶 ${result['balance']} 片')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _sending = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final done = _done;
+    return Align(
+      alignment: Alignment.centerRight,
+      child: InkWell(
+        key: const Key('post-fertilize-action'),
+        borderRadius: BorderRadius.circular(999),
+        onTap: _done ? null : _fertilize,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: done
+                ? Theme.of(context).colorScheme.surfaceContainerHighest
+                : AppTheme.primary.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: done
+                  ? Colors.transparent
+                  : AppTheme.primary.withValues(alpha: 0.3),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('🌿', style: TextStyle(fontSize: 15)),
+              const SizedBox(width: 6),
+              Text(
+                done ? '已施肥 $_count' : '施肥 $_count',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: done ? AppTheme.textSecondary : AppTheme.primary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

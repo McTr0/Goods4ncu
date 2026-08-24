@@ -21,6 +21,7 @@ pub struct Post {
     pub reply_count: i32,
     pub status: String,
     pub attributes: serde_json::Value,
+    pub fertilizer_count: i32,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub last_activity_at: chrono::DateTime<chrono::Utc>,
@@ -210,7 +211,8 @@ impl PostgresPostRepository {
 
     fn post_columns() -> &'static str {
         r#"p.id, p.campus_id, p.category, p.space_id, p.title, p.body,
-           p.tags, p.listing_id, p.reply_count, p.status, p.attributes, p.created_at,
+           p.tags, p.listing_id, p.reply_count, p.status, p.attributes,
+           p.fertilizer_count, p.created_at,
            p.updated_at, p.last_activity_at,
            author.id AS author_id, author.username AS author_username,
            CASE WHEN author.avatar_moderation_status = 'approved'
@@ -442,6 +444,7 @@ impl PostRepository for PostgresPostRepository {
                               EXTRACT(EPOCH FROM (NOW() - p.created_at)), 0
                             ) / 86400.0)) * 2.0
                         + LN(1.0 + p.reply_count::float8) * 0.25
+                        + LN(1.0 + p.fertilizer_count::float8) * 0.7
                       ) AS ranking_score
                {relations}
                CROSS JOIN preferences pref
@@ -865,6 +868,7 @@ fn post_from_row(row: &PgRow) -> Post {
         attributes: row
             .try_get("attributes")
             .unwrap_or_else(|_| serde_json::json!({})),
+        fertilizer_count: row.try_get("fertilizer_count").unwrap_or(0),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
         last_activity_at: row.get("last_activity_at"),

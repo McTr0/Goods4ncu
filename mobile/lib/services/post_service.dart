@@ -103,6 +103,29 @@ class PostService extends BaseService {
     );
   }
 
+  /// GET /api/camphor — settles today's grant and returns the balance.
+  Future<int> getCamphorBalance() async {
+    final headers = await authHeaders();
+    final response = await get(Uri.parse('$baseUrl/api/camphor'), headers);
+    final data = handleResponse(response, (d) => d as Map<String, dynamic>);
+    return (data['balance'] as num?)?.toInt() ?? 0;
+  }
+
+  /// POST /api/posts/{id}/fertilize — spend one leaf on a post.
+  Future<Map<String, dynamic>> fertilizePost(String id) async {
+    final headers = await authHeaders();
+    final response = await post(
+      Uri.parse('$baseUrl/api/posts/${Uri.encodeComponent(id)}/fertilize'),
+      headers,
+      '',
+    );
+    final data = handleResponse(response, (d) => d as Map<String, dynamic>);
+    return {
+      'balance': (data['balance'] as num?)?.toInt() ?? 0,
+      'fertilizer_count': (data['fertilizer_count'] as num?)?.toInt() ?? 0,
+    };
+  }
+
   Future<CampusPost> createPost({
     required String title,
     required String body,

@@ -516,6 +516,12 @@ fn validate_attributes(
     category: &str,
     value: &serde_json::Value,
 ) -> Result<serde_json::Value, ApiError> {
+    // Missing (serde default null) and empty both normalize to {}.
+    let value = if value.is_null() {
+        &serde_json::json!({})
+    } else {
+        value
+    };
     let object = match value.as_object() {
         None => {
             return Err(ApiError::BadRequest("attributes 必须是对象".to_string()));

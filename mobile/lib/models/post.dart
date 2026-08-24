@@ -30,6 +30,7 @@ class CampusPost {
     required this.replyCount,
     required this.status,
     required this.isLocked,
+    this.fertilizerCount = 0,
     required this.createdAt,
     required this.updatedAt,
     required this.lastActivityAt,
@@ -60,6 +61,7 @@ class CampusPost {
   final int replyCount;
   final String status;
   final bool isLocked;
+  final int fertilizerCount;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final DateTime? lastActivityAt;
@@ -159,6 +161,7 @@ class CampusPost {
       replyCount: (json['reply_count'] as num?)?.toInt() ?? 0,
       status: json['status']?.toString() ?? 'active',
       isLocked: json['is_locked'] == true,
+      fertilizerCount: (json['fertilizer_count'] as num?)?.toInt() ?? 0,
       createdAt: _dateTime(json['created_at']),
       updatedAt: _dateTime(json['updated_at']),
       lastActivityAt: _dateTime(json['last_activity_at']),
