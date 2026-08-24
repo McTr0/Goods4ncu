@@ -8,6 +8,7 @@ import '../components/user_avatar.dart';
 import '../l10n/app_localizations.dart';
 import '../models/models.dart';
 import '../models/post.dart';
+import '../models/post_taxonomy.dart';
 import '../services/listing_service.dart';
 import '../services/post_service.dart';
 import '../theme/app_theme.dart';
@@ -288,8 +289,8 @@ class _PostDetailPageState extends State<PostDetailPage> {
         title: Text(
           post != null && post.category != 'discussion'
               ? (post.category == 'wanted'
-                    ? l.publishCategoryWanted
-                    : l.publishCategoryOffer)
+                    ? postCategoryLabel(context, post.category)
+                    : postCategoryLabel(context, post.category))
               : l.postDetailTitle,
         ),
         leading: IconButton(
@@ -532,7 +533,7 @@ class _ThreadPostCard extends StatelessWidget {
                     children: post.tags
                         .map(
                           (tag) => Chip(
-                            label: Text('#$tag'),
+                            label: Text(postTagLabel(context, tag)),
                             visualDensity: VisualDensity.compact,
                             side: BorderSide.none,
                           ),
@@ -980,8 +981,8 @@ class _PostTypeChip extends StatelessWidget {
     final l = AppLocalizations.of(context)!;
     return Chip(
       label: Text(switch (post.category) {
-        'wanted' => l.publishCategoryWanted,
-        'offer' => l.publishCategoryOffer,
+        'wanted' => postCategoryLabel(context, 'wanted'),
+        'offer' => postCategoryLabel(context, 'offer'),
         _ => l.publishCategoryDiscussion,
       }),
       visualDensity: VisualDensity.compact,

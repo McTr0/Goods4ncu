@@ -3,9 +3,9 @@ import 'package:intl/intl.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/post.dart';
+import '../models/post_taxonomy.dart';
 import '../theme/app_theme.dart';
 import '../utils/platform_utils.dart';
-import 'feed_feedback_menu.dart';
 import 'price_tag.dart';
 import 'user_avatar.dart';
 
@@ -27,20 +27,18 @@ class PostDiscoveryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
-    final rawCover = post.coverImageUrl;
-    final cover = rawCover == null ? null : resolveDisplayUrl(rawCover);
-    final hasCover = cover != null && cover.isNotEmpty;
     final listing = post.listing;
     final isGoods = post.category != 'discussion';
-    final typeLabel = switch (post.category) {
-      'wanted' => l.publishCategoryWanted,
-      'offer' => l.publishCategoryOffer,
-      _ => l.publishCategoryDiscussion,
-    };
-    final reason =
-        (post.rankReason ?? '').isNotEmpty || (post.rankSource ?? '').isNotEmpty
-        ? localizedFeedReason(l, post.rankReason, source: post.rankSource)
-        : null;
+    final typeLabel = postCategoryLabel(context, post.category);
+    // All available imagery: post cover first, then the product photo.
+    final images = <String>{
+      if (post.coverImageUrl != null && post.coverImageUrl!.isNotEmpty)
+        resolveDisplayUrl(post.coverImageUrl!),
+      if (listing?.imageUrl != null && listing!.imageUrl!.isNotEmpty)
+        resolveDisplayUrl(listing.imageUrl!),
+    }.toList(growable: false);
+    final hasImage = images.isNotEmpty;
+    final headTag = post.tags.isEmpty ? null : post.tags.first;
 
     return Material(
       key: ValueKey('post-card-${post.id}'),
@@ -60,19 +58,16 @@ class PostDiscoveryCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (hasCover || isGoods)
+              if (hasImage || isGoods)
                 AspectRatio(
                   aspectRatio: isGoods ? 1.05 : 1.35,
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      if (hasCover)
-                        Image.network(
-                          cover,
+                      if (hasImage)
+                        _CardImageGallery(
                           key: ValueKey('post-cover-${post.id}'),
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) =>
-                              _PostCoverFallback(isListing: isGoods),
+                          images: images,
                         )
                       else
                         _PostCoverFallback(isListing: isGoods),
@@ -81,6 +76,12 @@ class PostDiscoveryCard extends StatelessWidget {
                         top: AppTheme.sp8,
                         child: _TypePill(label: typeLabel, isListing: isGoods),
                       ),
+                      if (headTag != null)
+                        Positioned(
+                          right: AppTheme.sp8,
+                          top: AppTheme.sp8,
+                          child: _TagPill(tagKey: headTag),
+                        ),
                     ],
                   ),
                 ),
@@ -89,7 +90,7 @@ class PostDiscoveryCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (!hasCover && !isGoods)
+                    if (!hasImage && !isGoods)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 8),
                         child: _TypePill(label: typeLabel, isListing: false),
@@ -125,16 +126,17 @@ class PostDiscoveryCard extends StatelessWidget {
                         fontSize: 16,
                       ),
                     ],
-                    if (post.tags.isNotEmpty) ...[
+                    if (post.tags.length > 1) ...[
                       const SizedBox(height: 8),
                       Wrap(
                         spacing: 5,
                         runSpacing: 5,
                         children: post.tags
-                            .take(3)
+                            .skip(1)
+                            .take(2)
                             .map(
                               (tag) => Text(
-                                '#$tag',
+                                postTagLabel(context, tag),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -145,31 +147,6 @@ class PostDiscoveryCard extends StatelessWidget {
                               ),
                             )
                             .toList(growable: false),
-                      ),
-                    ],
-                    if (reason != null) ...[
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.auto_awesome_outlined,
-                            size: 13,
-                            color: scheme.primary,
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              reason,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: scheme.primary,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ],
                       ),
                     ],
                     const SizedBox(height: 11),
@@ -308,4 +285,77 @@ String _lastActivityLabel(BuildContext context, DateTime? value) {
   if (diff.inDays < 7) return '${diff.inDays}天前';
   if (local.year == now.year) return DateFormat.MMMd(locale).format(local);
   return DateFormat.yMMMd(locale).format(local);
+}
+
+/// Swipeable image gallery: post cover first, product photo second.
+class _CardImageGallery extends StatefulWidget {
+  const _CardImageGallery({super.key, required this.images});
+
+  final List<String> images;
+
+  @override
+  State<_CardImageGallery> createState() => _CardImageGalleryState();
+}
+
+class _CardImageGalleryState extends State<_CardImageGallery> {
+  int _page = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final images = widget.images;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        PageView.builder(
+          itemCount: images.length,
+          onPageChanged: (page) => setState(() => _page = page),
+          itemBuilder: (context, index) => Image.network(
+            images[index],
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => _PostCoverFallback(isListing: index > 0),
+          ),
+        ),
+        if (images.length > 1)
+          Positioned(
+            right: 8,
+            bottom: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.black45,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                '${_page + 1}/${images.length}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Emoji tag pill for the card's top-right corner.
+class _TagPill extends StatelessWidget {
+  const _TagPill({required this.tagKey});
+
+  final String tagKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final emoji = postTagEmoji(tagKey);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black45,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(emoji ?? '🏷️', style: const TextStyle(fontSize: 13)),
+    );
+  }
 }
