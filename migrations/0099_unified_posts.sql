@@ -1,24 +1,39 @@
--- General posts (topics) and replies.
+-- Unified posts: one structure for 出(offer) / 收(wanted) / 讨论(discussion).
 --
--- A marketplace listing is a first-class post subtype. `inventory` remains
--- the source of truth for product-specific facts (price, condition, status),
--- while this table gives every listing the same topic/reply surface as a
--- discussion. The trigger below keeps the shared title/body/category and
--- lifecycle projection in sync, including rows written by legacy workers.
+-- Replaces the legacy 0081/0083/0092 shape. Key changes versus the old
+-- posts table:
+--   * `category` IS the kind: CHECK IN ('offer','wanted','discussion').
+--     post_type / post_kind are gone.
+--   * Listings are references, not projections. `listing_id` is an optional
+--     pointer into inventory (SET NULL on listing delete); no sync trigger,
+--     no UNIQUE, no mirrored rows.
+--   * `space_id` scopes a post to one chat space (group); NULL = campus-wide.
+--   * Errand (跑腿互助) is a catalog tag on offer/wanted posts; its payload
+--     lives in `errand_metadata` and the resolution lifecycle only applies
+--     to posts carrying that tag.
 
-CREATE TABLE IF NOT EXISTS posts (
+CREATE TABLE posts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     campus_id UUID NOT NULL REFERENCES campuses(id) ON DELETE CASCADE,
     author_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    post_type TEXT NOT NULL DEFAULT 'discussion'
-        CHECK (post_type IN ('discussion', 'listing')),
-    -- NULL for discussions; one and only one post represents a listing.
-    listing_id TEXT UNIQUE REFERENCES inventory(id) ON DELETE CASCADE,
-    category TEXT NOT NULL DEFAULT 'general',
-    title TEXT NOT NULL,
-    body TEXT NOT NULL,
+    category TEXT NOT NULL
+        CHECK (category IN ('offer', 'wanted', 'discussion')),
+    -- Optional reference to a marketplace item. Offers/wants usually create
+    -- their inventory row in the same transaction; discussions may attach any
+    -- existing listing. The listing may outlive the post.
+    listing_id TEXT REFERENCES inventory(id) ON DELETE SET NULL,
+    space_id UUID REFERENCES chat_spaces(id) ON DELETE CASCADE,
+    title TEXT NOT NULL CHECK (char_length(btrim(title)) BETWEEN 1 AND 300),
+    body TEXT NOT NULL CHECK (char_length(body) <= 50000),
     tags JSONB NOT NULL DEFAULT '[]'::jsonb
         CHECK (jsonb_typeof(tags) = 'array' AND jsonb_array_length(tags) <= 5),
+    image_url TEXT,
+    images_moderation_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (images_moderation_status IN ('pending', 'approved', 'rejected', 'failed')),
+    errand_metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+        CHECK (jsonb_typeof(errand_metadata) = 'object'),
+    resolution_status TEXT NOT NULL DEFAULT 'open'
+        CHECK (resolution_status IN ('open', 'resolved', 'closed')),
     status TEXT NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'locked', 'archived', 'deleted')),
     reply_count INTEGER NOT NULL DEFAULT 0 CHECK (reply_count >= 0),
@@ -26,36 +41,33 @@ CREATE TABLE IF NOT EXISTS posts (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (id, campus_id),
-    CONSTRAINT posts_listing_shape CHECK (
-        (post_type = 'discussion' AND listing_id IS NULL)
-        OR (post_type = 'listing' AND listing_id IS NOT NULL)
+    CONSTRAINT post_space_campus_fk
+        FOREIGN KEY (space_id, campus_id) REFERENCES chat_spaces(id, campus_id)
+            ON DELETE CASCADE,
+    CONSTRAINT posts_errand_payload_shape CHECK (
+        errand_metadata = '{}'::jsonb OR tags @> '"errand"'::jsonb
     ),
-    -- Listing writes predate this domain and historically had no equivalent
-    -- character limits. Keep those writes compatible; PostService enforces
-    -- the limits for new/edit discussion requests.
-    CONSTRAINT posts_discussion_text_limits CHECK (
-        post_type = 'listing'
-        OR (
-            char_length(btrim(category)) BETWEEN 1 AND 80
-            AND char_length(btrim(title)) BETWEEN 1 AND 300
-            AND char_length(body) <= 50000
-        )
+    CONSTRAINT posts_resolution_shape CHECK (
+        tags @> '"errand"'::jsonb OR resolution_status = 'open'
     )
 );
 
-CREATE INDEX IF NOT EXISTS idx_posts_campus_activity
+CREATE INDEX idx_posts_campus_activity
     ON posts(campus_id, last_activity_at DESC, id DESC)
     WHERE status IN ('active', 'locked');
-CREATE INDEX IF NOT EXISTS idx_posts_campus_type_activity
-    ON posts(campus_id, post_type, last_activity_at DESC, id DESC)
-    WHERE status IN ('active', 'locked');
-CREATE INDEX IF NOT EXISTS idx_posts_campus_category_activity
+CREATE INDEX idx_posts_campus_category_activity
     ON posts(campus_id, category, last_activity_at DESC, id DESC)
     WHERE status IN ('active', 'locked');
-CREATE INDEX IF NOT EXISTS idx_posts_author_created
+CREATE INDEX idx_posts_space_activity
+    ON posts(space_id, last_activity_at DESC, id DESC)
+    WHERE status IN ('active', 'locked') AND space_id IS NOT NULL;
+CREATE INDEX idx_posts_author_created
     ON posts(author_id, created_at DESC);
+CREATE INDEX idx_posts_listing_ref
+    ON posts(listing_id)
+    WHERE listing_id IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS post_replies (
+CREATE TABLE post_replies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     campus_id UUID NOT NULL REFERENCES campuses(id) ON DELETE CASCADE,
     post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -74,10 +86,10 @@ CREATE TABLE IF NOT EXISTS post_replies (
         FOREIGN KEY (reply_to_id) REFERENCES post_replies(id) ON DELETE SET NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_post_replies_post_created
+CREATE INDEX idx_post_replies_post_created
     ON post_replies(post_id, created_at ASC, id ASC)
     WHERE status = 'active';
-CREATE INDEX IF NOT EXISTS idx_post_replies_author_created
+CREATE INDEX idx_post_replies_author_created
     ON post_replies(author_id, created_at DESC);
 
 CREATE OR REPLACE FUNCTION validate_post_reply_parent()
@@ -134,63 +146,6 @@ CREATE POLICY tenant_isolation ON post_replies
         OR campus_id = current_setting('app.campus_id', true)::uuid
     );
 
--- All inventory writers (including older agents and test fixtures) get a
--- corresponding listing post. Existing rows are backfilled before the trigger
--- is installed, so every listing has a stable reverse lookup immediately.
-INSERT INTO posts (
-    campus_id, author_id, post_type, listing_id, category, title, body, status,
-    created_at, updated_at, last_activity_at
-)
-SELECT i.campus_id, i.owner_id, 'listing', i.id, i.category, i.title,
-       COALESCE(i.description, ''),
-       CASE
-           WHEN i.status = 'active' THEN 'active'
-           WHEN i.status = 'deleted' THEN 'deleted'
-           ELSE 'archived'
-       END,
-       COALESCE(i.created_at, NOW()), COALESCE(i.updated_at, i.created_at, NOW()),
-       COALESCE(i.updated_at, i.created_at, NOW())
-FROM inventory i
-WHERE NOT EXISTS (SELECT 1 FROM posts p WHERE p.listing_id = i.id);
-
-CREATE OR REPLACE FUNCTION sync_listing_post()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    INSERT INTO posts (
-        campus_id, author_id, post_type, listing_id, category, title, body,
-        status, created_at, updated_at, last_activity_at
-    )
-    VALUES (
-        NEW.campus_id, NEW.owner_id, 'listing', NEW.id, NEW.category, NEW.title,
-        COALESCE(NEW.description, ''),
-        CASE
-            WHEN NEW.status = 'active' THEN 'active'
-            WHEN NEW.status = 'deleted' THEN 'deleted'
-            ELSE 'archived'
-        END,
-        COALESCE(NEW.created_at, NOW()), COALESCE(NEW.updated_at, NOW()),
-        COALESCE(NEW.updated_at, NOW())
-    )
-    ON CONFLICT (listing_id) DO UPDATE SET
-        campus_id = EXCLUDED.campus_id,
-        author_id = EXCLUDED.author_id,
-        category = EXCLUDED.category,
-        title = EXCLUDED.title,
-        body = EXCLUDED.body,
-        status = EXCLUDED.status,
-        updated_at = EXCLUDED.updated_at;
-    RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS inventory_listing_post_sync ON inventory;
-CREATE TRIGGER inventory_listing_post_sync
-    AFTER INSERT OR UPDATE OF campus_id, owner_id, category, title, description, status
-    ON inventory
-    FOR EACH ROW EXECUTE FUNCTION sync_listing_post();
-
 CREATE OR REPLACE FUNCTION refresh_post_reply_count()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -220,9 +175,23 @@ CREATE TRIGGER post_replies_count_refresh
     AFTER INSERT OR UPDATE OF status OR DELETE ON post_replies
     FOR EACH ROW EXECUTE FUNCTION refresh_post_reply_count();
 
+-- From deleted 0092: keep the trimmed intents kind set (help intents were
+-- development-only and are intentionally discarded).
+DELETE FROM intents WHERE kind = 'help';
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'intents'::regclass AND conname = 'intents_kind_check'
+    ) THEN
+        ALTER TABLE intents DROP CONSTRAINT intents_kind_check;
+    END IF;
+END $$;
+
+ALTER TABLE intents
+    ADD CONSTRAINT intents_kind_check
+    CHECK (kind IN ('goods_offer', 'goods_seek', 'companion', 'activity'));
+
 COMMENT ON TABLE posts IS
-    'Campus-scoped topics. Listing posts are projections of inventory rows and use listing_id as their canonical association.';
-COMMENT ON COLUMN posts.listing_id IS
-    'Non-null only for post_type=listing; inventory remains authoritative for product-specific facts.';
-COMMENT ON TABLE post_replies IS
-    'Threaded replies to posts; reply_to_id is optional and must reference a reply in the same post and campus.';
+    'Unified campus/group posts. category IS the kind (offer/wanted/discussion); listings are optional references; space_id scopes group visibility.';

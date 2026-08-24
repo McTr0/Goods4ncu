@@ -15,7 +15,7 @@ use crate::api::session::{OptionalSession, VerifiedTenant};
 use crate::api::{normalize_platform_media_url, AppState};
 use crate::repositories::{ListingPostPreview, Post, PostFilter, PostReply, PostSort};
 use crate::services::campus::CampusService;
-use crate::services::post::{CreateDiscussion, EditDiscussion, PostService};
+use crate::services::post::{CreatePost, EditPost, PostService};
 
 pub const UNIFIED_POST_RANKING_VERSION: &str = "2026.08-unified-post-v1";
 
@@ -23,9 +23,9 @@ pub const UNIFIED_POST_RANKING_VERSION: &str = "2026.08-unified-post-v1";
 pub struct PostListQuery {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
-    pub post_type: Option<String>,
-    pub direction: Option<String>,
+    /// offer | wanted | discussion (the post kind). Omit for all.
     pub category: Option<String>,
+    pub space_id: Option<Uuid>,
     pub search: Option<String>,
     pub sort: Option<String>,
 }
@@ -40,13 +40,15 @@ pub struct ReplyListQuery {
 pub struct CreatePostRequest {
     pub title: String,
     pub body: String,
+    /// offer | wanted | discussion. Defaults to discussion.
     pub category: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
     pub cover_image_url: Option<String>,
-    pub post_kind: Option<String>,
+    pub listing_id: Option<String>,
+    pub space_id: Option<Uuid>,
     #[serde(default)]
-    pub mutual_aid_metadata: serde_json::Value,
+    pub errand_metadata: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -56,8 +58,7 @@ pub struct UpdatePostRequest {
     pub category: Option<String>,
     pub tags: Option<Vec<String>>,
     pub locked: Option<bool>,
-    pub post_kind: Option<String>,
-    pub mutual_aid_metadata: Option<serde_json::Value>,
+    pub errand_metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,9 +87,8 @@ pub struct PostAuthor {
 #[derive(Debug, Serialize)]
 pub struct PostSummary {
     pub id: Uuid,
-    pub post_type: String,
-    pub post_kind: String,
     pub category: String,
+    pub space_id: Option<Uuid>,
     pub title: String,
     pub body_excerpt: String,
     pub tags: Vec<String>,
@@ -97,7 +97,7 @@ pub struct PostSummary {
     pub author: PostAuthor,
     pub reply_count: i32,
     pub status: String,
-    pub mutual_aid_metadata: serde_json::Value,
+    pub errand_metadata: serde_json::Value,
     pub resolution_status: String,
     pub can_update_resolution: bool,
     pub is_locked: bool,
@@ -113,9 +113,8 @@ pub struct PostSummary {
 #[derive(Debug, Serialize)]
 pub struct PostDetail {
     pub id: Uuid,
-    pub post_type: String,
-    pub post_kind: String,
     pub category: String,
+    pub space_id: Option<Uuid>,
     pub title: String,
     pub body: String,
     pub tags: Vec<String>,
@@ -124,7 +123,7 @@ pub struct PostDetail {
     pub author: PostAuthor,
     pub reply_count: i32,
     pub status: String,
-    pub mutual_aid_metadata: serde_json::Value,
+    pub errand_metadata: serde_json::Value,
     pub resolution_status: String,
     pub can_update_resolution: bool,
     pub is_locked: bool,
@@ -194,16 +193,6 @@ fn post_service(state: &AppState) -> PostService {
 }
 
 fn normalize_filter(query: &PostListQuery) -> Result<PostFilter, ApiError> {
-    let post_type = match query.post_type.as_deref().map(str::trim) {
-        None | Some("") | Some("all") => None,
-        Some("discussion") => Some("discussion".to_string()),
-        Some("listing") => Some("listing".to_string()),
-        Some(_) => {
-            return Err(ApiError::BadRequest(
-                "post_type 可选值为 all、discussion、listing".to_string(),
-            ))
-        }
-    };
     let sort = match query.sort.as_deref().map(str::trim) {
         None | Some("") | Some("active") => PostSort::Active,
         Some("latest") => PostSort::Latest,
@@ -215,23 +204,19 @@ fn normalize_filter(query: &PostListQuery) -> Result<PostFilter, ApiError> {
             ))
         }
     };
-    let category = normalized_optional_query(&query.category, "category", 80)?;
-    let search = normalized_optional_query(&query.search, "search", 200)?;
-    let direction = match query.direction.as_deref().map(str::trim) {
+    let category = match query.category.as_deref().map(str::trim) {
         None | Some("") | Some("all") => None,
-        Some("offer") => Some("offer".to_string()),
-        Some("wanted") => Some("wanted".to_string()),
+        Some(value) if crate::categories::is_valid_post_category(value) => Some(value.to_string()),
         Some(_) => {
             return Err(ApiError::BadRequest(
-                "direction 可选值为 all、offer、wanted".to_string(),
+                "category 可选值为 all、offer、wanted、discussion".to_string(),
             ))
         }
     };
     Ok(PostFilter {
-        post_type,
-        direction,
         category,
-        search,
+        space_id: query.space_id,
+        search: normalized_optional_query(&query.search, "search", 200)?,
         sort,
     })
 }
@@ -262,16 +247,15 @@ fn clamp_page(limit: Option<i64>, offset: Option<i64>) -> (i64, i64) {
 }
 
 fn summary_view(state: &AppState, post: Post, viewer_id: Option<&str>) -> PostSummary {
-    let can_update_resolution = post.post_kind == "mutual_aid"
-        && viewer_id.is_some_and(|viewer_id| viewer_id == post.author_id);
+    let can_update_resolution =
+        is_errand_post(&post) && viewer_id.is_some_and(|viewer_id| viewer_id == post.author_id);
     let listing = post
         .listing
         .map(|listing| listing_preview_view(state, listing));
     PostSummary {
         id: post.id,
-        post_type: post.post_type,
-        post_kind: post.post_kind.clone(),
-        category: post.category,
+        category: post.category.clone(),
+        space_id: post.space_id,
         title: post.title,
         body_excerpt: excerpt(&post.body, 180),
         tags: post.tags,
@@ -285,7 +269,7 @@ fn summary_view(state: &AppState, post: Post, viewer_id: Option<&str>) -> PostSu
         reply_count: post.reply_count,
         is_locked: post.status == "locked",
         status: post.status,
-        mutual_aid_metadata: post.mutual_aid_metadata.clone(),
+        errand_metadata: post.errand_metadata.clone(),
         resolution_status: post.resolution_status.clone(),
         can_update_resolution,
         created_at: post.created_at,
@@ -299,17 +283,16 @@ fn summary_view(state: &AppState, post: Post, viewer_id: Option<&str>) -> PostSu
 }
 
 fn detail_view(state: &AppState, post: Post, viewer_id: Option<&str>) -> PostDetail {
-    let can_update_resolution = post.post_kind == "mutual_aid"
-        && viewer_id.is_some_and(|viewer_id| viewer_id == post.author_id);
+    let can_update_resolution =
+        is_errand_post(&post) && viewer_id.is_some_and(|viewer_id| viewer_id == post.author_id);
     let listing = post
         .listing
         .map(|listing| listing_preview_view(state, listing));
     PostDetail {
         id: post.id,
-        post_type: post.post_type,
         can_update_resolution,
-        post_kind: post.post_kind,
         category: post.category,
+        space_id: post.space_id,
         title: post.title,
         body: post.body,
         tags: post.tags,
@@ -323,7 +306,7 @@ fn detail_view(state: &AppState, post: Post, viewer_id: Option<&str>) -> PostDet
         reply_count: post.reply_count,
         is_locked: post.status == "locked",
         status: post.status,
-        mutual_aid_metadata: post.mutual_aid_metadata,
+        errand_metadata: post.errand_metadata,
         resolution_status: post.resolution_status,
         created_at: post.created_at,
         updated_at: post.updated_at,
@@ -362,6 +345,10 @@ fn reply_view(state: &AppState, reply: PostReply) -> ReplyView {
         created_at: reply.created_at,
         updated_at: reply.updated_at,
     }
+}
+
+fn is_errand_post(post: &Post) -> bool {
+    post.tags.iter().any(|tag| tag == "errand")
 }
 
 fn excerpt(body: &str, max_chars: usize) -> String {
@@ -407,7 +394,9 @@ pub async fn get_post(
 ) -> Result<Json<PostDetail>, ApiError> {
     let viewer_id = session.0.as_ref().map(|session| session.user_id.clone());
     let campus_id = resolve_read_campus(&state, session).await?;
-    let post = post_service(&state).get(campus_id, id).await?;
+    let post = post_service(&state)
+        .get_for_viewer(campus_id, id, viewer_id.as_deref())
+        .await?;
     Ok(Json(detail_view(&state, post, viewer_id.as_deref())))
 }
 
@@ -420,7 +409,7 @@ pub async fn get_post_by_listing(
     let viewer_id = session.0.as_ref().map(|session| session.user_id.clone());
     let campus_id = resolve_read_campus(&state, session).await?;
     let post = post_service(&state)
-        .get_by_listing(campus_id, &listing_id)
+        .get_by_listing_for_viewer(campus_id, &listing_id, viewer_id.as_deref())
         .await?;
     Ok(Json(detail_view(&state, post, viewer_id.as_deref())))
 }
@@ -434,16 +423,17 @@ pub async fn create_post(
     let cover_image_url =
         normalize_platform_media_url(&state, payload.cover_image_url, "cover_image_url")?;
     let post = post_service(&state)
-        .create(CreateDiscussion {
+        .create(CreatePost {
             campus_id: tenant.campus_id,
             author_id: tenant.session.user_id.clone(),
             title: payload.title,
             body: payload.body,
-            category: payload.category,
+            category: payload.category.unwrap_or_else(|| "discussion".to_string()),
             tags: payload.tags,
             cover_image_url,
-            post_kind: payload.post_kind,
-            mutual_aid_metadata: payload.mutual_aid_metadata,
+            listing_id: payload.listing_id,
+            space_id: payload.space_id,
+            errand_metadata: payload.errand_metadata,
         })
         .await?;
     Ok(Json(detail_view(
@@ -465,14 +455,13 @@ pub async fn update_post(
             tenant.campus_id,
             id,
             &tenant.session.user_id,
-            EditDiscussion {
+            EditPost {
                 title: payload.title,
                 body: payload.body,
                 category: payload.category,
                 tags: payload.tags,
                 locked: payload.locked,
-                post_kind: payload.post_kind,
-                mutual_aid_metadata: payload.mutual_aid_metadata,
+                errand_metadata: payload.errand_metadata,
             },
         )
         .await?;
@@ -607,35 +596,32 @@ mod tests {
         let valid = normalize_filter(&PostListQuery {
             limit: None,
             offset: None,
-            post_type: Some("listing".to_string()),
-            direction: Some("wanted".to_string()),
-            category: None,
+            category: Some("offer".to_string()),
+            space_id: None,
             search: None,
             sort: Some("replies".to_string()),
         })
         .unwrap();
-        assert_eq!(valid.post_type.as_deref(), Some("listing"));
-        assert_eq!(valid.direction.as_deref(), Some("wanted"));
+        assert_eq!(valid.category.as_deref(), Some("offer"));
         assert_eq!(valid.sort, PostSort::Replies);
 
-        let personalized = normalize_filter(&PostListQuery {
+        let all = normalize_filter(&PostListQuery {
             limit: None,
             offset: None,
-            post_type: None,
-            direction: None,
-            category: None,
+            category: Some("all".to_string()),
+            space_id: None,
             search: None,
             sort: Some("for_you".to_string()),
         })
         .unwrap();
-        assert_eq!(personalized.sort, PostSort::ForYou);
+        assert_eq!(all.category, None);
+        assert_eq!(all.sort, PostSort::ForYou);
 
         let invalid = normalize_filter(&PostListQuery {
             limit: None,
             offset: None,
-            post_type: Some("video".to_string()),
-            direction: None,
-            category: None,
+            category: Some("listing".to_string()),
+            space_id: None,
             search: None,
             sort: None,
         });

@@ -1,9 +1,9 @@
 //! Business rules for discussion/listing posts and threaded replies.
 
 use crate::api::error::ApiError;
+use crate::categories::{is_valid_post_category, ERRAND_TAG_KEY};
 use crate::repositories::{
-    NewDiscussionPost, Post, PostFilter, PostReply, PostRepository, PostgresPostRepository,
-    UpdateDiscussionPost,
+    NewPost, Post, PostFilter, PostReply, PostRepository, PostgresPostRepository, UpdatePostInput,
 };
 use crate::services::moderation::ModerationService;
 use sqlx::PgPool;
@@ -13,32 +13,34 @@ use uuid::Uuid;
 pub const MAX_POST_TITLE_CHARS: usize = 300;
 pub const MAX_POST_BODY_CHARS: usize = 50_000;
 pub const MAX_REPLY_BODY_CHARS: usize = 20_000;
-pub const MAX_CATEGORY_CHARS: usize = 80;
 pub const MAX_TAGS: usize = 5;
 pub const MAX_TAG_CHARS: usize = 32;
 
 #[derive(Debug, Clone)]
-pub struct CreateDiscussion {
+pub struct CreatePost {
     pub campus_id: Uuid,
     pub author_id: String,
+    /// One of offer | wanted | discussion. This IS the post kind.
+    pub category: String,
     pub title: String,
     pub body: String,
-    pub category: Option<String>,
     pub tags: Vec<String>,
     pub cover_image_url: Option<String>,
-    pub post_kind: Option<String>,
-    pub mutual_aid_metadata: serde_json::Value,
+    /// Optional reference to an existing inventory row.
+    pub listing_id: Option<String>,
+    /// Group scope; when set the post is visible to space members only.
+    pub space_id: Option<Uuid>,
+    pub errand_metadata: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct EditDiscussion {
+pub struct EditPost {
     pub title: Option<String>,
     pub body: Option<String>,
     pub category: Option<String>,
     pub tags: Option<Vec<String>>,
     pub locked: Option<bool>,
-    pub post_kind: Option<String>,
-    pub mutual_aid_metadata: Option<serde_json::Value>,
+    pub errand_metadata: Option<serde_json::Value>,
 }
 
 #[derive(Clone)]
@@ -57,6 +59,64 @@ impl PostService {
         }
     }
 
+    /// Tags must exist in the curated catalog; keys are matched exactly
+    /// (they are camelCase identifiers like freeShipping, never lowercased).
+    async fn normalize_tags(
+        &self,
+        tags: Vec<String>,
+        category: &str,
+    ) -> Result<Vec<String>, ApiError> {
+        let mut normalized: Vec<String> = Vec::new();
+        let mut seen = HashSet::new();
+        for tag in tags {
+            let tag = tag.trim().trim_start_matches('#').trim().to_string();
+            if tag.is_empty() {
+                continue;
+            }
+            if tag.chars().count() > MAX_TAG_CHARS {
+                return Err(ApiError::BadRequest(format!(
+                    "每个标签不能超过 {MAX_TAG_CHARS} 个字符"
+                )));
+            }
+            if seen.insert(tag.clone()) {
+                normalized.push(tag);
+            }
+        }
+        if normalized.len() > MAX_TAGS {
+            return Err(ApiError::BadRequest(format!(
+                "每个帖子最多 {MAX_TAGS} 个标签"
+            )));
+        }
+        if normalized.is_empty() {
+            return Ok(normalized);
+        }
+        let rows: Vec<(String, Vec<String>)> =
+            sqlx::query_as("SELECT key, categories FROM post_tag_catalog WHERE key = ANY($1)")
+                .bind(&normalized)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
+        let mut valid: std::collections::HashMap<String, Vec<String>> = rows.into_iter().collect();
+        for tag in &normalized {
+            match valid.remove(tag) {
+                None => {
+                    return Err(ApiError::BadRequest(format!(
+                        "标签 “{tag}” 不在预定义标签目录中"
+                    )));
+                }
+                Some(allowed)
+                    if !allowed.is_empty() && !allowed.contains(&category.to_string()) =>
+                {
+                    return Err(ApiError::BadRequest(format!(
+                        "标签 “{tag}” 不适用于 {category} 帖子"
+                    )));
+                }
+                Some(_) => {}
+            }
+        }
+        Ok(normalized)
+    }
+
     #[allow(dead_code)]
     pub async fn list(
         &self,
@@ -65,7 +125,9 @@ impl PostService {
         limit: i64,
         offset: i64,
     ) -> Result<(Vec<Post>, i64), ApiError> {
-        self.repository.list(campus_id, filter, limit, offset).await
+        self.repository
+            .list(campus_id, None, filter, limit, offset)
+            .await
     }
 
     pub async fn list_for_viewer(
@@ -81,7 +143,9 @@ impl PostService {
                 .list_for_you(campus_id, viewer_id, filter, limit, offset)
                 .await
         } else {
-            self.repository.list(campus_id, filter, limit, offset).await
+            self.repository
+                .list(campus_id, viewer_id, filter, limit, offset)
+                .await
         }
     }
 
@@ -90,6 +154,29 @@ impl PostService {
             .find_by_id(campus_id, id)
             .await?
             .ok_or(ApiError::NotFound)
+    }
+
+    /// Detail read with group-visibility enforcement.
+    pub async fn get_for_viewer(
+        &self,
+        campus_id: Uuid,
+        id: Uuid,
+        viewer_id: Option<&str>,
+    ) -> Result<Post, ApiError> {
+        let post = self.get(campus_id, id).await?;
+        ensure_post_visible(&self.pool, &post, viewer_id).await?;
+        Ok(post)
+    }
+
+    pub async fn get_by_listing_for_viewer(
+        &self,
+        campus_id: Uuid,
+        listing_id: &str,
+        viewer_id: Option<&str>,
+    ) -> Result<Post, ApiError> {
+        let post = self.get_by_listing(campus_id, listing_id).await?;
+        ensure_post_visible(&self.pool, &post, viewer_id).await?;
+        Ok(post)
     }
 
     pub async fn get_by_listing(
@@ -107,19 +194,20 @@ impl PostService {
             .ok_or(ApiError::NotFound)
     }
 
-    pub async fn create(&self, input: CreateDiscussion) -> Result<Post, ApiError> {
+    pub async fn create(&self, input: CreatePost) -> Result<Post, ApiError> {
         let title = required_text(input.title, "title", MAX_POST_TITLE_CHARS)?;
         let body = required_text(input.body, "body", MAX_POST_BODY_CHARS)?;
-        let category = normalize_category(input.category)?;
-        let tags = normalize_tags(input.tags)?;
+        let category = normalize_post_category(Some(input.category))?;
+        let tags = self.normalize_tags(input.tags, &category).await?;
+        let errand_metadata = normalize_errand_metadata(&tags, &category, input.errand_metadata)?;
         let cover_image_url = normalize_cover_image_url(input.cover_image_url)?;
-        let post_kind = normalize_post_kind(input.post_kind)?;
-        let mutual_aid_metadata =
-            normalize_mutual_aid_metadata(&post_kind, input.mutual_aid_metadata)?;
+        if let Some(space_id) = input.space_id {
+            ensure_space_member(&self.pool, input.author_id.as_str(), space_id).await?;
+        }
         self.ensure_text_allowed(&format!("{title}\n{body}\n{}", tags.join(" ")))?;
         let created = self
             .repository
-            .create_discussion(NewDiscussionPost {
+            .create_post(NewPost {
                 campus_id: input.campus_id,
                 author_id: input.author_id,
                 category,
@@ -127,8 +215,9 @@ impl PostService {
                 body,
                 tags,
                 image_url: cover_image_url.clone(),
-                post_kind,
-                mutual_aid_metadata,
+                listing_id: input.listing_id,
+                space_id: input.space_id,
+                errand_metadata,
             })
             .await?;
         if let Some(image_url) = cover_image_url {
@@ -151,27 +240,25 @@ impl PostService {
         campus_id: Uuid,
         id: Uuid,
         author_id: &str,
-        input: EditDiscussion,
+        input: EditPost,
     ) -> Result<Post, ApiError> {
         if input.title.is_none()
             && input.body.is_none()
             && input.category.is_none()
             && input.tags.is_none()
             && input.locked.is_none()
-            && input.post_kind.is_none()
-            && input.mutual_aid_metadata.is_none()
+            && input.errand_metadata.is_none()
         {
             return Err(ApiError::BadRequest("没有要更新的字段".to_string()));
         }
         let existing = self.get(campus_id, id).await?;
-        if existing.post_type == "listing" {
-            return Err(ApiError::BadRequest(
-                "商品帖子请通过 listing API 更新".to_string(),
-            ));
-        }
         if existing.author_id != author_id {
             return Err(ApiError::Forbidden);
         }
+        let effective_category = input
+            .category
+            .clone()
+            .unwrap_or_else(|| existing.category.clone());
         let title = input
             .title
             .map(|value| required_text(value, "title", MAX_POST_TITLE_CHARS))
@@ -182,19 +269,26 @@ impl PostService {
             .transpose()?;
         let category = input
             .category
-            .map(|value| normalize_category(Some(value)))
+            .map(|value| normalize_post_category(Some(value)))
             .transpose()?;
-        let tags = input.tags.map(normalize_tags).transpose()?;
-        let post_kind = input
-            .post_kind
-            .map(|value| normalize_post_kind(Some(value)))
-            .transpose()?;
-        let effective_post_kind = post_kind.as_deref().unwrap_or(&existing.post_kind);
-        let mutual_aid_metadata = match input.mutual_aid_metadata {
-            Some(value) => Some(normalize_mutual_aid_metadata(effective_post_kind, value)?),
-            None if post_kind.is_some() => Some(normalize_mutual_aid_metadata(
-                effective_post_kind,
-                existing.mutual_aid_metadata.clone(),
+        let tags = match &input.tags {
+            Some(tags) => Some(
+                self.normalize_tags(tags.clone(), &effective_category)
+                    .await?,
+            ),
+            None => None,
+        };
+        let effective_tags = tags.clone().unwrap_or_else(|| existing.tags.clone());
+        let errand_metadata = match input.errand_metadata {
+            Some(value) => Some(normalize_errand_metadata(
+                &effective_tags,
+                &effective_category,
+                value,
+            )?),
+            None if tags.is_some() => Some(normalize_errand_metadata(
+                &effective_tags,
+                &effective_category,
+                existing.errand_metadata.clone(),
             )?),
             None => None,
         };
@@ -206,18 +300,17 @@ impl PostService {
         ))?;
         let updated = self
             .repository
-            .update_discussion(
+            .update_post(
                 campus_id,
                 id,
                 author_id,
-                &UpdateDiscussionPost {
+                &UpdatePostInput {
                     title,
                     body,
                     category,
                     tags,
                     locked: input.locked,
-                    post_kind,
-                    mutual_aid_metadata,
+                    errand_metadata,
                 },
             )
             .await?;
@@ -229,17 +322,12 @@ impl PostService {
 
     pub async fn delete(&self, campus_id: Uuid, id: Uuid, author_id: &str) -> Result<(), ApiError> {
         let existing = self.get(campus_id, id).await?;
-        if existing.post_type == "listing" {
-            return Err(ApiError::BadRequest(
-                "商品帖子请通过 listing API 删除".to_string(),
-            ));
-        }
         if existing.author_id != author_id {
             return Err(ApiError::Forbidden);
         }
         if self
             .repository
-            .delete_discussion(campus_id, id, author_id)
+            .delete_post(campus_id, id, author_id)
             .await?
         {
             Ok(())
@@ -256,9 +344,9 @@ impl PostService {
         resolution_status: String,
     ) -> Result<Post, ApiError> {
         let existing = self.get(campus_id, id).await?;
-        if existing.post_kind != "mutual_aid" {
+        if !existing.tags.iter().any(|tag| tag == ERRAND_TAG_KEY) {
             return Err(ApiError::BadRequest(
-                "只有互助帖子可以更新解决状态".to_string(),
+                "只有带跑腿互助标签的帖子可以更新解决状态".to_string(),
             ));
         }
         if existing.author_id != author_id {
@@ -416,31 +504,43 @@ fn required_text(value: String, field: &str, max_chars: usize) -> Result<String,
     Ok(value)
 }
 
-fn normalize_category(value: Option<String>) -> Result<String, ApiError> {
-    let value = value.unwrap_or_else(|| "general".to_string());
-    required_text(value, "category", MAX_CATEGORY_CHARS)
-}
-
-fn normalize_post_kind(value: Option<String>) -> Result<String, ApiError> {
+fn normalize_post_category(value: Option<String>) -> Result<String, ApiError> {
     let value = value.unwrap_or_else(|| "discussion".to_string());
-    if value != "discussion" && value != "mutual_aid" {
-        return Err(ApiError::BadRequest("post_kind 无效".to_string()));
+    let value = value.trim().to_string();
+    if !is_valid_post_category(&value) {
+        return Err(ApiError::BadRequest(
+            "category 可选值为 offer、wanted、discussion".to_string(),
+        ));
     }
     Ok(value)
 }
 
-fn normalize_mutual_aid_metadata(
-    post_kind: &str,
+/// Validate errand payload: only meaningful when the post carries the errand
+/// tag AND the category is offer/wanted. Field rules inherited from the old
+/// mutual-aid metadata contract (service_direction is now the category).
+fn normalize_errand_metadata(
+    tags: &[String],
+    category: &str,
     value: serde_json::Value,
 ) -> Result<serde_json::Value, ApiError> {
-    if post_kind == "discussion" {
+    let has_errand = tags.iter().any(|tag| tag == ERRAND_TAG_KEY);
+    if !has_errand {
+        if value.as_object().is_some_and(|object| !object.is_empty()) {
+            return Err(ApiError::BadRequest(
+                "errand_metadata 仅在携带跑腿互助标签时可用".to_string(),
+            ));
+        }
         return Ok(serde_json::json!({}));
+    }
+    if category == "discussion" {
+        return Err(ApiError::BadRequest(
+            "跑腿互助标签仅适用于出/收帖子".to_string(),
+        ));
     }
     let object = value
         .as_object()
-        .ok_or_else(|| ApiError::BadRequest("mutual_aid_metadata 必须是对象".to_string()))?;
+        .ok_or_else(|| ApiError::BadRequest("errand_metadata 必须是对象".to_string()))?;
     let allowed = [
-        "service_direction",
         "service_mode",
         "pickup_place",
         "dropoff_place",
@@ -451,11 +551,10 @@ fn normalize_mutual_aid_metadata(
     ];
     if object.keys().any(|key| !allowed.contains(&key.as_str())) {
         return Err(ApiError::BadRequest(
-            "mutual_aid_metadata 包含未知字段".to_string(),
+            "errand_metadata 包含未知字段".to_string(),
         ));
     }
-    let text_fields = ["pickup_place", "dropoff_place", "time_hint", "notes"];
-    for field in text_fields {
+    for field in ["pickup_place", "dropoff_place", "time_hint", "notes"] {
         if let Some(value) = object.get(field) {
             let text = value
                 .as_str()
@@ -463,11 +562,6 @@ fn normalize_mutual_aid_metadata(
             if text.chars().count() > 120 {
                 return Err(ApiError::BadRequest(format!("{field} 不能超过 120 个字符")));
             }
-        }
-    }
-    if let Some(direction) = object.get("service_direction") {
-        if !matches!(direction.as_str(), Some("wanted") | Some("offer")) {
-            return Err(ApiError::BadRequest("service_direction 无效".to_string()));
         }
     }
     if let Some(mode) = object.get("service_mode") {
@@ -501,48 +595,51 @@ fn normalize_mutual_aid_metadata(
     Ok(value)
 }
 
-fn normalize_tags(tags: Vec<String>) -> Result<Vec<String>, ApiError> {
-    let mut normalized = Vec::new();
-    let mut seen = HashSet::new();
-    for tag in tags {
-        let tag = tag.trim().trim_start_matches('#').trim().to_string();
-        if tag.is_empty() {
-            continue;
-        }
-        if tag.chars().count() > MAX_TAG_CHARS {
-            return Err(ApiError::BadRequest(format!(
-                "每个标签不能超过 {MAX_TAG_CHARS} 个字符"
-            )));
-        }
-        let key = tag.to_lowercase();
-        if seen.insert(key) {
-            normalized.push(tag);
-        }
+async fn ensure_space_member(
+    pool: &sqlx::PgPool,
+    user_id: &str,
+    space_id: Uuid,
+) -> Result<(), ApiError> {
+    let member: Option<(String,)> =
+        sqlx::query_as("SELECT role FROM chat_space_members WHERE space_id = $1 AND user_id = $2")
+            .bind(space_id)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
+    match member {
+        Some((role,)) if role != "banned" => Ok(()),
+        _ => Err(ApiError::Forbidden),
     }
-    if normalized.len() > MAX_TAGS {
-        return Err(ApiError::BadRequest(format!(
-            "每个主题最多 {MAX_TAGS} 个标签"
-        )));
+}
+
+async fn ensure_post_visible(
+    pool: &sqlx::PgPool,
+    post: &Post,
+    viewer_id: Option<&str>,
+) -> Result<(), ApiError> {
+    let Some(space_id) = post.space_id else {
+        return Ok(());
+    };
+    let Some(viewer_id) = viewer_id else {
+        return Err(ApiError::NotFound);
+    };
+    let member: Option<(String,)> =
+        sqlx::query_as("SELECT role FROM chat_space_members WHERE space_id = $1 AND user_id = $2")
+            .bind(space_id)
+            .bind(viewer_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
+    match member {
+        Some((role,)) if role != "banned" => Ok(()),
+        _ => Err(ApiError::NotFound),
     }
-    Ok(normalized)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn tags_are_trimmed_deduplicated_and_unprefixed() {
-        assert_eq!(
-            normalize_tags(vec![
-                " #Rust ".to_string(),
-                "rust".to_string(),
-                "campus".to_string(),
-            ])
-            .unwrap(),
-            vec!["Rust", "campus"]
-        );
-    }
 
     #[test]
     fn post_and_reply_limits_count_characters() {
@@ -561,49 +658,55 @@ mod tests {
     }
 
     #[test]
-    fn category_defaults_to_general() {
-        assert_eq!(normalize_category(None).unwrap(), "general");
+    fn post_category_vocabulary_is_fixed() {
+        assert_eq!(
+            normalize_post_category(Some("offer".into())).unwrap(),
+            "offer"
+        );
+        assert_eq!(normalize_post_category(None).unwrap(), "discussion");
+        assert!(normalize_post_category(Some("listing".into())).is_err());
     }
 
     #[test]
-    fn mutual_aid_metadata_accepts_structured_fields() {
-        let metadata = serde_json::json!({
-            "service_direction": "wanted",
-            "service_mode": "pickup",
-            "pickup_place": "图书馆",
-            "reward_cents": 1200
-        });
-        assert!(normalize_mutual_aid_metadata("mutual_aid", metadata).is_ok());
+    fn errand_metadata_requires_errand_tag() {
+        let metadata = serde_json::json!({"service_mode": "pickup", "reward_cents": 1200});
+        // Without the tag the payload is rejected...
+        assert!(
+            normalize_errand_metadata(&["urgent".to_string()], "wanted", metadata.clone()).is_err()
+        );
+        // ...and discussion can never carry it.
+        assert!(
+            normalize_errand_metadata(&["errand".to_string()], "discussion", metadata.clone())
+                .is_err()
+        );
+        // With the tag on a wanted post it passes and normalizes.
+        assert_eq!(
+            normalize_errand_metadata(
+                &["errand".to_string(), "urgent".to_string()],
+                "wanted",
+                metadata
+            )
+            .unwrap(),
+            serde_json::json!({"service_mode": "pickup", "reward_cents": 1200})
+        );
     }
 
     #[test]
-    fn mutual_aid_metadata_rejects_invalid_direction_and_reward() {
-        assert!(normalize_mutual_aid_metadata(
-            "mutual_aid",
-            serde_json::json!({"service_direction": "maybe"})
-        )
-        .is_err());
-        assert!(normalize_mutual_aid_metadata(
-            "mutual_aid",
+    fn errand_metadata_rejects_unknown_fields_and_bad_values() {
+        let tags = ["errand".to_string()];
+        assert!(
+            normalize_errand_metadata(&tags, "offer", serde_json::json!({"mystery_field": 1}))
+                .is_err()
+        );
+        assert!(normalize_errand_metadata(
+            &tags,
+            "offer",
             serde_json::json!({"valid_until": "not-a-date"})
         )
         .is_err());
-        assert!(normalize_mutual_aid_metadata(
-            "mutual_aid",
-            serde_json::json!({"reward_cents": -1})
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn discussion_posts_discard_mutual_aid_metadata() {
-        assert_eq!(
-            normalize_mutual_aid_metadata(
-                "discussion",
-                serde_json::json!({"service_mode": "pickup"})
-            )
-            .unwrap(),
-            serde_json::json!({})
+        assert!(
+            normalize_errand_metadata(&tags, "offer", serde_json::json!({"reward_cents": -1}))
+                .is_err()
         );
     }
 }

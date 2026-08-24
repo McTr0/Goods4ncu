@@ -2479,8 +2479,8 @@ mod tests {
         campus_id: uuid::Uuid,
     ) {
         sqlx::query(
-            "INSERT INTO posts (id, campus_id, author_id, post_type, post_kind, category, title, body, status)
-             VALUES ($1::uuid, $2::uuid, $3::text, 'discussion', 'discussion', 'misc', '测试帖', '正文', 'active')",
+            "INSERT INTO posts (id, campus_id, author_id, category, title, body, status)
+             VALUES ($1::uuid, $2::uuid, $3::text, 'discussion', '测试帖', '正文', 'active')",
         )
         .bind(post_id)
         .bind(campus_id)

@@ -51,6 +51,17 @@ pub fn valid_category_message() -> String {
     )
 }
 
+/// Unified post categories. This IS the post kind: offer(出) / wanted(收) /
+/// discussion(讨论). Marketplace listing categories above are unrelated.
+pub const POST_CATEGORIES: &[&str] = &["offer", "wanted", "discussion"];
+
+pub fn is_valid_post_category(value: &str) -> bool {
+    POST_CATEGORIES.contains(&value)
+}
+
+/// Special catalog tag unlocking the errand payload + resolution lifecycle.
+pub const ERRAND_TAG_KEY: &str = "errand";
+
 #[cfg(test)]
 mod tests {
     use super::*;

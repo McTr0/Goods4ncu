@@ -8,9 +8,8 @@ use uuid::Uuid;
 pub struct Post {
     pub id: Uuid,
     pub campus_id: Uuid,
-    pub post_type: String,
-    pub post_kind: String,
     pub category: String,
+    pub space_id: Option<Uuid>,
     pub title: String,
     pub body: String,
     pub tags: Vec<String>,
@@ -21,7 +20,7 @@ pub struct Post {
     pub author_avatar_url: Option<String>,
     pub reply_count: i32,
     pub status: String,
-    pub mutual_aid_metadata: serde_json::Value,
+    pub errand_metadata: serde_json::Value,
     pub resolution_status: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -63,7 +62,7 @@ pub struct PostReply {
 }
 
 #[derive(Debug, Clone)]
-pub struct NewDiscussionPost {
+pub struct NewPost {
     pub campus_id: Uuid,
     pub author_id: String,
     pub category: String,
@@ -71,26 +70,26 @@ pub struct NewDiscussionPost {
     pub body: String,
     pub tags: Vec<String>,
     pub image_url: Option<String>,
-    pub post_kind: String,
-    pub mutual_aid_metadata: serde_json::Value,
+    pub listing_id: Option<String>,
+    pub space_id: Option<Uuid>,
+    pub errand_metadata: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct UpdateDiscussionPost {
+pub struct UpdatePostInput {
     pub title: Option<String>,
     pub body: Option<String>,
     pub category: Option<String>,
     pub tags: Option<Vec<String>>,
     pub locked: Option<bool>,
-    pub post_kind: Option<String>,
-    pub mutual_aid_metadata: Option<serde_json::Value>,
+    pub errand_metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct PostFilter {
-    pub post_type: Option<String>,
-    pub direction: Option<String>,
+    /// One of offer | wanted | discussion; None = all three.
     pub category: Option<String>,
+    pub space_id: Option<Uuid>,
     pub search: Option<String>,
     pub sort: PostSort,
 }
@@ -109,6 +108,7 @@ pub trait PostRepository: Send + Sync {
     async fn list(
         &self,
         campus_id: Uuid,
+        viewer_id: Option<&str>,
         filter: &PostFilter,
         limit: i64,
         offset: i64,
@@ -131,17 +131,17 @@ pub trait PostRepository: Send + Sync {
         listing_id: &str,
     ) -> Result<Option<Post>, ApiError>;
 
-    async fn create_discussion(&self, input: NewDiscussionPost) -> Result<Post, ApiError>;
+    async fn create_post(&self, input: NewPost) -> Result<Post, ApiError>;
 
-    async fn update_discussion(
+    async fn update_post(
         &self,
         campus_id: Uuid,
         id: Uuid,
         author_id: &str,
-        input: &UpdateDiscussionPost,
+        input: &UpdatePostInput,
     ) -> Result<bool, ApiError>;
 
-    async fn delete_discussion(
+    async fn delete_post(
         &self,
         campus_id: Uuid,
         id: Uuid,
@@ -209,19 +209,15 @@ impl PostgresPostRepository {
     }
 
     fn post_columns() -> &'static str {
-        r#"p.id, p.campus_id, p.post_type, p.post_kind, p.category, p.title, p.body,
-           p.tags, p.listing_id, p.reply_count, p.status, p.mutual_aid_metadata,
+        r#"p.id, p.campus_id, p.category, p.space_id, p.title, p.body,
+           p.tags, p.listing_id, p.reply_count, p.status, p.errand_metadata,
            p.resolution_status, p.created_at,
            p.updated_at, p.last_activity_at,
            author.id AS author_id, author.username AS author_username,
            CASE WHEN author.avatar_moderation_status = 'approved'
                 THEN author.avatar_url ELSE NULL END AS author_avatar_url,
            CASE
-               WHEN p.post_type = 'listing'
-                    AND listing.images_moderation_status = 'approved'
-                   THEN listing.image_url
-               WHEN p.post_type = 'discussion'
-                    AND p.images_moderation_status = 'approved'
+               WHEN p.images_moderation_status = 'approved'
                    THEN p.image_url
                ELSE NULL
            END AS cover_image_url,
@@ -270,10 +266,23 @@ impl PostgresPostRepository {
     }
 }
 
+fn errand_pin() -> &'static str {
+    "CASE WHEN p.tags @> '\"errand\"'::jsonb AND p.resolution_status = 'open' THEN 0 ELSE 1 END"
+}
+
+/// Group posts are visible only to unbanned members; anonymous viewers and
+/// non-members see campus-public posts only.
+const MEMBER_VISIBILITY_SQL: &str =
+    "AND (p.space_id IS NULL          OR EXISTS (SELECT 1 FROM chat_space_members member_check \
+                      WHERE member_check.space_id = p.space_id \
+                        AND member_check.user_id = $2 \
+                        AND member_check.role <> 'banned'))";
+
 impl PostRepository for PostgresPostRepository {
     async fn list(
         &self,
         campus_id: Uuid,
+        viewer_id: Option<&str>,
         filter: &PostFilter,
         limit: i64,
         offset: i64,
@@ -283,20 +292,25 @@ impl PostRepository for PostgresPostRepository {
             .as_deref()
             .map(escape_like_pattern)
             .map(|value| format!("%{value}%"));
+        let pin = errand_pin();
         let order_by = match filter.sort {
-            PostSort::Latest => "CASE WHEN p.post_kind = 'mutual_aid' AND p.resolution_status = 'open' THEN 0 ELSE 1 END, p.created_at DESC, p.id DESC",
-            PostSort::Active => "CASE WHEN p.post_kind = 'mutual_aid' AND p.resolution_status = 'open' THEN 0 ELSE 1 END, p.last_activity_at DESC, p.id DESC",
-            PostSort::Replies => "CASE WHEN p.post_kind = 'mutual_aid' AND p.resolution_status = 'open' THEN 0 ELSE 1 END, p.reply_count DESC, p.last_activity_at DESC, p.id DESC",
-            PostSort::ForYou => "CASE WHEN p.post_kind = 'mutual_aid' AND p.resolution_status = 'open' THEN 0 ELSE 1 END, p.last_activity_at DESC, p.id DESC",
+            PostSort::Latest => format!("{pin}, p.created_at DESC, p.id DESC"),
+            PostSort::Active => format!("{pin}, p.last_activity_at DESC, p.id DESC"),
+            PostSort::Replies => {
+                format!("{pin}, p.reply_count DESC, p.last_activity_at DESC, p.id DESC")
+            }
+            PostSort::ForYou => format!("{pin}, p.last_activity_at DESC, p.id DESC"),
         };
-        let visibility = "p.campus_id = $1
+        let visibility = format!(
+            "p.campus_id = $1
               AND p.status IN ('active', 'locked')
-              AND ($2::text IS NULL OR p.post_type = $2)
               AND ($3::text IS NULL OR p.category = $3)
-              AND ($4::text IS NULL OR p.title ILIKE $4
-                   OR p.body ILIKE $4)
-              AND ($5::text IS NULL OR listing.direction = $5)
-              AND (p.listing_id IS NULL OR NOT listing_has_active_restriction(p.listing_id))";
+              AND ($4::uuid IS NULL OR p.space_id = $4)
+              AND ($5::text IS NULL OR p.title ILIKE $5
+                   OR p.body ILIKE $5)
+              AND (p.listing_id IS NULL OR NOT listing_has_active_restriction(p.listing_id))
+              {MEMBER_VISIBILITY_SQL}"
+        );
         let query = format!(
             "{} WHERE {} ORDER BY {} LIMIT $6 OFFSET $7",
             Self::post_select(),
@@ -305,10 +319,10 @@ impl PostRepository for PostgresPostRepository {
         );
         let rows = sqlx::query(&query)
             .bind(campus_id)
-            .bind(filter.post_type.as_deref())
+            .bind(viewer_id)
             .bind(filter.category.as_deref())
+            .bind(filter.space_id)
             .bind(search.as_deref())
-            .bind(filter.direction.as_deref())
             .bind(limit)
             .bind(offset)
             .fetch_all(&self.pool)
@@ -321,10 +335,10 @@ impl PostRepository for PostgresPostRepository {
         );
         let total: i64 = sqlx::query_scalar(&count_query)
             .bind(campus_id)
-            .bind(filter.post_type.as_deref())
+            .bind(viewer_id)
             .bind(filter.category.as_deref())
+            .bind(filter.space_id)
             .bind(search.as_deref())
-            .bind(filter.direction.as_deref())
             .fetch_one(&self.pool)
             .await
             .map_err(db_error)?;
@@ -426,7 +440,7 @@ impl PostRepository for PostgresPostRepository {
                         ELSE 'recency'
                       END AS rank_source,
                       (
-                        CASE WHEN p.post_kind = 'mutual_aid' AND p.resolution_status = 'open' THEN 1.5 ELSE 0.0 END
+                        CASE WHEN p.tags @> '"errand"'::jsonb AND p.resolution_status = 'open' THEN 1.5 ELSE 0.0 END
                         +
                         CASE WHEN pref.personalization_enabled
                              THEN COALESCE(affinity.weight, 0) * 3.0
@@ -443,14 +457,14 @@ impl PostRepository for PostgresPostRepository {
                LEFT JOIN less_like ON less_like.category = LOWER(BTRIM(p.category))
                WHERE p.campus_id = $1
                  AND p.status IN ('active', 'locked')
-                 AND ($3::text IS NULL OR p.post_type = $3)
-                 AND ($4::text IS NULL OR p.category = $4)
+                 AND ($3::text IS NULL OR p.category = $3)
+                 AND ($4::uuid IS NULL OR p.space_id = $4)
                  AND ($5::text IS NULL OR p.title ILIKE $5
                       OR p.body ILIKE $5)
-                 AND ($6::text IS NULL OR listing.direction = $6)
                  AND ($2::text IS NULL OR p.author_id <> $2)
                  AND (p.listing_id IS NULL
                       OR NOT listing_has_active_restriction(p.listing_id))
+                 {member_visibility}
                  AND ($2::text IS NULL OR NOT EXISTS (
                        SELECT 1 FROM feed_feedback exact_feedback
                        WHERE exact_feedback.user_id = $2
@@ -464,22 +478,22 @@ impl PostRepository for PostgresPostRepository {
                          )
                      ))
                ORDER BY CASE
-                          WHEN p.post_kind = 'mutual_aid'
+                          WHEN p.tags @> '"errand"'::jsonb
                                AND p.resolution_status = 'open' THEN 0
                           ELSE 1
                         END,
                         ranking_score DESC, p.last_activity_at DESC, p.id DESC
-               LIMIT $7 OFFSET $8"#,
+               LIMIT $6 OFFSET $7"#,
             columns = Self::post_columns(),
             relations = Self::post_relations(),
+            member_visibility = MEMBER_VISIBILITY_SQL,
         );
         let rows = sqlx::query(&query)
             .bind(campus_id)
             .bind(viewer_id)
-            .bind(filter.post_type.as_deref())
             .bind(filter.category.as_deref())
+            .bind(filter.space_id)
             .bind(search.as_deref())
-            .bind(filter.direction.as_deref())
             .bind(limit)
             .bind(offset)
             .fetch_all(&self.pool)
@@ -490,17 +504,16 @@ impl PostRepository for PostgresPostRepository {
                LEFT JOIN inventory listing_filter ON listing_filter.id = p.listing_id
                WHERE p.campus_id = $1
                  AND p.status IN ('active', 'locked')
-                 AND ($2::text IS NULL OR p.post_type = $2)
+                 AND ($2::text IS NULL OR p.author_id <> $2)
                  AND ($3::text IS NULL OR p.category = $3)
-                 AND ($4::text IS NULL OR p.title ILIKE $4
-                      OR p.body ILIKE $4)
-                 AND ($5::text IS NULL OR listing_filter.direction = $5)
-                 AND ($6::text IS NULL OR p.author_id <> $6)
+                 AND ($4::uuid IS NULL OR p.space_id = $4)
+                 AND ($5::text IS NULL OR p.title ILIKE $5
+                      OR p.body ILIKE $5)
                  AND (p.listing_id IS NULL
                       OR NOT listing_has_active_restriction(p.listing_id))
-                 AND ($6::text IS NULL OR NOT EXISTS (
+                 AND ($2::text IS NULL OR NOT EXISTS (
                        SELECT 1 FROM feed_feedback exact_feedback
-                       WHERE exact_feedback.user_id = $6
+                       WHERE exact_feedback.user_id = $2
                          AND exact_feedback.campus_id = $1
                          AND (
                            (exact_feedback.resource_type = 'post'
@@ -512,11 +525,10 @@ impl PostRepository for PostgresPostRepository {
                      ))"#;
         let total: i64 = sqlx::query_scalar(count_query)
             .bind(campus_id)
-            .bind(filter.post_type.as_deref())
-            .bind(filter.category.as_deref())
-            .bind(search.as_deref())
-            .bind(filter.direction.as_deref())
             .bind(viewer_id)
+            .bind(filter.category.as_deref())
+            .bind(filter.space_id)
+            .bind(search.as_deref())
             .fetch_one(&self.pool)
             .await
             .map_err(db_error)?;
@@ -559,26 +571,29 @@ impl PostRepository for PostgresPostRepository {
             .map_err(db_error)
     }
 
-    async fn create_discussion(&self, input: NewDiscussionPost) -> Result<Post, ApiError> {
+    async fn create_post(&self, input: NewPost) -> Result<Post, ApiError> {
         let id: Uuid = sqlx::query_scalar(
             "INSERT INTO posts (
-                 campus_id, author_id, post_type, post_kind, category, title, body, tags,
-                 mutual_aid_metadata, image_url, images_moderation_status
+                 campus_id, author_id, category, title, body, tags,
+                 errand_metadata, image_url, images_moderation_status,
+                 listing_id, space_id
              ) VALUES (
-                 $1, $2, 'discussion', $3, $4, $5, $6, $7, $8, $9,
-                 CASE WHEN $9::text IS NULL THEN 'approved' ELSE 'pending' END
+                 $1, $2, $3, $4, $5, $6, $7, $8,
+                 CASE WHEN $8::text IS NULL THEN 'approved' ELSE 'pending' END,
+                 $9, $10
              )
              RETURNING id",
         )
         .bind(input.campus_id)
         .bind(&input.author_id)
-        .bind(&input.post_kind)
         .bind(&input.category)
         .bind(&input.title)
         .bind(&input.body)
         .bind(serde_json::json!(input.tags))
-        .bind(&input.mutual_aid_metadata)
+        .bind(&input.errand_metadata)
         .bind(input.image_url.as_deref())
+        .bind(input.listing_id.as_deref())
+        .bind(input.space_id)
         .fetch_one(&self.pool)
         .await
         .map_err(db_error)?;
@@ -587,12 +602,12 @@ impl PostRepository for PostgresPostRepository {
             .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("created post disappeared")))
     }
 
-    async fn update_discussion(
+    async fn update_post(
         &self,
         campus_id: Uuid,
         id: Uuid,
         author_id: &str,
-        input: &UpdateDiscussionPost,
+        input: &UpdatePostInput,
     ) -> Result<bool, ApiError> {
         let updated = sqlx::query(
             "UPDATE posts SET
@@ -600,16 +615,22 @@ impl PostRepository for PostgresPostRepository {
                  body = COALESCE($5, body),
                  category = COALESCE($6, category),
                  tags = COALESCE($7, tags),
-                 post_kind = COALESCE($8, post_kind),
-                 mutual_aid_metadata = COALESCE($9, mutual_aid_metadata),
+                 errand_metadata = CASE
+                     WHEN $8::jsonb IS NULL THEN errand_metadata
+                     ELSE $8
+                 END,
                  status = CASE
-                     WHEN $10::boolean IS NULL THEN status
-                     WHEN $10 THEN 'locked'
+                     WHEN $9::boolean IS NULL THEN status
+                     WHEN $9 THEN 'locked'
                      ELSE 'active'
                  END,
                  updated_at = NOW()
              WHERE id = $1 AND campus_id = $2 AND author_id = $3
-               AND post_type = 'discussion' AND status IN ('active', 'locked')",
+               AND status IN ('active', 'locked')
+               AND NOT (
+                     COALESCE($7, tags) @> '\"errand\"'::jsonb
+                     AND COALESCE($6, category) NOT IN ('offer', 'wanted')
+               )",
         )
         .bind(id)
         .bind(campus_id)
@@ -618,8 +639,7 @@ impl PostRepository for PostgresPostRepository {
         .bind(input.body.as_deref())
         .bind(input.category.as_deref())
         .bind(input.tags.as_ref().map(|tags| serde_json::json!(tags)))
-        .bind(input.post_kind.as_deref())
-        .bind(input.mutual_aid_metadata.as_ref())
+        .bind(input.errand_metadata.as_ref())
         .bind(input.locked)
         .execute(&self.pool)
         .await
@@ -627,7 +647,7 @@ impl PostRepository for PostgresPostRepository {
         Ok(updated.rows_affected() == 1)
     }
 
-    async fn delete_discussion(
+    async fn delete_post(
         &self,
         campus_id: Uuid,
         id: Uuid,
@@ -636,7 +656,7 @@ impl PostRepository for PostgresPostRepository {
         let deleted = sqlx::query(
             "UPDATE posts SET status = 'deleted', updated_at = NOW()
              WHERE id = $1 AND campus_id = $2 AND author_id = $3
-               AND post_type = 'discussion' AND status IN ('active', 'locked')",
+               AND status IN ('active', 'locked')",
         )
         .bind(id)
         .bind(campus_id)
@@ -657,7 +677,7 @@ impl PostRepository for PostgresPostRepository {
         let updated = sqlx::query(
             "UPDATE posts SET resolution_status = $4, updated_at = NOW()
              WHERE id = $1 AND campus_id = $2 AND author_id = $3
-               AND post_type = 'discussion' AND post_kind = 'mutual_aid'
+               AND tags @> '\"errand\"'::jsonb
                AND status IN ('active', 'locked')",
         )
         .bind(id)
@@ -835,11 +855,8 @@ fn post_from_row(row: &PgRow) -> Post {
     Post {
         id: row.get("id"),
         campus_id: row.get("campus_id"),
-        post_type: row.get("post_type"),
-        post_kind: row
-            .try_get("post_kind")
-            .unwrap_or_else(|_| "discussion".to_string()),
         category: row.get("category"),
+        space_id: row.try_get("space_id").ok(),
         title: row.get("title"),
         body: row.get("body"),
         tags,
@@ -850,8 +867,8 @@ fn post_from_row(row: &PgRow) -> Post {
         author_avatar_url: row.get("author_avatar_url"),
         reply_count: row.get("reply_count"),
         status: row.get("status"),
-        mutual_aid_metadata: row
-            .try_get("mutual_aid_metadata")
+        errand_metadata: row
+            .try_get("errand_metadata")
             .unwrap_or_else(|_| serde_json::json!({})),
         resolution_status: row
             .try_get("resolution_status")

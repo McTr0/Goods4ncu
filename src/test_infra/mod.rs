@@ -113,7 +113,11 @@ pub(crate) async fn ensure_test_schema_ready(database_url: &str) {
     }
 
     fn is_version_mismatch(err: &sqlx::migrate::MigrateError) -> bool {
-        matches!(err, sqlx::migrate::MigrateError::VersionMismatch(_))
+        matches!(
+            err,
+            sqlx::migrate::MigrateError::VersionMissing(_)
+                | sqlx::migrate::MigrateError::VersionMismatch(_)
+        )
     }
 
     async fn reset_public_schema(pool: &PgPool) {
