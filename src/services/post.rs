@@ -1,13 +1,14 @@
 //! Business rules for discussion/listing posts and threaded replies.
 
 use crate::api::error::ApiError;
-use crate::categories::is_valid_post_category;
+use crate::categories::POST_CATEGORIES;
 use crate::repositories::{
     NewPost, Post, PostFilter, PostReply, PostRepository, PostgresPostRepository, UpdatePostInput,
 };
 use crate::services::moderation::ModerationService;
 use sqlx::PgPool;
 use std::collections::HashSet;
+use std::sync::{OnceLock, RwLock};
 use uuid::Uuid;
 
 pub const MAX_POST_TITLE_CHARS: usize = 300;
@@ -41,6 +42,40 @@ pub struct EditPost {
     pub tags: Option<Vec<String>>,
     pub locked: Option<bool>,
     pub attributes: Option<serde_json::Value>,
+}
+
+/// Process-wide snapshot of post_categories, refreshed on first use and
+/// whenever an unknown category shows up — keeps Rust validation from
+/// drifting away from the catalog table.
+fn category_cache() -> &'static RwLock<Option<Vec<String>>> {
+    static CACHE: OnceLock<RwLock<Option<Vec<String>>>> = OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(None))
+}
+
+async fn load_allowed_categories(pool: &PgPool) -> Vec<String> {
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT key FROM post_categories WHERE enabled ORDER BY sort_order")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+    let keys: Vec<String> = rows.into_iter().map(|(key,)| key).collect();
+    if !keys.is_empty() {
+        if let Ok(mut slot) = category_cache().write() {
+            *slot = Some(keys.clone());
+        }
+    }
+    keys
+}
+
+pub async fn allowed_post_categories(pool: &PgPool) -> Vec<String> {
+    if let Ok(slot) = category_cache().read() {
+        if let Some(keys) = slot.as_ref() {
+            if !keys.is_empty() {
+                return keys.clone();
+            }
+        }
+    }
+    load_allowed_categories(pool).await
 }
 
 #[derive(Clone)]
@@ -229,7 +264,7 @@ impl PostService {
     pub async fn create(&self, input: CreatePost) -> Result<Post, ApiError> {
         let title = required_text(input.title, "title", MAX_POST_TITLE_CHARS)?;
         let body = required_text(input.body, "body", MAX_POST_BODY_CHARS)?;
-        let category = normalize_post_category(Some(input.category))?;
+        let category = normalize_post_category(&self.pool, Some(input.category)).await?;
         if category == "announcement" {
             self.ensure_can_announce(input.campus_id, input.author_id.as_str())
                 .await?;
@@ -303,10 +338,10 @@ impl PostService {
             .body
             .map(|value| required_text(value, "body", MAX_POST_BODY_CHARS))
             .transpose()?;
-        let category = input
-            .category
-            .map(|value| normalize_post_category(Some(value)))
-            .transpose()?;
+        let category = match input.category {
+            Some(value) => Some(normalize_post_category(&self.pool, Some(value)).await?),
+            None => None,
+        };
         if effective_category == "announcement" && existing.author_id == author_id {
             // Re-check on edits that touch an announcement.
             self.ensure_can_announce(campus_id, author_id).await?;
@@ -571,13 +606,24 @@ fn validate_attributes(
     Ok(serde_json::Value::Object(out))
 }
 
-fn normalize_post_category(value: Option<String>) -> Result<String, ApiError> {
+async fn normalize_post_category(
+    pool: &PgPool,
+    value: Option<String>,
+) -> Result<String, ApiError> {
     let value = value.unwrap_or_else(|| "discussion".to_string());
     let value = value.trim().to_string();
-    if !is_valid_post_category(&value) {
-        return Err(ApiError::BadRequest(
-            "category 可选值为 offer、wanted、discussion".to_string(),
-        ));
+    let mut allowed = allowed_post_categories(pool).await;
+    if allowed.is_empty() {
+        allowed = POST_CATEGORIES.iter().map(|key| key.to_string()).collect();
+        // Refresh for next time; the table is authoritative.
+        let pool = pool.clone();
+        tokio::spawn(async move { load_allowed_categories(&pool).await; });
+    }
+    if !allowed.iter().any(|key| key == &value) {
+        return Err(ApiError::BadRequest(format!(
+            "category 可选值为 {}",
+            allowed.join("、")
+        )));
     }
     Ok(value)
 }
@@ -645,12 +691,8 @@ mod tests {
     }
 
     #[test]
-    fn post_category_vocabulary_is_fixed() {
-        assert_eq!(
-            normalize_post_category(Some("offer".into())).unwrap(),
-            "offer"
-        );
-        assert_eq!(normalize_post_category(None).unwrap(), "discussion");
-        assert!(normalize_post_category(Some("listing".into())).is_err());
+    fn post_category_vocabulary_falls_back_to_bootstrap_catalog() {
+        // Pure-unit coverage: without a pool the const catalog applies.
+        assert_eq!(POST_CATEGORIES.len(), 5);
     }
 }

@@ -189,7 +189,10 @@ fn post_service(state: &AppState) -> PostService {
     PostService::new(state.infra.db.clone(), state.infra.moderation.clone())
 }
 
-fn normalize_filter(query: &PostListQuery) -> Result<PostFilter, ApiError> {
+fn normalize_filter(
+    query: &PostListQuery,
+    allowed_categories: &[String],
+) -> Result<PostFilter, ApiError> {
     let sort = match query.sort.as_deref().map(str::trim) {
         None | Some("") | Some("active") => PostSort::Active,
         Some("latest") => PostSort::Latest,
@@ -203,11 +206,14 @@ fn normalize_filter(query: &PostListQuery) -> Result<PostFilter, ApiError> {
     };
     let category = match query.category.as_deref().map(str::trim) {
         None | Some("") | Some("all") => None,
-        Some(value) if crate::categories::is_valid_post_category(value) => Some(value.to_string()),
-        Some(_) => {
-            return Err(ApiError::BadRequest(
-                "category 可选值为 all、offer、wanted、discussion".to_string(),
-            ))
+        Some(value) => {
+            if !allowed_categories.iter().any(|key| key == value) {
+                return Err(ApiError::BadRequest(format!(
+                    "category 可选值为 all、{}",
+                    allowed_categories.join("、")
+                )));
+            }
+            Some(value.to_string())
         }
     };
     Ok(PostFilter {
@@ -390,7 +396,9 @@ pub async fn list_posts(
 ) -> Result<Json<PostListResponse>, ApiError> {
     let viewer_id = session.0.as_ref().map(|session| session.user_id.clone());
     let campus_id = resolve_read_campus(&state, session).await?;
-    let filter = normalize_filter(&query)?;
+    let allowed_categories =
+        crate::services::post::allowed_post_categories(&state.infra.db).await;
+    let filter = normalize_filter(&query, &allowed_categories)?;
     let (limit, offset) = clamp_page(query.limit, query.offset);
     let (posts, total) = post_service(&state)
         .list_for_viewer(campus_id, viewer_id.as_deref(), &filter, limit, offset)
@@ -590,9 +598,19 @@ mod tests {
         assert_eq!(excerpt("校园", 2), "校园");
     }
 
+    fn normalize_filter_with_fallback(query: &PostListQuery) -> Result<PostFilter, ApiError> {
+        normalize_filter(
+            query,
+            &crate::categories::POST_CATEGORIES
+                .iter()
+                .map(|key| key.to_string())
+                .collect::<Vec<_>>(),
+        )
+    }
+
     #[test]
     fn validates_filter_vocabulary() {
-        let valid = normalize_filter(&PostListQuery {
+        let valid = normalize_filter_with_fallback(&PostListQuery {
             limit: None,
             offset: None,
             category: Some("offer".to_string()),
@@ -605,7 +623,7 @@ mod tests {
         assert_eq!(valid.category.as_deref(), Some("offer"));
         assert_eq!(valid.sort, PostSort::Replies);
 
-        let all = normalize_filter(&PostListQuery {
+        let all = normalize_filter_with_fallback(&PostListQuery {
             limit: None,
             offset: None,
             category: Some("all".to_string()),
@@ -618,7 +636,7 @@ mod tests {
         assert_eq!(all.category, None);
         assert_eq!(all.sort, PostSort::ForYou);
 
-        let invalid = normalize_filter(&PostListQuery {
+        let invalid = normalize_filter_with_fallback(&PostListQuery {
             limit: None,
             offset: None,
             category: Some("listing".to_string()),

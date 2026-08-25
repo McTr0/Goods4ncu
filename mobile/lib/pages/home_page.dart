@@ -88,9 +88,12 @@ class _HomePageState extends State<HomePage> {
         setState(() {
           _recommendationLoading = false;
           _feedLoading = false;
-          // Initial load failures replace the page; pagination failures keep
-          // the waterfall results and offer an inline retry.
-          if (reset || _posts.isEmpty) {
+          // A failed filter/refresh must never masquerade as stale results:
+          // drop the old cards so the error state is actually visible.
+          // Pagination failures (reset=false) keep the waterfall and offer
+          // an inline retry instead.
+          if (reset) {
+            _posts = [];
             _loadError = error.toString();
           } else {
             _postFeedError = error.toString();
@@ -445,7 +448,7 @@ class _PostSectionTitle extends StatelessWidget {
   Future<void> _pickTags(BuildContext context) async {
     final selected = await showSearchablePickerSheet<String>(
       context: context,
-      title: '按标签筛选（可多选）',
+      title: '按标签筛选（满足任一即可）',
       options: [
         for (final tag in kPostTags)
           PickerOption(

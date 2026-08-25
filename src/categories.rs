@@ -51,13 +51,12 @@ pub fn valid_category_message() -> String {
     )
 }
 
-/// Unified post categories. This IS the post kind: offer(出) / wanted(收) /
-/// discussion(讨论). Marketplace listing categories above are unrelated.
-pub const POST_CATEGORIES: &[&str] = &["offer", "wanted", "discussion"];
-
-pub fn is_valid_post_category(value: &str) -> bool {
-    POST_CATEGORIES.contains(&value)
-}
+/// Unified post categories. This IS the post kind. Bootstrap fallback only —
+/// the authoritative set lives in post_categories (migrations 0101/0103) and
+/// is cached from the DB at runtime (see services::post::allowed_categories).
+pub const POST_CATEGORIES: &[&str] = &[
+    "offer", "wanted", "discussion", "event", "announcement",
+];
 
 #[cfg(test)]
 mod tests {

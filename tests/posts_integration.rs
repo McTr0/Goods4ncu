@@ -57,6 +57,81 @@ async fn join_group(pool: &sqlx::PgPool, space_id: Uuid, user_id: &str) {
 }
 
 #[tokio::test]
+async fn event_and_announcement_categories_round_trip() {
+    with_test_pool(|pool| async move {
+        let campus_id = campus(&pool).await;
+        let author = user(&pool, "event-host").await;
+        // Promote to operator so the announcement gate opens.
+        sqlx::query(
+            "INSERT INTO campus_memberships
+                 (campus_id, user_id, status, role, verification_method, verified_at)
+             SELECT id, $1, 'verified', 'operator', 'test_fixture', NOW()
+             FROM campuses WHERE slug = 'ncu'
+             ON CONFLICT (campus_id, user_id) DO UPDATE SET role = 'operator'",
+        )
+        .bind(&author)
+        .execute(&pool)
+        .await
+        .expect("promote");
+
+        let service = service(&pool);
+
+        let event = service
+            .create(CreatePost {
+                campus_id,
+                author_id: author.clone(),
+                category: "event".to_string(),
+                title: "周六跳蚤市场".to_string(),
+                body: "天健广场见。".to_string(),
+                tags: vec!["share".to_string()],
+                cover_image_url: None,
+                listing_id: None,
+                space_id: None,
+                attributes: serde_json::json!({
+                    "starts_at": "2026-08-29T02:00:00Z",
+                    "place": "天健广场"
+                }),
+            })
+            .await
+            .expect("create event post");
+        assert_eq!(event.attributes["place"], "天健广场");
+
+        let announcement = service
+            .create(CreatePost {
+                campus_id,
+                author_id: author,
+                category: "announcement".to_string(),
+                title: "图书馆闭馆通知".to_string(),
+                body: "考试周延长开放。".to_string(),
+                tags: vec![],
+                cover_image_url: None,
+                listing_id: None,
+                space_id: None,
+                attributes: serde_json::json!({}),
+            })
+            .await
+            .expect("create announcement");
+
+        assert!(service
+            .list(
+                campus_id,
+                &PostFilter {
+                    category: Some("announcement".to_string()),
+                    ..Default::default()
+                },
+                10,
+                0,
+            )
+            .await
+            .expect("filter by announcement")
+            .0
+            .iter()
+            .any(|post| post.id == announcement.id));
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn tags_must_come_from_the_catalog_and_respect_groups() {
     with_test_pool(|pool| async move {
         let campus_id = campus(&pool).await;
