@@ -103,31 +103,10 @@ const List<PostTag> kPostTags = [
     group: null,
   ),
   PostTag(
-    key: 'freeShipping',
-    label: '包邮',
-    labelEn: 'Free shipping',
-    emoji: '📦',
-    group: null,
-  ),
-  PostTag(
     key: 'pickupOnly',
     label: '仅自提',
     labelEn: 'Pickup only',
     emoji: '📍',
-    group: null,
-  ),
-  PostTag(
-    key: 'brandNew',
-    label: '全新',
-    labelEn: 'Brand new',
-    emoji: '🆕',
-    group: null,
-  ),
-  PostTag(
-    key: 'likeNew',
-    label: '九成新',
-    labelEn: 'Like new',
-    emoji: '🌟',
     group: null,
   ),
   PostTag(
@@ -149,13 +128,6 @@ const List<PostTag> kPostTags = [
     label: '高价收',
     labelEn: 'Top price',
     emoji: '💎',
-    group: null,
-  ),
-  PostTag(
-    key: 'usedOk',
-    label: '接受二手',
-    labelEn: 'Used ok',
-    emoji: '♻️',
     group: null,
   ),
   // Exclusive groups (one pick max each).
