@@ -750,6 +750,10 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .route("/api/camphor", get(camphor::get_balance))
         .route("/api/posts/{id}/fertilize", post(camphor::fertilize_post))
         .route(
+            "/api/agent/turns/{conversation_id}/cancel",
+            post(chat::cancel_turn),
+        )
+        .route(
             "/api/posts/by-listing/{listing_id}",
             get(posts::get_post_by_listing),
         )

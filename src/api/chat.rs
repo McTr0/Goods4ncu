@@ -15,7 +15,7 @@ use crate::api::{normalize_platform_media_url, AppState, PeerAddr};
 use crate::llm::{AgentStreamChunk, MarketplaceAgent};
 use crate::services::agent_chat;
 use crate::services::chat::{ChatService, AGENT_CONVERSATION_SENTINEL};
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::Json;
@@ -704,6 +704,10 @@ async fn handle_chat_stream_request(
     let persisted_user_id = current_user_id.clone();
     let persisted_campus_id = session_campus_id;
     let persist_service = chat_svc.clone();
+    // Register cancellation token so POST cancel endpoint can reach it.
+    let turn_cancellation = crate::agents::runtime::TurnRegistry::register(&conversation_id);
+
+    const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
     let sse_stream = async_stream::stream! {
         let mut full_reply = String::new();
         let mut usage = None;
@@ -712,7 +716,45 @@ async fn handle_chat_stream_request(
         let mut tool_calls: u32 = 0;
         let mut first_token_ms: Option<i32> = None;
         let stream_started_at = std::time::Instant::now();
-        while let Some(result) = stream.next().await {
+
+        // Emit initial heartbeat so the client knows the connection is alive.
+        yield Ok(encode_sse_data(&serde_json::json!({
+            "type": "heartbeat",
+            "protocol_version": "2.0"
+        })));
+
+        let mut heartbeat_ticker = tokio::time::interval(HEARTBEAT_INTERVAL);
+        heartbeat_ticker.tick().await; // consume first immediate tick
+
+        loop {
+            // Check for user-initiated cancellation.
+            if turn_cancellation.is_cancelled() {
+                completed = false;
+                let cancel_payload = serde_json::json!({
+                    "type": "turn_cancelled",
+                    "reason": "user_requested",
+                });
+                yield Ok(encode_sse_data(&cancel_payload));
+                break;
+            }
+
+            // Emit heartbeat if the provider has been quiet.
+            heartbeat_ticker.tick().await;
+
+            let result = tokio::select! {
+                r = stream.next() => match r {
+                    Some(r) => r,
+                    None => break,
+                },
+                _ = heartbeat_ticker.tick() => {
+                    yield Ok(encode_sse_data(&serde_json::json!({
+                        "type": "heartbeat",
+                        "protocol_version": "2.0"
+                    })));
+                    continue;
+                }
+            };
+
             let bytes = match result {
                 Ok(AgentStreamChunk::Text(token)) => {
                     if !ttft_recorded {
@@ -857,6 +899,13 @@ pub(crate) async fn handle_chat_stream_get(
     axum::extract::Query(payload): axum::extract::Query<ChatStreamRequest>,
 ) -> Result<impl axum::response::IntoResponse, ApiError> {
     handle_chat_stream_request(state, headers, payload).await
+}
+
+/// POST /api/agent/turns/:conversation_id/cancel — cancel an in-flight turn.
+pub(crate) async fn cancel_turn(Path(conversation_id): Path<String>) -> Json<serde_json::Value> {
+    let cancelled = crate::agents::runtime::TurnRegistry::cancel(&conversation_id);
+    crate::agents::runtime::TurnRegistry::remove(&conversation_id);
+    Json(serde_json::json!({ "cancelled": cancelled }))
 }
 
 /// POST /api/chat/stream — preferred SSE path for authenticated JSON payloads.
