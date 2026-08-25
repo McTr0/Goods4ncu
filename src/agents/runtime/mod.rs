@@ -8,6 +8,7 @@
 #![allow(dead_code)]
 
 pub mod budget;
+pub mod engine;
 pub mod error;
 pub mod event;
 pub mod loop_guard;

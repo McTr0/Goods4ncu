@@ -45,3 +45,37 @@ impl ModelRequest {
         self
     }
 }
+
+/// Providers implement this to become a [`ModelDriver`] adapter.
+///
+/// The driver only translates provider streams into normalized
+/// [`ModelEvent`]s; it does NOT execute tools, parse UI actions,
+/// manage budgets, or detect loops.
+pub trait ModelDriver: Send + Sync {
+    /// Provider identifier (e.g., "gemini", "minimax", "openai").
+    fn provider(&self) -> &str;
+
+    /// Model identifier (e.g., "gemini-3-flash-preview").
+    fn model(&self) -> &str;
+
+    /// Capability flags for routing decisions.
+    fn capabilities(&self) -> super::model::ModelCapabilities;
+
+    /// Stream one inference step.
+    ///
+    /// Returns a stream of normalized events. The runtime consumes these;
+    /// it never sees provider-specific formats.
+    fn stream_step<'life0, 'async_trait>(
+        &'life0 self,
+        request: ModelRequest,
+    ) -> ::core::pin::Pin<
+        Box<
+            dyn ::core::future::Future<Output = anyhow::Result<ModelEventStream>>
+                + Send
+                + 'async_trait,
+        >,
+    >
+    where
+        'life0: 'async_trait,
+        Self: 'async_trait;
+}
