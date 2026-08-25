@@ -194,7 +194,6 @@ impl AgentEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn turn_started_serializes_with_type_tag() {
@@ -292,7 +291,7 @@ mod tests {
         let event = AgentEvent::new(TurnId::generate(), "c", 50, EventData::Heartbeat);
         let parsed: Value = serde_json::from_str(&event.to_sse()).unwrap();
         assert_eq!(parsed["type"], "heartbeat");
-        assert!(event.is_terminal() == false);
+        assert!(!event.is_terminal());
     }
 
     use serde_json::Value;

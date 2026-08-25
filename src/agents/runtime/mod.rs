@@ -5,10 +5,8 @@
 //! (Phase 3); this phase establishes the protocol types and serialization
 //! contracts that both Rust and Flutter consume.
 
+#![allow(dead_code)]
+
 pub mod budget;
 pub mod error;
 pub mod event;
-
-pub use budget::ExecutionBudget;
-pub use error::RuntimeErrorCode;
-pub use event::{AgentEvent, EventData, ModelEvent, ModelStopReason, ToolCallData, TurnId};
