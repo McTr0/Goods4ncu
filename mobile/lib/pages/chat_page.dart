@@ -465,8 +465,9 @@ class _ChatPageState extends State<ChatPage> {
   Widget? get _agentResultsStrip {
     if (_agentResultPosts.isEmpty) return null;
     final l = AppLocalizations.of(context)!;
+    final scheme = Theme.of(context).colorScheme;
     return Container(
-      color: const Color(0xFFF0FAF7),
+      color: scheme.surfaceContainerLow,
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -477,7 +478,7 @@ class _ChatPageState extends State<ChatPage> {
               l.assistantAgentResultTitle,
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
                 fontWeight: FontWeight.w700,
-                color: const Color(0xFF0F766E),
+                color: scheme.primary,
               ),
             ),
           ),
@@ -536,7 +537,7 @@ class _ChatPageState extends State<ChatPage> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.grey.shade100,
+                color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: SelectableText(text),
@@ -593,7 +594,7 @@ class _ChatPageState extends State<ChatPage> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.grey.shade100,
+                color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: SelectableText(text),
@@ -1501,6 +1502,7 @@ class _ChatPageState extends State<ChatPage> {
 
   Widget _buildQuickSuggestionChips() {
     final l = AppLocalizations.of(context)!;
+    final scheme = Theme.of(context).colorScheme;
     final chips = [
       ..._skillChips.take(3),
       l.assistantSuggestionVehicles,
@@ -1519,16 +1521,16 @@ class _ChatPageState extends State<ChatPage> {
             child: ActionChip(
               label: Text(
                 prompt,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF0F766E),
+                  color: scheme.onSurface,
                 ),
               ),
-              backgroundColor: Colors.white.withValues(alpha: 0.9),
-              side: BorderSide(
-                color: const Color(0xFF0F766E).withValues(alpha: 0.25),
+              backgroundColor: scheme.surfaceContainerHigh.withValues(
+                alpha: 0.94,
               ),
+              side: BorderSide(color: scheme.primary.withValues(alpha: 0.35)),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
@@ -1546,6 +1548,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
+    final scheme = Theme.of(context).colorScheme;
     final agentResults = _agentResultsStrip;
     final page = Column(
       children: [
@@ -1559,27 +1562,27 @@ class _ChatPageState extends State<ChatPage> {
         if (_historyError != null)
           Container(
             width: double.infinity,
-            color: const Color(0xFFFFF3CD),
+            color: scheme.errorContainer,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Text(
               l.assistantHistoryLoadFailed,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF765A16)),
+              style: TextStyle(fontSize: 12, color: scheme.onErrorContainer),
             ),
           ),
         // Pending agent action plans
         if (_agentPlans.isNotEmpty)
           Container(
-            color: const Color(0xFFF1F5FF),
+            color: scheme.secondaryContainer,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   l.agentPlanPendingHeader,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF3F51B5),
+                    color: scheme.onSecondaryContainer,
                   ),
                 ),
                 ..._agentPlans.map(
@@ -1593,8 +1596,8 @@ class _ChatPageState extends State<ChatPage> {
                               : Icons.pending_actions,
                           size: 18,
                           color: plan.isHighRisk
-                              ? const Color(0xFFB45309)
-                              : const Color(0xFF3F51B5),
+                              ? scheme.error
+                              : scheme.onSecondaryContainer,
                         ),
                         const SizedBox(width: 6),
                         Expanded(
@@ -1626,17 +1629,17 @@ class _ChatPageState extends State<ChatPage> {
         // Reversible writes undo strip
         if (_undoableActions.isNotEmpty)
           Container(
-            color: const Color(0xFFF4F6F4),
+            color: scheme.surfaceContainerHigh,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   l.undoDoneHeader,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF5F6B5F),
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
                 ..._undoableActions.map((action) {
@@ -1645,10 +1648,10 @@ class _ChatPageState extends State<ChatPage> {
                     padding: const EdgeInsets.only(top: 2),
                     child: Row(
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.check_circle_outline,
                           size: 16,
-                          color: Color(0xFF5F6B5F),
+                          color: scheme.primary,
                         ),
                         const SizedBox(width: 6),
                         Expanded(
@@ -1662,9 +1665,9 @@ class _ChatPageState extends State<ChatPage> {
                         if (remaining != null)
                           Text(
                             l.undoRemainingSeconds(remaining.inSeconds),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 11,
-                              color: Color(0xFF8A968A),
+                              color: scheme.onSurfaceVariant,
                             ),
                           ),
                         TextButton(
@@ -1703,13 +1706,17 @@ class _ChatPageState extends State<ChatPage> {
           key: const Key('assistant-stage-toggle'),
           onTap: () => setState(() => _stageExpanded = !_stageExpanded),
           child: Container(
+            key: const Key('assistant-stage-background'),
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 6),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [Color(0xFFE1F4EF), Color(0xFFFFFBF5)],
+                colors: [
+                  scheme.primaryContainer.withValues(alpha: 0.55),
+                  scheme.surface,
+                ],
               ),
             ),
             child: Column(
@@ -1722,14 +1729,14 @@ class _ChatPageState extends State<ChatPage> {
                           ? Icons.keyboard_arrow_up_rounded
                           : Icons.keyboard_arrow_down_rounded,
                       size: 18,
-                      color: const Color(0xFF0F766E),
+                      color: scheme.primary,
                     ),
                     Text(
                       _stageExpanded ? '' : l.assistantStageCollapsed,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFF0F766E),
+                        color: scheme.primary,
                       ),
                     ),
                   ],
@@ -1795,10 +1802,10 @@ class _ChatPageState extends State<ChatPage> {
         // Bottom Input Message Composer
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: scheme.surface,
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF0F766E).withValues(alpha: 0.08),
+                color: scheme.shadow.withValues(alpha: 0.16),
                 blurRadius: 16,
                 offset: const Offset(0, -4),
               ),
@@ -2027,7 +2034,7 @@ class _AgentResultCard extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 fontSize: 11,
-                                color: Colors.grey.shade700,
+                                color: scheme.onSurfaceVariant,
                               ),
                             ),
                           ),
@@ -2042,7 +2049,7 @@ class _AgentResultCard extends StatelessWidget {
                               textAlign: TextAlign.end,
                               style: TextStyle(
                                 fontSize: 10,
-                                color: Colors.grey.shade600,
+                                color: scheme.onSurfaceVariant,
                               ),
                             ),
                           ),
@@ -2094,6 +2101,7 @@ class _ChatBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     // Show negotiation cards after bot messages.
     Widget? trailingCard;
     if (!isUser && message.content.isNotEmpty && !message.isPartial) {
@@ -2122,13 +2130,17 @@ class _ChatBubble extends StatelessWidget {
         Align(
           alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
           child: Container(
+            key: Key(
+              isUser ? 'assistant-user-bubble' : 'assistant-reply-bubble',
+            ),
             constraints: BoxConstraints(
               maxWidth: MediaQuery.of(context).size.width * 0.75,
             ),
             margin: const EdgeInsets.symmetric(vertical: 4),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: isUser ? const Color(0xFF6366F1) : Colors.grey[200],
+              color: isUser ? scheme.primary : scheme.surfaceContainerHighest,
+              border: isUser ? null : Border.all(color: scheme.outlineVariant),
               borderRadius: BorderRadius.circular(16).copyWith(
                 bottomRight: isUser
                     ? const Radius.circular(0)
@@ -2173,7 +2185,7 @@ class _ChatBubble extends StatelessWidget {
                   Text(
                     message.content,
                     style: TextStyle(
-                      color: isUser ? Colors.white : Colors.black87,
+                      color: isUser ? scheme.onPrimary : scheme.onSurface,
                       fontSize: 16,
                     ),
                     softWrap: true,

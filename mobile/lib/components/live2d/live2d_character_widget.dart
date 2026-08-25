@@ -486,6 +486,7 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
   }
 
   Widget _buildSpeechBubble(String text) {
+    final scheme = Theme.of(context).colorScheme;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
       duration: const Duration(milliseconds: 180),
@@ -495,21 +496,22 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
           scale: val,
           alignment: Alignment.bottomCenter,
           child: Container(
+            key: const Key('live2d-speech-bubble'),
             constraints: BoxConstraints(
               maxWidth: math.max(widget.size * 1.15, 260),
               maxHeight: 160,
             ),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.96),
+              color: scheme.surfaceContainerHigh.withValues(alpha: 0.96),
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
-                color: const Color(0xFF0F766E).withValues(alpha: 0.35),
+                color: scheme.primary.withValues(alpha: 0.42),
                 width: 1.5,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF0F766E).withValues(alpha: 0.15),
+                  color: scheme.shadow.withValues(alpha: 0.24),
                   blurRadius: 14,
                   offset: const Offset(0, 4),
                 ),
@@ -519,10 +521,10 @@ class _Live2DCharacterWidgetState extends State<Live2DCharacterWidget>
               physics: const BouncingScrollPhysics(),
               child: Text(
                 text,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13.5,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF134E4A),
+                  color: scheme.onSurface,
                   height: 1.35,
                 ),
                 textAlign: TextAlign.center,

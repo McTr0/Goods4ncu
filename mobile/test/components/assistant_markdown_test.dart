@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/components/assistant_markdown.dart';
+import 'package:goods4ncu_mobile/theme/app_theme.dart';
 
 void main() {
   test('sanitizer escapes html outside fenced code', () {
@@ -39,5 +40,27 @@ void main() {
     expect(renderedText, isNot(contains('**')));
     expect(renderedText, contains('[图片：远程图片]'));
     expect(find.byType(Image), findsNothing);
+  });
+
+  testWidgets('uses the dark color scheme for assistant text', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        themeMode: ThemeMode.dark,
+        home: const Scaffold(body: AssistantMarkdown(data: '暗色内容')),
+      ),
+    );
+    await tester.pump();
+
+    final context = tester.element(find.byType(AssistantMarkdown));
+    final paragraph = tester
+        .widgetList<RichText>(find.byType(RichText))
+        .firstWhere((widget) => widget.text.toPlainText().contains('暗色内容'));
+
+    expect(
+      paragraph.text.style?.color,
+      Theme.of(context).colorScheme.onSurface,
+    );
   });
 }

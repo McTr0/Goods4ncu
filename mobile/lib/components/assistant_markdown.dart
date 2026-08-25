@@ -23,9 +23,10 @@ class AssistantMarkdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const textColor = Color(0xFF24312F);
-    const mutedColor = Color(0xFF526663);
-    const primary = Color(0xFF0F766E);
+    final scheme = Theme.of(context).colorScheme;
+    final textColor = scheme.onSurface;
+    final mutedColor = scheme.onSurfaceVariant;
+    final primary = scheme.primary;
 
     return MarkdownBlock(
       data: sanitizeAssistantMarkdown(data),
@@ -35,10 +36,10 @@ class AssistantMarkdown extends StatelessWidget {
       ),
       config: MarkdownConfig(
         configs: [
-          const PConfig(
+          PConfig(
             textStyle: TextStyle(color: textColor, fontSize: 16, height: 1.45),
           ),
-          const H1Config(
+          H1Config(
             style: TextStyle(
               color: textColor,
               fontSize: 22,
@@ -46,7 +47,7 @@ class AssistantMarkdown extends StatelessWidget {
               fontWeight: FontWeight.w800,
             ),
           ),
-          const H2Config(
+          H2Config(
             style: TextStyle(
               color: textColor,
               fontSize: 20,
@@ -54,7 +55,7 @@ class AssistantMarkdown extends StatelessWidget {
               fontWeight: FontWeight.w800,
             ),
           ),
-          const H3Config(
+          H3Config(
             style: TextStyle(
               color: textColor,
               fontSize: 18,
@@ -62,57 +63,57 @@ class AssistantMarkdown extends StatelessWidget {
               fontWeight: FontWeight.w800,
             ),
           ),
-          const H4Config(
+          H4Config(
             style: TextStyle(
               color: textColor,
               fontSize: 17,
               fontWeight: FontWeight.w700,
             ),
           ),
-          const H5Config(
+          H5Config(
             style: TextStyle(
               color: textColor,
               fontSize: 16,
               fontWeight: FontWeight.w700,
             ),
           ),
-          const H6Config(
+          H6Config(
             style: TextStyle(
               color: mutedColor,
               fontSize: 15,
               fontWeight: FontWeight.w700,
             ),
           ),
-          const CodeConfig(
+          CodeConfig(
             style: TextStyle(
-              color: Color(0xFF9A3412),
-              backgroundColor: Color(0xFFFFE8D7),
+              color: scheme.onTertiaryContainer,
+              backgroundColor: scheme.tertiaryContainer,
               fontFamily: 'monospace',
             ),
           ),
-          const PreConfig(
-            padding: EdgeInsets.all(12),
-            margin: EdgeInsets.symmetric(vertical: 6),
+          PreConfig(
+            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.symmetric(vertical: 6),
             decoration: BoxDecoration(
-              color: Color(0xFF172321),
-              borderRadius: BorderRadius.all(Radius.circular(10)),
+              color: scheme.surfaceContainerHighest,
+              borderRadius: const BorderRadius.all(Radius.circular(10)),
             ),
             textStyle: TextStyle(
-              color: Color(0xFFE5F3F0),
+              color: scheme.onSurface,
               fontSize: 13,
               height: 1.45,
               fontFamily: 'monospace',
             ),
-            styleNotMatched: TextStyle(color: Color(0xFFE5F3F0)),
+            styleNotMatched: TextStyle(color: scheme.onSurface),
           ),
-          const BlockquoteConfig(
+          BlockquoteConfig(
             sideColor: primary,
             textColor: mutedColor,
             sideWith: 3,
-            padding: EdgeInsets.fromLTRB(12, 2, 0, 2),
-            margin: EdgeInsets.symmetric(vertical: 6),
+            padding: const EdgeInsets.fromLTRB(12, 2, 0, 2),
+            margin: const EdgeInsets.symmetric(vertical: 6),
           ),
-          const LinkConfig(
+          LinkConfig(
             style: TextStyle(
               color: primary,
               decoration: TextDecoration.underline,
@@ -120,7 +121,10 @@ class AssistantMarkdown extends StatelessWidget {
             ),
             onTap: _ignoreExternalLink,
           ),
-          ImgConfig(builder: _buildBlockedImage),
+          ImgConfig(
+            builder: (url, attributes) =>
+                _buildBlockedImage(url, attributes, mutedColor),
+          ),
         ],
       ),
     );
@@ -128,14 +132,15 @@ class AssistantMarkdown extends StatelessWidget {
 
   static void _ignoreExternalLink(String _) {}
 
-  static Widget _buildBlockedImage(String _, Map<String, String> attributes) {
+  static Widget _buildBlockedImage(
+    String _,
+    Map<String, String> attributes,
+    Color color,
+  ) {
     final alt = attributes['alt']?.trim();
     return Text(
       alt == null || alt.isEmpty ? '[图片链接]' : '[图片：$alt]',
-      style: const TextStyle(
-        color: Color(0xFF64748B),
-        fontStyle: FontStyle.italic,
-      ),
+      style: TextStyle(color: color, fontStyle: FontStyle.italic),
     );
   }
 }

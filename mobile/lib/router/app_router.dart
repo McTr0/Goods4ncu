@@ -492,8 +492,9 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
         final isDesktop = constraints.maxWidth >= AppBreakpoints.desktop;
         if (isDesktop) {
           final extended = constraints.maxWidth >= AppBreakpoints.wideDesktop;
+          final scheme = Theme.of(context).colorScheme;
           return Scaffold(
-            backgroundColor: AppTheme.surface,
+            backgroundColor: scheme.surface,
             body: Row(
               children: [
                 _DesktopNavigation(
@@ -510,7 +511,7 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
                 ),
                 Expanded(
                   child: ColoredBox(
-                    color: AppTheme.surface,
+                    color: scheme.surface,
                     child: ResponsiveContent(
                       child: SizedBox.expand(child: widget.child),
                     ),
@@ -604,6 +605,7 @@ class _DesktopNavigation extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return Container(
       width: extended ? 216 : 88,
       decoration: BoxDecoration(
@@ -628,17 +630,15 @@ class _DesktopNavigation extends StatelessWidget {
           selectedIndex: selectedIndex,
           groupAlignment: extended ? -0.5 : -0.42,
           useIndicator: true,
-          indicatorColor: AppTheme.accentSoft,
-          selectedIconTheme: const IconThemeData(color: AppTheme.primaryDark),
-          unselectedIconTheme: const IconThemeData(
-            color: AppTheme.textSecondary,
-          ),
-          selectedLabelTextStyle: const TextStyle(
-            color: AppTheme.primaryDark,
+          indicatorColor: scheme.primaryContainer,
+          selectedIconTheme: IconThemeData(color: scheme.onPrimaryContainer),
+          unselectedIconTheme: IconThemeData(color: scheme.onSurfaceVariant),
+          selectedLabelTextStyle: TextStyle(
+            color: scheme.onSurface,
             fontWeight: FontWeight.w900,
           ),
-          unselectedLabelTextStyle: const TextStyle(
-            color: AppTheme.textSecondary,
+          unselectedLabelTextStyle: TextStyle(
+            color: scheme.onSurfaceVariant,
             fontWeight: FontWeight.w700,
           ),
           onDestinationSelected: onDestinationSelected,
@@ -690,19 +690,31 @@ class _XiaochangNavigationIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final size = desktop ? 36.0 : 42.0;
     final avatar = Container(
+      key: Key(
+        selected
+            ? 'xiaochang-navigation-icon-selected'
+            : 'xiaochang-navigation-icon',
+      ),
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
+        color: selected ? scheme.primaryContainer : scheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(15),
         border: Border.all(
-          color: selected
-              ? Theme.of(context).colorScheme.primary
-              : Theme.of(context).colorScheme.outlineVariant,
+          color: selected ? scheme.primary : scheme.outlineVariant,
           width: selected ? 2 : 1,
         ),
-        boxShadow: selected ? AppTheme.cardShadow : null,
+        boxShadow: selected
+            ? [
+                BoxShadow(
+                  color: scheme.shadow.withValues(alpha: 0.22),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : null,
       ),
       child: XiaochangAvatar(
         size: size,
@@ -752,7 +764,7 @@ class _DesktopBrand extends StatelessWidget {
       children: [
         mark,
         const SizedBox(width: AppTheme.sp12),
-        const Expanded(
+        Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -760,7 +772,7 @@ class _DesktopBrand extends StatelessWidget {
               Text(
                 AppBrand.englishName,
                 style: TextStyle(
-                  color: AppTheme.textPrimary,
+                  color: theme.colorScheme.onSurface,
                   fontSize: 17,
                   fontWeight: FontWeight.w900,
                 ),
@@ -768,7 +780,7 @@ class _DesktopBrand extends StatelessWidget {
               Text(
                 AppBrand.subtitle,
                 style: TextStyle(
-                  color: AppTheme.textSecondary,
+                  color: theme.colorScheme.onSurfaceVariant,
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                 ),

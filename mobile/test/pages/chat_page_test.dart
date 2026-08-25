@@ -8,6 +8,7 @@ import 'package:goods4ncu_mobile/services/chat_service.dart';
 import 'package:goods4ncu_mobile/services/sse_service.dart';
 import 'package:goods4ncu_mobile/services/post_service.dart';
 import 'package:goods4ncu_mobile/services/upload_service.dart';
+import 'package:goods4ncu_mobile/theme/app_theme.dart';
 
 class _FakeApiService extends ApiService {
   _FakeApiService({
@@ -82,8 +83,11 @@ class _FakeUploadService extends UploadService {}
 
 class _FakePostService extends PostService {}
 
-Widget _buildTestApp(Widget child) {
+Widget _buildTestApp(Widget child, {ThemeMode themeMode = ThemeMode.light}) {
   return MaterialApp(
+    theme: AppTheme.light,
+    darkTheme: AppTheme.dark,
+    themeMode: themeMode,
     locale: const Locale('zh'),
     localizationsDelegates: AppLocalizations.localizationsDelegates,
     supportedLocales: AppLocalizations.supportedLocales,
@@ -92,6 +96,44 @@ Widget _buildTestApp(Widget child) {
 }
 
 void main() {
+  testWidgets('assistant stage and reply bubbles follow dark theme colors', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _buildTestApp(
+        ChatPage(
+          apiService: _FakeApiService(),
+          chatService: _FakeChatService(),
+          sseService: SseService(),
+          uploadService: _FakeUploadService(),
+          postService: _FakePostService(),
+          embedded: true,
+        ),
+        themeMode: ThemeMode.dark,
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    final context = tester.element(
+      find.byKey(const Key('assistant-stage-background')),
+    );
+    final scheme = Theme.of(context).colorScheme;
+    final stage = tester.widget<Container>(
+      find.byKey(const Key('assistant-stage-background')),
+    );
+    final stageDecoration = stage.decoration! as BoxDecoration;
+    final gradient = stageDecoration.gradient! as LinearGradient;
+    final reply = tester.widget<Container>(
+      find.byKey(const Key('assistant-reply-bubble')),
+    );
+    final replyDecoration = reply.decoration! as BoxDecoration;
+
+    expect(gradient.colors.last, scheme.surface);
+    expect(replyDecoration.color, scheme.surfaceContainerHighest);
+    expect(replyDecoration.border, isNotNull);
+  });
+
   testWidgets('assistant page keeps navigation in the persistent shell', (
     tester,
   ) async {
