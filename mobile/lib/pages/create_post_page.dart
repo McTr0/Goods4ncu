@@ -164,7 +164,8 @@ class _CreatePostPageState extends State<CreatePostPage> {
         for (final tag in kPostTags)
           PickerOption(
             value: tag.key,
-            label: tag.label,
+            // Same emoji+label rendering as the discover-page filter.
+            label: postTagLabel(context, tag.key),
             subtitle: tag.group == 'location'
                 ? _locationGroupLabel
                 : tag.group == 'ttl'
