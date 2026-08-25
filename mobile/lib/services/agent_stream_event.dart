@@ -1,4 +1,3 @@
-
 /// Structured agent event from the v2 protocol.
 class AgentStreamEvent {
   AgentStreamEvent._({

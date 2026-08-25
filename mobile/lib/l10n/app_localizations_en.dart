@@ -3303,4 +3303,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get postStartAction => 'Start a discussion';
+
+  @override
+  String get composerStopTooltip => 'Stop generating';
 }

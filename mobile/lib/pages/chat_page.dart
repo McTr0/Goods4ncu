@@ -1051,6 +1051,16 @@ class _ChatPageState extends State<ChatPage> {
     _attachPostReference(picked);
   }
 
+  void _stopStreaming() {
+    if (!_isStreaming) return;
+    // Signal the server to cancel the turn.
+    final conversationId = '__agent__';
+    try {
+      _sseService.cancelTurn(conversationId);
+    } catch (_) {}
+    setState(() => _isStreaming = false);
+  }
+
   Future<void> _sendMessage() async {
     final localizations = AppLocalizations.of(context);
     final text = _controller.text.trim();
@@ -1799,6 +1809,7 @@ class _ChatPageState extends State<ChatPage> {
             focusNode: _composerFocusNode,
             hintText: l.assistantComposerHint,
             isSending: _isStreaming,
+            onStop: () => _stopStreaming(),
             onChanged: (_) {
               if (_useLegacyBrain) _live2DController.brain.onUserTyping();
             },

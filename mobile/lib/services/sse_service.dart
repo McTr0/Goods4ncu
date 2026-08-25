@@ -410,6 +410,23 @@ class SseService {
   }
 
   /// Disconnect and clean up. Idempotent.
+  /// POST cancel to the server for an in-flight turn.
+  void cancelTurn(String conversationId) {
+    final headers = <String, String>{'Content-Type': 'application/json'};
+    final url = Uri.parse(
+      '$_baseUrl/api/agent/turns/'
+      '${Uri.encodeComponent(conversationId)}/cancel',
+    );
+    _client
+        ?.post(url, headers: headers, body: '{}')
+        .then(
+          (_) {},
+          onError: (_) {
+            // Best effort; turn will time out naturally if cancel fails.
+          },
+        );
+  }
+
   Future<void> disconnect() async {
     _activeConnectionId += 1;
     _isConnected = false;

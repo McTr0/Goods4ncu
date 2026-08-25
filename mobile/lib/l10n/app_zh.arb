@@ -1503,5 +1503,6 @@
   "postEmptyTitle": "这里还没有内容",
   "postEmptyBody": "发起一个有用的校园讨论，和同学一起把楼盖起来吧。",
   "postEmptyListingBody": "暂时没有符合筛选条件的商品帖子。",
-  "postStartAction": "发起讨论"
+  "postStartAction": "发起讨论",
+  "composerStopTooltip": "停止生成"
 }

@@ -6083,6 +6083,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Start a discussion'**
   String get postStartAction;
+
+  /// No description provided for @composerStopTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop generating'**
+  String get composerStopTooltip;
 }
 
 class _AppLocalizationsDelegate

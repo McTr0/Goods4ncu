@@ -3155,4 +3155,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get postStartAction => '发起讨论';
+
+  @override
+  String get composerStopTooltip => '停止生成';
 }

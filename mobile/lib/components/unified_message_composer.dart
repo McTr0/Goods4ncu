@@ -37,6 +37,7 @@ class UnifiedMessageComposer extends StatefulWidget {
     this.statusContent,
     this.enabled = true,
     this.isSending = false,
+    this.onStop,
     this.isEditing = false,
     this.enableDictation = true,
     this.dictation,
@@ -54,6 +55,7 @@ class UnifiedMessageComposer extends StatefulWidget {
   final Widget? statusContent;
   final bool enabled;
   final bool isSending;
+  final VoidCallback? onStop;
   final bool isEditing;
   final bool enableDictation;
   final SpeechDictation? dictation;
@@ -333,10 +335,24 @@ class _UnifiedMessageComposerState extends State<UnifiedMessageComposer> {
                   ),
                 const SizedBox(width: 8),
                 IconButton.filled(
-                  key: const Key('composer-send'),
-                  tooltip: widget.isEditing ? l.confirm : l.composerSendTooltip,
-                  onPressed: interactive ? widget.onSend : null,
-                  icon: widget.isSending
+                  key: Key(
+                    widget.isSending && widget.onStop != null
+                        ? 'composer-stop'
+                        : 'composer-send',
+                  ),
+                  tooltip: widget.isSending && widget.onStop != null
+                      ? l.composerStopTooltip
+                      : widget.isEditing
+                      ? l.confirm
+                      : l.composerSendTooltip,
+                  onPressed: widget.isSending && widget.onStop != null
+                      ? widget.onStop
+                      : interactive
+                      ? widget.onSend
+                      : null,
+                  icon: widget.isSending && widget.onStop != null
+                      ? const Icon(Icons.stop_rounded)
+                      : widget.isSending
                       ? const SizedBox(
                           width: 18,
                           height: 18,
