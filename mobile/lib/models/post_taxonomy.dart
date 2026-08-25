@@ -1,6 +1,12 @@
 import 'package:flutter/widgets.dart';
 
 /// Post taxonomy — single source of truth for category pickers.
+///
+/// Mirrors migrations/0101/0103/0108 (post_categories + post_tag_catalog).
+/// The server also serves GET /api/posts/categories; this local registry is
+/// the offline fallback and the structural contract (kind drives form
+/// branches). Adding a category: INSERT a row server-side + add an entry
+/// here.
 
 class PostCategory {
   const PostCategory({
@@ -25,15 +31,24 @@ const List<PostCategory> kPostCategories = [
   PostCategory(key: 'wanted', label: '收', labelEn: 'Wanted', kind: 'goods'),
   PostCategory(
     key: 'discussion',
-    label: '话题讨论',
+    label: '讨论',
     labelEn: 'Discussion',
     kind: 'discussion',
   ),
   PostCategory(key: 'event', label: '活动', labelEn: 'Event', kind: 'discussion'),
   PostCategory(
+    key: 'recruit',
+    label: '召集',
+    labelEn: 'Recruit',
+    kind: 'discussion',
+  ),
+  PostCategory(key: 'help', label: '求助', labelEn: 'Help', kind: 'discussion'),
+  PostCategory(key: 'lost', label: '寻物', labelEn: 'Lost', kind: 'discussion'),
+  PostCategory(key: 'found', label: '招领', labelEn: 'Found', kind: 'discussion'),
+  PostCategory(
     key: 'announcement',
     label: '公告',
-    labelEn: 'Announcement',
+    labelEn: 'Notice',
     kind: 'discussion',
   ),
 ];
@@ -47,14 +62,23 @@ PostCategory? postCategoryByKey(String key) {
   return null;
 }
 
-/// Curated tag catalog — mirrors migrations/0100_post_taxonomy.sql.
+/// Locale-aware category label (zh default, en fallback to English name).
+String postCategoryLabel(BuildContext context, String key) {
+  final category = postCategoryByKey(key);
+  if (category == null) return key;
+  final isZh = Localizations.localeOf(context).languageCode == 'zh';
+  return isZh ? category.label : category.labelEn;
+}
+
+/// Curated tag catalog — mirrors migrations/0100+0106+0108.
 class PostTag {
   const PostTag({
     required this.key,
     required this.label,
     required this.labelEn,
     this.emoji,
-    required this.group,
+    this.group,
+    this.categories = const [],
   });
 
   final String key;
@@ -62,73 +86,68 @@ class PostTag {
   final String labelEn;
   final String? emoji;
 
-  /// Grouped tags allow one pick per group and don't count against the
-  /// free-tag budget; null group = free multi-select.
+  /// Grouped tags allow one pick per group.
   final String? group;
+
+  /// Empty = unrestricted; non-empty = only these categories may use it.
+  final List<String> categories;
+
+  bool allowedIn(String categoryKey) =>
+      categories.isEmpty || categories.contains(categoryKey);
 
   bool get exclusive => group != null;
 }
 
 const List<PostTag> kPostTags = [
-  // Free multi-select.
   PostTag(
     key: 'question',
     label: '提问',
     labelEn: 'Question',
     emoji: '❓',
-    group: null,
+    categories: ['discussion', 'help'],
   ),
   PostTag(
     key: 'help',
     label: '求助·有偿',
     labelEn: 'Paid help',
     emoji: '💰',
-    group: null,
+    categories: ['help', 'wanted'],
   ),
-  PostTag(key: 'share', label: '分享', labelEn: 'Share', emoji: '✨', group: null),
-  PostTag(key: 'free', label: '免费送', labelEn: 'Free', emoji: '🎁', group: null),
-  PostTag(
-    key: 'found',
-    label: '招领',
-    labelEn: 'Found',
-    emoji: '📣',
-    group: null,
-  ),
-  PostTag(key: 'lost', label: '寻物', labelEn: 'Lost', emoji: '🔍', group: null),
+  PostTag(key: 'share', label: '分享', labelEn: 'Share', emoji: '✨'),
   PostTag(
     key: 'negotiable',
     label: '可议价',
     labelEn: 'Negotiable',
     emoji: '🤝',
-    group: null,
+    categories: ['offer'],
   ),
   PostTag(
     key: 'pickupOnly',
     label: '仅自提',
     labelEn: 'Pickup only',
     emoji: '📍',
-    group: null,
+    categories: ['offer', 'wanted'],
   ),
   PostTag(
     key: 'sellFast',
     label: '急出',
     labelEn: 'Sell fast',
     emoji: '⚡',
-    group: null,
+    categories: ['offer'],
   ),
   PostTag(
     key: 'budgetFlexible',
     label: '预算可议',
     labelEn: 'Flexible budget',
     emoji: '💬',
-    group: null,
+    categories: ['wanted', 'help'],
   ),
   PostTag(
     key: 'topPrice',
     label: '高价收',
     labelEn: 'Top price',
     emoji: '💎',
-    group: null,
+    categories: ['wanted'],
   ),
   // Exclusive groups (one pick max each).
   PostTag(
@@ -175,19 +194,9 @@ const List<PostTag> kPostTags = [
   ),
 ];
 
-/// Locale-aware category label (zh default, en fallback to English name).
-String postCategoryLabel(BuildContext context, String key) {
-  final category = postCategoryByKey(key);
-  if (category == null) return key;
-  final isZh = Localizations.localeOf(context).languageCode == 'zh';
-  return isZh ? category.label : category.labelEn;
-}
-
 /// Locale-aware tag label with its emoji prefix.
 String postTagLabel(BuildContext context, String key) {
-  final matches = kPostTags
-      .where((tag) => tag.key == key)
-      .toList(growable: false);
+  final matches = kPostTags.where((tag) => tag.key == key).toList();
   if (matches.isEmpty) return '#$key';
   final tag = matches.first;
   final isZh = Localizations.localeOf(context).languageCode == 'zh';
