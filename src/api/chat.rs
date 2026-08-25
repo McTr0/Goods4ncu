@@ -20,9 +20,7 @@ use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::Json;
 use futures::StreamExt;
-use rig::completion::Message;
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 
 /// A dropped SSE body cannot await a database write from its `Drop` path.  The
 /// sender below therefore stays alive for the generator's lifetime; if the
@@ -74,15 +72,6 @@ pub(crate) struct AssistantHistoryResponse {
     pub total: i64,
 }
 
-fn extract_bearer_token(headers: &HeaderMap) -> Result<&str, ApiError> {
-    headers
-        .get("Authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .filter(|v| !v.is_empty())
-        .ok_or(ApiError::Unauthorized)
-}
-
 pub(crate) async fn get_assistant_history(
     State(state): State<AppState>,
     Session(session): Session,
@@ -126,7 +115,6 @@ pub(crate) async fn clear_assistant_history(
 /// Returns `(resolved_listing_id, receiver)`. When `listing_id` points to an
 /// active listing owned by someone other than the caller, both values are
 /// returned verbatim. Otherwise both fall back to `"global"` / `None`.
-
 pub(crate) async fn handle_chat(
     State(state): State<AppState>,
     PeerAddr(addr): PeerAddr,
@@ -507,7 +495,7 @@ async fn handle_chat_stream_request(
     let proposal_idempotency_key =
         crate::api::request_context::idempotency_key_from_headers(&headers)?;
 
-    let token = extract_bearer_token(&headers)?;
+    let token = agent_chat::extract_bearer_token(&headers)?;
 
     auth::ensure_token_not_revoked(&state, token)
         .await

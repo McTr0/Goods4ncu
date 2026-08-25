@@ -173,6 +173,7 @@ impl AgentTokenUsage {
         })
     }
 
+    #[allow(dead_code)]
     pub fn bounded_i32(self) -> (Option<i32>, Option<i32>) {
         let input = i32::try_from(self.input_tokens).ok();
         let output = i32::try_from(self.output_tokens).ok();
