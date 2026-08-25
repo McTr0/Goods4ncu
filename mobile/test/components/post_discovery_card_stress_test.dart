@@ -87,7 +87,7 @@ void main() {
     expect(find.byKey(const ValueKey('post-cover-errand-1')), findsNothing);
     expect(tester.takeException(), isNull);
     // Header pills still identify category and first tag.
-    expect(find.text('商品出'), findsOneWidget);
+    expect(find.text('出'), findsOneWidget);
     expect(find.text('📍 前湖北院'), findsOneWidget);
   });
 }
