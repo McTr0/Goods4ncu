@@ -4,6 +4,7 @@ use tokio::sync::mpsc;
 
 pub mod admin;
 pub mod admin_mfa;
+pub mod agent_chat;
 pub mod agent_memory;
 pub mod agent_plan;
 pub mod agent_run;

@@ -12,8 +12,8 @@ use crate::api::auth;
 use crate::api::error::ApiError;
 use crate::api::session::Session;
 use crate::api::{normalize_platform_media_url, AppState, PeerAddr};
-use crate::llm::{AgentStreamChunk, AgentTokenUsage, MarketplaceAgent};
-use crate::services::agent_run::AgentRunService;
+use crate::llm::{AgentStreamChunk, MarketplaceAgent};
+use crate::services::agent_chat;
 use crate::services::chat::{ChatService, AGENT_CONVERSATION_SENTINEL};
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
@@ -21,20 +21,14 @@ use axum::response::Response;
 use axum::Json;
 use futures::StreamExt;
 use rig::completion::Message;
-use rig::message::{AssistantContent, Text, UserContent};
-use rig::OneOrMany;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use std::time::{Duration, Instant};
-use tokio::sync::oneshot;
-use uuid::Uuid;
 
 /// A dropped SSE body cannot await a database write from its `Drop` path.  The
 /// sender below therefore stays alive for the generator's lifetime; if the
 /// client disconnects and drops the generator, a bounded grace period later
 /// the reconciliation task closes a still-started run as cancelled.  Normal
 /// completion explicitly signals the task and avoids an unnecessary wake-up.
-const AGENT_RUN_RECONCILIATION_DELAY: Duration = Duration::from_secs(120);
 
 #[derive(Deserialize)]
 pub(crate) struct ChatRequest {
@@ -89,24 +83,6 @@ fn extract_bearer_token(headers: &HeaderMap) -> Result<&str, ApiError> {
         .ok_or(ApiError::Unauthorized)
 }
 
-fn resolve_chat_conversation_id(
-    requested_id: Option<String>,
-    user_id: &str,
-) -> (String, String, bool) {
-    match requested_id.filter(|id| !id.is_empty()) {
-        Some(id) if id == AGENT_CONVERSATION_SENTINEL => (
-            ChatService::assistant_conversation_id(user_id),
-            AGENT_CONVERSATION_SENTINEL.to_string(),
-            true,
-        ),
-        Some(id) => (id.clone(), id, false),
-        None => {
-            let id = Uuid::new_v4().to_string();
-            (id.clone(), id, false)
-        }
-    }
-}
-
 pub(crate) async fn get_assistant_history(
     State(state): State<AppState>,
     Session(session): Session,
@@ -150,258 +126,6 @@ pub(crate) async fn clear_assistant_history(
 /// Returns `(resolved_listing_id, receiver)`. When `listing_id` points to an
 /// active listing owned by someone other than the caller, both values are
 /// returned verbatim. Otherwise both fall back to `"global"` / `None`.
-async fn resolve_listing_context(
-    db: &sqlx::PgPool,
-    listing_id: Option<&str>,
-    current_user_id: &str,
-    session_campus_id: Option<Uuid>,
-) -> Result<(String, Option<String>), ApiError> {
-    match listing_id {
-        Some(lid) if !lid.is_empty() => {
-            let row = sqlx::query(
-                "SELECT listing.owner_id
-                 FROM inventory listing
-                 JOIN campuses campus
-                   ON campus.id = listing.campus_id AND campus.status = 'active'
-                 WHERE listing.id = $1
-                   AND listing.status = 'active'
-                   AND NOT listing_has_active_restriction(listing.id)
-                   AND ($2::uuid IS NULL OR listing.campus_id = $2)
-                   AND EXISTS (
-                       SELECT 1 FROM campus_memberships membership
-                       WHERE membership.campus_id = listing.campus_id
-                         AND membership.user_id = $3
-                         AND membership.status = 'verified'
-                   )",
-            )
-            .bind(lid)
-            .bind(session_campus_id)
-            .bind(current_user_id)
-            .fetch_optional(db)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-            match row {
-                Some(r) => {
-                    let owner_id: String = r.get("owner_id");
-                    if owner_id != current_user_id {
-                        Ok((lid.to_string(), Some(owner_id)))
-                    } else {
-                        Ok(("global".to_string(), None))
-                    }
-                }
-                None => Err(ApiError::NotFound),
-            }
-        }
-        _ => Ok(("global".to_string(), None)),
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn persist_context_message(
-    chat_svc: &ChatService,
-    conversation_id: &str,
-    listing_id: &str,
-    sender: &str,
-    receiver: Option<&str>,
-    is_agent: bool,
-    content: &str,
-    image_data: Option<&str>,
-    audio_data: Option<&str>,
-    image_url: Option<&str>,
-    audio_url: Option<&str>,
-    session_campus_id: Option<Uuid>,
-) -> anyhow::Result<bool> {
-    if listing_id == "global" {
-        chat_svc
-            .log_message(
-                conversation_id,
-                listing_id,
-                sender,
-                receiver,
-                is_agent,
-                content,
-                image_data,
-                audio_data,
-                image_url,
-                audio_url,
-            )
-            .await?;
-        return Ok(true);
-    }
-
-    chat_svc
-        .log_listing_message_if_eligible(
-            conversation_id,
-            listing_id,
-            sender,
-            receiver,
-            is_agent,
-            content,
-            image_data,
-            audio_data,
-            image_url,
-            audio_url,
-            session_campus_id,
-        )
-        .await
-}
-
-fn history_to_rig_messages(entries: &[crate::services::chat::ChatHistoryEntry]) -> Vec<Message> {
-    entries
-        .iter()
-        .map(|entry| {
-            if entry.is_agent {
-                Message::Assistant {
-                    id: None,
-                    content: OneOrMany::one(AssistantContent::Text(Text {
-                        text: entry.content.clone(),
-                    })),
-                }
-            } else {
-                Message::User {
-                    content: OneOrMany::one(UserContent::Text(Text {
-                        text: entry.content.clone(),
-                    })),
-                }
-            }
-        })
-        .collect()
-}
-
-#[derive(Clone)]
-struct AgentRunHandle {
-    service: AgentRunService,
-    trace_id: String,
-    campus_id: Uuid,
-    user_id: String,
-    started_at: Instant,
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn begin_agent_run(
-    db: &sqlx::PgPool,
-    trace_id: String,
-    campus_id: Option<Uuid>,
-    user_id: &str,
-    conversation_id: &str,
-    route: &str,
-    route_confidence: f32,
-    provider: Option<&str>,
-    model: Option<&str>,
-) -> Option<AgentRunHandle> {
-    let Some(campus_id) = campus_id else {
-        // Legacy access tokens without an active campus remain compatible;
-        // they cannot create a tenant-scoped run until the session is bound.
-        return None;
-    };
-    let service = AgentRunService::new(db.clone());
-    match service
-        .start(
-            &trace_id,
-            campus_id,
-            user_id,
-            conversation_id,
-            route,
-            route_confidence,
-            provider,
-            model,
-        )
-        .await
-    {
-        Ok(_) => Some(AgentRunHandle {
-            service,
-            trace_id,
-            campus_id,
-            user_id: user_id.to_string(),
-            started_at: Instant::now(),
-        }),
-        Err(error) => {
-            tracing::warn!(%error, "failed to start AgentRun envelope");
-            None
-        }
-    }
-}
-
-async fn finish_agent_run(
-    run: &AgentRunHandle,
-    status: &str,
-    outcome_code: &str,
-    error_code: Option<&str>,
-) -> bool {
-    finish_agent_run_with_usage(run, status, outcome_code, error_code, None).await
-}
-
-async fn finish_agent_run_with_usage(
-    run: &AgentRunHandle,
-    status: &str,
-    outcome_code: &str,
-    error_code: Option<&str>,
-    usage: Option<AgentTokenUsage>,
-) -> bool {
-    let duration_ms = Some(run.started_at.elapsed().as_millis().min(i32::MAX as u128) as i32);
-    let (token_input, token_output) = usage
-        .map(AgentTokenUsage::bounded_i32)
-        .unwrap_or((None, None));
-    match run
-        .service
-        .finish_with_usage(
-            &run.trace_id,
-            run.campus_id,
-            &run.user_id,
-            status,
-            outcome_code,
-            error_code,
-            token_input,
-            token_output,
-            duration_ms,
-        )
-        .await
-    {
-        Ok(finished) => finished,
-        Err(error) => {
-            tracing::warn!(%error, trace_id = %run.trace_id, "failed to finish AgentRun envelope");
-            false
-        }
-    }
-}
-
-fn schedule_agent_run_reconciliation(run: AgentRunHandle) -> oneshot::Sender<()> {
-    let (done_tx, done_rx) = oneshot::channel();
-    tokio::spawn(async move {
-        // A normal generator completion sends `()`.  A dropped generator
-        // drops the sender, after which the grace period gives an in-flight
-        // response a chance to finish before we record cancellation.
-        if done_rx.await.is_ok() {
-            return;
-        }
-        tokio::time::sleep(AGENT_RUN_RECONCILIATION_DELAY).await;
-        let duration_ms = Some(run.started_at.elapsed().as_millis().min(i32::MAX as u128) as i32);
-        match run
-            .service
-            .cancel_started(
-                &run.trace_id,
-                run.campus_id,
-                &run.user_id,
-                Some("client_disconnect_or_timeout"),
-                duration_ms,
-            )
-            .await
-        {
-            Ok(true) => tracing::debug!(
-                trace_id = %run.trace_id,
-                "reconciled abandoned AgentRun as cancelled"
-            ),
-            Ok(false) => {}
-            Err(error) => tracing::warn!(
-                %error,
-                trace_id = %run.trace_id,
-                "failed to reconcile abandoned AgentRun"
-            ),
-        }
-    });
-    done_tx
-}
 
 pub(crate) async fn handle_chat(
     State(state): State<AppState>,
@@ -459,11 +183,11 @@ pub(crate) async fn handle_chat(
     let session_campus_id = session.campus_id;
     let current_user_id = session.user_id;
     let (conversation_id, response_conversation_id, is_assistant_conversation) =
-        resolve_chat_conversation_id(conversation_id, &current_user_id);
+        agent_chat::resolve_conversation_id(conversation_id, &current_user_id);
     let chat_svc = ChatService::new(state.infra.db.clone());
     // Validate an explicit listing before greeting/blocked-intent shortcuts so
     // those fast paths cannot turn an ineligible id into a successful request.
-    let (resolved_listing_id, receiver) = resolve_listing_context(
+    let (resolved_listing_id, receiver) = agent_chat::resolve_listing_context(
         &state.infra.db,
         listing_id.as_deref(),
         &current_user_id,
@@ -485,7 +209,7 @@ pub(crate) async fn handle_chat(
     );
 
     if let Some(reply) = intent_result.direct_response(&message) {
-        let run = begin_agent_run(
+        let run = agent_chat::begin_agent_run(
             &state.infra.db,
             crate::api::request_context::current_or_new_request_id(),
             session_campus_id,
@@ -530,7 +254,7 @@ pub(crate) async fn handle_chat(
                 .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
         }
         if let Some(run) = run {
-            finish_agent_run(&run, "completed", "direct_response", None).await;
+            agent_chat::finish_agent_run(&run, "completed", "direct_response", None).await;
         }
         return Ok(Json(ChatResponse {
             reply,
@@ -542,10 +266,10 @@ pub(crate) async fn handle_chat(
         .get_conversation_history(&conversation_id)
         .await
         .unwrap_or_default();
-    let chat_history = history_to_rig_messages(&history);
+    let chat_history = agent_chat::history_to_rig_messages(&history);
 
     // Persist before LLM execution to avoid message loss on timeout or abort.
-    let persisted = persist_context_message(
+    let persisted = agent_chat::persist_context_message(
         &chat_svc,
         &conversation_id,
         &resolved_listing_id,
@@ -570,7 +294,7 @@ pub(crate) async fn handle_chat(
 
     state.infra.metrics.record_chat_message();
 
-    let run = begin_agent_run(
+    let run = agent_chat::begin_agent_run(
         &state.infra.db,
         crate::api::request_context::current_or_new_request_id(),
         session_campus_id,
@@ -600,7 +324,7 @@ pub(crate) async fn handle_chat(
         Ok(agent) => agent,
         Err(error) => {
             if let Some(run) = &run {
-                finish_agent_run(
+                agent_chat::finish_agent_run(
                     run,
                     "failed",
                     "provider_unavailable",
@@ -645,7 +369,8 @@ pub(crate) async fn handle_chat(
             tracing::error!(err = %error, "LLM prompt failed");
             state.infra.metrics.record_llm_error();
             if let Some(run) = &run {
-                finish_agent_run(run, "failed", "llm_failed", Some("provider_error")).await;
+                agent_chat::finish_agent_run(run, "failed", "llm_failed", Some("provider_error"))
+                    .await;
             }
             return Err(ApiError::Internal(anyhow::anyhow!(error)));
         }
@@ -685,11 +410,19 @@ pub(crate) async fn handle_chat(
 
     state.infra.metrics.record_llm_call();
     if let Some(run) = &run {
-        finish_agent_run_with_usage(run, "completed", "llm_completed", None, usage).await;
+        agent_chat::finish_agent_run_with_usage(
+            run,
+            "completed",
+            "llm_completed",
+            None,
+            usage.as_ref().map(|u| u.input_tokens),
+            usage.as_ref().map(|u| u.output_tokens),
+        )
+        .await;
     }
 
     // Fire-and-forget: agent reply persistence — errors are non-fatal.
-    if let Err(e) = persist_context_message(
+    if let Err(e) = agent_chat::persist_context_message(
         &chat_svc,
         &conversation_id,
         &resolved_listing_id,
@@ -790,9 +523,9 @@ async fn handle_chat_stream_request(
     let current_user_id = session.user_id;
     auth::ensure_user_not_banned(&state, &current_user_id).await?;
     let (conversation_id, response_conversation_id, is_assistant_conversation) =
-        resolve_chat_conversation_id(conversation_id, &current_user_id);
+        agent_chat::resolve_conversation_id(conversation_id, &current_user_id);
     let chat_svc = ChatService::new(state.infra.db.clone());
-    let (resolved_listing_id, receiver) = resolve_listing_context(
+    let (resolved_listing_id, receiver) = agent_chat::resolve_listing_context(
         &state.infra.db,
         listing_id.as_deref(),
         &current_user_id,
@@ -813,7 +546,7 @@ async fn handle_chat_stream_request(
     );
 
     if let Some(reply) = intent_result.direct_response(&message) {
-        let run = begin_agent_run(
+        let run = agent_chat::begin_agent_run(
             &state.infra.db,
             crate::api::request_context::current_or_new_request_id(),
             session_campus_id,
@@ -858,7 +591,7 @@ async fn handle_chat_stream_request(
                 .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
         }
         if let Some(run) = &run {
-            finish_agent_run(run, "completed", "direct_response", None).await;
+            agent_chat::finish_agent_run(run, "completed", "direct_response", None).await;
         }
         let sse_payload = serde_json::json!({
             "token": reply,
@@ -873,10 +606,10 @@ async fn handle_chat_stream_request(
         .get_conversation_history(&conversation_id)
         .await
         .unwrap_or_default();
-    let chat_history = history_to_rig_messages(&history);
+    let chat_history = agent_chat::history_to_rig_messages(&history);
 
     // Persist user turn before streaming — aborted streams must not lose the message.
-    let persisted = persist_context_message(
+    let persisted = agent_chat::persist_context_message(
         &chat_svc,
         &conversation_id,
         &resolved_listing_id,
@@ -925,7 +658,7 @@ async fn handle_chat_stream_request(
 
     let provider_name = state.agents.llm_provider.name().to_string();
     let provider_model = state.agents.llm_provider.model().to_string();
-    let run = begin_agent_run(
+    let run = agent_chat::begin_agent_run(
         &state.infra.db,
         crate::api::request_context::current_or_new_request_id(),
         session_campus_id,
@@ -954,7 +687,7 @@ async fn handle_chat_stream_request(
         Ok(agent) => agent,
         Err(error) => {
             if let Some(run) = &run {
-                finish_agent_run(
+                agent_chat::finish_agent_run(
                     run,
                     "failed",
                     "provider_unavailable",
@@ -976,7 +709,7 @@ async fn handle_chat_stream_request(
     let log_route = intent_result.intent.as_str().to_string();
     let log_request_id = crate::api::request_context::current_or_new_request_id();
     let run_for_stream = run.clone();
-    let reconciliation_tx = run.clone().map(schedule_agent_run_reconciliation);
+    let reconciliation_tx = run.clone().map(agent_chat::schedule_reconciliation);
     let persisted_conversation_id = conversation_id.clone();
     let public_conversation_id = response_conversation_id.clone();
     let persisted_listing_id = resolved_listing_id.clone();
@@ -1068,7 +801,7 @@ async fn handle_chat_stream_request(
         }
 
         if completed && !full_reply.trim().is_empty() {
-            if let Err(error) = persist_context_message(
+            if let Err(error) = agent_chat::persist_context_message(
                     &persist_service,
                     &persisted_conversation_id,
                     &persisted_listing_id,
@@ -1090,9 +823,13 @@ async fn handle_chat_stream_request(
 
         let finished = if let Some(run) = &run_for_stream {
             if completed {
-                finish_agent_run_with_usage(run, "completed", "llm_completed", None, usage).await
+                agent_chat::finish_agent_run_with_usage(
+        run, "completed", "llm_completed", None,
+        usage.as_ref().map(|u| u.input_tokens),
+        usage.as_ref().map(|u| u.output_tokens),
+    ).await
             } else {
-                finish_agent_run(run, "failed", "llm_failed", Some("provider_error")).await
+                agent_chat::finish_agent_run(run, "failed", "llm_failed", Some("provider_error")).await
             }
         } else {
             true
@@ -1213,8 +950,10 @@ mod tests {
 
     #[test]
     fn assistant_sentinel_maps_to_user_scoped_conversation() {
-        let (internal, public, is_assistant) =
-            resolve_chat_conversation_id(Some(AGENT_CONVERSATION_SENTINEL.to_string()), "user-1");
+        let (internal, public, is_assistant) = agent_chat::resolve_conversation_id(
+            Some(AGENT_CONVERSATION_SENTINEL.to_string()),
+            "user-1",
+        );
         assert_eq!(internal, "agent:user-1");
         assert_eq!(public, AGENT_CONVERSATION_SENTINEL);
         assert!(is_assistant);
@@ -1222,17 +961,21 @@ mod tests {
 
     #[test]
     fn assistant_conversations_are_isolated_between_users() {
-        let (first, _, _) =
-            resolve_chat_conversation_id(Some(AGENT_CONVERSATION_SENTINEL.to_string()), "user-1");
-        let (second, _, _) =
-            resolve_chat_conversation_id(Some(AGENT_CONVERSATION_SENTINEL.to_string()), "user-2");
+        let (first, _, _) = agent_chat::resolve_conversation_id(
+            Some(AGENT_CONVERSATION_SENTINEL.to_string()),
+            "user-1",
+        );
+        let (second, _, _) = agent_chat::resolve_conversation_id(
+            Some(AGENT_CONVERSATION_SENTINEL.to_string()),
+            "user-2",
+        );
         assert_ne!(first, second);
     }
 
     #[test]
     fn regular_conversation_id_is_preserved() {
         let (internal, public, is_assistant) =
-            resolve_chat_conversation_id(Some("conv-123".to_string()), "user-1");
+            agent_chat::resolve_conversation_id(Some("conv-123".to_string()), "user-1");
         assert_eq!(internal, "conv-123");
         assert_eq!(public, "conv-123");
         assert!(!is_assistant);
