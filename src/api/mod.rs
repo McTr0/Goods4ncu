@@ -675,7 +675,6 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             "/api/admin/community-health",
             get(admin::get_community_health),
         )
-        .route("/api/admin/spaces/form", post(admin::form_spaces_now))
         .route(
             "/api/admin/capabilities",
             get(admin::get_admin_capabilities),
@@ -884,7 +883,6 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .route("/api/intents/{id}/confirm", post(intents::confirm_intent))
         .route("/api/intents/{id}/fulfil", post(intents::fulfil_intent))
         .route("/api/intents/{id}/matches", get(intents::intent_matches))
-        .route("/api/spaces/{id}/why", get(intents::why_this_space))
         .route("/api/actions/undoable", get(undo::list_undoable))
         .route("/api/actions/{id}/undo", post(undo::undo_action))
         .route(

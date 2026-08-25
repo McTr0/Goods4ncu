@@ -462,7 +462,6 @@ pub async fn create_post(
     )))
 }
 
-
 pub async fn update_post(
     State(state): State<AppState>,
     tenant: VerifiedTenant,
@@ -480,7 +479,6 @@ pub async fn update_post(
 
                 tags: payload.tags,
                 locked: payload.locked,
-
             },
         )
         .await?;

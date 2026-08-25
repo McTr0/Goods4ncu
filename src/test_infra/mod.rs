@@ -248,7 +248,7 @@ where
             chat_messages, chat_conversation_events, chat_conversation_members, chat_blocks, \
             chat_conversations, hitl_requests, notifications, watchlist, orders, inventory, \
             reversible_actions, interruption_ledger, interruption_preferences, \
-            space_formation_sources, space_formation_pairs, chat_space_members, chat_spaces, \
+            chat_space_members, chat_spaces, \
             handoff_confirmations, agreement_terms, agreements, \
             price_reservations, price_discovery_sessions, \
             feed_feedback, feed_preferences, intent_responses, intents, \

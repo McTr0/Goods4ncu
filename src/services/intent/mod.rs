@@ -48,6 +48,7 @@ pub mod status {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[allow(dead_code)]
 pub struct Intent {
     pub id: Uuid,
     pub kind: String,

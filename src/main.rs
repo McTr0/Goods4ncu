@@ -283,13 +283,6 @@ async fn main() -> Result<(), anyhow::Error> {
         shutdown.clone(),
     ));
 
-    // Space formation worker: assembles spaces from intent density and archives
-    // the ones whose reason is spent.
-    let space_formation_handle = tokio::spawn(services::aggregation::run_formation_worker(
-        db_pool.clone(),
-        shutdown.clone(),
-    ));
-
     // Multi-replica realtime: when REDIS_URL is configured, WS broadcasts
     // route through Redis pub/sub so any replica can deliver to the sockets it
     // Holds. Without it (or without the `redis` feature) delivery stays local.
@@ -493,7 +486,6 @@ async fn main() -> Result<(), anyhow::Error> {
             outbox_worker_handle,
             undo_prune_handle,
             intent_expiry_handle,
-            space_formation_handle,
             embedding_worker_handle,
         );
         #[cfg(feature = "redis")]
@@ -514,8 +506,7 @@ async fn main() -> Result<(), anyhow::Error> {
             ("outbox", workers.8),
             ("undo_prune", workers.9),
             ("intent_expiry", workers.10),
-            ("space_formation", workers.11),
-            ("embedding_worker", workers.12),
+            ("embedding_worker", workers.11),
         ] {
             if let Err(e) = result {
                 tracing::error!(worker = name, %e, "Worker task failed during shutdown");

@@ -788,26 +788,6 @@ fn counterpart(kind: &str) -> &str {
     }
 }
 
-/// GET /api/spaces/{id}/why — why the caller is in this space.
-///
-/// An automated decision put them in a room with named people, so it has to be
-/// answerable to them. A space someone was added to with no stated reason is
-/// how group chats become noise, and the way an opaque system loses trust.
-pub async fn why_this_space(
-    State(state): State<AppState>,
-    Session(session): Session,
-    Path(space_id): Path<Uuid>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    let reason = crate::services::aggregation::AggregationService::new(state.infra.db.clone())
-        .explain(&session.user_id, space_id)
-        .await
-        .map_err(ApiError::Internal)?
-        // Absent for hand-made spaces, and for spaces the caller is not in —
-        // one answer for both, so this cannot be used to probe membership.
-        .ok_or(ApiError::NotFound)?;
-    Ok(Json(serde_json::json!({ "reason": reason })))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

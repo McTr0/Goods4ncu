@@ -57,86 +57,6 @@ async fn join_group(pool: &sqlx::PgPool, space_id: Uuid, user_id: &str) {
 }
 
 #[tokio::test]
-async fn event_and_announcement_categories_round_trip() {
-    with_test_pool(|pool| async move {
-        let campus_id = campus(&pool).await;
-        let author = user(&pool, "event-host").await;
-        // Promote to operator so the announcement gate opens.
-        sqlx::query(
-            "INSERT INTO campus_memberships
-                 (campus_id, user_id, status, role, verification_method, verified_at)
-             SELECT id, $1, 'verified', 'operator', 'test_fixture', NOW()
-             FROM campuses WHERE slug = 'ncu'
-             ON CONFLICT (campus_id, user_id) DO UPDATE SET role = 'operator'",
-        )
-        .bind(&author)
-        .execute(&pool)
-        .await
-        .expect("promote");
-
-        let service = service(&pool);
-
-        let event = service
-            .create(CreatePost {
-                campus_id,
-                author_id: author.clone(),
-                category: "event".to_string(),
-                title: "周六跳蚤市场".to_string(),
-                body: "天健广场见。".to_string(),
-                tags: vec!["share".to_string()],
-                cover_image_url: None,
-                listing_id: None,
-                space_id: None,
-                attributes: serde_json::json!({
-                    "starts_at": "2026-08-29T02:00:00Z",
-                    "location_type": "offline",
-                    "place": "天健广场"
-                }),
-
-                lifecycle: None,
-            })
-            .await
-            .expect("create event post");
-        assert_eq!(event.attributes["place"], "天健广场");
-
-        let announcement = service
-            .create(CreatePost {
-                campus_id,
-                author_id: author,
-                category: "announcement".to_string(),
-                title: "图书馆闭馆通知".to_string(),
-                body: "考试周延长开放。".to_string(),
-                tags: vec![],
-                cover_image_url: None,
-                listing_id: None,
-                space_id: None,
-                attributes: serde_json::json!({}),
-
-                lifecycle: None,
-            })
-            .await
-            .expect("create announcement");
-
-        assert!(service
-            .list(
-                campus_id,
-                &PostFilter {
-                    category: Some("announcement".to_string()),
-                    ..Default::default()
-                },
-                10,
-                0,
-            )
-            .await
-            .expect("filter by announcement")
-            .0
-            .iter()
-            .any(|post| post.id == announcement.id));
-    })
-    .await;
-}
-
-#[tokio::test]
 async fn tags_must_come_from_the_catalog_and_respect_groups() {
     with_test_pool(|pool| async move {
         let campus_id = campus(&pool).await;
@@ -155,9 +75,6 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                attributes: serde_json::json!({}),
-
-                lifecycle: None,
             })
             .await;
         assert!(matches!(unknown, Err(ApiError::BadRequest(_))));
@@ -174,31 +91,9 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                attributes: serde_json::json!({}),
-
-                lifecycle: None,
             })
             .await;
         assert!(matches!(duplicate_group, Err(ApiError::BadRequest(_))));
-
-        // Structured attributes on a category that has none are rejected.
-        let stray_attributes = service
-            .create(CreatePost {
-                campus_id,
-                author_id: author.clone(),
-                category: "discussion".to_string(),
-                title: "讨论帖不带结构化属性".to_string(),
-                body: "正文".to_string(),
-                tags: vec![],
-                cover_image_url: None,
-                listing_id: None,
-                space_id: None,
-                attributes: serde_json::json!({"starts_at": "2026-09-01T10:00:00Z"}),
-
-                lifecycle: None,
-            })
-            .await;
-        assert!(matches!(stray_attributes, Err(ApiError::BadRequest(_))));
 
         // Valid global tag passes.
         let ok = service
@@ -208,17 +103,14 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
                 category: "discussion".to_string(),
                 title: "提问：期末复习资料哪里找".to_string(),
                 body: "欢迎分享经验。".to_string(),
-                tags: vec!["question".to_string(), "share".to_string()],
+                tags: vec!["urgent".to_string(), "donghu".to_string()],
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                attributes: serde_json::json!({}),
-
-                lifecycle: None,
             })
             .await
             .expect("catalog tags accepted");
-        assert_eq!(ok.tags, vec!["question", "share"]);
+        assert_eq!(ok.tags, vec!["urgent", "donghu"]);
     })
     .await;
 }
@@ -243,13 +135,10 @@ async fn group_posts_are_hidden_from_non_members_and_feeds() {
                 category: "discussion".to_string(),
                 title: "本群内部公告".to_string(),
                 body: "只有群成员可以看到这条。".to_string(),
-                tags: vec!["share".to_string()],
+                tags: vec!["donghu".to_string()],
                 cover_image_url: None,
                 listing_id: None,
                 space_id: Some(space_id),
-                attributes: serde_json::json!({}),
-
-                lifecycle: None,
             })
             .await
             .expect("create group post");
@@ -325,9 +214,6 @@ async fn discussion_policy_rejection_happens_before_persistence() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                attributes: serde_json::json!({}),
-
-                lifecycle: None,
             })
             .await;
         assert!(matches!(result, Err(ApiError::ContentViolation(_))));
@@ -360,13 +246,10 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 category: "discussion".to_string(),
                 title: "毕业季宿舍整理经验".to_string(),
                 body: "把同类物品放在一起，标题写清楚楼栋和取货时间。".to_string(),
-                tags: vec!["share".to_string()],
+                tags: vec!["donghu".to_string()],
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                attributes: serde_json::json!({}),
-
-                lifecycle: None,
             })
             .await
             .expect("create discussion");
@@ -381,9 +264,6 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                attributes: serde_json::json!({}),
-
-                lifecycle: None,
             })
             .await
             .expect("create second discussion");
@@ -521,9 +401,6 @@ async fn discussion_images_stay_private_until_moderation_approval() {
                 cover_image_url: Some(image_url.to_string()),
                 listing_id: None,
                 space_id: None,
-                attributes: serde_json::json!({}),
-
-                lifecycle: None,
             })
             .await
             .expect("create discussion with image");
@@ -599,13 +476,10 @@ async fn listings_are_references_and_marketplace_filters_follow_category() {
                 category: "offer".to_string(),
                 title: "出二手显示器，可小刀".to_string(),
                 body: "自提优先，宿舍楼下交易。".to_string(),
-                tags: vec!["pickupOnly".to_string(), "negotiable".to_string()],
+                tags: vec!["qianhuNorth".to_string(), "urgent".to_string()],
                 cover_image_url: None,
                 listing_id: Some(listing_id.clone()),
                 space_id: None,
-                attributes: serde_json::json!({}),
-
-                lifecycle: None,
             })
             .await
             .expect("create offer post with reference");
@@ -710,13 +584,10 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 category: "discussion".to_string(),
                 title: "二手教材交换".to_string(),
                 body: "本学期教材可以在校内交换。".to_string(),
-                tags: vec!["share".to_string()],
+                tags: vec!["donghu".to_string()],
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                attributes: serde_json::json!({}),
-
-                lifecycle: None,
             })
             .await
             .expect("relevant post");
@@ -727,13 +598,10 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 category: "discussion".to_string(),
                 title: "周末球局".to_string(),
                 body: "周末一起打球。".to_string(),
-                tags: vec!["share".to_string()],
+                tags: vec!["donghu".to_string()],
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                attributes: serde_json::json!({}),
-
-                lifecycle: None,
             })
             .await
             .expect("unrelated post");
@@ -744,13 +612,10 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 category: "discussion".to_string(),
                 title: "校园跑步路线".to_string(),
                 body: "分享一条适合夜跑的路线。".to_string(),
-                tags: vec!["share".to_string()],
+                tags: vec!["donghu".to_string()],
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                attributes: serde_json::json!({}),
-
-                lifecycle: None,
             })
             .await
             .expect("same tag post");
@@ -765,9 +630,6 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
-                attributes: serde_json::json!({}),
-
-                lifecycle: None,
             })
             .await
             .expect("viewer post");
