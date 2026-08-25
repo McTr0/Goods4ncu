@@ -38,6 +38,14 @@ Rust uses the default `rustfmt` style with 4-space indentation. Follow standard 
 
 Keep the current layering intact: handlers should call services and repositories instead of embedding ad hoc SQL. In Flutter, follow `flutter_lints`, keep pages/services/providers split by responsibility, and route new user-facing strings through `mobile/lib/l10n/`.
 
+### Code Editing Discipline (hard rule)
+
+Never patch source files with regex or blind string-replace one-liners. Formatted code wraps across lines, so patterns silently fail to match (leaving the old code in place) or over-match and corrupt surrounding structure — this has caused real regressions in this repo. Instead:
+
+- Use precise edits with exact, verified context (the Edit tool), or rewrite a whole block/function deliberately.
+- If a scripted transformation is genuinely necessary, it must assert every replacement count, and afterwards re-read the modified regions plus run the analyzer/compiler before reporting success.
+- Never trust "no exception" as proof an edit applied; verify the intended post-state explicitly.
+
 ## Companion Runtime (小昌)
 
 Live2D AI companion. Runtime lives in `mobile/lib/companion/`; persona layers in `/persona/*.md` (loaded server-side via `src/agents/persona.rs`); journey script at `scripts/agent_journey.sh`.
