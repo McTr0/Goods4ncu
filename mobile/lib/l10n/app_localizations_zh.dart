@@ -647,12 +647,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get profileTab => '我的';
 
   @override
-  String get campusMembershipVerified => '校园身份已验证';
-
-  @override
-  String get campusMembershipPending => '校园身份待验证';
-
-  @override
   String get campusMembershipSuspended => '校园资格已暂停';
 
   @override
@@ -3086,9 +3080,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get publishGoodsSection => '商品信息（将同步创建商品）';
 
   @override
-  String get publishErrandSwitch => '跑腿互助';
-
-  @override
   String get publishPriceRequired => '请输入有效价格';
 
   @override
@@ -3102,72 +3093,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get postKindMutualAid => '互助服务';
-
-  @override
-  String get postMutualAidWanted => '需要帮忙';
-
-  @override
-  String get postMutualAidOffer => '可以帮忙';
-
-  @override
-  String get postMutualAidMode => '互助类型';
-
-  @override
-  String get postMutualAidModePickup => '代取';
-
-  @override
-  String get postMutualAidModeBuy => '代买';
-
-  @override
-  String get postMutualAidModeQueue => '排队';
-
-  @override
-  String get postMutualAidModePrint => '打印';
-
-  @override
-  String get postMutualAidModeReturn => '归还';
-
-  @override
-  String get postMutualAidModeOther => '其他';
-
-  @override
-  String get postMutualAidPickup => '取件地点';
-
-  @override
-  String get postMutualAidDropoff => '交接地点';
-
-  @override
-  String get postMutualAidTime => '时间说明';
-
-  @override
-  String get postMutualAidReward => '报酬（元）';
-
-  @override
-  String get postMutualAidRewardInvalid => '报酬需为 0 到 100000 元的整数';
-
-  @override
-  String get postMutualAidValidity => '有效期';
-
-  @override
-  String get postMutualAidOneDay => '1 天';
-
-  @override
-  String get postMutualAidThreeDays => '3 天';
-
-  @override
-  String get postMutualAidSevenDays => '7 天';
-
-  @override
-  String get postResolutionOpen => '开放';
-
-  @override
-  String get postResolutionResolved => '已解决';
-
-  @override
-  String get postResolutionClosed => '已关闭';
-
-  @override
-  String get postResolutionUpdate => '更新互助状态';
 
   @override
   String get postMutualAidNotes => '补充说明';

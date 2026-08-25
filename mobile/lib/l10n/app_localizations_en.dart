@@ -669,12 +669,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get profileTab => 'Profile';
 
   @override
-  String get campusMembershipVerified => 'Campus verified';
-
-  @override
-  String get campusMembershipPending => 'Verification pending';
-
-  @override
   String get campusMembershipSuspended => 'Membership suspended';
 
   @override
@@ -3230,9 +3224,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get publishGoodsSection => 'Item details (creates a listing)';
 
   @override
-  String get publishErrandSwitch => 'Errand help';
-
-  @override
   String get publishPriceRequired => 'Enter a valid price';
 
   @override
@@ -3246,73 +3237,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get postKindMutualAid => 'Mutual aid';
-
-  @override
-  String get postMutualAidWanted => 'Need help';
-
-  @override
-  String get postMutualAidOffer => 'Can help';
-
-  @override
-  String get postMutualAidMode => 'Help type';
-
-  @override
-  String get postMutualAidModePickup => 'Pickup';
-
-  @override
-  String get postMutualAidModeBuy => 'Purchase';
-
-  @override
-  String get postMutualAidModeQueue => 'Queueing';
-
-  @override
-  String get postMutualAidModePrint => 'Printing';
-
-  @override
-  String get postMutualAidModeReturn => 'Return';
-
-  @override
-  String get postMutualAidModeOther => 'Other';
-
-  @override
-  String get postMutualAidPickup => 'Pickup location';
-
-  @override
-  String get postMutualAidDropoff => 'Handoff location';
-
-  @override
-  String get postMutualAidTime => 'Time details';
-
-  @override
-  String get postMutualAidReward => 'Reward (yuan)';
-
-  @override
-  String get postMutualAidRewardInvalid =>
-      'Enter a reward from 0 to 100,000 yuan';
-
-  @override
-  String get postMutualAidValidity => 'Keep open for';
-
-  @override
-  String get postMutualAidOneDay => '1 day';
-
-  @override
-  String get postMutualAidThreeDays => '3 days';
-
-  @override
-  String get postMutualAidSevenDays => '7 days';
-
-  @override
-  String get postResolutionOpen => 'Open';
-
-  @override
-  String get postResolutionResolved => 'Resolved';
-
-  @override
-  String get postResolutionClosed => 'Closed';
-
-  @override
-  String get postResolutionUpdate => 'Update mutual-aid status';
 
   @override
   String get postMutualAidNotes => 'Additional details';

@@ -1346,18 +1346,6 @@ abstract class AppLocalizations {
   /// **'Profile'**
   String get profileTab;
 
-  /// No description provided for @campusMembershipVerified.
-  ///
-  /// In en, this message translates to:
-  /// **'Campus verified'**
-  String get campusMembershipVerified;
-
-  /// No description provided for @campusMembershipPending.
-  ///
-  /// In en, this message translates to:
-  /// **'Verification pending'**
-  String get campusMembershipPending;
-
   /// No description provided for @campusMembershipSuspended.
   ///
   /// In en, this message translates to:
@@ -5946,12 +5934,6 @@ abstract class AppLocalizations {
   /// **'Item details (creates a listing)'**
   String get publishGoodsSection;
 
-  /// No description provided for @publishErrandSwitch.
-  ///
-  /// In en, this message translates to:
-  /// **'Errand help'**
-  String get publishErrandSwitch;
-
   /// No description provided for @publishPriceRequired.
   ///
   /// In en, this message translates to:
@@ -5981,138 +5963,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Mutual aid'**
   String get postKindMutualAid;
-
-  /// No description provided for @postMutualAidWanted.
-  ///
-  /// In en, this message translates to:
-  /// **'Need help'**
-  String get postMutualAidWanted;
-
-  /// No description provided for @postMutualAidOffer.
-  ///
-  /// In en, this message translates to:
-  /// **'Can help'**
-  String get postMutualAidOffer;
-
-  /// No description provided for @postMutualAidMode.
-  ///
-  /// In en, this message translates to:
-  /// **'Help type'**
-  String get postMutualAidMode;
-
-  /// No description provided for @postMutualAidModePickup.
-  ///
-  /// In en, this message translates to:
-  /// **'Pickup'**
-  String get postMutualAidModePickup;
-
-  /// No description provided for @postMutualAidModeBuy.
-  ///
-  /// In en, this message translates to:
-  /// **'Purchase'**
-  String get postMutualAidModeBuy;
-
-  /// No description provided for @postMutualAidModeQueue.
-  ///
-  /// In en, this message translates to:
-  /// **'Queueing'**
-  String get postMutualAidModeQueue;
-
-  /// No description provided for @postMutualAidModePrint.
-  ///
-  /// In en, this message translates to:
-  /// **'Printing'**
-  String get postMutualAidModePrint;
-
-  /// No description provided for @postMutualAidModeReturn.
-  ///
-  /// In en, this message translates to:
-  /// **'Return'**
-  String get postMutualAidModeReturn;
-
-  /// No description provided for @postMutualAidModeOther.
-  ///
-  /// In en, this message translates to:
-  /// **'Other'**
-  String get postMutualAidModeOther;
-
-  /// No description provided for @postMutualAidPickup.
-  ///
-  /// In en, this message translates to:
-  /// **'Pickup location'**
-  String get postMutualAidPickup;
-
-  /// No description provided for @postMutualAidDropoff.
-  ///
-  /// In en, this message translates to:
-  /// **'Handoff location'**
-  String get postMutualAidDropoff;
-
-  /// No description provided for @postMutualAidTime.
-  ///
-  /// In en, this message translates to:
-  /// **'Time details'**
-  String get postMutualAidTime;
-
-  /// No description provided for @postMutualAidReward.
-  ///
-  /// In en, this message translates to:
-  /// **'Reward (yuan)'**
-  String get postMutualAidReward;
-
-  /// No description provided for @postMutualAidRewardInvalid.
-  ///
-  /// In en, this message translates to:
-  /// **'Enter a reward from 0 to 100,000 yuan'**
-  String get postMutualAidRewardInvalid;
-
-  /// No description provided for @postMutualAidValidity.
-  ///
-  /// In en, this message translates to:
-  /// **'Keep open for'**
-  String get postMutualAidValidity;
-
-  /// No description provided for @postMutualAidOneDay.
-  ///
-  /// In en, this message translates to:
-  /// **'1 day'**
-  String get postMutualAidOneDay;
-
-  /// No description provided for @postMutualAidThreeDays.
-  ///
-  /// In en, this message translates to:
-  /// **'3 days'**
-  String get postMutualAidThreeDays;
-
-  /// No description provided for @postMutualAidSevenDays.
-  ///
-  /// In en, this message translates to:
-  /// **'7 days'**
-  String get postMutualAidSevenDays;
-
-  /// No description provided for @postResolutionOpen.
-  ///
-  /// In en, this message translates to:
-  /// **'Open'**
-  String get postResolutionOpen;
-
-  /// No description provided for @postResolutionResolved.
-  ///
-  /// In en, this message translates to:
-  /// **'Resolved'**
-  String get postResolutionResolved;
-
-  /// No description provided for @postResolutionClosed.
-  ///
-  /// In en, this message translates to:
-  /// **'Closed'**
-  String get postResolutionClosed;
-
-  /// No description provided for @postResolutionUpdate.
-  ///
-  /// In en, this message translates to:
-  /// **'Update mutual-aid status'**
-  String get postResolutionUpdate;
 
   /// No description provided for @postMutualAidNotes.
   ///
