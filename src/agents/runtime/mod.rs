@@ -10,6 +10,8 @@
 pub mod budget;
 pub mod error;
 pub mod event;
+pub mod loop_guard;
+pub mod model;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
