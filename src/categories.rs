@@ -55,7 +55,15 @@ pub fn valid_category_message() -> String {
 /// the authoritative set lives in post_categories (migrations 0101/0103) and
 /// is cached from the DB at runtime (see services::post::allowed_categories).
 pub const POST_CATEGORIES: &[&str] = &[
-    "offer", "wanted", "discussion", "event", "announcement",
+    "offer",
+    "wanted",
+    "discussion",
+    "event",
+    "announcement",
+    "recruit",
+    "help",
+    "lost",
+    "found",
 ];
 
 #[cfg(test)]

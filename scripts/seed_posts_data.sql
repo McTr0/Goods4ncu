@@ -37,6 +37,23 @@ INSERT INTO chat_space_members (space_id, user_id, role, joined_at) VALUES
 ON CONFLICT (space_id, user_id) DO NOTHING;
 
 
+-- Offers without a listing violate the new invariant: give them listings.
+INSERT INTO inventory (id, campus_id, owner_id, title, category, brand, condition_score, suggested_price_cny, description, direction, status, defects) VALUES
+  ('l0000000-0000-0000-0000-000000000007', 'c0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000002', '床上懒人小桌板', 'dailyGoods', '无品牌', 7, 15, '退宿清仓两张一起拿。', 'offer', 'active', '[]'::jsonb),
+  ('l0000000-0000-0000-0000-000000000008', 'c0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000002', '全新蓝牙键盘', 'electronics', '罗技', 10, 55, '双十一凑单多买。', 'offer', 'active', '[]'::jsonb),
+  ('l0000000-0000-0000-0000-000000000009', 'c0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000002', '狼人杀+UNO桌游套装', 'dailyGoods', '无品牌', 8, 25, '搬校区带不走，群内自提。', 'offer', 'active', '[]'::jsonb)
+ON CONFLICT (id) DO NOTHING;
+
+
+UPDATE posts SET listing_id = CASE id
+        WHEN 'd0000000-0000-4000-8000-000000000005' THEN 'l0000000-0000-0000-0000-000000000007'
+        WHEN 'd0000000-0000-4000-8000-000000000006' THEN 'l0000000-0000-0000-0000-000000000008'
+        WHEN 'd0000000-0000-4000-8000-000000000023' THEN 'l0000000-0000-0000-0000-000000000009'
+        WHEN 'd0000000-0000-4000-8000-000000000026' THEN 'l0000000-0000-0000-0000-000000000007'
+        ELSE listing_id
+END
+WHERE category = 'offer' AND listing_id IS NULL;
+
 INSERT INTO posts (
   id, campus_id, author_id, category, listing_id, space_id,
   title, body, tags, status,
@@ -88,7 +105,7 @@ INSERT INTO posts (
 ('d0000000-0000-4000-8000-000000000005',
  'c0000000-0000-0000-0000-000000000001',
  'b0000000-0000-0000-0000-000000000002', 'offer',
- NULL, NULL,
+ 'l0000000-0000-0000-0000-000000000007', NULL,
  '宿舍神器：懒人小桌板+床上支架 15 元',
  '退宿清仓，两张一起 15 块拿走，单张 9 块。润溪湖畔楼下交易。',
  '["pickupOnly"]'::jsonb, 'active', 0,
@@ -98,7 +115,7 @@ INSERT INTO posts (
 ('d0000000-0000-4000-8000-000000000006',
  'c0000000-0000-0000-0000-000000000001',
  'b0000000-0000-0000-0000-000000000002', 'offer',
- NULL, NULL,
+ 'l0000000-0000-0000-0000-000000000008', NULL,
  '全新未拆封蓝牙键盘（多买了一个）',
  '双十一凑单手滑买了两个，全新未拆。原价 89 现在 55 出。',
  '["sellFast"]'::jsonb, 'archived', 0,
@@ -149,7 +166,7 @@ INSERT INTO posts (
 -- ===== Errand: offered help =====
 ('d0000000-0000-4000-8000-000000000011',
  'c0000000-0000-0000-0000-000000000001',
- 's0000000-0000-0000-0000-000000000001', 'offer',
+ 's0000000-0000-0000-0000-000000000001', 'help',
  NULL, NULL,
  '每天下午代取快递 北门菜鸟驿站',
  '课少时间多，每天 16:00 和 18:30 两趟统一去北门取件送到各宿舍楼楼下，5 元一件，大件加 2 元。',
@@ -160,7 +177,7 @@ INSERT INTO posts (
 
 ('d0000000-0000-4000-8000-000000000012',
  'c0000000-0000-0000-0000-000000000001',
- 's0000000-0000-0000-0000-000000000002', 'offer',
+ 's0000000-0000-0000-0000-000000000002', 'help',
  NULL, NULL,
  '周末代打热水 代买食堂饭菜',
  '周末在校区，可以帮忙打热水、带饭。热水 2 元/壶，带饭跑腿费 3 元+餐费实报实销。',
@@ -277,7 +294,7 @@ INSERT INTO posts (
 ('d0000000-0000-4000-8000-000000000023',
  'c0000000-0000-0000-0000-000000000001',
  'b0000000-0000-0000-0000-000000000002', 'offer',
- NULL, 'd1000000-0000-4000-8000-000000000001',
+ 'l0000000-0000-0000-0000-000000000009', 'd1000000-0000-4000-8000-000000000001',
  '桌游局装备低价转（狼人杀+UNO）',
  '闲置出清，两套一起 25 元，群内自提。周日晚之前都方便。',
  '["pickupOnly"]'::jsonb, 'active', 1,
@@ -308,7 +325,7 @@ INSERT INTO posts (
 ('d0000000-0000-4000-8000-000000000026',
  'c0000000-0000-0000-0000-000000000001',
  'b0000000-0000-0000-0000-000000000001', 'offer',
- NULL, NULL,
+ 'l0000000-0000-0000-0000-000000000007', NULL,
  '【已删除】测试误发的帖子',
  '这条帖子应只出现在作者本人的"我的发布（已删除）"里。',
  '[]'::jsonb, 'deleted', 0,
@@ -374,6 +391,24 @@ WHERE id IN ('l0000000-0000-0000-0000-000000000001','l0000000-0000-0000-0000-000
 -- Seeded covers skip the moderation pipeline.
 UPDATE posts SET images_moderation_status = 'approved'
 WHERE image_url IS NOT NULL AND images_moderation_status <> 'approved';
+
+
+-- Help-category posts carry structured service payloads.
+UPDATE posts SET attributes = CASE id
+        WHEN 'd0000000-0000-4000-8000-000000000011' THEN '{"deadline":"2026-08-30T16:00:00Z","place":"北门菜鸟驿站至各宿舍楼"}'::jsonb
+        WHEN 'd0000000-0000-4000-8000-000000000012' THEN '{"place":"天健园食堂周边"}'::jsonb
+        WHEN 'd0000000-0000-4000-8000-000000000013' THEN '{"deadline":"2026-08-27T18:00:00Z","place":"前湖北院门口"}'::jsonb
+        WHEN 'd0000000-0000-4000-8000-000000000014' THEN '{"place":"前湖南院门口"}'::jsonb
+        ELSE attributes
+END,
+lifecycle = CASE id
+        WHEN 'd0000000-0000-4000-8000-000000000012' THEN 'resolved'
+        WHEN 'd0000000-0000-4000-8000-000000000014' THEN 'resolved'
+        ELSE lifecycle
+END
+WHERE id IN ('d0000000-0000-4000-8000-000000000011','d0000000-0000-4000-8000-000000000012','d0000000-0000-4000-8000-000000000013','d0000000-0000-4000-8000-000000000014');
+
+
 
 -- Fertilizer counts so popular posts feel alive.
 UPDATE posts SET fertilizer_count = 12 WHERE id = 'd0000000-0000-4000-8000-000000000015';

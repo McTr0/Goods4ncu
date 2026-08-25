@@ -89,8 +89,11 @@ async fn event_and_announcement_categories_round_trip() {
                 space_id: None,
                 attributes: serde_json::json!({
                     "starts_at": "2026-08-29T02:00:00Z",
+                    "location_type": "offline",
                     "place": "天健广场"
                 }),
+
+                lifecycle: None,
             })
             .await
             .expect("create event post");
@@ -108,6 +111,8 @@ async fn event_and_announcement_categories_round_trip() {
                 listing_id: None,
                 space_id: None,
                 attributes: serde_json::json!({}),
+
+                lifecycle: None,
             })
             .await
             .expect("create announcement");
@@ -151,6 +156,8 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
                 listing_id: None,
                 space_id: None,
                 attributes: serde_json::json!({}),
+
+                lifecycle: None,
             })
             .await;
         assert!(matches!(unknown, Err(ApiError::BadRequest(_))));
@@ -168,6 +175,8 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
                 listing_id: None,
                 space_id: None,
                 attributes: serde_json::json!({}),
+
+                lifecycle: None,
             })
             .await;
         assert!(matches!(duplicate_group, Err(ApiError::BadRequest(_))));
@@ -185,6 +194,8 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
                 listing_id: None,
                 space_id: None,
                 attributes: serde_json::json!({"starts_at": "2026-09-01T10:00:00Z"}),
+
+                lifecycle: None,
             })
             .await;
         assert!(matches!(stray_attributes, Err(ApiError::BadRequest(_))));
@@ -202,6 +213,8 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
                 listing_id: None,
                 space_id: None,
                 attributes: serde_json::json!({}),
+
+                lifecycle: None,
             })
             .await
             .expect("catalog tags accepted");
@@ -235,6 +248,8 @@ async fn group_posts_are_hidden_from_non_members_and_feeds() {
                 listing_id: None,
                 space_id: Some(space_id),
                 attributes: serde_json::json!({}),
+
+                lifecycle: None,
             })
             .await
             .expect("create group post");
@@ -311,6 +326,8 @@ async fn discussion_policy_rejection_happens_before_persistence() {
                 listing_id: None,
                 space_id: None,
                 attributes: serde_json::json!({}),
+
+                lifecycle: None,
             })
             .await;
         assert!(matches!(result, Err(ApiError::ContentViolation(_))));
@@ -348,6 +365,8 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 listing_id: None,
                 space_id: None,
                 attributes: serde_json::json!({}),
+
+                lifecycle: None,
             })
             .await
             .expect("create discussion");
@@ -363,6 +382,8 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 listing_id: None,
                 space_id: None,
                 attributes: serde_json::json!({}),
+
+                lifecycle: None,
             })
             .await
             .expect("create second discussion");
@@ -501,6 +522,8 @@ async fn discussion_images_stay_private_until_moderation_approval() {
                 listing_id: None,
                 space_id: None,
                 attributes: serde_json::json!({}),
+
+                lifecycle: None,
             })
             .await
             .expect("create discussion with image");
@@ -581,6 +604,8 @@ async fn listings_are_references_and_marketplace_filters_follow_category() {
                 listing_id: Some(listing_id.clone()),
                 space_id: None,
                 attributes: serde_json::json!({}),
+
+                lifecycle: None,
             })
             .await
             .expect("create offer post with reference");
@@ -690,6 +715,8 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 listing_id: None,
                 space_id: None,
                 attributes: serde_json::json!({}),
+
+                lifecycle: None,
             })
             .await
             .expect("relevant post");
@@ -705,6 +732,8 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 listing_id: None,
                 space_id: None,
                 attributes: serde_json::json!({}),
+
+                lifecycle: None,
             })
             .await
             .expect("unrelated post");
@@ -720,6 +749,8 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 listing_id: None,
                 space_id: None,
                 attributes: serde_json::json!({}),
+
+                lifecycle: None,
             })
             .await
             .expect("same tag post");
@@ -735,6 +766,8 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 listing_id: None,
                 space_id: None,
                 attributes: serde_json::json!({}),
+
+                lifecycle: None,
             })
             .await
             .expect("viewer post");

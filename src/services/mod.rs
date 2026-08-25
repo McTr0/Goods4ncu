@@ -12,6 +12,7 @@ pub mod aggregation;
 pub mod agreement;
 pub mod camphor;
 pub mod campus;
+pub mod category_spec;
 pub mod chat;
 pub mod chat_conversation;
 pub mod chat_expire;

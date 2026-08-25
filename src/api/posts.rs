@@ -53,16 +53,20 @@ pub struct CreatePostRequest {
     pub space_id: Option<Uuid>,
     #[serde(default)]
     pub attributes: serde_json::Value,
+    /// Omit on create — lifecycle starts at the category initial state.
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub lifecycle: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct UpdatePostRequest {
     pub title: Option<String>,
     pub body: Option<String>,
-    pub category: Option<String>,
     pub tags: Option<Vec<String>>,
     pub locked: Option<bool>,
     pub attributes: Option<serde_json::Value>,
+    pub lifecycle: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,6 +101,7 @@ pub struct PostSummary {
     pub reply_count: i32,
     pub status: String,
     pub attributes: serde_json::Value,
+    pub lifecycle: Option<String>,
     pub fertilizer_count: i32,
     pub is_locked: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -122,6 +127,7 @@ pub struct PostDetail {
     pub reply_count: i32,
     pub status: String,
     pub attributes: serde_json::Value,
+    pub lifecycle: Option<String>,
     pub fertilizer_count: i32,
     pub is_locked: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -280,6 +286,7 @@ fn summary_view(state: &AppState, post: Post, _viewer_id: Option<&str>) -> PostS
         is_locked: post.status == "locked",
         status: post.status.clone(),
         attributes: post.attributes.clone(),
+        lifecycle: post.lifecycle.clone(),
         fertilizer_count: post.fertilizer_count,
         created_at: post.created_at,
         updated_at: post.updated_at,
@@ -313,6 +320,7 @@ pub(crate) fn detail_view(state: &AppState, post: Post, _viewer_id: Option<&str>
         is_locked: post.status == "locked",
         status: post.status.clone(),
         attributes: post.attributes.clone(),
+        lifecycle: post.lifecycle.clone(),
         fertilizer_count: post.fertilizer_count,
         created_at: post.created_at,
         updated_at: post.updated_at,
@@ -396,8 +404,7 @@ pub async fn list_posts(
 ) -> Result<Json<PostListResponse>, ApiError> {
     let viewer_id = session.0.as_ref().map(|session| session.user_id.clone());
     let campus_id = resolve_read_campus(&state, session).await?;
-    let allowed_categories =
-        crate::services::post::allowed_post_categories(&state.infra.db).await;
+    let allowed_categories = crate::services::post::allowed_post_categories(&state.infra.db).await;
     let filter = normalize_filter(&query, &allowed_categories)?;
     let (limit, offset) = clamp_page(query.limit, query.offset);
     let (posts, total) = post_service(&state)
@@ -463,6 +470,7 @@ pub async fn create_post(
             listing_id: payload.listing_id,
             space_id: payload.space_id,
             attributes: payload.attributes,
+            lifecycle: None,
         })
         .await?;
     Ok(Json(detail_view(
@@ -473,6 +481,43 @@ pub async fn create_post(
 }
 
 /// PUT /api/posts/:id — owner-only discussion edit/lock.
+#[derive(Debug, Deserialize)]
+pub struct UpdateLifecycleRequest {
+    pub lifecycle: String,
+}
+
+/// PATCH /api/posts/:id/lifecycle — owner-only workflow transition.
+pub async fn update_lifecycle(
+    State(state): State<AppState>,
+    tenant: VerifiedTenant,
+    Path(id): Path<Uuid>,
+    Json(payload): Json<UpdateLifecycleRequest>,
+) -> Result<Json<PostDetail>, ApiError> {
+    let post_service = post_service(&state);
+    let existing = post_service.get(tenant.campus_id, id).await?;
+    if existing.author_id != tenant.session.user_id {
+        return Err(ApiError::Forbidden);
+    }
+    crate::services::category_spec::validate_lifecycle(
+        &existing.category,
+        existing.lifecycle.as_deref(),
+        &payload.lifecycle,
+    )?;
+    let updated = post_service
+        .set_lifecycle(
+            tenant.campus_id,
+            id,
+            &tenant.session.user_id,
+            payload.lifecycle,
+        )
+        .await?;
+    Ok(Json(detail_view(
+        &state,
+        updated,
+        Some(&tenant.session.user_id),
+    )))
+}
+
 pub async fn update_post(
     State(state): State<AppState>,
     tenant: VerifiedTenant,
@@ -487,10 +532,11 @@ pub async fn update_post(
             EditPost {
                 title: payload.title,
                 body: payload.body,
-                category: payload.category,
+
                 tags: payload.tags,
                 locked: payload.locked,
                 attributes: payload.attributes,
+                lifecycle: payload.lifecycle,
             },
         )
         .await?;

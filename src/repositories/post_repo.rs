@@ -21,6 +21,7 @@ pub struct Post {
     pub reply_count: i32,
     pub status: String,
     pub attributes: serde_json::Value,
+    pub lifecycle: Option<String>,
     pub fertilizer_count: i32,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -73,6 +74,7 @@ pub struct NewPost {
     pub listing_id: Option<String>,
     pub space_id: Option<Uuid>,
     pub attributes: serde_json::Value,
+    pub lifecycle: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -83,6 +85,7 @@ pub struct UpdatePostInput {
     pub tags: Option<Vec<String>>,
     pub locked: Option<bool>,
     pub attributes: Option<serde_json::Value>,
+    pub lifecycle: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -152,6 +155,14 @@ pub trait PostRepository: Send + Sync {
         input: &UpdatePostInput,
     ) -> Result<bool, ApiError>;
 
+    async fn update_lifecycle(
+        &self,
+        campus_id: Uuid,
+        id: Uuid,
+        author_id: &str,
+        lifecycle: &str,
+    ) -> Result<bool, ApiError>;
+
     async fn delete_post(
         &self,
         campus_id: Uuid,
@@ -214,7 +225,7 @@ impl PostgresPostRepository {
     fn post_columns() -> &'static str {
         r#"p.id, p.campus_id, p.category, p.space_id, p.title, p.body,
            p.tags, p.listing_id, p.reply_count, p.status, p.attributes,
-           p.fertilizer_count, p.created_at,
+           p.lifecycle, p.fertilizer_count, p.created_at,
            p.updated_at, p.last_activity_at,
            author.id AS author_id, author.username AS author_username,
            CASE WHEN author.avatar_moderation_status = 'approved'
@@ -616,11 +627,11 @@ impl PostRepository for PostgresPostRepository {
             "INSERT INTO posts (
                  campus_id, author_id, category, title, body, tags,
                  image_url, images_moderation_status,
-                 listing_id, space_id, attributes
+                 listing_id, space_id, attributes, lifecycle
              ) VALUES (
                  $1, $2, $3, $4, $5, $6, $7,
                  CASE WHEN $7::text IS NULL THEN 'approved' ELSE 'pending' END,
-                 $8, $9, $10
+                 $8, $9, $10, $11
              )
              RETURNING id",
         )
@@ -634,6 +645,7 @@ impl PostRepository for PostgresPostRepository {
         .bind(input.listing_id.as_deref())
         .bind(input.space_id)
         .bind(&input.attributes)
+        .bind(&input.lifecycle)
         .fetch_one(&self.pool)
         .await
         .map_err(db_error)?;
@@ -656,6 +668,7 @@ impl PostRepository for PostgresPostRepository {
                  category = COALESCE($6, category),
                  tags = COALESCE($7, tags),
                  attributes = COALESCE($9, attributes),
+                 lifecycle = COALESCE($10, lifecycle),
                  status = CASE
                      WHEN $8::boolean IS NULL THEN status
                      WHEN $8 THEN 'locked'
@@ -674,6 +687,29 @@ impl PostRepository for PostgresPostRepository {
         .bind(input.tags.as_ref().map(|tags| serde_json::json!(tags)))
         .bind(input.locked)
         .bind(input.attributes.as_ref())
+        .bind(input.lifecycle.as_ref())
+        .execute(&self.pool)
+        .await
+        .map_err(db_error)?;
+        Ok(updated.rows_affected() == 1)
+    }
+
+    async fn update_lifecycle(
+        &self,
+        campus_id: Uuid,
+        id: Uuid,
+        author_id: &str,
+        lifecycle: &str,
+    ) -> Result<bool, ApiError> {
+        let updated = sqlx::query(
+            "UPDATE posts SET lifecycle = $4, updated_at = NOW()
+             WHERE id = $1 AND campus_id = $2 AND author_id = $3
+               AND status IN ('active', 'locked')",
+        )
+        .bind(id)
+        .bind(campus_id)
+        .bind(author_id)
+        .bind(lifecycle)
         .execute(&self.pool)
         .await
         .map_err(db_error)?;
@@ -880,6 +916,7 @@ fn post_from_row(row: &PgRow) -> Post {
         attributes: row
             .try_get("attributes")
             .unwrap_or_else(|_| serde_json::json!({})),
+        lifecycle: row.try_get("lifecycle").ok(),
         fertilizer_count: row.try_get("fertilizer_count").unwrap_or(0),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
