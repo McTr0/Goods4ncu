@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/post.dart';
+import '../models/post_taxonomy.dart';
 import '../services/post_service.dart';
 import '../theme/app_theme.dart';
 
@@ -214,11 +215,7 @@ class _MyPostsPageState extends State<MyPostsPage> {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      switch (post.category) {
-                        'offer' => l.publishCategoryOffer,
-                        'wanted' => l.publishCategoryWanted,
-                        _ => l.publishCategoryDiscussion,
-                      },
+                      postCategoryLabel(context, post.category),
                       style: const TextStyle(
                         fontSize: 11,
                         color: AppTheme.textSecondary,

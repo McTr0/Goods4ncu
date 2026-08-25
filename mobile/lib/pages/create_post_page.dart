@@ -328,6 +328,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
                   child: InputDecorator(
                     decoration: InputDecoration(
                       labelText: l.postCategoryLabel,
+                      prefixIcon: const Icon(Icons.category_outlined),
                       suffixIcon: const Icon(Icons.expand_more_rounded),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(AppTheme.radiusMd),
@@ -456,7 +457,8 @@ class _CreatePostPageState extends State<CreatePostPage> {
             decoration: InputDecoration(
               labelText: l.postTagsLabel,
               helperText: '可多选；地点/时效各限一个',
-              suffixIcon: const Icon(Icons.sell_outlined),
+              prefixIcon: const Icon(Icons.sell_outlined),
+              suffixIcon: const Icon(Icons.expand_more_rounded),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(AppTheme.radiusMd),
               ),

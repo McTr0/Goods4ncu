@@ -970,13 +970,8 @@ class _PostTypeChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context)!;
     return Chip(
-      label: Text(switch (post.category) {
-        'wanted' => postCategoryLabel(context, 'wanted'),
-        'offer' => postCategoryLabel(context, 'offer'),
-        _ => l.publishCategoryDiscussion,
-      }),
+      label: Text(postCategoryLabel(context, post.category)),
       visualDensity: VisualDensity.compact,
       side: BorderSide.none,
     );

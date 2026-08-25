@@ -21,8 +21,8 @@ class PostCategory {
 }
 
 const List<PostCategory> kPostCategories = [
-  PostCategory(key: 'offer', label: '商品出', labelEn: 'Offer', kind: 'goods'),
-  PostCategory(key: 'wanted', label: '商品收', labelEn: 'Wanted', kind: 'goods'),
+  PostCategory(key: 'offer', label: '出', labelEn: 'Offer', kind: 'goods'),
+  PostCategory(key: 'wanted', label: '收', labelEn: 'Wanted', kind: 'goods'),
   PostCategory(
     key: 'discussion',
     label: '话题讨论',
