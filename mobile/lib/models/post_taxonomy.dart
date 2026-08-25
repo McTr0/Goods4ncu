@@ -2,11 +2,7 @@ import 'package:flutter/widgets.dart';
 
 /// Post taxonomy — single source of truth for category pickers.
 ///
-/// Mirrors migrations/0101/0103/0108 (post_categories + post_tag_catalog).
-/// The server also serves GET /api/posts/categories; this local registry is
-/// the offline fallback and the structural contract (kind drives form
-/// branches). Adding a category: INSERT a row server-side + add an entry
-/// here.
+/// Mirrors migrations/0109 (post_categories table).
 
 class PostCategory {
   const PostCategory({
@@ -27,33 +23,42 @@ class PostCategory {
 }
 
 const List<PostCategory> kPostCategories = [
+  PostCategory(
+    key: 'announcement',
+    label: '公告',
+    labelEn: 'Announcement',
+    kind: 'discussion',
+  ),
   PostCategory(key: 'offer', label: '出', labelEn: 'Offer', kind: 'goods'),
   PostCategory(key: 'wanted', label: '收', labelEn: 'Wanted', kind: 'goods'),
+  PostCategory(key: 'share', label: '分享', labelEn: 'Share', kind: 'discussion'),
+  PostCategory(
+    key: 'question',
+    label: '提问',
+    labelEn: 'Question',
+    kind: 'discussion',
+  ),
   PostCategory(
     key: 'discussion',
     label: '讨论',
     labelEn: 'Discussion',
     kind: 'discussion',
   ),
-  PostCategory(key: 'event', label: '活动', labelEn: 'Event', kind: 'discussion'),
   PostCategory(
     key: 'recruit',
     label: '召集',
     labelEn: 'Recruit',
     kind: 'discussion',
   ),
-  PostCategory(key: 'help', label: '求助', labelEn: 'Help', kind: 'discussion'),
-  PostCategory(key: 'lost', label: '寻物', labelEn: 'Lost', kind: 'discussion'),
-  PostCategory(key: 'found', label: '招领', labelEn: 'Found', kind: 'discussion'),
   PostCategory(
-    key: 'announcement',
-    label: '公告',
-    labelEn: 'Notice',
+    key: 'team_up',
+    label: '组队',
+    labelEn: 'Team Up',
     kind: 'discussion',
   ),
 ];
 
-bool categoryHasAttributes(String key) => key == 'event';
+bool categoryHasAttributes(String key) => false;
 
 PostCategory? postCategoryByKey(String key) {
   for (final category in kPostCategories) {
@@ -62,7 +67,7 @@ PostCategory? postCategoryByKey(String key) {
   return null;
 }
 
-/// Locale-aware category label (zh default, en fallback to English name).
+/// Locale-aware category label.
 String postCategoryLabel(BuildContext context, String key) {
   final category = postCategoryByKey(key);
   if (category == null) return key;
@@ -70,15 +75,14 @@ String postCategoryLabel(BuildContext context, String key) {
   return isZh ? category.label : category.labelEn;
 }
 
-/// Curated tag catalog — mirrors migrations/0100+0106+0108.
+/// Curated tag catalog — only location + ttl groups remain.
 class PostTag {
   const PostTag({
     required this.key,
     required this.label,
     required this.labelEn,
     this.emoji,
-    this.group,
-    this.categories = const [],
+    required this.group,
   });
 
   final String key;
@@ -89,67 +93,11 @@ class PostTag {
   /// Grouped tags allow one pick per group.
   final String? group;
 
-  /// Empty = unrestricted; non-empty = only these categories may use it.
-  final List<String> categories;
-
-  bool allowedIn(String categoryKey) =>
-      categories.isEmpty || categories.contains(categoryKey);
-
   bool get exclusive => group != null;
 }
 
 const List<PostTag> kPostTags = [
-  PostTag(
-    key: 'question',
-    label: '提问',
-    labelEn: 'Question',
-    emoji: '❓',
-    categories: ['discussion', 'help'],
-  ),
-  PostTag(
-    key: 'help',
-    label: '求助·有偿',
-    labelEn: 'Paid help',
-    emoji: '💰',
-    categories: ['help', 'wanted'],
-  ),
-  PostTag(key: 'share', label: '分享', labelEn: 'Share', emoji: '✨'),
-  PostTag(
-    key: 'negotiable',
-    label: '可议价',
-    labelEn: 'Negotiable',
-    emoji: '🤝',
-    categories: ['offer'],
-  ),
-  PostTag(
-    key: 'pickupOnly',
-    label: '仅自提',
-    labelEn: 'Pickup only',
-    emoji: '📍',
-    categories: ['offer', 'wanted'],
-  ),
-  PostTag(
-    key: 'sellFast',
-    label: '急出',
-    labelEn: 'Sell fast',
-    emoji: '⚡',
-    categories: ['offer'],
-  ),
-  PostTag(
-    key: 'budgetFlexible',
-    label: '预算可议',
-    labelEn: 'Flexible budget',
-    emoji: '💬',
-    categories: ['wanted', 'help'],
-  ),
-  PostTag(
-    key: 'topPrice',
-    label: '高价收',
-    labelEn: 'Top price',
-    emoji: '💎',
-    categories: ['wanted'],
-  ),
-  // Exclusive groups (one pick max each).
+  // ttl group
   PostTag(
     key: 'urgent',
     label: '急',
@@ -164,6 +112,7 @@ const List<PostTag> kPostTags = [
     emoji: '♾️',
     group: 'ttl',
   ),
+  // location group
   PostTag(
     key: 'qianhuNorth',
     label: '前湖北院',

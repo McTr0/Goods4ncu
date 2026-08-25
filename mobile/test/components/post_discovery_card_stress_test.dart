@@ -59,7 +59,7 @@ void main() {
     expect(find.text('⏰ 急'), findsOneWidget);
     // Remaining tags stay localized in the body, capped at two.
     expect(find.text('📍 前湖北院'), findsOneWidget);
-    expect(find.text('❓ 提问'), findsOneWidget);
+    expect(find.text('⏰ 急'), findsOneWidget);
   });
 
   testWidgets('imageless goods posts render text-first without an empty slot', (

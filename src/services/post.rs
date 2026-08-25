@@ -5,7 +5,6 @@ use crate::categories::POST_CATEGORIES;
 use crate::repositories::{
     NewPost, Post, PostFilter, PostReply, PostRepository, PostgresPostRepository, UpdatePostInput,
 };
-use crate::services::category_spec::validate_lifecycle as spec_validate_lifecycle;
 use crate::services::moderation::ModerationService;
 use sqlx::PgPool;
 use std::collections::HashSet;
@@ -31,12 +30,6 @@ pub struct CreatePost {
     pub listing_id: Option<String>,
     /// Group scope; when set the post is visible to space members only.
     pub space_id: Option<Uuid>,
-    /// Category-specific structured payload (validated whitelist).
-    pub attributes: serde_json::Value,
-    /// Explicit lifecycle state; NULL means the category initial state.
-    /// Stored on create as NULL; read back by lifecycle PATCH validation.
-    #[allow(dead_code)]
-    pub lifecycle: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -45,8 +38,6 @@ pub struct EditPost {
     pub body: Option<String>,
     pub tags: Option<Vec<String>>,
     pub locked: Option<bool>,
-    pub attributes: Option<serde_json::Value>,
-    pub lifecycle: Option<String>,
 }
 
 /// Process-wide snapshot of post_categories, refreshed on first use and
@@ -275,7 +266,6 @@ impl PostService {
                 .await?;
         }
         let tags = self.normalize_tags(input.tags).await?;
-        let attributes = validate_attributes(&category, &input.attributes)?;
         let cover_image_url = normalize_cover_image_url(input.cover_image_url)?;
         if let Some(space_id) = input.space_id {
             ensure_space_member(&self.pool, input.author_id.as_str(), space_id).await?;
@@ -293,8 +283,6 @@ impl PostService {
                 image_url: cover_image_url.clone(),
                 listing_id: input.listing_id,
                 space_id: input.space_id,
-                attributes,
-                lifecycle: None,
             })
             .await?;
         if let Some(image_url) = cover_image_url {
@@ -323,7 +311,6 @@ impl PostService {
             && input.body.is_none()
             && input.tags.is_none()
             && input.locked.is_none()
-            && input.attributes.is_none()
         {
             return Err(ApiError::BadRequest("没有要更新的字段".to_string()));
         }
@@ -344,13 +331,6 @@ impl PostService {
         if effective_category == "announcement" && existing.author_id == author_id {
             // Re-check on edits that touch an announcement.
             self.ensure_can_announce(campus_id, author_id).await?;
-        }
-        let attributes = match &input.attributes {
-            Some(value) => Some(validate_attributes(&effective_category, value)?),
-            None => None,
-        };
-        if let Some(next) = &input.lifecycle {
-            spec_validate_lifecycle(&effective_category, existing.lifecycle.as_deref(), next)?;
         }
         let tags = match &input.tags {
             Some(tags) => Some(self.normalize_tags(tags.clone()).await?),
@@ -374,39 +354,10 @@ impl PostService {
                     category: None,
                     tags,
                     locked: input.locked,
-                    attributes,
-                    lifecycle: input.lifecycle,
                 },
             )
             .await?;
         if !updated {
-            return Err(ApiError::NotFound);
-        }
-        self.get(campus_id, id).await
-    }
-
-    /// Owner-only lifecycle transition along the category state machine.
-    pub async fn set_lifecycle(
-        &self,
-        campus_id: Uuid,
-        id: Uuid,
-        author_id: &str,
-        lifecycle: String,
-    ) -> Result<Post, ApiError> {
-        let existing = self.get(campus_id, id).await?;
-        if existing.author_id != author_id {
-            return Err(ApiError::Forbidden);
-        }
-        spec_validate_lifecycle(
-            &existing.category,
-            existing.lifecycle.as_deref(),
-            &lifecycle,
-        )?;
-        if !self
-            .repository
-            .update_lifecycle(campus_id, id, author_id, &lifecycle)
-            .await?
-        {
             return Err(ApiError::NotFound);
         }
         self.get(campus_id, id).await
@@ -567,15 +518,6 @@ fn required_text(value: String, field: &str, max_chars: usize) -> Result<String,
     Ok(value)
 }
 
-/// Thin wrapper so call sites keep a single entry point; real rules live in
-/// the CategorySpec registry (services/category_spec.rs).
-fn validate_attributes(
-    category: &str,
-    raw: &serde_json::Value,
-) -> Result<serde_json::Value, ApiError> {
-    crate::services::category_spec::validate_attributes(category, raw)
-}
-
 async fn normalize_post_category(pool: &PgPool, value: Option<String>) -> Result<String, ApiError> {
     let value = value.unwrap_or_else(|| "discussion".to_string());
     let value = value.trim().to_string();
@@ -662,6 +604,6 @@ mod tests {
     #[test]
     fn post_category_vocabulary_falls_back_to_bootstrap_catalog() {
         // Pure-unit coverage: without a pool the const catalog applies.
-        assert_eq!(POST_CATEGORIES.len(), 9);
+        assert_eq!(POST_CATEGORIES.len(), 8);
     }
 }
