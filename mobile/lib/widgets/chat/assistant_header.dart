@@ -8,11 +8,15 @@ class AssistantDigitalHumanHeader extends StatelessWidget {
     required this.onOpenHistory,
     this.onOpenMemoryPanel,
     this.onClearHistory,
+    this.onOpenExpressionLab,
   });
 
   final VoidCallback onOpenHistory;
   final VoidCallback? onOpenMemoryPanel;
   final VoidCallback? onClearHistory;
+
+  /// Web-only Live2D expression/motion debug entry (小昌页面调试用).
+  final VoidCallback? onOpenExpressionLab;
 
   @override
   Widget build(BuildContext context) {
@@ -42,6 +46,13 @@ class AssistantDigitalHumanHeader extends StatelessWidget {
             tooltip: l.assistantClearHistoryTooltip,
             icon: const Icon(Icons.delete_sweep_outlined),
             onPressed: onClearHistory,
+          ),
+        if (onOpenExpressionLab != null)
+          IconButton(
+            key: const Key('assistant-expression-lab'),
+            tooltip: '表情调试',
+            icon: const Icon(Icons.science_outlined),
+            onPressed: onOpenExpressionLab,
           ),
       ],
     );

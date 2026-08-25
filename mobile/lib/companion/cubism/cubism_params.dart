@@ -20,12 +20,30 @@ class CubismParams {
   static const mouthForm = 'ParamMouthForm';
 }
 
+/// Native expression names shipped in Doro.model3.json.
+const List<String> kDoroExpressions = [
+  'Exp1',
+  'Exp2',
+  'Exp3',
+  'Exp4',
+  'Exp5',
+  'Exp6',
+  'Exp7',
+  'Exp8',
+  'Highlight OFF',
+  'Running OFF',
+  'TongueOut',
+];
+
 /// Abstract over the JS stage so mapping logic is testable headless.
 abstract class CubismBridge {
   void setParam(String id, double value);
   void focus(double x, double y);
   void nod();
   void shake();
+  void setExpressionByName(String name);
+  void resetExpression();
+  void startIdleMotion();
 }
 
 class NoopCubismBridge implements CubismBridge {
@@ -40,61 +58,15 @@ class NoopCubismBridge implements CubismBridge {
 
   @override
   void shake() {}
-}
 
-/// Behavioural state → parameter choreography.
-Map<String, double> paramsForState(
-  String stateName, {
-  required double gazeX,
-  required double gazeY,
-}) {
-  final map = <String, double>{
-    // Head follows the smoothed gaze; body leans with it (§41).
-    CubismParams.angleX: gazeX * 30,
-    CubismParams.angleY: -gazeY * 30,
-    CubismParams.bodyZ: gazeX * 10,
-  };
-  switch (stateName) {
-    case 'thinking':
-      map[CubismParams.browLY] = -0.5;
-      map[CubismParams.browRY] = -0.5;
-      map[CubismParams.eyeSmile] = 0;
-      map[CubismParams.mouthForm] = -0.3;
-      map[CubismParams.angleZ] = 6;
-      break;
-    case 'happy':
-      map[CubismParams.eyeSmile] = 0.7;
-      map[CubismParams.mouthForm] = 0.6;
-      break;
-    case 'excited':
-      map[CubismParams.eyeSmile] = 0.85;
-      map[CubismParams.mouthForm] = 0.8;
-      map[CubismParams.bodyZ] = gazeX * 14 + 4;
-      break;
-    case 'shy':
-      map[CubismParams.browLY] = 0.35;
-      map[CubismParams.browRY] = 0.35;
-      map[CubismParams.eyeSmile] = 0.4;
-      map[CubismParams.angleY] = -12;
-      break;
-    case 'surprised':
-      map[CubismParams.browLY] = 0.6;
-      map[CubismParams.browRY] = 0.6;
-      map[CubismParams.mouthOpenY] = 0.45;
-      break;
-    case 'concerned':
-      map[CubismParams.browLY] = 0.55;
-      map[CubismParams.browRY] = 0.55;
-      map[CubismParams.mouthForm] = -0.4;
-      break;
-    case 'sleeping':
-      map[CubismParams.eyeLOpen] = 0;
-      map[CubismParams.eyeROpen] = 0;
-      break;
-    default:
-      break;
-  }
-  return map;
+  @override
+  void setExpressionByName(String name) {}
+
+  @override
+  void resetExpression() {}
+
+  @override
+  void startIdleMotion() {}
 }
 
 /// Motion tag → one-shot gesture on the bridge.

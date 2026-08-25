@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -16,6 +17,7 @@ import '../services/companion_character_service.dart';
 import '../services/sse_service.dart';
 import '../services/upload_service.dart';
 import '../services/companion_memory_service.dart';
+import '../companion/cubism/expression_lab.dart';
 import '../services/post_service.dart';
 import '../services/ws_service.dart';
 import '../models/models.dart';
@@ -1358,6 +1360,66 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  void _showExpressionLab() {
+    if (!ExpressionLab.enabled()) return;
+    final names = ExpressionLab.names();
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Doro 原生表情/动作调试',
+                  style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final name in names)
+                      ActionChip(
+                        key: ValueKey('exp-$name'),
+                        label: Text(name),
+                        onPressed: () => ExpressionLab.setExpression(name),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    FilledButton.tonalIcon(
+                      key: const ValueKey('motion-idle'),
+                      onPressed: () => ExpressionLab.idle(),
+                      icon: const Icon(Icons.play_circle_outline),
+                      label: const Text('Idle 重播'),
+                    ),
+                    OutlinedButton.icon(
+                      key: const ValueKey('exp-reset'),
+                      onPressed: () => ExpressionLab.reset(),
+                      icon: const Icon(Icons.restart_alt_rounded),
+                      label: const Text('恢复默认脸'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   void _showHistorySheet() {
     showModalBottomSheet<void>(
       context: context,
@@ -1481,6 +1543,7 @@ class _ChatPageState extends State<ChatPage> {
           onOpenHistory: _showHistorySheet,
           onOpenMemoryPanel: () => AssistantMemoryPanel.show(context),
           onClearHistory: _clearAssistantHistory,
+          onOpenExpressionLab: kIsWeb ? _showExpressionLab : null,
         ),
         ?agentResults,
         if (_historyError != null)

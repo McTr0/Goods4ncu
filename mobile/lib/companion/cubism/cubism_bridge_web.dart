@@ -54,4 +54,27 @@ class WebCubismBridge implements CubismBridge {
 
   @override
   void shake() => _stage.callMethod('shake'.toJS);
+
+  @override
+  void setExpressionByName(String name) =>
+      _stage.callMethod('setExpressionByName'.toJS, name.toJS);
+
+  @override
+  void resetExpression() => _stage.callMethod('resetExpression'.toJS);
+
+  @override
+  void startIdleMotion() => _stage.callMethod('startIdleMotion'.toJS);
+
+  /// Expression names registered in the loaded model settings.
+  List<String> expressionNames() {
+    final names = _stage.callMethod('getExpressionNames'.toJS) as JSArray?;
+    if (names == null) return const [];
+    return [
+      for (final entry in names.toDart)
+        switch (entry) {
+          final JSString text => text.toDart,
+          _ => '',
+        },
+    ].where((name) => name.isNotEmpty).toList(growable: false);
+  }
 }

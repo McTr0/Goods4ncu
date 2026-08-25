@@ -23,20 +23,16 @@ class CubismCharacterRenderer implements CharacterRenderer {
 
   @override
   void setCharacterState(CompanionState state) {
+    // Facial states are native Doro expressions now; the director's state
+    // machine only tracks it for logging/attention purposes.
     characterState = state;
-    // Re-apply choreography against the latest gaze.
-    for (final entry in paramsForState(
-      state.name,
-      gazeX: gazeX,
-      gazeY: gazeY,
-    ).entries) {
-      bridge.setParam(entry.key, entry.value);
-    }
   }
 
   @override
   void setExpression(String expression, {double weight = 1}) {
-    // Expression overlays are param choreography here; states carry them.
+    kDoroExpressions.contains(expression)
+        ? bridge.setExpressionByName(expression)
+        : bridge.resetExpression();
   }
 
   @override
@@ -53,7 +49,6 @@ class CubismCharacterRenderer implements CharacterRenderer {
     gazeX = x.clamp(-1.0, 1.0);
     gazeY = y.clamp(-1.0, 1.0);
     bridge.focus(gazeX, gazeY);
-    if (characterState != null) setCharacterState(characterState!);
   }
 
   @override

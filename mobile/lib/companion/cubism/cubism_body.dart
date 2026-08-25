@@ -5,8 +5,7 @@ import 'cubism_body_default.dart'
     if (dart.library.js_interop) 'cubism_body_web.dart'
     as impl;
 
-export 'cubism_params.dart'
-    show CubismBridge, CubismParams, gestureForTag, paramsForState;
+export 'cubism_params.dart' show CubismBridge, CubismParams, gestureForTag;
 
 /// Compile-time default companion character (multi-character catalog).
 const String kCompanionCharacter = String.fromEnvironment(

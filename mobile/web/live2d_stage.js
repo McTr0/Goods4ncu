@@ -7,6 +7,10 @@
 //   focus(x, y)                   – normalized gaze (-1..1)
 //   nod()                         – keyframed head-nod gesture
 //   shake()                       – keyframed body shake
+//   setExpressionByName(name)     – play a model3.json expression
+//   resetExpression()             – back to the neutral face
+//   startIdleMotion()             – replay the Idle motion group
+//   getExpressionNames()          – names registered in the model settings
 //   dispose()
 //
 // Breath + blink run on an internal ticker so they stay smooth regardless of
@@ -50,16 +54,11 @@ window.__live2dStage = (function () {
 
   function applyIdle(t) {
     if (!model) return;
+    // Breath stays procedural; blinking and lip-sync now flow through the
+    // model3.json EyeBlink / LipSync groups so native motions and
+    // expressions are never overwritten by this ticker.
     state.breath = 0.5 + 0.5 * Math.sin(t / 1600);
-    // Blink: quick close every 2–5 s.
-    const period = 3400;
-    const phase = t % period;
-    state.blink =
-      phase < 130 ? Math.max(0, 1 - phase / 65) : 1;
     setRaw("ParamBreath", state.breath);
-    setRaw("ParamEyeLOpen", state.blink);
-    setRaw("ParamEyeROpen", state.blink);
-    setRaw("ParamMouthOpenY", state.mouth);
   }
 
   function setRaw(id, v) {
@@ -268,6 +267,52 @@ window.__live2dStage = (function () {
       seq.forEach(function (deg, i) {
         setTimeout(function () { setRaw("ParamBodyAngleZ", deg); }, i * 90);
       });
+    },
+    setExpressionByName: function (name) {
+      if (!model) return false;
+      try {
+        model.expression(name);
+        return true;
+      } catch (err) {
+        console.warn('[companion] expression failed:', name, err);
+        return false;
+      }
+    },
+    resetExpression: function () {
+      if (!model) return false;
+      try {
+        const manager =
+          model.internalModel && model.internalModel.motionManager
+            ? model.internalModel.motionManager.expressionManager
+            : null;
+        if (manager && typeof manager.resetExpression === 'function') {
+          manager.resetExpression();
+          return true;
+        }
+        if (manager) {
+          manager.startRandomExpression?.();
+          return true;
+        }
+      } catch (err) {
+        console.warn('[companion] resetExpression failed:', err);
+      }
+      return false;
+    },
+    startIdleMotion: function () {
+      if (!model) return false;
+      try {
+        return !!model.motion('Idle', undefined, 3 /* FORCE */);
+      } catch (err) {
+        console.warn('[companion] idle motion failed:', err);
+        return false;
+      }
+    },
+    getExpressionNames: function () {
+      const settings = model && model.internalModel
+        ? model.internalModel.settings
+        : null;
+      const defs = settings && settings.expressions ? settings.expressions : [];
+      return defs.map(function (def) { return def.Name; });
     },
     hasLoadFailed: function () {
       return !!loadFailed;
