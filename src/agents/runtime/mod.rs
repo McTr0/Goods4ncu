@@ -8,6 +8,7 @@
 #![allow(dead_code)]
 
 pub mod budget;
+pub mod driver;
 pub mod engine;
 pub mod error;
 pub mod event;
