@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../brand/app_brand.dart';
 import '../components/xiaochang_avatar.dart';
 import '../components/contact_conversation_sheet.dart';
+import '../components/scroll_aware_bottom_bar.dart';
 import '../l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 import '../pages/home_page.dart';
@@ -413,6 +414,8 @@ class _ShellScaffold extends StatefulWidget {
 
 class _ShellScaffoldState extends State<_ShellScaffold> {
   int _currentIndex = 0;
+  final _bottomBarController = ScrollAwareBottomBarController();
+  String? _lastLocation;
 
   static const _routes = [
     '/feed',
@@ -457,18 +460,29 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
   }
 
   @override
+  void dispose() {
+    _bottomBarController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     if (l == null) {
       return const SizedBox.shrink();
     }
     final location = GoRouterState.of(context).matchedLocation;
+    if (_lastLocation != location) {
+      _lastLocation = location;
+      _bottomBarController.resetForRoute();
+    }
     final nextIndex = _tabIndexForLocation(location);
     if (_currentIndex != nextIndex) {
       _currentIndex = nextIndex;
     }
 
     void selectDestination(int index) {
+      _bottomBarController.show();
       setState(() => _currentIndex = index);
       context.go(_routes[index]);
     }
@@ -508,47 +522,64 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
         }
 
         return Scaffold(
-          body: widget.child,
-          bottomNavigationBar: DecoratedBox(
-            decoration: BoxDecoration(
-              color: Theme.of(context).navigationBarTheme.backgroundColor,
-              border: Border(
-                top: BorderSide(
-                  color: Theme.of(context).dividerColor.withValues(alpha: 0.7),
-                ),
+          body: NotificationListener<ScrollMetricsNotification>(
+            onNotification:
+                _bottomBarController.handleScrollMetricsNotification,
+            child: Listener(
+              onPointerSignal: _bottomBarController.handlePointerSignal,
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _bottomBarController.handleScrollNotification,
+                child: widget.child,
               ),
-              boxShadow: AppTheme.cardShadow,
             ),
-            child: NavigationBar(
-              selectedIndex: _currentIndex,
-              onDestinationSelected: selectDestination,
-              destinations: [
-                NavigationDestination(
-                  icon: const Icon(Icons.explore_outlined),
-                  selectedIcon: const Icon(Icons.explore_rounded),
-                  label: l.homeTab,
+          ),
+          bottomNavigationBar: ScrollAwareBottomBar(
+            controller: _bottomBarController,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Theme.of(context).navigationBarTheme.backgroundColor,
+                border: Border(
+                  top: BorderSide(
+                    color: Theme.of(
+                      context,
+                    ).dividerColor.withValues(alpha: 0.7),
+                  ),
                 ),
-                NavigationDestination(
-                  icon: const Icon(Icons.chat_bubble_outline),
-                  selectedIcon: const Icon(Icons.chat_bubble_rounded),
-                  label: l.messagesTab,
-                ),
-                NavigationDestination(
-                  icon: const _XiaochangNavigationIcon(),
-                  selectedIcon: const _XiaochangNavigationIcon(selected: true),
-                  label: l.assistantName,
-                ),
-                NavigationDestination(
-                  icon: const Icon(Icons.add_circle_outline),
-                  selectedIcon: const Icon(Icons.add_circle_rounded),
-                  label: l.publishTab,
-                ),
-                NavigationDestination(
-                  icon: const Icon(Icons.person_outline),
-                  selectedIcon: const Icon(Icons.person_rounded),
-                  label: l.profileTab,
-                ),
-              ],
+                boxShadow: AppTheme.cardShadow,
+              ),
+              child: NavigationBar(
+                selectedIndex: _currentIndex,
+                onDestinationSelected: selectDestination,
+                destinations: [
+                  NavigationDestination(
+                    icon: const Icon(Icons.explore_outlined),
+                    selectedIcon: const Icon(Icons.explore_rounded),
+                    label: l.homeTab,
+                  ),
+                  NavigationDestination(
+                    icon: const Icon(Icons.chat_bubble_outline),
+                    selectedIcon: const Icon(Icons.chat_bubble_rounded),
+                    label: l.messagesTab,
+                  ),
+                  NavigationDestination(
+                    icon: const _XiaochangNavigationIcon(),
+                    selectedIcon: const _XiaochangNavigationIcon(
+                      selected: true,
+                    ),
+                    label: l.assistantName,
+                  ),
+                  NavigationDestination(
+                    icon: const Icon(Icons.add_circle_outline),
+                    selectedIcon: const Icon(Icons.add_circle_rounded),
+                    label: l.publishTab,
+                  ),
+                  NavigationDestination(
+                    icon: const Icon(Icons.person_outline),
+                    selectedIcon: const Icon(Icons.person_rounded),
+                    label: l.profileTab,
+                  ),
+                ],
+              ),
             ),
           ),
         );
