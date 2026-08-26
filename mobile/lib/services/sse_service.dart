@@ -44,16 +44,12 @@ SseToken? _decodeV2Event(Map<String, dynamic> json) {
       return SseToken(
         token: '',
         conversationId: convId,
-        toolActivity: {'tool': call['name'], 'status': call['status']},
+        toolActivity: call['name'] as String?,
       );
     case 'ui_action':
       final action = json['action'] as Map<String, dynamic>?;
       if (action == null) return null;
-      return SseToken(
-        token: '',
-        conversationId: convId,
-        uiAction: action,
-      );
+      return SseToken(token: '', conversationId: convId, uiAction: action);
     default:
       return null; // heartbeat and unknown types are silently skipped
   }

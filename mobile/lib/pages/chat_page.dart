@@ -1056,7 +1056,7 @@ class _ChatPageState extends State<ChatPage> {
     if (!_isStreaming) return;
     // Signal the server to cancel the turn using the actual conversation.
     try {
-      _sseService.cancelTurn(_conversationId ?? '__agent__');
+      _sseService.cancelTurn('__agent__');
     } catch (_) {}
     // Close the local SSE stream so no more chunks arrive.
     _sseService.disconnect();
