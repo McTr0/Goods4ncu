@@ -461,20 +461,32 @@ class SseService {
 
   /// Disconnect and clean up. Idempotent.
   /// POST cancel to the server for an in-flight turn.
-  void cancelTurn(String conversationId) {
+  ///
+  /// Uses an independent [http.Client] so the cancel request survives
+  /// the SSE stream's disconnect. Carries Bearer auth for the Session
+  /// extractor on the server side.
+  Future<void> cancelTurn(String conversationId) async {
     final headers = <String, String>{'Content-Type': 'application/json'};
+    try {
+      final token = await _getAccessToken();
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
+    } catch (_) {
+      // Proceed without auth; server will reject if required.
+    }
     final url = Uri.parse(
       '$_baseUrl/api/agent/turns/'
       '${Uri.encodeComponent(conversationId)}/cancel',
     );
-    _client
-        ?.post(url, headers: headers, body: '{}')
-        .then(
-          (_) {},
-          onError: (_) {
-            // Best effort; turn will time out naturally if cancel fails.
-          },
-        );
+    final client = http.Client();
+    try {
+      await client.post(url, headers: headers, body: '{}');
+    } catch (_) {
+      // Best effort; turn will time out naturally if cancel fails.
+    } finally {
+      client.close();
+    }
   }
 
   Future<void> disconnect() async {

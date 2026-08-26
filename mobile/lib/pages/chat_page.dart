@@ -1052,11 +1052,11 @@ class _ChatPageState extends State<ChatPage> {
     _attachPostReference(picked);
   }
 
-  void _stopStreaming() {
+  Future<void> _stopStreaming() async {
     if (!_isStreaming) return;
-    // Signal the server to cancel the turn using the actual conversation.
+    // Signal the server to cancel the turn using the assistant conversation.
     try {
-      _sseService.cancelTurn('__agent__');
+      await _sseService.cancelTurn('__agent__');
     } catch (_) {}
     // Close the local SSE stream so no more chunks arrive.
     _sseService.disconnect();

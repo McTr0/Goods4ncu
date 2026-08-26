@@ -765,27 +765,6 @@ async fn handle_chat_stream_request(
 
             let bytes = match result {
                 Ok(AgentStreamChunk::Text(token)) => {
-                    if use_v2_protocol {
-                        seq += 1;
-                        let v2_event = serde_json::json!({
-                            "type": "text_delta",
-                            "protocol_version": "2.0",
-                            "seq": seq,
-                            "text": token,
-                        });
-                        yield Ok(encode_sse_data(&v2_event));
-
-                        if !ttft_recorded {
-                            if let Some(run) = &run_for_stream {
-                                let ttft_ms = run
-                                    .started_at
-                                    .elapsed()
-                                    .as_millis() as i64;
-                                tracing::debug!(ttft_ms, "first token (v2)");
-                            }
-                        }
-                        continue;
-                    }
                     if !ttft_recorded {
                         if let Some(run) = &run_for_stream {
                             let ttft_ms = run
@@ -814,11 +793,27 @@ async fn handle_chat_stream_request(
                         ttft_recorded = true;
                     }
                     full_reply.push_str(&token);
-                    let payload = serde_json::json!({
-                        "token": token,
-                        "conversation_id": public_conversation_id
-                    });
-                    encode_sse_data(&payload)
+
+                    // v2: emit versioned event envelope.
+                    if use_v2_protocol {
+                        seq += 1;
+                        let v2_event = serde_json::json!({
+                            "type": "text_delta",
+                            "protocol_version": "2.0",
+                            "turn_id": run_for_stream.as_ref().map(|r| r.trace_id.clone()).unwrap_or_default(),
+                            "conversation_id": public_conversation_id,
+                            "seq": seq,
+                            "text": token,
+                        });
+                        encode_sse_data(&v2_event)
+                    } else {
+                        // v1: legacy format.
+                        let payload = serde_json::json!({
+                            "token": token,
+                            "conversation_id": public_conversation_id
+                        });
+                        encode_sse_data(&payload)
+                    }
                 }
                 Ok(AgentStreamChunk::Usage(reported_usage)) => {
                     usage = Some(reported_usage);
