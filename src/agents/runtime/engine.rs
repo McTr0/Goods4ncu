@@ -35,6 +35,7 @@ pub enum TurnEvent {
     },
 }
 
+use crate::agents::runtime::event::UsageSummary;
 use rig::completion::Message;
 
 fn to_event_action(action: &crate::llm::UiAction) -> crate::agents::runtime::event::UiAction {
@@ -178,7 +179,15 @@ impl AgentRuntime {
 
             // If no tool calls were made, the model produced its final answer.
             if collected_calls.is_empty() {
-                break;
+                emit!(EventData::TurnCompleted {
+                    usage: UsageSummary {
+                        model_steps: step + 1,
+                        tool_calls: total_tool_calls,
+                        prompt_tokens,
+                        completion_tokens,
+                    },
+                });
+                return;
             }
 
             // Execute tool calls sequentially (v1; parallel read-only later).

@@ -2,7 +2,7 @@
 
 use goods4ncu::agents::runtime::budget::ExecutionBudget;
 use goods4ncu::agents::runtime::engine::{AgentRuntime, ToolExecutor, TurnEvent};
-use goods4ncu::agents::runtime::event::{AgentEvent, EventData, TurnId};
+use goods4ncu::agents::runtime::event::{EventData, TurnId};
 use goods4ncu::agents::runtime::fake_driver::{FakeModelDriver, FakeStep};
 use goods4ncu::agents::runtime::model::ModelRequest;
 use std::future::Future;

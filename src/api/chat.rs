@@ -446,6 +446,10 @@ async fn handle_chat_stream_request(
             "AI assistant is disabled on this server.",
         ));
     }
+    // Feature flag: route to v2 runtime when enabled for this user.
+    // Phase 3 will wire the actual v2 engine; currently falls through
+    // to legacy regardless (the flag is infrastructure-only).
+    let _use_v2 = std::env::var("AGENT_RUNTIME").as_deref() == Ok("v2");
     let ChatStreamRequest {
         message,
         listing_id,
