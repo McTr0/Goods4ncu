@@ -10,6 +10,7 @@
 pub mod budget;
 pub mod driver;
 pub mod engine;
+pub mod envelope;
 pub mod error;
 pub mod event;
 pub mod loop_guard;
