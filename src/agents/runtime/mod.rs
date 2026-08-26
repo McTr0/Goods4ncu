@@ -13,9 +13,11 @@ pub mod engine;
 pub mod envelope;
 pub mod error;
 pub mod event;
+pub mod fake_driver;
 pub mod hooks;
 pub mod loop_guard;
 pub mod model;
+pub mod route;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
