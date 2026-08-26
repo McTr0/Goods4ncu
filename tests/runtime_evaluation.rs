@@ -34,7 +34,7 @@ async fn text_only_turn_completes() {
                 if let TurnEvent::Emit(e) = event {
                     emitted.push(e.clone());
                 }
-                },
+            },
         )
         .await;
 
@@ -64,7 +64,7 @@ async fn provider_error_produces_turn_failed() {
                 if let TurnEvent::Emit(e) = event {
                     emitted.push(e.clone());
                 }
-                },
+            },
         )
         .await;
 
@@ -117,7 +117,7 @@ async fn budget_exhaustion_stops_runaway_loop() {
                 if let TurnEvent::Emit(e) = event {
                     emitted.push(e.clone());
                 }
-                },
+            },
         )
         .await;
 
