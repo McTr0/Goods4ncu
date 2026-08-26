@@ -110,19 +110,6 @@ async fn main() -> Result<(), anyhow::Error> {
                 &config.llm_model,
             )?)
         }
-        "minimax" => {
-            let api_key = config.minimax_api_key.as_ref().ok_or_else(|| {
-                anyhow::anyhow!("MINIMAX_API_KEY must be set when LLM_PROVIDER=minimax")
-            })?;
-            let base_url = config.minimax_api_base_url.as_deref();
-            Arc::new(crate::llm::minimax::MiniMaxProvider::new_with_model(
-                api_key,
-                base_url,
-                &config.llm_model,
-                &config.gemini_api_key,
-                config.vector_dim,
-            )?)
-        }
         provider if config::is_openai_compatible_provider(provider) => {
             let api_key = config.llm_api_key.as_ref().ok_or_else(|| {
                 anyhow::anyhow!(

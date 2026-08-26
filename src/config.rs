@@ -102,6 +102,8 @@ pub struct AppConfig {
     /// When false, all AI/agent features are disabled and the platform
     /// operates as the original non-AI demo.
     pub agent_enabled: bool,
+    #[allow(dead_code)]
+    pub llm_api_style: String,
     pub vector_dim: usize,
 
     // --- Infrastructure ---
@@ -552,6 +554,9 @@ impl AppConfig {
             agent_enabled: read_non_empty_env("AGENT_ENABLED")
                 .map(|v| v.to_lowercase() != "false" && v != "0")
                 .unwrap_or(true),
+            llm_api_style: read_non_empty_env("LLM_API_STYLE")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "auto".to_string()),
             vector_dim,
             cors_origins,
             blocked_keywords,
@@ -608,6 +613,7 @@ impl AppConfig {
             llm_model: "gemini-3-flash-preview".to_string(),
             llm_base_url: None,
             agent_enabled: true,
+            llm_api_style: "auto".to_string(),
             vector_dim: 768,
             cors_origins: vec![],
             oss_endpoint: "https://oss-cn-beijing.aliyuncs.com".to_string(),
@@ -813,6 +819,7 @@ mod tests {
             llm_model: "gemini-3-flash-preview".to_string(),
             llm_base_url: None,
             agent_enabled: true,
+            llm_api_style: "auto".to_string(),
             vector_dim: 768,
             cors_origins: vec![],
             oss_endpoint: "https://oss-cn-beijing.aliyuncs.com".to_string(),

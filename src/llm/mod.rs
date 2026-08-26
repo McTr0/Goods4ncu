@@ -1,5 +1,4 @@
 pub mod gemini;
-pub mod minimax;
 pub mod openai_compatible;
 
 use crate::services::BusinessEvent;

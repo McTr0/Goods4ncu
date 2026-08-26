@@ -7,6 +7,7 @@
 
 #![allow(dead_code)]
 
+pub mod api_drivers;
 pub mod budget;
 pub mod driver;
 pub mod engine;
