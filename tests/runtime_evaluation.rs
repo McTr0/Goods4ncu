@@ -30,10 +30,11 @@ async fn text_only_turn_completes() {
             noop_executor(),
             TurnId::generate(),
             "conv-test",
-            &mut |event| match event {
-                TurnEvent::Emit(e) => emitted.push(e),
-                _ => {}
-            },
+            &mut |event| {
+                if let TurnEvent::Emit(e) = event {
+                    emitted.push(e.clone());
+                }
+                },
         )
         .await;
 
@@ -59,10 +60,11 @@ async fn provider_error_produces_turn_failed() {
             noop_executor(),
             TurnId::generate(),
             "conv-err",
-            &mut |event| match event {
-                TurnEvent::Emit(e) => emitted.push(e),
-                _ => {}
-            },
+            &mut |event| {
+                if let TurnEvent::Emit(e) = event {
+                    emitted.push(e.clone());
+                }
+                },
         )
         .await;
 
@@ -111,10 +113,11 @@ async fn budget_exhaustion_stops_runaway_loop() {
             executor,
             TurnId::generate(),
             "conv-budget",
-            &mut |event| match event {
-                TurnEvent::Emit(e) => emitted.push(e),
-                _ => {}
-            },
+            &mut |event| {
+                if let TurnEvent::Emit(e) = event {
+                    emitted.push(e.clone());
+                }
+                },
         )
         .await;
 

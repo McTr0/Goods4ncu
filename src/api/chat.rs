@@ -449,7 +449,7 @@ async fn handle_chat_stream_request(
     // Feature flag: route to v2 runtime when enabled for this user.
     // Phase 3 will wire the actual v2 engine; currently falls through
     // to legacy regardless (the flag is infrastructure-only).
-    let _use_v2 = std::env::var("AGENT_RUNTIME").as_deref() == Ok("v2");
+    let use_v2_protocol = std::env::var("AGENT_RUNTIME").as_deref() == Ok("v2");
     let ChatStreamRequest {
         message,
         listing_id,
@@ -720,6 +720,7 @@ async fn handle_chat_stream_request(
         let mut tool_calls: u32 = 0;
         let mut first_token_ms: Option<i32> = None;
         let stream_started_at = std::time::Instant::now();
+        let mut seq: u64 = 0;
 
         // Emit initial heartbeat so the client knows the connection is alive.
         yield Ok(encode_sse_data(&serde_json::json!({
@@ -761,6 +762,27 @@ async fn handle_chat_stream_request(
 
             let bytes = match result {
                 Ok(AgentStreamChunk::Text(token)) => {
+                    if use_v2_protocol {
+                        seq += 1;
+                        let v2_event = serde_json::json!({
+                            "type": "text_delta",
+                            "protocol_version": "2.0",
+                            "seq": seq,
+                            "text": token,
+                        });
+                        yield Ok(encode_sse_data(&v2_event));
+
+                        if !ttft_recorded {
+                            if let Some(run) = &run_for_stream {
+                                let ttft_ms = run
+                                    .started_at
+                                    .elapsed()
+                                    .as_millis() as i64;
+                                tracing::debug!(ttft_ms, "first token (v2)");
+                            }
+                        }
+                        continue;
+                    }
                     if !ttft_recorded {
                         if let Some(run) = &run_for_stream {
                             let ttft_ms = run
