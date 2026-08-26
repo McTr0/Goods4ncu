@@ -139,6 +139,7 @@ impl AgentRuntime {
 
             let mut collected_calls: Vec<ToolCallData> = vec![];
             let mut had_text = false;
+            let mut tool_results: Vec<(String, String)> = vec![];
 
             while let Some(event) = stream.next().await {
                 match event {
@@ -252,6 +253,7 @@ impl AgentRuntime {
                         duration_ms: Some(start.elapsed().as_millis() as u64),
                     },
                 });
+                tool_results.push((call.name.clone(), tool_result.clone()));
 
                 // Parse UI actions from the tool result (legacy bridge).
                 // Phase 4 replaces this with ToolResultEnvelope.
@@ -267,12 +269,21 @@ impl AgentRuntime {
                 });
             }
 
-            // Feed the last tool call back as the next user message.
-            if let Some(last_call) = collected_calls.last() {
-                current_msg = Message::user(format!(
-                    "Tool {} returned: {}",
-                    last_call.name, "see tool result above"
-                ));
+            // Feed real tool results back to the model for the next step.
+            // Results are truncated to max_tool_result_bytes.
+            if !tool_results.is_empty() {
+                let summary: String = tool_results
+                    .iter()
+                    .map(|(name, text)| {
+                        let truncated: String = text
+                            .chars()
+                            .take(self.budget.max_tool_result_bytes)
+                            .collect();
+                        format!("[{}] {}", name, truncated)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                current_msg = Message::user(format!("Tool results:\n{}", summary));
                 history.push(current_msg.clone());
             }
         }

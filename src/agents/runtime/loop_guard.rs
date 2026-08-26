@@ -50,10 +50,9 @@ impl LoopGuard {
                 count
             ))
         } else if *count >= self.warn_threshold {
-            Err(format!(
-                "loop warning: same tool call repeated {} times",
-                count
-            ))
+            // Warning is non-fatal: log and continue.
+            tracing::warn!("loop warning: same call repeated {}", count);
+            Ok(())
         } else {
             Ok(())
         }
@@ -101,7 +100,7 @@ mod tests {
         let mut guard = LoopGuard::new(2, 3);
         let args = json!({"q": "same"});
         assert!(guard.check("search", &args, "ok").is_ok()); // 1st ok
-        assert!(guard.check("search", &args, "ok").is_err()); // 2nd warns
+        assert!(guard.check("search", &args, "ok").is_ok()); // 2nd warns but continues
         assert!(guard.check("search", &args, "ok").is_err()); // 3rd hard stop
     }
 
@@ -110,8 +109,8 @@ mod tests {
         let mut guard = LoopGuard::new(2, 3);
         let args = json!({"q": "same"});
         assert!(guard.check("search", &args, "ok").is_ok());
-        assert!(guard.check("search", &args, "ok").is_err());
-        // Different tool resets counter.
+        assert!(guard.check("search", &args, "ok").is_ok()); // warn at threshold
+                                                             // Different tool resets counter.
         assert!(guard.check("other_tool", &json!({}), "ok").is_ok());
         // Same original tool is fresh again.
         assert!(guard.check("search", &args, "ok").is_ok());

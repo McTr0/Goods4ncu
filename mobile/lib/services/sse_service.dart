@@ -10,6 +10,55 @@ typedef AccessTokenProvider = Future<String?> Function();
 typedef RefreshAccessToken = Future<bool> Function();
 typedef HttpClientFactory = http.Client Function();
 
+/// Decode a v2 protocol event into an [SseToken] for the legacy pipeline.
+SseToken? _decodeV2Event(Map<String, dynamic> json) {
+  final type = json['type'] as String? ?? '';
+  final convId = json['conversation_id'] as String? ?? '';
+
+  switch (type) {
+    case 'text_delta':
+      final text = json['text'] as String?;
+      if (text == null || text.isEmpty) return null;
+      return SseToken(token: text, conversationId: convId);
+    case 'turn_completed':
+      return SseToken(token: '', conversationId: convId, isComplete: true);
+    case 'turn_failed':
+      final err = json['error'] as Map<String, dynamic>?;
+      return SseToken(
+        token: '',
+        conversationId: convId,
+        isComplete: true,
+        error: err?['message'] ?? 'turn failed',
+      );
+    case 'turn_cancelled':
+      return SseToken(
+        token: '',
+        conversationId: convId,
+        isComplete: true,
+        error: 'cancelled',
+      );
+    case 'tool_started':
+    case 'tool_finished':
+      final call = json['call'] as Map<String, dynamic>?;
+      if (call == null) return null;
+      return SseToken(
+        token: '',
+        conversationId: convId,
+        toolActivity: {'tool': call['name'], 'status': call['status']},
+      );
+    case 'ui_action':
+      final action = json['action'] as Map<String, dynamic>?;
+      if (action == null) return null;
+      return SseToken(
+        token: '',
+        conversationId: convId,
+        uiAction: action,
+      );
+    default:
+      return null; // heartbeat and unknown types are silently skipped
+  }
+}
+
 /// SSE token event parsed from `data: {...}\n\n` format.
 class SseToken {
   final String token;
@@ -368,6 +417,11 @@ class SseService {
     if (jsonStr.isEmpty) return null;
     try {
       final decoded = jsonDecode(jsonStr) as Map<String, dynamic>;
+
+      // Agent Runtime v2 protocol events.
+      if (decoded['protocol_version'] == '2.0') {
+        return _decodeV2Event(decoded);
+      }
 
       // Handle error events from backend.
       final error = decoded['error']?.toString();

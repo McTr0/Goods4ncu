@@ -709,7 +709,10 @@ async fn handle_chat_stream_request(
     let persisted_campus_id = session_campus_id;
     let persist_service = chat_svc.clone();
     // Register cancellation token so POST cancel endpoint can reach it.
-    let turn_cancellation = crate::agents::runtime::TurnRegistry::register(&conversation_id);
+    let turn_cancellation = crate::agents::runtime::TurnRegistry::register(&format!(
+        "agent:{}:{}",
+        current_user_id, conversation_id
+    ));
 
     const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
     let sse_stream = async_stream::stream! {
@@ -743,9 +746,9 @@ async fn handle_chat_stream_request(
                 break;
             }
 
-            // Emit heartbeat if the provider has been quiet.
-            heartbeat_ticker.tick().await;
-
+            // Stream, heartbeat, and cancellation compete in the same select.
+            // No unconditional tick before reading the stream — that was
+            // blocking every chunk by up to 10 seconds.
             let result = tokio::select! {
                 r = stream.next() => match r {
                     Some(r) => r,
@@ -928,9 +931,13 @@ pub(crate) async fn handle_chat_stream_get(
 }
 
 /// POST /api/agent/turns/:conversation_id/cancel — cancel an in-flight turn.
-pub(crate) async fn cancel_turn(Path(conversation_id): Path<String>) -> Json<serde_json::Value> {
-    let cancelled = crate::agents::runtime::TurnRegistry::cancel(&conversation_id);
-    crate::agents::runtime::TurnRegistry::remove(&conversation_id);
+pub(crate) async fn cancel_turn(
+    Session(session): Session,
+    Path(conversation_id): Path<String>,
+) -> Json<serde_json::Value> {
+    let registry_key = format!("agent:{}:{}", session.user_id, conversation_id);
+    let cancelled = crate::agents::runtime::TurnRegistry::cancel(&registry_key);
+    crate::agents::runtime::TurnRegistry::remove(&registry_key);
     Json(serde_json::json!({ "cancelled": cancelled }))
 }
 
