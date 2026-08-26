@@ -13,6 +13,7 @@ pub mod engine;
 pub mod envelope;
 pub mod error;
 pub mod event;
+pub mod hooks;
 pub mod loop_guard;
 pub mod model;
 
