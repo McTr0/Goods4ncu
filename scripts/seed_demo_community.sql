@@ -23,6 +23,7 @@ INSERT INTO inventory (
     defects,
     description,
     image_url,
+    images_moderation_status,
     owner_id,
     status,
     direction,
@@ -39,6 +40,7 @@ INSERT INTO inventory (
     '["灯罩边缘有一处小磕碰"]',
     '用了两个学期，亮度正常。前湖校区北区宿舍自提，适合书桌或床头。',
     '/assets/assets/test_product_images/good4ncu-demo-04.webp',
+    'approved',
     's0000000-0000-0000-0000-000000000002',
     'active',
     'offer',
@@ -55,6 +57,7 @@ INSERT INTO inventory (
     '["前两章有荧光笔标记"]',
     '数据结构课程用书，笔记主要是老师强调的考点。教学楼或图书馆都可以交接。',
     NULL,
+    'approved',
     's0000000-0000-0000-0000-000000000001',
     'active',
     'offer',
@@ -71,6 +74,7 @@ INSERT INTO inventory (
     '[]',
     '新学期搬到北区，想收一盏亮度正常的书桌台灯。工作日晚上方便自提。',
     NULL,
+    'approved',
     'b0000000-0000-0000-0000-000000000001',
     'active',
     'wanted',
@@ -87,6 +91,7 @@ INSERT INTO inventory (
     '[]',
     '下周开始上课，版本接近即可；有少量笔记没关系，希望在校内面交。',
     NULL,
+    'approved',
     'b0000000-0000-0000-0000-000000000002',
     'active',
     'wanted',
@@ -103,6 +108,7 @@ INSERT INTO inventory (
     '[]',
     '主要往返宿舍和教学楼，刹车可靠即可。预算 450 元，最好能在周末试骑。',
     NULL,
+    'approved',
     'b0000000-0000-0000-0000-000000000001',
     'active',
     'wanted',
@@ -119,6 +125,7 @@ INSERT INTO inventory (
     '[]',
     '充电和左右耳功能正常即可，希望能现场连接手机确认序列号与电池情况。',
     NULL,
+    'approved',
     'b0000000-0000-0000-0000-000000000002',
     'active',
     'wanted',
@@ -134,6 +141,7 @@ ON CONFLICT (id) DO UPDATE SET
     defects = EXCLUDED.defects,
     description = EXCLUDED.description,
     image_url = EXCLUDED.image_url,
+    images_moderation_status = EXCLUDED.images_moderation_status,
     owner_id = EXCLUDED.owner_id,
     status = EXCLUDED.status,
     direction = EXCLUDED.direction,
@@ -147,7 +155,6 @@ INSERT INTO posts (
     id,
     campus_id,
     author_id,
-    post_type,
     listing_id,
     category,
     title,
@@ -164,9 +171,8 @@ INSERT INTO posts (
     'e2000000-0000-4000-8000-000000000001',
     'c0000000-0000-0000-0000-000000000001',
     'b0000000-0000-0000-0000-000000000002',
-    'discussion',
     NULL,
-    '校园生活',
+    'discussion',
     '毕业搬寝：大件闲置怎么交接最省事？',
     '最近准备搬离宿舍，台灯、小桌子和收纳架都要处理。大家一般会在帖子里写哪些信息，才能少来回确认？也想听听约在宿舍楼下交接的经验。',
     '["毕业季", "搬寝", "闲置"]',
@@ -181,9 +187,8 @@ INSERT INTO posts (
     'e2000000-0000-4000-8000-000000000002',
     'c0000000-0000-0000-0000-000000000001',
     'b0000000-0000-0000-0000-000000000001',
-    'discussion',
     NULL,
-    '学习交流',
+    'question',
     '二手教材一般什么时候收最划算？',
     '刚选完课，担心现在买早了会换教材版本。是等老师第一次课确认，还是先在校园里收一本比较稳？有数据结构课程的同学也欢迎分享版本信息。',
     '["教材", "选课", "经验"]',
@@ -198,9 +203,8 @@ INSERT INTO posts (
     'e2000000-0000-4000-8000-000000000003',
     'c0000000-0000-0000-0000-000000000001',
     's0000000-0000-0000-0000-000000000002',
-    'discussion',
     NULL,
-    '校园互助',
+    'recruit',
     '周六下午搬寝，求借手推车半小时',
     '周六 15:00 左右从北区 7 栋搬两箱书到校门口，想借一辆折叠手推车，用完马上送回。可以请一杯奶茶表示感谢。',
     '["互助", "搬寝", "手推车"]',
@@ -215,9 +219,8 @@ INSERT INTO posts (
     'e2000000-0000-4000-8000-000000000004',
     'c0000000-0000-0000-0000-000000000001',
     's0000000-0000-0000-0000-000000000001',
-    'discussion',
     NULL,
-    '失物招领',
+    'announcement',
     '图书馆一楼捡到蓝色校园卡套',
     '今天 16:20 在图书馆一楼打印机旁捡到蓝色卡套。为保护隐私不公开姓名，失主可以说出卡套背面的贴纸图案，我再约地点归还。',
     '["失物招领", "图书馆", "校园卡"]',
@@ -232,9 +235,8 @@ INSERT INTO posts (
     'e2000000-0000-4000-8000-000000000005',
     'c0000000-0000-0000-0000-000000000001',
     'b0000000-0000-0000-0000-000000000002',
-    'discussion',
     NULL,
-    '活动搭子',
+    'team_up',
     '今晚 7 点青山湖慢跑，缺两位搭子',
     '从北门集合，计划慢跑 5 公里，配速大约 7 分钟。新手友好，下雨就改到明晚，想来的直接在楼里回复。',
     '["运动", "跑步", "搭子"]',
@@ -413,55 +415,6 @@ FROM inventory listing
 WHERE post.listing_id = listing.id
   AND listing.id LIKE 'e1000000-0000-4000-8000-%';
 
--- Short-lived campus errands use the existing help-intent lifecycle. Public
--- handoff points keep private room numbers out of the discovery feed.
-INSERT INTO intents (
-    id, campus_id, author_id, kind, raw_input, slots, confidence, status,
-    visibility, valid_until, created_at, updated_at
-) VALUES
-(
-    'e5000000-0000-4000-8000-000000000001',
-    'c0000000-0000-0000-0000-000000000001',
-    'b0000000-0000-0000-0000-000000000001',
-    'help',
-    '取件：帮我从前湖校区图书馆取一份打印材料；送到：修贤广场；时间：今天 18:00 前；报酬：12 元',
-    '{"subject":"取一份打印材料","category":"campus_errand","service_mode":"pickup","pickup_place":"前湖校区图书馆","dropoff_place":"修贤广场","place":"前湖校区图书馆","time":{"kind":"flexible","hint":"今天 18:00 前"},"price":{"kind":"exact","cents":1200}}'::jsonb,
-    1.0, 'active', 'campus', NOW() + INTERVAL '24 hours',
-    NOW() - INTERVAL '14 minutes', NOW() - INTERVAL '14 minutes'
-),
-(
-    'e5000000-0000-4000-8000-000000000002',
-    'c0000000-0000-0000-0000-000000000001',
-    's0000000-0000-0000-0000-000000000001',
-    'help',
-    '打印/复印：帮忙打印课程表两份；取件：前湖校区图书馆；送到：前湖校区北门；时间：今晚下课后；报酬：8 元',
-    '{"subject":"打印课程表两份","category":"campus_errand","service_mode":"print","pickup_place":"前湖校区图书馆","dropoff_place":"前湖校区北门","place":"前湖校区图书馆","time":{"kind":"flexible","hint":"今晚下课后"},"price":{"kind":"exact","cents":800},"notes":["黑白双面即可"]}'::jsonb,
-    1.0, 'active', 'campus', NOW() + INTERVAL '24 hours',
-    NOW() - INTERVAL '9 minutes', NOW() - INTERVAL '9 minutes'
-),
-(
-    'e5000000-0000-4000-8000-000000000003',
-    'c0000000-0000-0000-0000-000000000001',
-    's0000000-0000-0000-0000-000000000002',
-    'help',
-    '代排队：帮忙在前湖校区校医院窗口问一下周末门诊时间；时间：今天 17:00 前；报酬：10 元',
-    '{"subject":"咨询周末门诊时间","category":"campus_errand","service_mode":"queue","pickup_place":"前湖校区校医院","place":"前湖校区校医院","time":{"kind":"flexible","hint":"今天 17:00 前"},"price":{"kind":"exact","cents":1000}}'::jsonb,
-    1.0, 'active', 'campus', NOW() + INTERVAL '24 hours',
-    NOW() - INTERVAL '5 minutes', NOW() - INTERVAL '5 minutes'
-)
-ON CONFLICT (id) DO UPDATE SET
-    campus_id = EXCLUDED.campus_id,
-    author_id = EXCLUDED.author_id,
-    kind = EXCLUDED.kind,
-    raw_input = EXCLUDED.raw_input,
-    slots = EXCLUDED.slots,
-    confidence = EXCLUDED.confidence,
-    status = EXCLUDED.status,
-    visibility = EXCLUDED.visibility,
-    valid_until = EXCLUDED.valid_until,
-    created_at = EXCLUDED.created_at,
-    updated_at = EXCLUDED.updated_at;
-
 COMMIT;
 
 SELECT
@@ -472,6 +425,4 @@ SELECT
     (SELECT COUNT(*) FROM post_replies WHERE id::text LIKE 'e3000000-0000-4000-8000-%')
         AS demo_reply_count,
     (SELECT COUNT(*) FROM wanted_responses WHERE id::text LIKE 'e4000000-0000-4000-8000-%')
-        AS demo_wanted_response_count,
-    (SELECT COUNT(*) FROM intents WHERE id::text LIKE 'e5000000-0000-4000-8000-%')
-        AS demo_errand_count;
+        AS demo_wanted_response_count;
