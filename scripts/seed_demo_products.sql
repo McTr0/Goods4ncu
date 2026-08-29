@@ -19,6 +19,7 @@ INSERT INTO inventory (
     defects,
     description,
     image_url,
+    images_moderation_status,
     owner_id,
     status,
     created_at
@@ -33,6 +34,7 @@ INSERT INTO inventory (
     '["外包装有轻微存放痕迹"]',
     '浓密纤长型睫毛膏，适合验证低价商品、日用品分类和图片展示。仅用于本地功能测试。',
     '/assets/assets/test_product_images/good4ncu-demo-01.webp',
+    'approved',
     's0000000-0000-0000-0000-000000000001',
     'active',
     NOW() - INTERVAL '12 minutes'
@@ -47,6 +49,7 @@ INSERT INTO inventory (
     '["侧面有一道不明显划痕"]',
     '带储物空间的小型床头柜，适合宿舍或租房场景。仅用于本地功能测试。',
     '/assets/assets/test_product_images/good4ncu-demo-02.webp',
+    'approved',
     's0000000-0000-0000-0000-000000000002',
     'active',
     NOW() - INTERVAL '11 minutes'
@@ -61,6 +64,7 @@ INSERT INTO inventory (
     '[]',
     '未开封速溶咖啡，用于验证搜索、低价排序和无瑕疵商品展示。仅用于本地功能测试。',
     '/assets/assets/test_product_images/good4ncu-demo-03.webp',
+    'approved',
     's0000000-0000-0000-0000-000000000001',
     'active',
     NOW() - INTERVAL '10 minutes'
@@ -75,6 +79,7 @@ INSERT INTO inventory (
     '["灯座底部有轻微使用痕迹"]',
     '适合书桌和床头使用的现代台灯，用于验证家居类商品详情。仅用于本地功能测试。',
     '/assets/assets/test_product_images/good4ncu-demo-04.webp',
+    'approved',
     's0000000-0000-0000-0000-000000000002',
     'active',
     NOW() - INTERVAL '9 minutes'
@@ -89,6 +94,7 @@ INSERT INTO inventory (
     '["包装盒已拆封"]',
     '可制作奶昔和果汁的小型料理机，用于验证品牌与价格筛选。仅用于本地功能测试。',
     '/assets/assets/test_product_images/good4ncu-demo-05.webp',
+    'approved',
     's0000000-0000-0000-0000-000000000001',
     'active',
     NOW() - INTERVAL '8 minutes'
@@ -103,6 +109,7 @@ INSERT INTO inventory (
     '["门把手有轻微划痕"]',
     '支持加热和解冻的紧凑型微波炉，用于验证中等价格商品。仅用于本地功能测试。',
     '/assets/assets/test_product_images/good4ncu-demo-06.webp',
+    'approved',
     's0000000-0000-0000-0000-000000000002',
     'active',
     NOW() - INTERVAL '7 minutes'
@@ -117,6 +124,7 @@ INSERT INTO inventory (
     '["A 面有一处细小划痕"]',
     '深空灰色 14 英寸笔记本，用于验证高价商品、电子产品分类和降序排序。仅用于本地功能测试。',
     '/assets/assets/test_product_images/good4ncu-demo-07.webp',
+    'approved',
     's0000000-0000-0000-0000-000000000001',
     'active',
     NOW() - INTERVAL '6 minutes'
@@ -131,6 +139,7 @@ INSERT INTO inventory (
     '["吊牌已拆"]',
     '休闲格纹衬衫，适合验证服装鞋帽分类和关键词搜索。仅用于本地功能测试。',
     '/assets/assets/test_product_images/good4ncu-demo-08.webp',
+    'approved',
     's0000000-0000-0000-0000-000000000002',
     'active',
     NOW() - INTERVAL '5 minutes'
@@ -145,6 +154,7 @@ INSERT INTO inventory (
     '["鞋底有少量正常磨损"]',
     '红黑配色篮球鞋，用于验证鞋类商品和品牌搜索。仅用于本地功能测试。',
     '/assets/assets/test_product_images/good4ncu-demo-09.webp',
+    'approved',
     's0000000-0000-0000-0000-000000000001',
     'active',
     NOW() - INTERVAL '4 minutes'
@@ -159,6 +169,7 @@ INSERT INTO inventory (
     '["表带有轻微弯折痕迹"]',
     '经典棕色皮带腕表，用于验证数码配件分类与成色显示。仅用于本地功能测试。',
     '/assets/assets/test_product_images/good4ncu-demo-10.webp',
+    'approved',
     's0000000-0000-0000-0000-000000000002',
     'active',
     NOW() - INTERVAL '3 minutes'
@@ -173,6 +184,7 @@ INSERT INTO inventory (
     '["电源线有轻微使用痕迹"]',
     '支持语音控制的智能音箱，用于验证长标题和数码配件展示。仅用于本地功能测试。',
     '/assets/assets/test_product_images/good4ncu-demo-11.webp',
+    'approved',
     's0000000-0000-0000-0000-000000000001',
     'active',
     NOW() - INTERVAL '2 minutes'
@@ -187,6 +199,7 @@ INSERT INTO inventory (
     '["充电盒有细小划痕"]',
     '无线蓝牙耳机，用于验证收藏、详情和联系卖家等完整流程。仅用于本地功能测试。',
     '/assets/assets/test_product_images/good4ncu-demo-12.webp',
+    'approved',
     's0000000-0000-0000-0000-000000000002',
     'active',
     NOW() - INTERVAL '1 minute'
@@ -200,6 +213,7 @@ ON CONFLICT (id) DO UPDATE SET
     defects = EXCLUDED.defects,
     description = EXCLUDED.description,
     image_url = EXCLUDED.image_url,
+    images_moderation_status = EXCLUDED.images_moderation_status,
     owner_id = EXCLUDED.owner_id,
     status = EXCLUDED.status,
     created_at = EXCLUDED.created_at;
