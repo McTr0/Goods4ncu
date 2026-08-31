@@ -49,7 +49,11 @@ SseToken? _decodeV2Event(Map<String, dynamic> json) {
     case 'ui_action':
       final action = json['action'] as Map<String, dynamic>?;
       if (action == null) return null;
-      return SseToken(token: '', conversationId: convId, uiAction: action);
+      return SseToken(
+        token: '',
+        conversationId: convId,
+        uiAction: {'type': action['action_type'], 'payload': action['payload']},
+      );
     default:
       return null; // heartbeat and unknown types are silently skipped
   }
@@ -469,17 +473,16 @@ class SseService {
     final headers = <String, String>{'Content-Type': 'application/json'};
     try {
       final token = await _getAccessToken();
-      if (token != null && token.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $token';
-      }
+      if (token == null || token.isEmpty) return;
+      headers['Authorization'] = 'Bearer $token';
     } catch (_) {
-      // Proceed without auth; server will reject if required.
+      return;
     }
     final url = Uri.parse(
       '$_baseUrl/api/agent/turns/'
       '${Uri.encodeComponent(conversationId)}/cancel',
     );
-    final client = http.Client();
+    final client = _clientFactory();
     try {
       await client.post(url, headers: headers, body: '{}');
     } catch (_) {

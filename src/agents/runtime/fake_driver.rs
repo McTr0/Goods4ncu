@@ -66,7 +66,8 @@ impl ModelDriver for FakeModelDriver {
                         }
                         FakeStep::ToolCall { name, args } => {
                             yield Ok(ModelEvent::ToolCall(ToolCallData {
-                                call_id: format!("call_{}", name),
+                                id: format!("tool_{}", name),
+                                call_id: Some(format!("call_{}", name)),
                                 name: name.clone(),
                                 arguments: args.clone(),
                             }));

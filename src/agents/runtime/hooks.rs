@@ -88,7 +88,7 @@ impl Hook for CategoryTagPolicy {
         if matches!(ctx.category, "discussion" | "question" | "share")
             && matches!(
                 tool_name,
-                "purchase_item_intent" | "negotiate_item" | "update_listing"
+                "purchase_item" | "negotiate_item" | "update_listing"
             )
         {
             return HookDecision::Reject {
@@ -139,6 +139,36 @@ impl HookChain {
             }
         }
         Ok(())
+    }
+
+    pub fn before_model(&self, ctx: &HookContext) -> Result<(), Box<HookRejection>> {
+        for hook in &self.hooks {
+            if let HookDecision::Reject { code, message } = hook.before_model(ctx) {
+                return Err(Box::new(self.make_rejection(code, message)));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn after_model(&self, ctx: &HookContext) -> Result<(), Box<HookRejection>> {
+        for hook in &self.hooks {
+            if let HookDecision::Reject { code, message } = hook.after_model(ctx) {
+                return Err(Box::new(self.make_rejection(code, message)));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn after_tool(&self, ctx: &HookContext, tool_name: &str) {
+        for hook in &self.hooks {
+            hook.after_tool(ctx, tool_name);
+        }
+    }
+
+    pub fn on_terminal(&self, ctx: &HookContext, event: &AgentEvent) {
+        for hook in &self.hooks {
+            hook.on_terminal(ctx, event);
+        }
     }
 
     fn make_rejection(&self, code: RuntimeErrorCode, message: String) -> HookRejection {
@@ -222,7 +252,7 @@ mod tests {
         };
 
         assert!(chain
-            .before_tool(&disc_ctx, "purchase_item_intent", &json!({}))
+            .before_tool(&disc_ctx, "purchase_item", &json!({}))
             .is_err());
 
         let offer_ctx = HookContext {

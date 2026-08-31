@@ -85,6 +85,63 @@ impl ToolRegistry {
             .map(|spec| spec.name)
             .collect()
     }
+
+    /// Metadata for the exact tool set installed on marketplace agents.
+    pub fn marketplace() -> Self {
+        let readonly = [
+            ("search_inventory", "Search visible marketplace posts"),
+            ("get_listing_details", "Read one visible post"),
+            ("get_my_listings", "Read the current user's posts"),
+            ("get_user_posts", "Read a user's visible posts"),
+            ("find_related_posts", "Find related visible posts"),
+            ("get_comments", "Read visible post comments"),
+            ("draft_message", "Draft a private message for confirmation"),
+        ];
+        let mut builder = Self::builder();
+        for (name, description) in readonly {
+            builder = builder.register(ToolSpec {
+                name,
+                schema_version: "1.0",
+                risk: RiskLevel::ReadOnly,
+                execution: ExecutionClass::ReadOnlyParallel,
+                timeout: timeouts::readonly(),
+                max_output_bytes: 16 * 1024,
+                description,
+            });
+        }
+        builder = builder.register(ToolSpec {
+            name: "create_listing",
+            schema_version: "1.0",
+            risk: RiskLevel::Recoverable,
+            execution: ExecutionClass::Sequential,
+            timeout: timeouts::write(),
+            max_output_bytes: 8 * 1024,
+            description: "Publish a recoverable marketplace post",
+        });
+        for (name, description) in [
+            (
+                "update_listing",
+                "Update the current user's marketplace post",
+            ),
+            (
+                "delete_listing",
+                "Retract the current user's marketplace post",
+            ),
+            ("purchase_item", "Create a purchase intent"),
+            ("negotiate_item", "Create a negotiation proposal"),
+        ] {
+            builder = builder.register(ToolSpec {
+                name,
+                schema_version: "1.0",
+                risk: RiskLevel::RequiresConfirmation,
+                execution: ExecutionClass::RequiresActionPlan,
+                timeout: timeouts::action_plan(),
+                max_output_bytes: 8 * 1024,
+                description,
+            });
+        }
+        builder.build()
+    }
 }
 
 #[allow(dead_code)]
@@ -188,5 +245,41 @@ mod tests {
         let parallel = registry.parallel_tools();
         assert!(parallel.contains(&"read_only"));
         assert!(!parallel.contains(&"write"));
+    }
+
+    #[test]
+    fn marketplace_registry_matches_installed_agent_tools() {
+        let registry = ToolRegistry::marketplace();
+        for name in [
+            "create_listing",
+            "search_inventory",
+            "get_listing_details",
+            "update_listing",
+            "delete_listing",
+            "purchase_item",
+            "negotiate_item",
+            "get_my_listings",
+            "get_user_posts",
+            "find_related_posts",
+            "get_comments",
+            "draft_message",
+        ] {
+            assert!(registry.find(name).is_some(), "missing {name}");
+        }
+        assert_eq!(registry.specs().len(), 12);
+        assert_eq!(
+            registry.find("create_listing").unwrap().risk,
+            RiskLevel::Recoverable
+        );
+        for name in [
+            "update_listing",
+            "delete_listing",
+            "purchase_item",
+            "negotiate_item",
+        ] {
+            let spec = registry.find(name).unwrap();
+            assert_eq!(spec.risk, RiskLevel::RequiresConfirmation, "{name}");
+            assert_eq!(spec.execution, ExecutionClass::RequiresActionPlan, "{name}");
+        }
     }
 }

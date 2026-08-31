@@ -1,6 +1,7 @@
 use super::{
-    AgentStreamChunk, AgentTokenUsage, CircuitBreaker, EmbeddingGenerator, EmbeddingModelMetadata,
-    MarketplaceAgent, ReplyAssistant, LLM_CIRCUIT_BREAKER, REPLY_ASSISTANT_PREAMBLE,
+    AgentModelChunk, AgentStreamChunk, AgentTokenUsage, CircuitBreaker, EmbeddingGenerator,
+    EmbeddingModelMetadata, MarketplaceAgent, ReplyAssistant, LLM_CIRCUIT_BREAKER,
+    REPLY_ASSISTANT_PREAMBLE,
 };
 use crate::agents::models::Document;
 use crate::agents::tools::ToolContext;
@@ -249,7 +250,6 @@ impl MarketplaceAgent for GeminiMarketplaceAgent {
 
             let mut current_msg = Message::user(msg);
             let mut chat_history = h;
-            let mut did_call_tool = false;
             let mut call_succeeded = false;
 
             loop {
@@ -279,7 +279,6 @@ impl MarketplaceAgent for GeminiMarketplaceAgent {
                     match content.map_err(|e| anyhow::anyhow!("completion error: {}", e))? {
                         StreamedAssistantContent::Text(text) => {
                             yield AgentStreamChunk::Text(text.text);
-                            did_call_tool = false;
                             call_succeeded = true;
                         }
                         StreamedAssistantContent::ToolCall { tool_call, internal_call_id: _ } => {
@@ -365,18 +364,12 @@ impl MarketplaceAgent for GeminiMarketplaceAgent {
                                 &tool_call.function.name,
                                 &result,
                             );
-                            tool_calls.push((tool_call.id.clone(), tool_call.call_id.clone(), result));
-                            did_call_tool = true;
+                            tool_calls.push((tool_call.clone(), result));
                             call_succeeded = true;
                         }
-                        StreamedAssistantContent::Reasoning(reasoning) => {
-                            let rendered = reasoning.display_text();
-                            if !rendered.is_empty() {
-                                yield AgentStreamChunk::Text(rendered);
-                            }
-                            did_call_tool = false;
-                            call_succeeded = true;
-                        }
+                        // Reasoning is provider-internal metadata. Never expose
+                        // or persist it as assistant-visible text.
+                        StreamedAssistantContent::Reasoning(_) => {}
                         StreamedAssistantContent::ToolCallDelta { .. } => {}
                         StreamedAssistantContent::ReasoningDelta { .. } => {}
                         StreamedAssistantContent::Final(response) => {
@@ -387,19 +380,31 @@ impl MarketplaceAgent for GeminiMarketplaceAgent {
                     }
                 }
 
-                if !tool_calls.is_empty() {
-                    for (id, call_id, result) in tool_calls {
+                let has_tool_calls = !tool_calls.is_empty();
+                if has_tool_calls {
+                    let assistant_calls = tool_calls
+                        .iter()
+                        .map(|(tool_call, _)| {
+                            rig::message::AssistantContent::ToolCall(tool_call.clone())
+                        })
+                        .collect::<Vec<_>>();
+                    if let Ok(content) = rig::OneOrMany::many(assistant_calls) {
+                        chat_history.push(Message::Assistant { id: None, content });
+                    }
+                    for (tool_call, result) in tool_calls {
                         chat_history.push(Message::tool_result_with_call_id(
-                            id, call_id, result,
+                            tool_call.id,
+                            tool_call.call_id,
+                            result,
                         ));
                     }
                 }
 
-                if !did_call_tool {
+                if !has_tool_calls {
                     break;
                 }
 
-                current_msg = chat_history.last().cloned().unwrap_or(current_msg);
+                current_msg = chat_history.pop().unwrap_or(current_msg);
             }
 
             // Record success only if at least one LLM call succeeded.
@@ -407,6 +412,81 @@ impl MarketplaceAgent for GeminiMarketplaceAgent {
                 circuit_breaker.record_success().await;
             }
         })
+    }
+
+    fn stream_model_step(
+        &self,
+        message: Message,
+        history: Vec<Message>,
+    ) -> Pin<Box<dyn Stream<Item = Result<AgentModelChunk, anyhow::Error>> + Send>> {
+        let agent = self.0.clone();
+        let circuit_breaker = Arc::clone(&LLM_CIRCUIT_BREAKER);
+        Box::pin(async_stream::try_stream! {
+            if circuit_breaker.is_open().await {
+                Err(anyhow::anyhow!(CircuitBreaker::degraded_message()))?;
+            }
+            let stream = match agent.stream_completion(message, history).await {
+                Ok(stream) => stream,
+                Err(error) => {
+                    circuit_breaker.record_failure().await;
+                    Err(anyhow::anyhow!("stream error: {error}"))?
+                }
+            };
+            let mut stream = match stream.stream().await {
+                Ok(stream) => stream,
+                Err(error) => {
+                    circuit_breaker.record_failure().await;
+                    Err(anyhow::anyhow!("stream error: {error}"))?
+                }
+            };
+            let mut succeeded = false;
+            while let Some(content) = stream.next().await {
+                let content = match content {
+                    Ok(content) => content,
+                    Err(error) => {
+                        circuit_breaker.record_failure().await;
+                        Err(anyhow::anyhow!("completion error: {error}"))?
+                    }
+                };
+                match content {
+                    StreamedAssistantContent::Text(text) => {
+                        succeeded = true;
+                        yield AgentModelChunk::Text(text.text);
+                    }
+                    StreamedAssistantContent::ToolCall { tool_call, .. } => {
+                        succeeded = true;
+                        yield AgentModelChunk::ToolCall {
+                            id: tool_call.id,
+                            call_id: tool_call.call_id,
+                            name: tool_call.function.name,
+                            arguments: tool_call.function.arguments,
+                        };
+                    }
+                    StreamedAssistantContent::Reasoning(_) => {}
+                    StreamedAssistantContent::Final(response) => {
+                        if let Some(usage) = response.token_usage().and_then(AgentTokenUsage::from_rig) {
+                            yield AgentModelChunk::Usage(usage);
+                        }
+                        yield AgentModelChunk::Stop;
+                    }
+                    StreamedAssistantContent::ToolCallDelta { .. }
+                    | StreamedAssistantContent::ReasoningDelta { .. } => {}
+                }
+            }
+            if succeeded {
+                circuit_breaker.record_success().await;
+            }
+        })
+    }
+
+    async fn execute_tool(&self, name: &str, arguments: &str) -> anyhow::Result<String> {
+        let result = self
+            .0
+            .tool_server_handle
+            .call_tool(name, arguments)
+            .await
+            .map_err(|error| anyhow::anyhow!("tool error: {error}"))?;
+        Ok(serde_json::from_str::<String>(&result).unwrap_or(result))
     }
 }
 

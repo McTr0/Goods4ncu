@@ -247,5 +247,50 @@ void main() {
       );
       await service.disconnect();
     });
+
+    test('decodes complete Runtime v2 event envelopes', () async {
+      final body = [
+        'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"__agent__","seq":1,"type":"text_delta","text":"你好"}\n\n',
+        'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"__agent__","seq":2,"type":"tool_started","call":{"name":"search_inventory","status":"started"}}\n\n',
+        'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"__agent__","seq":3,"type":"ui_action","action":{"action_type":"SHOW_POSTS","payload":{"postIds":["p1"]}}}\n\n',
+        'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"__agent__","seq":4,"type":"turn_completed","usage":{"model_steps":1,"tool_calls":1}}\n\n',
+      ].join();
+      final client = _QueuedClient([_response(200, body: body)]);
+      final service = SseService(
+        baseUrl: 'https://api.test',
+        getAccessToken: () async => 'token-123',
+        refreshAccessToken: () async => false,
+        clientFactory: () => client,
+      );
+
+      await service.connect(message: '找书', conversationId: '__agent__');
+      final events = await service.stream.toList();
+
+      expect(events, hasLength(4));
+      expect(events[0].token, '你好');
+      expect(events[1].toolActivity, 'search_inventory');
+      expect(events[2].uiAction?['type'], 'SHOW_POSTS');
+      expect(events[3].isComplete, isTrue);
+    });
+
+    test(
+      'cancel endpoint uses public conversation id and bearer auth',
+      () async {
+        final client = _QueuedClient([_response(200, body: '{}')]);
+        final service = SseService(
+          baseUrl: 'https://api.test',
+          getAccessToken: () async => 'token-123',
+          refreshAccessToken: () async => false,
+          clientFactory: () => client,
+        );
+
+        await service.cancelTurn('__agent__');
+
+        final request = client.requests.single as http.Request;
+        expect(request.method, 'POST');
+        expect(request.url.path, '/api/agent/turns/__agent__/cancel');
+        expect(request.headers['Authorization'], 'Bearer token-123');
+      },
+    );
   });
 }

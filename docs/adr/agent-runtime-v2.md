@@ -4,6 +4,12 @@
 
 Accepted — 2026-08-24
 
+Production path wired — 2026-08-26. With `AGENT_RUNTIME=v2`, chat requests
+now enter `AgentRuntime`; providers stream raw model steps, while the runtime
+executes registered tools, applies hooks/budgets/cancellation, feeds back
+correlated tool results, and emits one terminal v2 event. The legacy path is
+retained only for rollout rollback.
+
 ## Context
 
 The companion agent (小昌) currently runs on a Rig SDK + custom runtime that
@@ -72,8 +78,11 @@ Rebuild the agent execution layer in-place as **Agent Runtime v2**:
 
 ## Rollout
 
-Feature flag `AGENT_RUNTIME=legacy|v2` with user allowlist. Gradual:
-local → dev → allowlist → read-only → full → delete legacy.
+Feature flag `AGENT_RUNTIME=legacy|v2`. Gradual:
+local → dev → read-only → full → delete legacy after production stability is
+confirmed. `LLM_API_STYLE=auto|chat_completions|responses` independently
+selects the OpenAI-compatible wire API; both styles normalize into the same
+runtime events and retain provider tool-call correlation IDs.
 
 ## Consequences
 

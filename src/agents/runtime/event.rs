@@ -43,7 +43,11 @@ pub enum ModelEvent {
 
 #[derive(Debug, Clone)]
 pub struct ToolCallData {
-    pub call_id: String,
+    /// Provider item ID used in the assistant tool-call message.
+    pub id: String,
+    /// Provider correlation ID. Responses requires this on
+    /// `function_call_output`; Chat Completions may leave it absent.
+    pub call_id: Option<String>,
     pub name: String,
     pub arguments: serde_json::Value,
 }

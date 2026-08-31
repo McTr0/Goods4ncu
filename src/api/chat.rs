@@ -663,9 +663,7 @@ async fn handle_chat_stream_request(
     )
     .await;
 
-    let agent: Box<dyn MarketplaceAgent> = match state
-        .agents
-        .llm_provider
+    let agent: Box<dyn MarketplaceAgent> = match std::sync::Arc::clone(&state.agents.llm_provider)
         .create_marketplace_agent(
             &state.infra.db,
             state.infra.event_tx.clone(),
@@ -691,6 +689,276 @@ async fn handle_chat_stream_request(
         }
     };
 
+    if use_v2_protocol {
+        use crate::agents::runtime::api_drivers::{
+            ApiStyle, ChatCompletionsDriver, ResponsesDriver,
+        };
+        use crate::agents::runtime::driver::MarketplaceDriver;
+        use crate::agents::runtime::engine::{
+            AgentRuntime, RuntimeContext, ToolExecutor, TurnEvent,
+        };
+        use crate::agents::runtime::event::{EventData, TurnId};
+        use crate::agents::runtime::hooks::{CategoryTagPolicy, HookChain, MetricsHook};
+        use crate::agents::runtime::model::{ModelDriver, ModelRequest};
+
+        let agent: std::sync::Arc<dyn MarketplaceAgent> = agent.into();
+        let driver: std::sync::Arc<dyn ModelDriver> = match state.agents.llm_provider.api_style() {
+            Some(ApiStyle::Responses) => std::sync::Arc::new(ResponsesDriver {
+                agent: std::sync::Arc::clone(&agent),
+                provider_name: provider_name.clone(),
+                model_name: provider_model.clone(),
+            }),
+            Some(ApiStyle::ChatCompletions) => std::sync::Arc::new(ChatCompletionsDriver {
+                agent: std::sync::Arc::clone(&agent),
+                provider_name: provider_name.clone(),
+                model_name: provider_model.clone(),
+            }),
+            Some(ApiStyle::Auto) | None => std::sync::Arc::new(MarketplaceDriver::new(
+                std::sync::Arc::clone(&agent),
+                provider_name.clone(),
+                provider_model.clone(),
+            )),
+        };
+        let executor_agent = std::sync::Arc::clone(&agent);
+        let execute_tool: ToolExecutor = std::sync::Arc::new(move |name, arguments| {
+            let agent = std::sync::Arc::clone(&executor_agent);
+            let name = name.to_string();
+            let arguments = arguments.to_string();
+            Box::pin(async move { agent.execute_tool(&name, &arguments).await })
+        });
+        let registry_key =
+            crate::agents::runtime::turn_registry_key(&current_user_id, &response_conversation_id);
+        let registration = crate::agents::runtime::TurnRegistration::register(registry_key);
+        let cancellation = registration.cancellation();
+        let policy_category = page_context
+            .as_ref()
+            .and_then(|context| context.get("category"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_else(|| intent_result.intent.as_str())
+            .to_string();
+        let runtime_context = RuntimeContext {
+            cancellation,
+            registry: std::sync::Arc::new(
+                crate::agents::tools::registry::ToolRegistry::marketplace(),
+            ),
+            hooks: std::sync::Arc::new(
+                HookChain::builder()
+                    .push_hook(Box::new(CategoryTagPolicy))
+                    .push_hook(Box::new(MetricsHook))
+                    .build(),
+            ),
+            category: policy_category,
+            route: intent_result.intent.as_str().to_string(),
+            user_id: current_user_id.clone(),
+        };
+        let request = ModelRequest::user(prompt_msg, chat_history);
+        let turn_id = TurnId::generate();
+        let runtime_conversation_id = response_conversation_id.clone();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            AgentRuntime::new(crate::agents::runtime::budget::ExecutionBudget::default())
+                .run_turn(
+                    driver.as_ref(),
+                    request,
+                    execute_tool,
+                    turn_id,
+                    &runtime_conversation_id,
+                    runtime_context,
+                    &mut |event| {
+                        let _ = event_tx.send(event);
+                    },
+                )
+                .await;
+        });
+
+        let log_page = page_context
+            .as_ref()
+            .and_then(|ctx| ctx.get("page"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("chat")
+            .to_string();
+        let log_route = intent_result.intent.as_str().to_string();
+        let log_request_id = crate::api::request_context::current_or_new_request_id();
+        let run_for_stream = run.clone();
+        let reconciliation_tx = run.clone().map(agent_chat::schedule_reconciliation);
+        let persisted_conversation_id = conversation_id.clone();
+        let public_conversation_id = response_conversation_id.clone();
+        let persisted_listing_id = resolved_listing_id.clone();
+        let persisted_user_id = current_user_id.clone();
+        let persisted_campus_id = session_campus_id;
+        let persist_service = chat_svc.clone();
+
+        const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
+        let sse_stream = async_stream::stream! {
+            let _registration = registration;
+            let mut full_reply = String::new();
+            let mut completed = false;
+            let mut cancelled = false;
+            let mut prompt_tokens = None;
+            let mut completion_tokens = None;
+            let mut tool_calls = 0_u32;
+            let mut ttft_recorded = false;
+            let mut first_token_ms = None;
+            let stream_started_at = std::time::Instant::now();
+            let mut transport_seq = 0_u64;
+            let mut heartbeat_ticker = tokio::time::interval(HEARTBEAT_INTERVAL);
+            heartbeat_ticker.tick().await;
+
+            loop {
+                let turn_event = tokio::select! {
+                    event = event_rx.recv() => match event {
+                        Some(event) => event,
+                        None => break,
+                    },
+                    _ = heartbeat_ticker.tick() => {
+                        transport_seq += 1;
+                        let heartbeat = crate::agents::runtime::event::AgentEvent::new(
+                            turn_id,
+                            &public_conversation_id,
+                            transport_seq,
+                            EventData::Heartbeat,
+                        );
+                        yield Ok::<_, std::convert::Infallible>(encode_sse_data(
+                            &serde_json::to_value(heartbeat).unwrap_or_default(),
+                        ));
+                        continue;
+                    }
+                };
+
+                let TurnEvent::Emit(mut event) = turn_event else {
+                    if let TurnEvent::ToolResult { tool_name, .. } = turn_event {
+                        if let Some(run) = &run_for_stream {
+                            if let Err(error) = run
+                                .service
+                                .record_tool(
+                                    &run.trace_id,
+                                    run.campus_id,
+                                    &run.user_id,
+                                    &tool_name,
+                                    None,
+                                    "completed",
+                                )
+                                .await
+                            {
+                                tracing::warn!(
+                                    %error,
+                                    trace_id = %run.trace_id,
+                                    tool = %tool_name,
+                                    "failed to record Runtime v2 tool event"
+                                );
+                            }
+                        }
+                    }
+                    continue;
+                };
+                transport_seq += 1;
+                event.seq = transport_seq;
+                match &event.data {
+                    EventData::TextDelta { text } => {
+                        if !ttft_recorded {
+                            if let Some(run) = &run_for_stream {
+                                let ttft_ms = run.started_at.elapsed().as_millis().min(i32::MAX as u128) as i32;
+                                first_token_ms = Some(ttft_ms);
+                                if let Err(error) = run
+                                    .service
+                                    .record_ttft(
+                                        &run.trace_id,
+                                        run.campus_id,
+                                        &run.user_id,
+                                        ttft_ms,
+                                    )
+                                    .await
+                                {
+                                    tracing::debug!(%error, trace_id = %run.trace_id, "failed to record AgentRun TTFT");
+                                }
+                            }
+                            ttft_recorded = true;
+                        }
+                        full_reply.push_str(text);
+                    }
+                    EventData::ToolStarted { .. } => tool_calls += 1,
+                    EventData::TurnCompleted { usage } => {
+                        completed = true;
+                        prompt_tokens = usage.prompt_tokens;
+                        completion_tokens = usage.completion_tokens;
+                    }
+                    EventData::TurnCancelled { .. } => cancelled = true,
+                    _ => {}
+                }
+                let is_terminal = event.is_terminal();
+                let json = serde_json::to_value(&event).unwrap_or_default();
+                yield Ok::<_, std::convert::Infallible>(encode_sse_data(&json));
+                if is_terminal {
+                    break;
+                }
+            }
+
+            if completed && !full_reply.trim().is_empty() {
+                if let Err(error) = agent_chat::persist_context_message(
+                    &persist_service,
+                    &persisted_conversation_id,
+                    &persisted_listing_id,
+                    &persisted_user_id,
+                    None,
+                    true,
+                    &full_reply,
+                    None,
+                    None,
+                    None,
+                    None,
+                    persisted_campus_id,
+                )
+                .await
+                {
+                    tracing::warn!(%error, "failed to persist streamed assistant reply");
+                }
+            }
+
+            let finished = if let Some(run) = &run_for_stream {
+                if completed {
+                    agent_chat::finish_agent_run_with_usage(
+                        run,
+                        "completed",
+                        "runtime_completed",
+                        None,
+                        prompt_tokens,
+                        completion_tokens,
+                    )
+                    .await
+                } else if cancelled {
+                    agent_chat::finish_agent_run(run, "cancelled", "user_cancelled", Some("cancelled")).await
+                } else {
+                    agent_chat::finish_agent_run(run, "failed", "runtime_failed", Some("runtime_error")).await
+                }
+            } else {
+                true
+            };
+            tracing::info!(
+                request_id = %log_request_id,
+                user_id = %persisted_user_id,
+                conversation_id = %public_conversation_id,
+                page = %log_page,
+                route = %log_route,
+                provider = %provider_name,
+                model = %provider_model,
+                tool_calls,
+                ttft_ms = first_token_ms.unwrap_or(0),
+                total_ms = stream_started_at.elapsed().as_millis() as u64,
+                completed,
+                cancelled,
+                "agent runtime stream finished"
+            );
+            if finished {
+                if let Some(done_tx) = reconciliation_tx {
+                    let _ = done_tx.send(());
+                }
+            }
+        };
+
+        let body = axum::body::Body::from_stream(sse_stream);
+        return build_sse_response(&response_conversation_id, body);
+    }
+
     let mut stream = agent.stream_chat(prompt_msg, chat_history);
     let log_page = page_context
         .as_ref()
@@ -709,13 +977,14 @@ async fn handle_chat_stream_request(
     let persisted_campus_id = session_campus_id;
     let persist_service = chat_svc.clone();
     // Register cancellation token so POST cancel endpoint can reach it.
-    let turn_cancellation = crate::agents::runtime::TurnRegistry::register(&format!(
-        "agent:{}:{}",
-        current_user_id, conversation_id
-    ));
+    let turn_registration = crate::agents::runtime::TurnRegistration::register(
+        crate::agents::runtime::turn_registry_key(&current_user_id, &response_conversation_id),
+    );
+    let turn_cancellation = turn_registration.cancellation();
 
     const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
     let sse_stream = async_stream::stream! {
+        let _turn_registration = turn_registration;
         let mut full_reply = String::new();
         let mut usage = None;
         let mut completed = true;
@@ -760,6 +1029,14 @@ async fn handle_chat_stream_request(
                         "protocol_version": "2.0"
                     })));
                     continue;
+                },
+                _ = turn_cancellation.cancelled() => {
+                    completed = false;
+                    yield Ok::<_, std::convert::Infallible>(encode_sse_data(&serde_json::json!({
+                        "type": "turn_cancelled",
+                        "reason": "user_requested",
+                    })));
+                    break;
                 }
             };
 
@@ -930,9 +1207,9 @@ pub(crate) async fn cancel_turn(
     Session(session): Session,
     Path(conversation_id): Path<String>,
 ) -> Json<serde_json::Value> {
-    let registry_key = format!("agent:{}:{}", session.user_id, conversation_id);
+    let registry_key =
+        crate::agents::runtime::turn_registry_key(&session.user_id, &conversation_id);
     let cancelled = crate::agents::runtime::TurnRegistry::cancel(&registry_key);
-    crate::agents::runtime::TurnRegistry::remove(&registry_key);
     Json(serde_json::json!({ "cancelled": cancelled }))
 }
 

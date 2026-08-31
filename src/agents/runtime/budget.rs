@@ -61,7 +61,7 @@ impl ExecutionBudget {
 
     /// Returns an error message if the given tool call count is over budget.
     pub fn check_tool_calls(&self, current_count: u32) -> Result<(), String> {
-        if current_count >= self.max_tool_calls {
+        if current_count > self.max_tool_calls {
             return Err(format!(
                 "tool call {current_count} exceeded budget of {}",
                 self.max_tool_calls
@@ -82,7 +82,8 @@ mod tests {
         assert!(b.check_step(5).is_ok());
         assert!(b.check_step(6).is_err());
         assert!(b.check_tool_calls(9).is_ok());
-        assert!(b.check_tool_calls(10).is_err());
+        assert!(b.check_tool_calls(10).is_ok());
+        assert!(b.check_tool_calls(11).is_err());
     }
 
     #[test]

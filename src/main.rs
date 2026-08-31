@@ -125,6 +125,7 @@ async fn main() -> Result<(), anyhow::Error> {
                     &config.llm_model,
                     &config.gemini_api_key,
                     config.vector_dim,
+                    config.llm_api_style,
                 )?,
             )
         }

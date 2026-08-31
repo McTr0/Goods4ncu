@@ -25,11 +25,13 @@
 | `CAMPUS_VERIFICATION_DELIVERY_TOKEN` | 生产必需 | 调用验证码投递 webhook 的 bearer token。 |
 | `GEMINI_API_KEY` | 条件必需 | `gemini` provider 必需；其它 chat provider 当前也需要它做 embedding/RAG。 |
 | `MINIMAX_API_KEY` | 条件必需 | 使用 MiniMax provider 时需要。 |
-| `MINIMAX_API_BASE_URL` | 可选 | MiniMax 自定义 base URL。 |
+| `MINIMAX_API_BASE_URL` | 已弃用 | MiniMax 自定义 base URL 的兼容别名；新部署使用 `LLM_BASE_URL`。 |
 | `LLM_PROVIDER` | 可选 | `gemini`、`minimax`，或 OpenAI-compatible alias：`openai`、`deepseek`、`groq`、`openrouter`、`xai`、`together`、`openai_compatible`。 |
 | `LLM_MODEL` | 条件必需 | Chat model 名称；OpenAI-compatible provider 必须设置。 |
 | `LLM_BASE_URL` | 可选 | OpenAI-compatible 自定义 base URL；命名 alias 有默认 base URL，可覆盖。 |
-| `LLM_API_KEY` | 条件必需 | OpenAI-compatible 通用 key；也可用 `OPENAI_API_KEY`、`DEEPSEEK_API_KEY`、`GROQ_API_KEY`、`OPENROUTER_API_KEY`、`XAI_API_KEY`、`TOGETHER_API_KEY`。 |
+| `LLM_API_KEY` | 条件必需 | OpenAI-compatible 通用 key；也可用 `MINIMAX_API_KEY`、`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`、`GROQ_API_KEY`、`OPENROUTER_API_KEY`、`XAI_API_KEY`、`TOGETHER_API_KEY`。 |
+| `LLM_API_STYLE` | 可选 | `auto`（默认）、`chat_completions` 或 `responses`。`auto` 对 MiniMax 选择 Responses，其余 OpenAI-compatible provider 选择 Chat Completions；非法值会阻止启动。 |
+| `AGENT_RUNTIME` | 可选 | `v2` 启用统一 Runtime、结构化 SSE、取消、预算和 Hook；其它值暂走 legacy，供灰度回退。 |
 | `VECTOR_DIM` | 可选 | embedding 维度，默认 768，必须与 `documents.embedding` 一致。 |
 | `CORS_ORIGINS` | 生产必需 | 逗号分隔允许来源；生产环境不允许空配置或 `*`。 |
 | `APP_ENV`、`ENVIRONMENT`、`RUST_ENV` | 可选 | 任一值为 `production` 或 `prod` 时启用生产 CORS 防护。 |

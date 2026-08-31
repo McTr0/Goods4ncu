@@ -150,7 +150,7 @@ Flutter 的空间布局保持稳定的“对方左上 / 自己右下”映射，
 
 ## 当前 Agent 与 RAG
 
-自然语言入口先经过内容审核和 IntentRouter，再根据意图直接回答、检索或调用 Agent。Provider 支持 Gemini、MiniMax 和 OpenAI-compatible chat；embedding 当前仍主要依赖 Gemini 客户端和配置维度。
+自然语言入口先经过内容审核和 IntentRouter，再根据意图直接回答、检索或调用 Agent。Provider 支持 Gemini、MiniMax 和 OpenAI-compatible chat；后者可选 Chat Completions 或 Responses wire API，统一 Runtime 不感知协议差异。embedding 当前仍主要依赖 Gemini 客户端和配置维度。
 
 市场 Agent 已挂载发布、搜索、详情、更新、删除、成交意向、议价和“我的发布”等工具。发布立即执行并进入撤销窗口；更新/删除使用 L2 ActionPlan，成交意向/议价使用独立两步 token 的 L3 ActionPlan。确认与业务事实已原子提交，listing 工具和 HTTP 已共享 command/审核入口；四类关键动作会在提案时保存 `inventory.content_revision`，确认时在锁内比较，HTTP 更新/删除也支持 body 版本或 `If-Match`。提案 `Idempotency-Key` 已按用户/校园和动作参数哈希去重；计划终态已使用受约束的 `result_code`，`agent_action_audits` 在同一事务中记录不含正文/token/args 的行动级 receipt。聊天提案 receipt 在共享 trace 下可用 `agent_run_id` 显式关联；首版 `agent_runs`/`agent_run_events` 已覆盖活动校园聊天的路由、provider/model、版本、检索聚合、工具类别、SSE TTFT、耗时和 typed outcome，并提供安全只读列表；服务端保存有界 input/output token 计数，客户端断开有界取消结案和 stale-run durable reconciliation 已落地；版本化风险文案、设备/重新认证绑定、provider TTFT 和完整 `/api/v1` 形态仍待补齐。新增写工具前必须阅读[Agent 系统设计](agent-system.md)。
 

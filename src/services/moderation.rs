@@ -885,8 +885,6 @@ mod tests {
         AppConfig {
             blocked_keywords: keywords,
             gemini_api_key: String::new(),
-            minimax_api_key: None,
-            minimax_api_base_url: None,
             llm_api_key: None,
             jwt_secret: "test-jwt-secret-that-is-at-least-32-chars".to_string(),
             jwt_secret_old: None,
@@ -895,7 +893,7 @@ mod tests {
             llm_model: "gemini-3-flash-preview".to_string(),
             llm_base_url: None,
             agent_enabled: true,
-            llm_api_style: "auto".to_string(),
+            llm_api_style: crate::agents::runtime::api_drivers::ApiStyle::ChatCompletions,
             vector_dim: 768,
             cors_origins: vec![],
             oss_endpoint: String::new(),

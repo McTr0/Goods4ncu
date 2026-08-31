@@ -1,15 +1,17 @@
 use super::{
-    AgentStreamChunk, AgentTokenUsage, CircuitBreaker, EmbeddingGenerator, EmbeddingModelMetadata,
-    MarketplaceAgent, ReplyAssistant, LLM_CIRCUIT_BREAKER, REPLY_ASSISTANT_PREAMBLE,
+    AgentModelChunk, AgentStreamChunk, AgentTokenUsage, CircuitBreaker, EmbeddingGenerator,
+    EmbeddingModelMetadata, MarketplaceAgent, ReplyAssistant, LLM_CIRCUIT_BREAKER,
+    REPLY_ASSISTANT_PREAMBLE,
 };
 use crate::agents::models::Document;
+use crate::agents::runtime::api_drivers::ApiStyle;
 use crate::agents::tools::ToolContext;
 use crate::services::BusinessEvent;
 use async_trait::async_trait;
 use futures::StreamExt;
 use rig::agent::Agent;
 use rig::client::CompletionClient;
-use rig::completion::{GetTokenUsage, Message, Prompt};
+use rig::completion::{CompletionModel, GetTokenUsage, Message, Prompt};
 use rig::embeddings::EmbeddingsBuilder;
 use rig::providers::gemini;
 use rig::providers::openai;
@@ -19,6 +21,92 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+fn stream_single_model_step<M>(
+    agent: Agent<M>,
+    message: Message,
+    history: Vec<Message>,
+) -> Pin<Box<dyn futures::Stream<Item = Result<AgentModelChunk, anyhow::Error>> + Send>>
+where
+    M: CompletionModel + Clone + Send + Sync + 'static,
+    M::StreamingResponse: Clone + Unpin + Send + GetTokenUsage + 'static,
+{
+    let circuit_breaker = Arc::clone(&LLM_CIRCUIT_BREAKER);
+    Box::pin(async_stream::try_stream! {
+        if circuit_breaker.is_open().await {
+            Err(anyhow::anyhow!(CircuitBreaker::degraded_message()))?;
+        }
+
+        let stream = match agent.stream_completion(message, history).await {
+            Ok(stream) => stream,
+            Err(error) => {
+                circuit_breaker.record_failure().await;
+                Err(anyhow::anyhow!("stream error: {error}"))?
+            }
+        };
+        let mut stream = match stream.stream().await {
+            Ok(stream) => stream,
+            Err(error) => {
+                circuit_breaker.record_failure().await;
+                Err(anyhow::anyhow!("stream error: {error}"))?
+            }
+        };
+        let mut succeeded = false;
+
+        while let Some(content) = stream.next().await {
+            let content = match content {
+                Ok(content) => content,
+                Err(error) => {
+                    circuit_breaker.record_failure().await;
+                    Err(anyhow::anyhow!("completion error: {error}"))?
+                }
+            };
+            match content {
+                StreamedAssistantContent::Text(text) => {
+                    succeeded = true;
+                    yield AgentModelChunk::Text(text.text);
+                }
+                StreamedAssistantContent::ToolCall { tool_call, .. } => {
+                    succeeded = true;
+                    yield AgentModelChunk::ToolCall {
+                        id: tool_call.id,
+                        call_id: tool_call.call_id,
+                        name: tool_call.function.name,
+                        arguments: tool_call.function.arguments,
+                    };
+                }
+                // Reasoning is provider-internal metadata. Never expose or
+                // persist it as assistant-visible text.
+                StreamedAssistantContent::Reasoning(_) => {}
+                StreamedAssistantContent::Final(response) => {
+                    if let Some(usage) = response.token_usage().and_then(AgentTokenUsage::from_rig) {
+                        yield AgentModelChunk::Usage(usage);
+                    }
+                    yield AgentModelChunk::Stop;
+                }
+                StreamedAssistantContent::ToolCallDelta { .. }
+                | StreamedAssistantContent::ReasoningDelta { .. } => {}
+            }
+        }
+
+        if succeeded {
+            circuit_breaker.record_success().await;
+        }
+    })
+}
+
+async fn execute_registered_tool<M: CompletionModel>(
+    agent: &Agent<M>,
+    name: &str,
+    arguments: &str,
+) -> anyhow::Result<String> {
+    let result = agent
+        .tool_server_handle
+        .call_tool(name, arguments)
+        .await
+        .map_err(|error| anyhow::anyhow!("tool error: {error}"))?;
+    Ok(serde_json::from_str::<String>(&result).unwrap_or(result))
+}
+
 /// Generic OpenAI Chat Completions compatible provider.
 ///
 /// This covers providers such as OpenAI, DeepSeek, Groq, OpenRouter, xAI,
@@ -27,10 +115,16 @@ use tokio::sync::mpsc;
 /// pipeline remain stable while chat providers can vary independently.
 pub struct OpenAiCompatibleProvider {
     provider_name: String,
-    chat_client: openai::CompletionsClient<reqwest::Client>,
+    api_client: OpenAiApiClient,
+    api_style: ApiStyle,
     embedding_client: gemini::Client,
     model: String,
     embedding_dim: usize,
+}
+
+enum OpenAiApiClient {
+    ChatCompletions(openai::CompletionsClient<reqwest::Client>),
+    Responses(openai::Client<reqwest::Client>),
 }
 
 impl OpenAiCompatibleProvider {
@@ -41,14 +135,33 @@ impl OpenAiCompatibleProvider {
         model: impl Into<String>,
         gemini_api_key: &str,
         embedding_dim: usize,
+        api_style: ApiStyle,
     ) -> anyhow::Result<Self> {
-        let mut chat_builder = openai::CompletionsClient::builder()
-            .api_key(api_key)
-            .http_client(crate::llm::llm_http_client()?);
-        if let Some(base_url) = base_url {
-            chat_builder = chat_builder.base_url(base_url);
-        }
-        let chat_client = chat_builder.build()?;
+        let api_client = match api_style {
+            ApiStyle::Auto => {
+                return Err(anyhow::anyhow!(
+                    "OpenAiCompatibleProvider requires a resolved API style"
+                ));
+            }
+            ApiStyle::ChatCompletions => {
+                let mut builder = openai::CompletionsClient::builder()
+                    .api_key(api_key)
+                    .http_client(crate::llm::llm_http_client()?);
+                if let Some(base_url) = base_url {
+                    builder = builder.base_url(base_url);
+                }
+                OpenAiApiClient::ChatCompletions(builder.build()?)
+            }
+            ApiStyle::Responses => {
+                let mut builder = openai::Client::builder()
+                    .api_key(api_key)
+                    .http_client(crate::llm::llm_http_client()?);
+                if let Some(base_url) = base_url {
+                    builder = builder.base_url(base_url);
+                }
+                OpenAiApiClient::Responses(builder.build()?)
+            }
+        };
 
         let embedding_client = gemini::Client::builder()
             .api_key(gemini_api_key)
@@ -57,7 +170,8 @@ impl OpenAiCompatibleProvider {
 
         Ok(Self {
             provider_name: provider_name.into(),
-            chat_client,
+            api_client,
+            api_style,
             embedding_client,
             model: model.into(),
             embedding_dim,
@@ -112,6 +226,10 @@ impl super::LlmProvider for OpenAiCompatibleProvider {
         &self.model
     }
 
+    fn api_style(&self) -> Option<ApiStyle> {
+        Some(self.api_style)
+    }
+
     async fn create_marketplace_agent(
         self: Arc<Self>,
         db_pool: &PgPool,
@@ -130,27 +248,36 @@ impl super::LlmProvider for OpenAiCompatibleProvider {
             notification: crate::services::notification::NotificationService::new(db_pool.clone()),
         };
 
-        let agent = self
-            .chat_client
-            .agent(&self.model)
-            .preamble(crate::llm::system_preamble())
-            // Global dynamic_context is disabled until vector retrieval can
-            // enforce campus/status/restriction scope before similarity.
-            .tool(crate::agents::tools::CreateListingTool { ctx: ctx.clone() })
-            .tool(crate::agents::tools::SearchInventoryTool { ctx: ctx.clone() })
-            .tool(crate::agents::tools::GetListingDetailsTool { ctx: ctx.clone() })
-            .tool(crate::agents::tools::UpdateListingTool { ctx: ctx.clone() })
-            .tool(crate::agents::tools::DeleteListingTool { ctx: ctx.clone() })
-            .tool(crate::agents::tools::PurchaseItemIntentTool { ctx: ctx.clone() })
-            .tool(crate::agents::tools::NegotiateItemTool { ctx: ctx.clone() })
-            .tool(crate::agents::tools::GetMyListingsTool { ctx: ctx.clone() })
-            .tool(crate::agents::tools::GetUserPostsTool { ctx: ctx.clone() })
-            .tool(crate::agents::tools::FindRelatedPostsTool { ctx: ctx.clone() })
-            .tool(crate::agents::tools::GetCommentsTool { ctx: ctx.clone() })
-            .tool(crate::agents::tools::DraftMessageTool { ctx: ctx.clone() })
-            .build();
+        macro_rules! build_agent {
+            ($client:expr, $wrapper:ident) => {{
+                let agent = $client
+                    .agent(&self.model)
+                    .preamble(crate::llm::system_preamble())
+                    .tool(crate::agents::tools::CreateListingTool { ctx: ctx.clone() })
+                    .tool(crate::agents::tools::SearchInventoryTool { ctx: ctx.clone() })
+                    .tool(crate::agents::tools::GetListingDetailsTool { ctx: ctx.clone() })
+                    .tool(crate::agents::tools::UpdateListingTool { ctx: ctx.clone() })
+                    .tool(crate::agents::tools::DeleteListingTool { ctx: ctx.clone() })
+                    .tool(crate::agents::tools::PurchaseItemIntentTool { ctx: ctx.clone() })
+                    .tool(crate::agents::tools::NegotiateItemTool { ctx: ctx.clone() })
+                    .tool(crate::agents::tools::GetMyListingsTool { ctx: ctx.clone() })
+                    .tool(crate::agents::tools::GetUserPostsTool { ctx: ctx.clone() })
+                    .tool(crate::agents::tools::FindRelatedPostsTool { ctx: ctx.clone() })
+                    .tool(crate::agents::tools::GetCommentsTool { ctx: ctx.clone() })
+                    .tool(crate::agents::tools::DraftMessageTool { ctx: ctx.clone() })
+                    .build();
+                Box::new($wrapper(agent)) as Box<dyn MarketplaceAgent>
+            }};
+        }
 
-        Ok(Box::new(OpenAiCompatibleMarketplaceAgent(agent)))
+        Ok(match &self.api_client {
+            OpenAiApiClient::ChatCompletions(client) => {
+                build_agent!(client, OpenAiCompatibleMarketplaceAgent)
+            }
+            OpenAiApiClient::Responses(client) => {
+                build_agent!(client, OpenAiResponsesMarketplaceAgent)
+            }
+        })
     }
 
     fn embedding_generator(self: Arc<Self>) -> Arc<dyn EmbeddingGenerator> {
@@ -166,12 +293,20 @@ impl super::LlmProvider for OpenAiCompatibleProvider {
     }
 
     async fn create_reply_assistant(self: Arc<Self>) -> anyhow::Result<Box<dyn ReplyAssistant>> {
-        let agent = self
-            .chat_client
-            .agent(&self.model)
-            .preamble(REPLY_ASSISTANT_PREAMBLE)
-            .build();
-        Ok(Box::new(OpenAiCompatibleReplyAssistant(agent)))
+        Ok(match &self.api_client {
+            OpenAiApiClient::ChatCompletions(client) => Box::new(OpenAiCompatibleReplyAssistant(
+                client
+                    .agent(&self.model)
+                    .preamble(REPLY_ASSISTANT_PREAMBLE)
+                    .build(),
+            )) as Box<dyn ReplyAssistant>,
+            OpenAiApiClient::Responses(client) => Box::new(OpenAiResponsesReplyAssistant(
+                client
+                    .agent(&self.model)
+                    .preamble(REPLY_ASSISTANT_PREAMBLE)
+                    .build(),
+            )),
+        })
     }
 }
 
@@ -269,7 +404,6 @@ impl MarketplaceAgent for OpenAiCompatibleMarketplaceAgent {
 
             let mut current_msg = Message::user(msg);
             let mut chat_history = h;
-            let mut did_call_tool = false;
             let mut call_succeeded = false;
 
             loop {
@@ -299,7 +433,6 @@ impl MarketplaceAgent for OpenAiCompatibleMarketplaceAgent {
                     match content.map_err(|e| anyhow::anyhow!("completion error: {}", e))? {
                         StreamedAssistantContent::Text(text) => {
                             yield AgentStreamChunk::Text(text.text);
-                            did_call_tool = false;
                             call_succeeded = true;
                         }
                         StreamedAssistantContent::ToolCall { tool_call, internal_call_id: _ } => {
@@ -382,18 +515,10 @@ impl MarketplaceAgent for OpenAiCompatibleMarketplaceAgent {
                                 &tool_call.function.name,
                                 &result,
                             );
-                            tool_calls.push((tool_call.id.clone(), tool_call.call_id.clone(), result));
-                            did_call_tool = true;
+                            tool_calls.push((tool_call.clone(), result));
                             call_succeeded = true;
                         }
-                        StreamedAssistantContent::Reasoning(reasoning) => {
-                            let rendered = reasoning.display_text();
-                            if !rendered.is_empty() {
-                                yield AgentStreamChunk::Text(rendered);
-                            }
-                            did_call_tool = false;
-                            call_succeeded = true;
-                        }
+                        StreamedAssistantContent::Reasoning(_) => {}
                         StreamedAssistantContent::ToolCallDelta { .. } => {}
                         StreamedAssistantContent::ReasoningDelta { .. } => {}
                         StreamedAssistantContent::Final(response) => {
@@ -404,25 +529,206 @@ impl MarketplaceAgent for OpenAiCompatibleMarketplaceAgent {
                     }
                 }
 
-                if !tool_calls.is_empty() {
-                    for (id, call_id, result) in tool_calls {
+                let has_tool_calls = !tool_calls.is_empty();
+                if has_tool_calls {
+                    let assistant_calls = tool_calls
+                        .iter()
+                        .map(|(tool_call, _)| {
+                            rig::message::AssistantContent::ToolCall(tool_call.clone())
+                        })
+                        .collect::<Vec<_>>();
+                    if let Ok(content) = rig::OneOrMany::many(assistant_calls) {
+                        chat_history.push(Message::Assistant { id: None, content });
+                    }
+                    for (tool_call, result) in tool_calls {
                         chat_history.push(Message::tool_result_with_call_id(
-                            id, call_id, result,
+                            tool_call.id,
+                            tool_call.call_id,
+                            result,
                         ));
                     }
                 }
 
-                if !did_call_tool {
+                if !has_tool_calls {
                     break;
                 }
 
-                current_msg = chat_history.last().cloned().unwrap_or(current_msg);
+                current_msg = chat_history.pop().unwrap_or(current_msg);
             }
 
             if call_succeeded {
                 circuit_breaker.record_success().await;
             }
         })
+    }
+
+    fn stream_model_step(
+        &self,
+        message: Message,
+        history: Vec<Message>,
+    ) -> Pin<Box<dyn futures::Stream<Item = Result<AgentModelChunk, anyhow::Error>> + Send>> {
+        stream_single_model_step(self.0.clone(), message, history)
+    }
+
+    async fn execute_tool(&self, name: &str, arguments: &str) -> anyhow::Result<String> {
+        execute_registered_tool(&self.0, name, arguments).await
+    }
+}
+
+pub struct OpenAiResponsesMarketplaceAgent(
+    Agent<openai::responses_api::ResponsesCompletionModel<reqwest::Client>>,
+);
+
+#[async_trait]
+impl MarketplaceAgent for OpenAiResponsesMarketplaceAgent {
+    async fn prompt(&self, msg: String) -> anyhow::Result<String> {
+        if LLM_CIRCUIT_BREAKER.is_open().await {
+            tracing::warn!("LLM circuit breaker: prompt rejected (circuit open)");
+            return Err(anyhow::anyhow!(CircuitBreaker::degraded_message()));
+        }
+        match self.0.prompt(msg).await {
+            Ok(reply) => {
+                LLM_CIRCUIT_BREAKER.record_success().await;
+                Ok(reply)
+            }
+            Err(error) => {
+                LLM_CIRCUIT_BREAKER.record_failure().await;
+                Err(anyhow::anyhow!(error))
+            }
+        }
+    }
+
+    async fn prompt_with_history(
+        &self,
+        msg: String,
+        history: Vec<Message>,
+    ) -> anyhow::Result<String> {
+        if LLM_CIRCUIT_BREAKER.is_open().await {
+            tracing::warn!("LLM circuit breaker: prompt_with_history rejected (circuit open)");
+            return Err(anyhow::anyhow!(CircuitBreaker::degraded_message()));
+        }
+        let mut history = history;
+        match self
+            .0
+            .prompt(Message::user(msg))
+            .with_history(&mut history)
+            .await
+        {
+            Ok(reply) => {
+                LLM_CIRCUIT_BREAKER.record_success().await;
+                Ok(reply)
+            }
+            Err(error) => {
+                LLM_CIRCUIT_BREAKER.record_failure().await;
+                Err(anyhow::anyhow!(error))
+            }
+        }
+    }
+
+    async fn prompt_with_history_with_usage(
+        &self,
+        msg: String,
+        history: Vec<Message>,
+    ) -> anyhow::Result<(String, Option<AgentTokenUsage>)> {
+        if LLM_CIRCUIT_BREAKER.is_open().await {
+            tracing::warn!("LLM circuit breaker: prompt_with_history rejected (circuit open)");
+            return Err(anyhow::anyhow!(CircuitBreaker::degraded_message()));
+        }
+        let mut history = history;
+        match self
+            .0
+            .prompt(Message::user(msg))
+            .with_history(&mut history)
+            .extended_details()
+            .await
+        {
+            Ok(response) => {
+                LLM_CIRCUIT_BREAKER.record_success().await;
+                Ok((response.output, AgentTokenUsage::from_rig(response.usage)))
+            }
+            Err(error) => {
+                LLM_CIRCUIT_BREAKER.record_failure().await;
+                Err(anyhow::anyhow!(error))
+            }
+        }
+    }
+
+    fn stream_chat(
+        &self,
+        msg: String,
+        history: Vec<Message>,
+    ) -> Pin<Box<dyn futures::Stream<Item = Result<AgentStreamChunk, anyhow::Error>> + Send>> {
+        let agent = self.0.clone();
+        Box::pin(async_stream::try_stream! {
+            let mut current = Message::user(msg);
+            let mut history = history;
+            loop {
+                let mut step = stream_single_model_step(agent.clone(), current.clone(), history.clone());
+                history.push(current.clone());
+                let mut calls = Vec::new();
+                let mut emitted_text = false;
+                while let Some(item) = step.next().await {
+                    match item? {
+                        AgentModelChunk::Text(text) => {
+                            emitted_text = true;
+                            yield AgentStreamChunk::Text(text);
+                        }
+                        AgentModelChunk::ToolCall { id, call_id, name, arguments } => {
+                            yield AgentStreamChunk::ToolActivity { tool: name.clone() };
+                            let result = execute_registered_tool(&agent, &name, &arguments.to_string()).await?;
+                            calls.push((id, call_id, name, arguments, result));
+                        }
+                        AgentModelChunk::Usage(usage) => yield AgentStreamChunk::Usage(usage),
+                        AgentModelChunk::Stop => {}
+                    }
+                }
+
+                if calls.is_empty() {
+                    if emitted_text {
+                        break;
+                    }
+                    break;
+                }
+                let assistant_calls = calls
+                    .iter()
+                    .map(|(id, call_id, name, arguments, _)| {
+                        rig::message::AssistantContent::ToolCall(rig::message::ToolCall {
+                            id: id.clone(),
+                            call_id: call_id.clone(),
+                            function: rig::message::ToolFunction::new(
+                                name.clone(),
+                                arguments.clone(),
+                            ),
+                            signature: None,
+                            additional_params: None,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                if let Ok(content) = rig::OneOrMany::many(assistant_calls) {
+                    history.push(Message::Assistant { id: None, content });
+                }
+                for (id, call_id, name, _arguments, result) in calls {
+                    for action in crate::agents::runtime::envelope::legacy::from_tool_result(&name, &result).ui_actions {
+                        yield AgentStreamChunk::UiAction(action);
+                    }
+                    let fenced = crate::llm::wrap_untrusted_platform_data(&name, &result);
+                    history.push(Message::tool_result_with_call_id(id, call_id, fenced));
+                }
+                current = history.pop().expect("tool result was just appended");
+            }
+        })
+    }
+
+    fn stream_model_step(
+        &self,
+        message: Message,
+        history: Vec<Message>,
+    ) -> Pin<Box<dyn futures::Stream<Item = Result<AgentModelChunk, anyhow::Error>> + Send>> {
+        stream_single_model_step(self.0.clone(), message, history)
+    }
+
+    async fn execute_tool(&self, name: &str, arguments: &str) -> anyhow::Result<String> {
+        execute_registered_tool(&self.0, name, arguments).await
     }
 }
 
@@ -434,5 +740,70 @@ pub struct OpenAiCompatibleReplyAssistant(
 impl ReplyAssistant for OpenAiCompatibleReplyAssistant {
     async fn prompt(&self, msg: String) -> anyhow::Result<String> {
         Ok(self.0.prompt(msg).await?)
+    }
+}
+
+pub struct OpenAiResponsesReplyAssistant(
+    Agent<openai::responses_api::ResponsesCompletionModel<reqwest::Client>>,
+);
+
+#[async_trait]
+impl ReplyAssistant for OpenAiResponsesReplyAssistant {
+    async fn prompt(&self, msg: String) -> anyhow::Result<String> {
+        Ok(self.0.prompt(msg).await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn api_style_selects_distinct_rig_clients() {
+        let chat = OpenAiCompatibleProvider::new(
+            "openai",
+            "test-key",
+            Some("http://127.0.0.1:9/v1"),
+            "test-model",
+            "test-gemini-key",
+            768,
+            ApiStyle::ChatCompletions,
+        )
+        .unwrap();
+        assert!(matches!(
+            chat.api_client,
+            OpenAiApiClient::ChatCompletions(_)
+        ));
+
+        let responses = OpenAiCompatibleProvider::new(
+            "openai",
+            "test-key",
+            Some("http://127.0.0.1:9/v1"),
+            "test-model",
+            "test-gemini-key",
+            768,
+            ApiStyle::Responses,
+        )
+        .unwrap();
+        assert!(matches!(
+            responses.api_client,
+            OpenAiApiClient::Responses(_)
+        ));
+    }
+
+    #[test]
+    fn unresolved_auto_style_is_rejected() {
+        let error = OpenAiCompatibleProvider::new(
+            "openai",
+            "test-key",
+            None,
+            "test-model",
+            "test-gemini-key",
+            768,
+            ApiStyle::Auto,
+        )
+        .err()
+        .expect("auto must be resolved by config");
+        assert!(error.to_string().contains("resolved API style"));
     }
 }

@@ -198,6 +198,85 @@ async fn agent_run_is_idempotent_typed_and_body_free() {
 }
 
 #[tokio::test]
+async fn runtime_v2_tool_event_is_persisted_without_payload() {
+    with_test_pool(|pool| async move {
+        let user_id = format!("agent-run-v2-tool-{}", Uuid::new_v4().simple());
+        seed_verified_user(&pool, &user_id).await;
+        let service = AgentRunService::new(pool.clone());
+        let trace_id = format!("agent-run-v2-tool-trace-{}", Uuid::new_v4().simple());
+        let run_id = service
+            .start(
+                &trace_id,
+                ncu_campus_id(),
+                &user_id,
+                "agent-user-1",
+                "chat",
+                0.5,
+                Some("openai-compatible"),
+                Some("test-model"),
+            )
+            .await
+            .expect("start Runtime v2 run");
+
+        assert!(service
+            .record_tool(
+                &trace_id,
+                ncu_campus_id(),
+                &user_id,
+                "search_inventory",
+                None,
+                "completed",
+            )
+            .await
+            .expect("record Runtime v2 tool event"));
+        assert!(service
+            .finish_with_usage(
+                &trace_id,
+                ncu_campus_id(),
+                &user_id,
+                "completed",
+                "runtime_completed",
+                None,
+                Some(10),
+                Some(4),
+                Some(20),
+            )
+            .await
+            .expect("finish Runtime v2 run"));
+
+        let (tool_name, risk_level, outcome_code, resource_ids, metadata): (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            serde_json::Value,
+            serde_json::Value,
+        ) = sqlx::query_as(
+            "SELECT tool_name, risk_level, outcome_code, resource_ids, metadata
+             FROM agent_run_events
+             WHERE run_id = $1 AND event_type = 'tool'",
+        )
+        .bind(run_id)
+        .fetch_one(&pool)
+        .await
+        .expect("read Runtime v2 tool event");
+        assert_eq!(tool_name.as_deref(), Some("search_inventory"));
+        assert_eq!(risk_level, None);
+        assert_eq!(outcome_code.as_deref(), Some("completed"));
+        assert_eq!(resource_ids, serde_json::json!([]));
+        assert_eq!(metadata, serde_json::json!({}));
+
+        let tool_call_count: i32 =
+            sqlx::query_scalar("SELECT tool_call_count FROM agent_runs WHERE id = $1")
+                .bind(run_id)
+                .fetch_one(&pool)
+                .await
+                .expect("read tool call count");
+        assert_eq!(tool_call_count, 1);
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn abandoned_agent_run_can_be_reconciled_as_cancelled() {
     with_test_pool(|pool| async move {
         let user_id = format!("agent-run-cancel-{}", Uuid::new_v4().simple());

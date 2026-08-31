@@ -8,7 +8,7 @@ use crate::agents::runtime::event::{ModelEvent, ToolCallData};
 use crate::agents::runtime::model::{
     ModelCapabilities, ModelDriver, ModelEventStream, ModelRequest,
 };
-use crate::llm::{AgentStreamChunk, MarketplaceAgent};
+use crate::llm::{AgentModelChunk, MarketplaceAgent};
 use futures::StreamExt;
 use std::future::Future;
 use std::pin::Pin;
@@ -17,15 +17,20 @@ use std::sync::Arc;
 /// Which wire format the driver uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApiStyle {
+    Auto,
     ChatCompletions,
     Responses,
 }
 
 impl ApiStyle {
-    pub fn parse(value: &str) -> Self {
+    pub fn parse(value: &str) -> Result<Self, String> {
         match value {
-            "responses" => Self::Responses,
-            _ => Self::ChatCompletions,
+            "auto" => Ok(Self::Auto),
+            "chat_completions" => Ok(Self::ChatCompletions),
+            "responses" => Ok(Self::Responses),
+            _ => Err(format!(
+                "LLM_API_STYLE must be one of auto, chat_completions, responses; got: {value}"
+            )),
         }
     }
 
@@ -35,58 +40,56 @@ impl ApiStyle {
             _ => Self::ChatCompletions,
         }
     }
+
+    pub fn resolve(self, provider: &str) -> Self {
+        match self {
+            Self::Auto => Self::auto_for_provider(provider),
+            explicit => explicit,
+        }
+    }
 }
 
 /// Resolve the effective API style from config + provider defaults.
-pub fn resolve_api_style(config_value: &str, provider: &str) -> ApiStyle {
-    match config_value {
-        "chat_completions" => ApiStyle::ChatCompletions,
-        "responses" => ApiStyle::Responses,
-        _ => ApiStyle::auto_for_provider(provider),
-    }
+pub fn resolve_api_style(config_value: &str, provider: &str) -> Result<ApiStyle, String> {
+    Ok(ApiStyle::parse(config_value)?.resolve(provider))
 }
 
-fn extract_user_text(msg: &rig::completion::Message) -> String {
-    match msg {
-        rig::completion::Message::User { content } => content
-            .iter()
-            .filter_map(|c| match c {
-                rig::message::UserContent::Text(t) => Some(t.text.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join(" "),
-        _ => String::new(),
-    }
-}
-
-fn translate_chunk(chunk: &AgentStreamChunk) -> Option<Result<ModelEvent, anyhow::Error>> {
+fn translate_chunk(chunk: AgentModelChunk) -> ModelEvent {
     match chunk {
-        AgentStreamChunk::Text(text) => Some(Ok(ModelEvent::TextDelta(text.clone()))),
-        AgentStreamChunk::Usage(u) => Some(Ok(ModelEvent::Usage(
-            crate::agents::runtime::event::AgentTokenUsage {
+        AgentModelChunk::Text(text) => ModelEvent::TextDelta(text),
+        AgentModelChunk::Usage(u) => {
+            ModelEvent::Usage(crate::agents::runtime::event::AgentTokenUsage {
                 prompt_tokens: u.input_tokens,
                 completion_tokens: u.output_tokens,
-            },
-        ))),
-        AgentStreamChunk::ToolActivity { tool } => Some(Ok(ModelEvent::ToolCall(ToolCallData {
-            call_id: format!("tc_{}", tool),
-            name: tool.clone(),
-            arguments: serde_json::json!({}),
-        }))),
-        AgentStreamChunk::UiAction(_) => None,
+            })
+        }
+        AgentModelChunk::ToolCall {
+            id,
+            call_id,
+            name,
+            arguments,
+        } => ModelEvent::ToolCall(ToolCallData {
+            id,
+            call_id,
+            name,
+            arguments,
+        }),
+        AgentModelChunk::Stop => {
+            ModelEvent::Stop(crate::agents::runtime::event::ModelStopReason::EndTurn)
+        }
     }
 }
 
 /// Driver for providers using the OpenAI `/chat/completions` wire format.
 pub struct ChatCompletionsDriver {
     pub agent: Arc<dyn MarketplaceAgent>,
+    pub provider_name: String,
     pub model_name: String,
 }
 
 impl ModelDriver for ChatCompletionsDriver {
     fn provider(&self) -> &str {
-        "openai_compatible"
+        &self.provider_name
     }
 
     fn model(&self) -> &str {
@@ -112,14 +115,8 @@ impl ModelDriver for ChatCompletionsDriver {
     {
         let agent = Arc::clone(&self.agent);
         Box::pin(async move {
-            let msg_text = extract_user_text(&request.message);
-            let chunk_stream = agent.stream_chat(msg_text, request.history);
-            let translated = chunk_stream.filter_map(|result| async move {
-                match result {
-                    Ok(ref chunk) => translate_chunk(chunk),
-                    Err(e) => Some(Err(anyhow::anyhow!("{}", e))),
-                }
-            });
+            let chunk_stream = agent.stream_model_step(request.message, request.history);
+            let translated = chunk_stream.map(|result| result.map(translate_chunk));
             Ok(Box::pin(translated) as ModelEventStream)
         })
     }
@@ -129,12 +126,13 @@ impl ModelDriver for ChatCompletionsDriver {
 /// Normalizes function_call/output into the same ModelEvent::ToolCall.
 pub struct ResponsesDriver {
     pub agent: Arc<dyn MarketplaceAgent>,
+    pub provider_name: String,
     pub model_name: String,
 }
 
 impl ModelDriver for ResponsesDriver {
     fn provider(&self) -> &str {
-        "responses"
+        &self.provider_name
     }
 
     fn model(&self) -> &str {
@@ -160,15 +158,36 @@ impl ModelDriver for ResponsesDriver {
     {
         let agent = Arc::clone(&self.agent);
         Box::pin(async move {
-            let msg_text = extract_user_text(&request.message);
-            let chunk_stream = agent.stream_chat(msg_text, request.history);
-            let translated = chunk_stream.filter_map(|result| async move {
-                match result {
-                    Ok(ref chunk) => translate_chunk(chunk),
-                    Err(e) => Some(Err(anyhow::anyhow!("{}", e))),
-                }
-            });
+            let chunk_stream = agent.stream_model_step(request.message, request.history);
+            let translated = chunk_stream.map(|result| result.map(translate_chunk));
             Ok(Box::pin(translated) as ModelEventStream)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn api_style_rejects_unknown_values() {
+        assert!(ApiStyle::parse("response").is_err());
+        assert!(ApiStyle::parse("").is_err());
+    }
+
+    #[test]
+    fn auto_selects_minimax_responses_and_chat_elsewhere() {
+        assert_eq!(
+            resolve_api_style("auto", "minimax"),
+            Ok(ApiStyle::Responses)
+        );
+        assert_eq!(
+            resolve_api_style("auto", "openrouter"),
+            Ok(ApiStyle::ChatCompletions)
+        );
+        assert_eq!(
+            resolve_api_style("responses", "openai"),
+            Ok(ApiStyle::Responses)
+        );
     }
 }

@@ -12,6 +12,8 @@ use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::agents::runtime::api_drivers::ApiStyle;
+
 /// Default marketplace categories (used when not set in config file).
 pub const DEFAULT_CATEGORIES: &[&str] = &[
     "electronics",
@@ -41,7 +43,14 @@ fn normalize_llm_provider(provider: &str) -> String {
 pub fn is_openai_compatible_provider(provider: &str) -> bool {
     matches!(
         provider,
-        "openai_compatible" | "openai" | "deepseek" | "groq" | "openrouter" | "xai" | "together"
+        "minimax"
+            | "openai_compatible"
+            | "openai"
+            | "deepseek"
+            | "groq"
+            | "openrouter"
+            | "xai"
+            | "together"
     )
 }
 
@@ -60,6 +69,7 @@ fn default_llm_model(provider: &str) -> Option<&'static str> {
 fn default_llm_base_url(provider: &str) -> Option<&'static str> {
     match provider {
         "openai" => Some("https://api.openai.com/v1"),
+        "minimax" => Some("https://api.minimaxi.com/v1"),
         "deepseek" => Some("https://api.deepseek.com/v1"),
         "groq" => Some("https://api.groq.com/openai/v1"),
         "openrouter" => Some("https://openrouter.ai/api/v1"),
@@ -72,6 +82,7 @@ fn default_llm_base_url(provider: &str) -> Option<&'static str> {
 fn provider_api_key_env(provider: &str) -> Option<&'static str> {
     match provider {
         "openai" => Some("OPENAI_API_KEY"),
+        "minimax" => Some("MINIMAX_API_KEY"),
         "deepseek" => Some("DEEPSEEK_API_KEY"),
         "groq" => Some("GROQ_API_KEY"),
         "openrouter" => Some("OPENROUTER_API_KEY"),
@@ -86,8 +97,6 @@ fn provider_api_key_env(provider: &str) -> Option<&'static str> {
 pub struct AppConfig {
     // --- Secrets (env var only, never from TOML) ---
     pub gemini_api_key: String,
-    pub minimax_api_key: Option<String>,
-    pub minimax_api_base_url: Option<String>,
     pub llm_api_key: Option<String>,
     pub jwt_secret: String,
     pub jwt_secret_old: Option<String>,
@@ -102,8 +111,7 @@ pub struct AppConfig {
     /// When false, all AI/agent features are disabled and the platform
     /// operates as the original non-AI demo.
     pub agent_enabled: bool,
-    #[allow(dead_code)]
-    pub llm_api_style: String,
+    pub llm_api_style: ApiStyle,
     pub vector_dim: usize,
 
     // --- Infrastructure ---
@@ -150,11 +158,6 @@ impl fmt::Debug for AppConfig {
         f.debug_struct("AppConfig")
             .field("gemini_api_key", &"[REDACTED]")
             .field(
-                "minimax_api_key",
-                &self.minimax_api_key.as_ref().map(|_| "[REDACTED]"),
-            )
-            .field("minimax_api_base_url", &self.minimax_api_base_url)
-            .field(
                 "llm_api_key",
                 &self.llm_api_key.as_ref().map(|_| "[REDACTED]"),
             )
@@ -167,6 +170,7 @@ impl fmt::Debug for AppConfig {
             .field("llm_provider", &self.llm_provider)
             .field("llm_model", &self.llm_model)
             .field("llm_base_url", &self.llm_base_url)
+            .field("llm_api_style", &self.llm_api_style)
             .field("vector_dim", &self.vector_dim)
             .field("cors_origins", &self.cors_origins)
             .field("oss_endpoint", &self.oss_endpoint)
@@ -280,7 +284,23 @@ impl AppConfig {
 
         let llm_base_url = read_non_empty_env("LLM_BASE_URL")
             .or_else(|| file.as_ref()?.llm.base_url.clone())
+            .or_else(|| {
+                (llm_provider == "minimax")
+                    .then(|| read_non_empty_env("MINIMAX_API_BASE_URL"))
+                    .flatten()
+            })
             .or_else(|| default_llm_base_url(&llm_provider).map(str::to_string));
+
+        let configured_api_style = ApiStyle::parse(
+            read_non_empty_env("LLM_API_STYLE")
+                .as_deref()
+                .unwrap_or("auto"),
+        )
+        .unwrap_or_else(|message| panic!("{message}"));
+        if llm_provider == "gemini" && configured_api_style != ApiStyle::Auto {
+            panic!("LLM_API_STYLE is only valid for OpenAI-compatible providers");
+        }
+        let llm_api_style = configured_api_style.resolve(&llm_provider);
 
         let llm_api_key = read_non_empty_env("LLM_API_KEY")
             .or_else(|| provider_api_key_env(&llm_provider).and_then(read_non_empty_env))
@@ -292,15 +312,9 @@ impl AppConfig {
             .unwrap_or(768);
 
         let gemini_api_key = read_non_empty_env("GEMINI_API_KEY");
-        let minimax_api_key = read_non_empty_env("MINIMAX_API_KEY");
-        let minimax_api_base_url = read_non_empty_env("MINIMAX_API_BASE_URL");
 
         if llm_provider == "gemini" && gemini_api_key.is_none() {
             panic!("GEMINI_API_KEY must be set when LLM_PROVIDER=gemini");
-        }
-
-        if llm_provider == "minimax" && minimax_api_key.is_none() {
-            panic!("MINIMAX_API_KEY must be set when LLM_PROVIDER=minimax");
         }
 
         if is_openai_compatible_provider(&llm_provider) && llm_api_key.is_none() {
@@ -318,16 +332,6 @@ impl AppConfig {
                 llm_provider
             );
         }
-
-        // Deprecated compatibility path: keep accepting MINIMAX_API_BASE_URL
-        // while newer OpenAI-compatible providers use LLM_BASE_URL.
-        let minimax_api_base_url = minimax_api_base_url.or_else(|| {
-            if llm_provider == "minimax" {
-                llm_base_url.clone()
-            } else {
-                None
-            }
-        });
 
         let jwt_secret =
             std::env::var("JWT_SECRET").expect("JWT_SECRET must be set in environment");
@@ -541,8 +545,6 @@ impl AppConfig {
 
         Arc::new(Self {
             gemini_api_key: gemini_api_key.unwrap_or_default(),
-            minimax_api_key,
-            minimax_api_base_url,
             llm_api_key,
             jwt_secret,
             jwt_secret_old,
@@ -554,9 +556,7 @@ impl AppConfig {
             agent_enabled: read_non_empty_env("AGENT_ENABLED")
                 .map(|v| v.to_lowercase() != "false" && v != "0")
                 .unwrap_or(true),
-            llm_api_style: read_non_empty_env("LLM_API_STYLE")
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "auto".to_string()),
+            llm_api_style,
             vector_dim,
             cors_origins,
             blocked_keywords,
@@ -601,8 +601,6 @@ impl AppConfig {
     pub fn test_defaults() -> Self {
         Self {
             gemini_api_key: "test-gemini-key".to_string(),
-            minimax_api_key: None,
-            minimax_api_base_url: None,
             llm_api_key: None,
             jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),
             jwt_secret_old: None,
@@ -613,7 +611,7 @@ impl AppConfig {
             llm_model: "gemini-3-flash-preview".to_string(),
             llm_base_url: None,
             agent_enabled: true,
-            llm_api_style: "auto".to_string(),
+            llm_api_style: ApiStyle::ChatCompletions,
             vector_dim: 768,
             cors_origins: vec![],
             oss_endpoint: "https://oss-cn-beijing.aliyuncs.com".to_string(),
@@ -807,8 +805,6 @@ mod tests {
     fn test_debug_redacts_secrets() {
         let config = AppConfig {
             gemini_api_key: "gemini-secret".to_string(),
-            minimax_api_key: Some("minimax-secret".to_string()),
-            minimax_api_base_url: None,
             llm_api_key: Some("generic-llm-secret".to_string()),
             jwt_secret: "jwt-secret-that-is-at-least-32-characters".to_string(),
             jwt_secret_old: None,
@@ -819,7 +815,7 @@ mod tests {
             llm_model: "gemini-3-flash-preview".to_string(),
             llm_base_url: None,
             agent_enabled: true,
-            llm_api_style: "auto".to_string(),
+            llm_api_style: ApiStyle::ChatCompletions,
             vector_dim: 768,
             cors_origins: vec![],
             oss_endpoint: "https://oss-cn-beijing.aliyuncs.com".to_string(),

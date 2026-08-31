@@ -42,6 +42,19 @@ impl ToolResultEnvelope {
 pub mod legacy {
     use super::*;
 
+    /// Convert one legacy string result into the structured channels used by
+    /// Runtime v2. Unknown tools keep their textual result but never create a
+    /// client-side action implicitly.
+    pub fn from_tool_result(tool_name: &str, result: &str) -> ToolResultEnvelope {
+        match tool_name {
+            "draft_message" => draft_message(result),
+            "draft_comment" => draft_comment(result),
+            "search_inventory" | "find_related_posts" | "get_user_posts" => listing_ids(result),
+            _ => None,
+        }
+        .unwrap_or_else(|| ToolResultEnvelope::success(result))
+    }
+
     /// Parse `DRAFT_MESSAGE|{listing_id}|{receiver_id}|{text}`.
     pub fn draft_message(result: &str) -> Option<ToolResultEnvelope> {
         let parts: Vec<&str> = result.splitn(4, '|').collect();

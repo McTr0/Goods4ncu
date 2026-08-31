@@ -1,16 +1,14 @@
 //! MarketplaceAgent → ModelDriver adapters.
 //!
 //! Wraps existing provider agents as [`ModelDriver`] implementations.
-//! The underlying agents execute tools inline inside their streaming
-//! loops; this adapter translates the mixed output into normalized
-//! [`ModelEvent`]s for the runtime engine. Full tool/model separation
-//! arrives with ToolResultEnvelope (Phase 4).
+//! The underlying agent exposes a single raw model step. Tool execution stays
+//! in AgentRuntime, so this adapter only translates normalized provider output.
 
-use crate::agents::runtime::event::ModelEvent;
+use crate::agents::runtime::event::{ModelEvent, ModelStopReason, ToolCallData};
 use crate::agents::runtime::model::{
     ModelCapabilities, ModelDriver, ModelEventStream, ModelRequest,
 };
-use crate::llm::{AgentStreamChunk, MarketplaceAgent};
+use crate::llm::{AgentModelChunk, MarketplaceAgent};
 use futures::StreamExt;
 use std::future::Future;
 use std::pin::Pin;
@@ -43,19 +41,27 @@ impl MarketplaceDriver {
         }
     }
 
-    /// Translate an AgentStreamChunk into zero or more ModelEvents.
-    fn translate(chunk: &AgentStreamChunk) -> Vec<ModelEvent> {
+    fn translate(chunk: AgentModelChunk) -> ModelEvent {
         match chunk {
-            AgentStreamChunk::Text(text) => vec![ModelEvent::TextDelta(text.clone())],
-            AgentStreamChunk::Usage(u) => vec![ModelEvent::Usage(
-                crate::agents::runtime::event::AgentTokenUsage {
+            AgentModelChunk::Text(text) => ModelEvent::TextDelta(text),
+            AgentModelChunk::Usage(u) => {
+                ModelEvent::Usage(crate::agents::runtime::event::AgentTokenUsage {
                     prompt_tokens: u.input_tokens,
                     completion_tokens: u.output_tokens,
-                },
-            )],
-            // Tool activity and UI actions are inline side effects from the
-            // legacy loop; the runtime observes them but doesn't act on them.
-            _ => vec![],
+                })
+            }
+            AgentModelChunk::ToolCall {
+                id,
+                call_id,
+                name,
+                arguments,
+            } => ModelEvent::ToolCall(ToolCallData {
+                id,
+                call_id,
+                name,
+                arguments,
+            }),
+            AgentModelChunk::Stop => ModelEvent::Stop(ModelStopReason::EndTurn),
         }
     }
 }
@@ -83,40 +89,10 @@ impl ModelDriver for MarketplaceDriver {
     {
         let agent = Arc::clone(&self.inner);
         Box::pin(async move {
-            // Extract the user message text from the rig Message.
-            let msg_text = extract_message_text(&request.message);
-
-            // Call the existing stream_chat which handles model calls +
-            // inline tool execution transparently.
-            let chunk_stream = agent.stream_chat(msg_text, request.history);
-
-            // Translate each chunk into ModelEvents.
-            let translated = chunk_stream.filter_map(|result| async move {
-                match result {
-                    Ok(chunk) => {
-                        let events = Self::translate(&chunk);
-                        events.into_iter().next().map(Ok)
-                    }
-                    Err(e) => Some(Err(anyhow::anyhow!("{}", e))),
-                }
-            });
+            let chunk_stream = agent.stream_model_step(request.message, request.history);
+            let translated = chunk_stream.map(|result| result.map(Self::translate));
 
             Ok(Box::pin(translated) as ModelEventStream)
         })
-    }
-}
-
-/// Extract text content from a rig Message (user variant only).
-fn extract_message_text(msg: &rig::completion::Message) -> String {
-    match msg {
-        rig::completion::Message::User { content } => content
-            .iter()
-            .filter_map(|c| match c {
-                rig::message::UserContent::Text(t) => Some(t.text.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join(" "),
-        _ => String::new(),
     }
 }

@@ -191,6 +191,21 @@ pub enum AgentStreamChunk {
     ToolActivity { tool: String },
 }
 
+/// A provider-normalized item from one model inference step. Unlike
+/// [`AgentStreamChunk`], this never represents an already executed tool.
+#[derive(Debug, Clone)]
+pub enum AgentModelChunk {
+    Text(String),
+    ToolCall {
+        id: String,
+        call_id: Option<String>,
+        name: String,
+        arguments: serde_json::Value,
+    },
+    Usage(AgentTokenUsage),
+    Stop,
+}
+
 /// A UI action the agent wants the frontend to perform.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UiAction {
@@ -300,6 +315,12 @@ pub trait LlmProvider: Send + Sync {
     /// run record.
     fn model(&self) -> &str;
 
+    /// Wire protocol used for OpenAI-compatible model calls. Native
+    /// providers such as Gemini return `None`.
+    fn api_style(&self) -> Option<crate::agents::runtime::api_drivers::ApiStyle> {
+        None
+    }
+
     /// Create a marketplace agent. Global dynamic context is intentionally
     /// disabled until retrieval can enforce tenant and visibility scope before
     /// similarity ranking; `SearchInventoryTool` remains the safe search path.
@@ -351,6 +372,20 @@ pub trait MarketplaceAgent: Send + Sync {
         msg: String,
         history: Vec<Message>,
     ) -> Pin<Box<dyn Stream<Item = Result<AgentStreamChunk, anyhow::Error>> + Send>>;
+
+    /// Stream exactly one provider inference step without executing tools.
+    /// Agent Runtime v2 owns tool dispatch and feeds structured results back
+    /// through the next `Message`.
+    fn stream_model_step(
+        &self,
+        message: Message,
+        history: Vec<Message>,
+    ) -> Pin<Box<dyn Stream<Item = Result<AgentModelChunk, anyhow::Error>> + Send>>;
+
+    /// Execute one tool registered on this per-request agent. This stays on
+    /// the erased agent so the runtime can separate provider streaming from
+    /// tool execution without duplicating the tool set.
+    async fn execute_tool(&self, name: &str, arguments: &str) -> anyhow::Result<String>;
 }
 
 #[async_trait]
