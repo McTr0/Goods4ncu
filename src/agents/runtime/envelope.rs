@@ -91,12 +91,27 @@ pub mod legacy {
         if ids.is_empty() {
             return None;
         }
-        let mut envelope =
-            ToolResultEnvelope::success(format!("搜索到 {} 条相关帖子。", ids.len()));
+        let mut envelope = ToolResultEnvelope::success(result);
         envelope = envelope.with_action(crate::llm::UiAction::show_posts(ids.clone()));
         for id in &ids {
             envelope = envelope.with_resource(id.clone());
         }
         Some(envelope)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::legacy;
+
+    #[test]
+    fn listing_results_keep_model_data_and_add_ui_action() {
+        let result = "Found 1 item(s):\n- [listing-1] Math Book (Brand: None, Category: books, Condition: 8/10, Price: 20 CNY)\n";
+        let envelope = legacy::from_tool_result("search_inventory", result);
+
+        assert_eq!(envelope.model_data, result);
+        assert_eq!(envelope.resource_ids, vec!["listing-1".to_string()]);
+        assert_eq!(envelope.ui_actions.len(), 1);
+        assert_eq!(envelope.ui_actions[0].kind, "SHOW_POSTS");
     }
 }
