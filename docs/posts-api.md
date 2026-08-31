@@ -1,16 +1,17 @@
-> last-verified: 2026-08-24
+> last-verified: 2026-08-31
 
 # Posts API
 
-Unified post structure (migration 0099/0100): one `posts` table covers
-出(offer) / 收(wanted) / 讨论(discussion). **`category` IS the kind.**
+Unified post structure (migration 0109): one `posts` table covers
+公告、出(offer)、收(wanted)、分享、提问、讨论、召集和组队。
+**`category` IS the kind.**
 
 - `post_type` / `post_kind` are gone; the inventory→post mirror trigger was
   removed. Listings are optional references (`listing_id`, SET NULL on listing
   delete) — a standalone listing has no post until someone writes one.
-- Tags must come from the curated `post_tag_catalog` (16 seeded keys) and
-  match the post's category. The special `errand` tag (offer/wanted only)
-  unlocks `errand_metadata` + the resolution lifecycle.
+- Tags must come from the curated `post_tag_catalog` (location and TTL groups);
+  each group allows at most one tag. There is no errand-specific metadata or
+  lifecycle.
 - `space_id` scopes a post to one chat space: member-only visibility in feeds,
   detail reads and replies; NULL means campus-wide.
 - Clients create goods inline: POST `/api/listings` first, then POST
@@ -27,9 +28,11 @@ Query parameters:
 
 - `limit`: 1–50, default 20
 - `offset`: non-negative, default 0
-- `category`: `all`, `offer`, `wanted`, or `discussion`
+- `category`: `all` or one enabled `post_categories` key
 - `space_id`: group scoping (viewer must be an unbanned member)
 - `search`: title/body substring, up to 200 characters
+- `tags`: comma-separated catalog keys; a post matches when it carries any one
+  of them
 - `sort`: `active` (default), `latest`, `replies`, or `for_you`
 
 `for_you` is the explainable unified-post home rank. Authenticated viewers get
@@ -41,10 +44,6 @@ category. The existing `/api/feed/preferences` toggle and personalization-clear
 endpoint apply to this rank. Guests and viewers without signals receive a
 recency/engagement fallback.
 
-Mutual-aid requests are ordinary discussion posts with `post_kind =
-"mutual_aid"`. Open mutual-aid posts receive a small ranking boost; resolved
-and closed posts remain readable but rank below open requests.
-
 Response:
 
 ```json
@@ -52,9 +51,8 @@ Response:
   "items": [
     {
       "id": "0c722551-6fce-4efb-94ed-f3ab28c671dc",
-      "post_type": "listing",
-      "post_kind": "discussion",
-      "category": "electronics",
+      "category": "offer",
+      "space_id": null,
       "title": "Dorm monitor",
       "body_excerpt": "24-inch monitor in good condition",
       "tags": [],
@@ -80,9 +78,7 @@ Response:
       },
       "reply_count": 3,
       "status": "active",
-      "mutual_aid_metadata": {},
-      "resolution_status": "open",
-      "can_update_resolution": false,
+      "fertilizer_count": 2,
       "is_locked": false,
       "created_at": "2026-08-15T12:00:00Z",
       "updated_at": "2026-08-15T12:30:00Z",
@@ -95,7 +91,7 @@ Response:
   "total": 1,
   "limit": 20,
   "offset": 0,
-  "ranking_version": "2026.08-unified-post-v1"
+  "ranking_version": "2026.08-post-v2"
 }
 ```
 
@@ -114,9 +110,6 @@ Returns the core topic fields from a list item, except `body` contains the
 full topic body and `body_excerpt` is absent. The feed-only ranking fields
 (`rank_reason`, `rank_source`, `ranking_score`) are not included because a
 direct detail lookup does not run the viewer-specific ranker.
-Both list and detail responses include `can_update_resolution`; it is `true`
-only for the authenticated author of a mutual-aid post, allowing clients to
-hide status controls from other viewers without inferring ownership.
 
 ### `GET /api/posts/by-listing/{listing_id}`
 
@@ -170,8 +163,8 @@ Creates a discussion topic. Products must still be created with
 {
   "title": "Graduation move-out tips",
   "body": "Share pickup windows early so people can plan.",
-  "category": "campus-life",
-  "tags": ["graduation", "guide"],
+  "category": "share",
+  "tags": ["urgent"],
   "cover_image_url": "https://bucket.example.com/post/image/cover.jpg"
 }
 ```
@@ -181,14 +174,10 @@ storage. Mobile clients should upload the image first, then pass the returned
 platform URL. The response is the new post detail; until moderation approves
 the image, its `cover_image_url` is `null`.
 
-Set `post_kind` to `"mutual_aid"` to publish a help request in the normal post
-feed. Optional `mutual_aid_metadata` accepts `service_direction` (`wanted` or
-`offer`), `service_mode`, public pickup/dropoff locations, `time_hint`,
-`reward_cents`, `valid_until`, and `notes`. Mutual-aid posts default to
-`resolution_status: "open"`. Rewards must be non-negative and no more than
-10,000,000 cents; `valid_until` must be an RFC 3339 timestamp within the next
-year. The unified list, search, category filters, and `sort=for_you` all include
-mutual-aid posts, with open requests ahead of resolved or closed requests.
+Help requests are not a special API shape: publish them in the same endpoint
+with a suitable category (for example `wanted`, `question`, or `discussion`)
+and catalog tags. The unified list, search, category filter, tag filter, and
+`sort=for_you` all include them as ordinary posts.
 
 ### `PUT /api/posts/{id}`
 
@@ -198,24 +187,13 @@ Owner-only partial update for discussion posts:
 {
   "title": "Updated title",
   "body": "Updated body",
-  "category": "campus-life",
-  "tags": ["guide"],
+  "tags": ["longterm"],
   "locked": true
 }
 ```
 
 Listing posts reject this route and direct clients back to the listing API.
 Locking preserves read access but rejects new replies.
-
-### `PATCH /api/posts/{id}/resolution`
-
-Owner-only update for mutual-aid posts:
-
-```json
-{ "resolution_status": "resolved" }
-```
-
-Allowed values are `open`, `resolved`, and `closed`.
 
 ### `DELETE /api/posts/{id}`
 
@@ -248,8 +226,8 @@ a database trigger.
 - Topic title: 300 Unicode characters
 - Topic body: 50,000 Unicode characters
 - Reply body: 20,000 Unicode characters
-- Category: 80 Unicode characters
-- Tags: at most 5 unique tags, each at most 32 Unicode characters
+- Category: one enabled `post_categories` key
+- Tags: catalog keys, at most one per group, each at most 32 Unicode characters
 
 Listing posts continue to reuse the listing image as their cover. Discussion
 posts use the post-specific `post_image` moderation lifecycle described above.

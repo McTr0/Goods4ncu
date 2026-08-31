@@ -3083,19 +3083,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get publishPriceRequired => '请输入有效价格';
 
   @override
-  String get postTagsHint => '空格或逗号分隔，最多五个';
-
-  @override
   String get postPublishAction => '发布';
 
   @override
   String get postKindDiscussion => '普通讨论';
-
-  @override
-  String get postKindMutualAid => '互助服务';
-
-  @override
-  String get postMutualAidNotes => '补充说明';
 
   @override
   String get postPublishFailed => '讨论发布失败，请稍后重试。';

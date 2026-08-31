@@ -5940,12 +5940,6 @@ abstract class AppLocalizations {
   /// **'Enter a valid price'**
   String get publishPriceRequired;
 
-  /// No description provided for @postTagsHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Separate up to five tags with spaces or commas'**
-  String get postTagsHint;
-
   /// No description provided for @postPublishAction.
   ///
   /// In en, this message translates to:
@@ -5957,18 +5951,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Discussion'**
   String get postKindDiscussion;
-
-  /// No description provided for @postKindMutualAid.
-  ///
-  /// In en, this message translates to:
-  /// **'Mutual aid'**
-  String get postKindMutualAid;
-
-  /// No description provided for @postMutualAidNotes.
-  ///
-  /// In en, this message translates to:
-  /// **'Additional details'**
-  String get postMutualAidNotes;
 
   /// No description provided for @postPublishFailed.
   ///

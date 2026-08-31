@@ -3227,19 +3227,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get publishPriceRequired => 'Enter a valid price';
 
   @override
-  String get postTagsHint => 'Separate up to five tags with spaces or commas';
-
-  @override
   String get postPublishAction => 'Publish';
 
   @override
   String get postKindDiscussion => 'Discussion';
-
-  @override
-  String get postKindMutualAid => 'Mutual aid';
-
-  @override
-  String get postMutualAidNotes => 'Additional details';
 
   @override
   String get postPublishFailed =>
