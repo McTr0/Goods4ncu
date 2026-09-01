@@ -1,0 +1,113 @@
+name: deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build release binary and Flutter web
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-release-
+
+      - name: Build backend (release)
+        run: cargo build --release --locked
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build Flutter web
+        run: flutter build web --release --dart-define=COMPANION_ENABLED=true
+        working-directory: mobile
+
+      - name: Package artifacts
+        run: |
+          mkdir -p dist
+          cp target/release/goods4ncu dist/goods4ncu
+          tar -czf dist/web.tar.gz -C mobile/build/web .
+          chmod +x dist/goods4ncu
+          ls -lh dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 14
+
+  deploy:
+    name: Deploy to production server
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: production
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Upload artifacts
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS="$DEPLOY_PASSWORD"
+          SSH_OPTS="-o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -P ${{ secrets.DEPLOY_PORT }}"
+          sshpass -e scp $SSH_OPTS dist/goods4ncu ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/goods4ncu/bin/goods4ncu.new
+          sshpass -e scp $SSH_OPTS dist/web.tar.gz ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/goods4ncu-web.tar.gz
+
+      - name: Swap binaries and restart
+        env:
+          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export SSHPASS="$DEPLOY_PASSWORD"
+          SSH_OPTS="-o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -p ${{ secrets.DEPLOY_PORT }}"
+          sshpass -e ssh $SSH_OPTS ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} '
+            set -e
+            chmod +x /opt/goods4ncu/bin/goods4ncu.new
+            mv /opt/goods4ncu/bin/goods4ncu.new /opt/goods4ncu/bin/goods4ncu
+            rm -rf /opt/goods4ncu/web.new && mkdir -p /opt/goods4ncu/web.new
+            tar -xzf /tmp/goods4ncu-web.tar.gz -C /opt/goods4ncu/web.new
+            rm -f /tmp/goods4ncu-web.tar.gz
+            /opt/goods4ncu/stop.sh
+            rm -rf /opt/goods4ncu/web && mv /opt/goods4ncu/web.new /opt/goods4ncu/web
+            /opt/goods4ncu/start.sh
+            sleep 3
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+              if curl -fsS http://127.0.0.1:3000/api/health > /dev/null; then
+                echo "backend healthy"
+                exit 0
+              fi
+              sleep 3
+            done
+            echo "backend failed health check" >&2
+            tail -50 /opt/goods4ncu/logs/backend.log >&2 || true
+            exit 1
+          '
