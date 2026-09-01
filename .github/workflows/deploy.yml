@@ -47,6 +47,7 @@ jobs:
       - name: Package artifacts
         run: |
           mkdir -p dist
+          strip target/release/goods4ncu
           cp target/release/goods4ncu dist/goods4ncu
           tar -czf dist/web.tar.gz -C mobile/build/web .
           chmod +x dist/goods4ncu

@@ -55,6 +55,41 @@
 
 验证码投递 webhook 接收 `to`、`template=campus_email_verification`、`code` 和 `expires_in_seconds`。生产模式下 URL 或 token 任一缺失都会 fail fast；投递返回非 2xx 时 challenge 标记为 `failed`，接口不会假装发送成功。日志和第三方投递系统都应把验证码按短期敏感凭据处理，不进入长期检索、分析或告警正文。
 
+## GitHub Actions 一键部署（paratera 实例）
+
+由于本地交叉编译受限（macOS SQLx proc-macro 链接受损），生产二进制在 GitHub Actions
+上构建，workflow 为 `.github/workflows/deploy.yml`，推 master 或手动 `workflow_dispatch`
+即触发：构建 Rust release 二进制 + Flutter web，然后经 scp 上传到服务器并把进程
+替换重启，最后用 `GET /api/health` 自检。
+
+仓库需要以下 Actions Secrets（实例重建后要更新，因为 Paratera 网关重启会换
+`ackcs-*` 实例 ID）：
+
+- `DEPLOY_HOST`（如 `ssh.zw1.paratera.com`）
+- `DEPLOY_PORT`（如 `2222`）
+- `DEPLOY_USER`（如 `root@ackcs-00gjhkuf`）
+- `DEPLOY_PASSWORD`
+
+服务器目录约定：
+
+- `/opt/goods4ncu/goods4ncu.env`（生产 env，`chmod 600`，不入库）
+- `/opt/goods4ncu/bin/goods4ncu`（后端二进制）
+- `/opt/goods4ncu/web/`（Flutter web 构建产物）
+- `/opt/goods4ncu/{start,stop}.sh`、`start_web.sh`（pidfile 驱动）
+- `/opt/goods4ncu/logs/`（`backend.log`、`web.log`、`mailer.log`）
+- `/opt/goods4ncu/mailer_stub.py`（本地验证码投递圈存服务，`127.0.0.1:3901`）
+
+注意事项：
+
+- 服务器只有 SSH 入口，没有对外 HTTP 端口。访问时用隧道：
+  `ssh -L 3000:127.0.0.1:3000 -L 3001:127.0.0.1:3001 paratera`，浏览器打开
+  `http://127.0.0.1:3001`。前端默认调 `http://127.0.0.1:3000`，与隧道匹配。
+- ⚠️ 写远端 `stop.sh` 类脚本时**永远不要用 `pkill -f`**，会误杀当前 SSH 会话
+  自身（其命令行中包含路径字符串），导致任务在远端被 SIGTERM。应该用
+  pidfile 或 `pkill -x <进程名>`。
+- 生产模式强制要求：邮件投递 webhook、图片审核 API、`MEDIA_PRIVATE_BUCKET=true` + OSS
+  凭据。缺任意一项都会 panic 拒绝启动。
+
 ## Docker Compose 本地栈
 
 根目录 `docker-compose.yml` 提供演示级两服务栈：`db`（`pgvector/pgvector:pg16`）和 `api`（本仓库 `Dockerfile`）。Compose 会把 `DATABASE_URL` 指到服务名 `db`，因此即使 `.env` 写了 localhost 也能在容器网络内连通。
