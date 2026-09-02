@@ -23,6 +23,8 @@ ignore = [
 
 # Unmaintained/unsound advisories stay visible as warnings rather than being
 # ignored: they should be read on every run and acted on when a fix lands.
-# Current known warning: RUSTSEC-2025-0057 (fxhash unmaintained), reached only
-# through `inquire`, which is used by the local admin CLI and not by the server
-# request path.
+# Current known warning: yanked `chacha20 0.10.1`. It is locked only through
+# reqwest's disabled HTTP/3 -> quinn-proto dependency and does not appear in
+# the active feature graph (`cargo tree --locked -i chacha20@0.10.1` prints
+# nothing). Both compatible 0.10 releases are yanked, so keep the newer one
+# until reqwest/quinn publishes a lockfile-compatible replacement.

@@ -23,7 +23,7 @@ const BASE32_ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 /// Generate a new 160-bit secret, base32-encoded for authenticator apps.
 pub fn generate_secret() -> String {
-    use rand::Rng;
+    use rand::RngCore;
     let mut bytes = [0u8; 20];
     rand::rng().fill_bytes(&mut bytes);
     base32_encode(&bytes)

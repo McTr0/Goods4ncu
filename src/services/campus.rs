@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
-use rand::RngExt;
+use rand::Rng;
 use serde::Serialize;
 use sha2::Sha256;
 use sqlx::{FromRow, PgPool, Row};
