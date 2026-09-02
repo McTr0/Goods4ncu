@@ -193,9 +193,14 @@ pub async fn rate_limit_middleware(
 }
 
 /// Denylist middleware that rejects revoked JWT access tokens by JTI.
+///
+/// On successful token verification, the decoded [`auth::AuthSessionContext`]
+/// is injected into request extensions so downstream extractors (`Session`,
+/// `OptionalSession`, `VerifiedTenant`) can reuse it without repeating HMAC-SHA256
+/// verification and JSON deserialization.
 pub async fn token_denylist_middleware(
     State(state): State<AppState>,
-    request: axum::extract::Request,
+    mut request: axum::extract::Request,
     next: middleware::Next,
 ) -> Response {
     use axum::response::IntoResponse;
@@ -214,17 +219,18 @@ pub async fn token_denylist_middleware(
             if auth::ensure_token_not_revoked(&state, token).await.is_err() {
                 return ApiError::Unauthorized.into_response();
             }
-            let user_id = match auth::extract_user_id_from_token_str_with_fallback(
+            let session = match auth::extract_auth_session_from_token_str_with_fallback(
                 token,
                 &state.secrets.jwt_secret,
                 state.secrets.jwt_secret_old.as_deref(),
             ) {
-                Ok(user_id) => user_id,
+                Ok(session) => session,
                 Err(_) => return ApiError::Unauthorized.into_response(),
             };
-            if let Err(err) = auth::ensure_user_not_banned(&state, &user_id).await {
+            if let Err(err) = auth::ensure_user_not_banned(&state, &session.user_id).await {
                 return err.into_response();
             }
+            request.extensions_mut().insert(session);
         }
     }
 

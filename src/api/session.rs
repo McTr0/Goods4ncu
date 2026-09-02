@@ -57,6 +57,9 @@ impl axum::extract::FromRequestParts<AppState> for Session {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
+        if let Some(session) = parts.extensions.get::<AuthSessionContext>() {
+            return Ok(Session(session.clone()));
+        }
         let token = bearer_token(parts).ok_or(ApiError::Unauthorized)?;
         decode_session(token, state).map(Session)
     }
@@ -77,6 +80,9 @@ impl axum::extract::FromRequestParts<AppState> for OptionalSession {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
+        if let Some(session) = parts.extensions.get::<AuthSessionContext>() {
+            return Ok(OptionalSession(Some(session.clone())));
+        }
         match bearer_token(parts) {
             None => Ok(OptionalSession(None)),
             Some(token) => decode_session(token, state).map(|s| OptionalSession(Some(s))),
@@ -101,8 +107,12 @@ impl axum::extract::FromRequestParts<AppState> for VerifiedTenant {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let token = bearer_token(parts).ok_or(ApiError::Unauthorized)?;
-        let session = decode_session(token, state)?;
+        let session = if let Some(session) = parts.extensions.get::<AuthSessionContext>() {
+            session.clone()
+        } else {
+            let token = bearer_token(parts).ok_or(ApiError::Unauthorized)?;
+            decode_session(token, state)?
+        };
         let tenant = CampusService::new(state.infra.db.clone())
             .require_tenant_context_for_session(&session.user_id, session.campus_id)
             .await?;
@@ -110,5 +120,184 @@ impl axum::extract::FromRequestParts<AppState> for VerifiedTenant {
             session,
             campus_id: tenant.campus_id,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::auth;
+    use axum::extract::FromRequestParts;
+    use axum::http::Request;
+
+    fn test_state() -> AppState {
+        let pool = sqlx::PgPool::connect_lazy("postgres://unused/unused").expect("lazy pool");
+        crate::api::auth::tests::build_test_state(pool)
+    }
+
+    fn sample_session() -> AuthSessionContext {
+        AuthSessionContext {
+            user_id: "user-test-123".to_string(),
+            role: "user".to_string(),
+            campus_id: Some(Uuid::new_v4()),
+            auth_time: Some(chrono::Utc::now().timestamp()),
+        }
+    }
+
+    #[tokio::test]
+    async fn session_prefers_injected_extension_without_header() {
+        let state = test_state();
+        let expected = sample_session();
+
+        let req = Request::builder()
+            .extension(expected.clone())
+            .body(())
+            .unwrap();
+        let (mut parts, _) = req.into_parts();
+
+        let session = Session::from_request_parts(&mut parts, &state)
+            .await
+            .expect("Session extraction from extension should succeed");
+        assert_eq!(session.0, expected);
+    }
+
+    #[tokio::test]
+    async fn session_prefers_injected_extension_over_invalid_header() {
+        let state = test_state();
+        let expected = sample_session();
+
+        // Even with an invalid Authorization header, the injected extension takes precedence
+        let req = Request::builder()
+            .header("Authorization", "Bearer invalid-garbage-token")
+            .extension(expected.clone())
+            .body(())
+            .unwrap();
+        let (mut parts, _) = req.into_parts();
+
+        let session = Session::from_request_parts(&mut parts, &state)
+            .await
+            .expect("Session extraction should prefer extension");
+        assert_eq!(session.0, expected);
+    }
+
+    #[tokio::test]
+    async fn session_falls_back_to_header_decoding() {
+        let state = test_state();
+        let (token, _, _) = auth::generate_access_token(
+            "user-fallback-456",
+            "user",
+            &state.secrets.jwt_secret,
+            3600,
+        )
+        .expect("token generation");
+
+        let req = Request::builder()
+            .header("Authorization", format!("Bearer {token}"))
+            .body(())
+            .unwrap();
+        let (mut parts, _) = req.into_parts();
+
+        let session = Session::from_request_parts(&mut parts, &state)
+            .await
+            .expect("Session should decode valid fallback token");
+        assert_eq!(session.0.user_id, "user-fallback-456");
+        assert_eq!(session.0.role, "user");
+    }
+
+    #[tokio::test]
+    async fn session_rejects_missing_extension_and_header() {
+        let state = test_state();
+        let req = Request::builder().body(()).unwrap();
+        let (mut parts, _) = req.into_parts();
+
+        let err = Session::from_request_parts(&mut parts, &state)
+            .await
+            .expect_err("Session should fail when missing");
+        assert!(matches!(err, ApiError::Unauthorized));
+    }
+
+    #[tokio::test]
+    async fn session_rejects_invalid_token_header_without_extension() {
+        let state = test_state();
+        let req = Request::builder()
+            .header("Authorization", "Bearer bad-token")
+            .body(())
+            .unwrap();
+        let (mut parts, _) = req.into_parts();
+
+        let err = Session::from_request_parts(&mut parts, &state)
+            .await
+            .expect_err("Session should fail with invalid token");
+        assert!(matches!(err, ApiError::Unauthorized));
+    }
+
+    #[tokio::test]
+    async fn optional_session_prefers_injected_extension() {
+        let state = test_state();
+        let expected = sample_session();
+
+        let req = Request::builder()
+            .extension(expected.clone())
+            .body(())
+            .unwrap();
+        let (mut parts, _) = req.into_parts();
+
+        let optional_session = OptionalSession::from_request_parts(&mut parts, &state)
+            .await
+            .expect("OptionalSession should succeed");
+        assert_eq!(optional_session.0, Some(expected));
+    }
+
+    #[tokio::test]
+    async fn optional_session_guest_without_token_or_extension() {
+        let state = test_state();
+        let req = Request::builder().body(()).unwrap();
+        let (mut parts, _) = req.into_parts();
+
+        let optional_session = OptionalSession::from_request_parts(&mut parts, &state)
+            .await
+            .expect("Guest should succeed with None");
+        assert_eq!(optional_session.0, None);
+    }
+
+    #[tokio::test]
+    async fn optional_session_falls_back_to_header_decoding() {
+        let state = test_state();
+        let (token, _, _) = auth::generate_access_token(
+            "guest-become-user",
+            "user",
+            &state.secrets.jwt_secret,
+            3600,
+        )
+        .expect("token generation");
+
+        let req = Request::builder()
+            .header("Authorization", format!("Bearer {token}"))
+            .body(())
+            .unwrap();
+        let (mut parts, _) = req.into_parts();
+
+        let optional_session = OptionalSession::from_request_parts(&mut parts, &state)
+            .await
+            .expect("OptionalSession should decode token");
+        assert_eq!(
+            optional_session.0.map(|s| s.user_id),
+            Some("guest-become-user".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn optional_session_rejects_invalid_token_without_extension() {
+        let state = test_state();
+        let req = Request::builder()
+            .header("Authorization", "Bearer invalid-guest-token")
+            .body(())
+            .unwrap();
+        let (mut parts, _) = req.into_parts();
+
+        let err = OptionalSession::from_request_parts(&mut parts, &state)
+            .await
+            .expect_err("Malformed token must be rejected, not downgraded to guest");
+        assert!(matches!(err, ApiError::Unauthorized));
     }
 }
