@@ -73,3 +73,5 @@ sensitive_data_archive/
 # === Local Model & Raw Asset Scratchpads ===
 /Doro/
 
+# Local Codex session compaction notes; useful on this workstation only.
+/docs/codex-session-noise-archive.md
