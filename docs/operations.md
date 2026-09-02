@@ -58,7 +58,7 @@
 ## GitHub Actions 一键部署（paratera 实例）
 
 由于本地交叉编译受限（macOS SQLx proc-macro 链接受损），生产二进制在 GitHub Actions
-上构建，workflow 为 `.github/workflows/deploy.yml`，推 master 或手动 `workflow_dispatch`
+上构建，workflow 为 `.github/workflows/deploy.yml`，推 main 或手动 `workflow_dispatch`
 即触发：构建 Rust release 二进制 + Flutter web，然后经 scp 上传到服务器并把进程
 替换重启，最后用 `GET /api/health` 自检。
 

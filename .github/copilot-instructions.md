@@ -203,7 +203,7 @@ Examples:
 **Common scopes:** `auth`, `api`, `llm`, `db`, `cli`, `mobile`, `ci`
 
 **PR requirements:**
-1. Rebase onto latest `master`
+1. Rebase onto latest `main`
 2. All tests pass: `cargo test --lib` minimum
 3. Linting clean: `cargo clippy --all-targets -- -D warnings`
 4. Formatted: `cargo fmt -- --check`
