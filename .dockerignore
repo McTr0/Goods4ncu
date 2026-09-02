@@ -1,0 +1,6 @@
+target/
+mobile/
+.git/
+.github/
+docs/
+scripts/

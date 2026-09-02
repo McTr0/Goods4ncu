@@ -29,6 +29,7 @@ RUN cargo build --release && rm -rf src
 
 # Copy build-time resources required by compile-time macros.
 COPY migrations ./migrations
+COPY persona ./persona
 
 # Copy actual source code
 COPY src ./src
