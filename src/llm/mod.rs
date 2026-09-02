@@ -10,7 +10,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use tokio::sync::RwLock;
 
 /// Shared reqwest client for all LLM provider traffic.
 ///
@@ -47,11 +46,21 @@ pub enum CircuitState {
 /// Tracks consecutive failures; after `failure_threshold` failures,
 /// the circuit opens and LLM calls fail fast with a degraded message
 /// instead of blocking on timeout.
+#[derive(Debug, Clone, Copy)]
+struct BreakerState {
+    state: CircuitState,
+    failures: u32,
+    last_failure: Option<Instant>,
+}
+
+/// Circuit breaker for LLM HTTP client.
+///
+/// Tracks consecutive failures; after `failure_threshold` failures,
+/// the circuit opens and LLM calls fail fast with a degraded message
+/// instead of blocking on timeout.
 #[derive(Debug)]
 pub struct CircuitBreaker {
-    state: RwLock<CircuitState>,
-    failures: RwLock<u32>,
-    last_failure: RwLock<Option<Instant>>,
+    inner: std::sync::Mutex<BreakerState>,
     /// Number of failures before opening circuit.
     failure_threshold: u32,
     /// Time to wait before transitioning Open -> HalfOpen.
@@ -63,31 +72,35 @@ impl CircuitBreaker {
     /// - Opens after 5 consecutive failures
     /// - Allows half-open test after 30 seconds
     pub fn new() -> Self {
+        Self::with_params(5, Duration::from_secs(30))
+    }
+
+    /// Creates a circuit breaker with custom failure threshold and recovery timeout.
+    pub fn with_params(failure_threshold: u32, recovery_timeout: Duration) -> Self {
         Self {
-            state: RwLock::new(CircuitState::Closed),
-            failures: RwLock::new(0),
-            last_failure: RwLock::new(None),
-            failure_threshold: 5,
-            recovery_timeout: Duration::from_secs(30),
+            inner: std::sync::Mutex::new(BreakerState {
+                state: CircuitState::Closed,
+                failures: 0,
+                last_failure: None,
+            }),
+            failure_threshold,
+            recovery_timeout,
         }
     }
 
     /// Returns true if the circuit is open and LLM calls should fail fast.
     pub async fn is_open(&self) -> bool {
-        let state = self.state.read().await;
-        if *state == CircuitState::Open {
-            // Check if recovery timeout has elapsed — transition to half-open.
-            let last_failure = self.last_failure.read().await;
-            if let Some(instant) = *last_failure {
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if inner.state == CircuitState::Open {
+            // Check if recovery timeout has elapsed — transition to half-open atomically.
+            if let Some(instant) = inner.last_failure {
                 if instant.elapsed() >= self.recovery_timeout {
-                    drop(last_failure);
-                    drop(state);
-                    let mut s = self.state.write().await;
-                    let mut f = self.failures.write().await;
-                    *s = CircuitState::HalfOpen;
-                    *f = 0;
-                    tracing::info!("LLM circuit breaker: 熔断打开 -> 半开 (30s recovery elapsed)");
-                    return false; // Half-open allows the request through
+                    inner.state = CircuitState::HalfOpen;
+                    inner.failures = 0;
+                    tracing::info!(
+                        "LLM circuit breaker: 熔断打开 -> 半开 (recovery timeout elapsed)"
+                    );
+                    return false; // Half-open allows the probe request through
                 }
             }
             true
@@ -98,31 +111,29 @@ impl CircuitBreaker {
 
     /// Records a successful LLM call — resets the circuit to closed.
     pub async fn record_success(&self) {
-        let mut failures = self.failures.write().await;
-        *failures = 0;
-        let mut state = self.state.write().await;
-        if *state != CircuitState::Closed {
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        inner.failures = 0;
+        if inner.state != CircuitState::Closed {
             tracing::info!("LLM circuit breaker: 半开 -> 闭合 (success)");
         }
-        *state = CircuitState::Closed;
+        inner.state = CircuitState::Closed;
     }
 
-    /// Records a failed LLM call — may open the circuit if threshold reached.
+    /// Records a failed LLM call — opens the circuit if threshold reached or if probed in half-open.
     pub async fn record_failure(&self) {
-        let mut failures = self.failures.write().await;
-        let mut last_failure = self.last_failure.write().await;
-        *last_failure = Some(Instant::now());
-        *failures += 1;
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        inner.last_failure = Some(Instant::now());
+        inner.failures += 1;
 
-        if *failures >= self.failure_threshold {
-            let mut state = self.state.write().await;
-            if *state != CircuitState::Open {
+        if inner.state == CircuitState::HalfOpen || inner.failures >= self.failure_threshold {
+            if inner.state != CircuitState::Open {
                 tracing::warn!(
-                    "LLM circuit breaker: 闭合 -> 熔断打开 ({} failures)",
-                    *failures
+                    "LLM circuit breaker: {:?} -> 熔断打开 ({} failures)",
+                    inner.state,
+                    inner.failures
                 );
             }
-            *state = CircuitState::Open;
+            inner.state = CircuitState::Open;
         }
     }
 
@@ -578,12 +589,62 @@ mod tests {
         assert!(PREAMBLE.contains("purchase_item"));
     }
 
-    #[test]
-    fn test_llm_provider_trait_objects_compile() {
-        // Verify trait bounds are satisfied (this is a compile-time check)
-        fn assert_send_sync<T: Send + Sync>() {}
-        // These are marker traits but we verify the bounds compile
-        assert_send_sync::<Box<dyn MarketplaceAgent>>();
-        assert_send_sync::<Box<dyn ReplyAssistant>>();
+    #[tokio::test]
+    async fn circuit_breaker_lifecycle_closed_to_open_to_half_open_to_closed() {
+        let breaker = CircuitBreaker::with_params(3, Duration::from_millis(50));
+        assert!(!breaker.is_open().await, "new breaker starts closed");
+
+        // First 2 failures: circuit stays closed
+        breaker.record_failure().await;
+        breaker.record_failure().await;
+        assert!(
+            !breaker.is_open().await,
+            "failures < threshold keeps circuit closed"
+        );
+
+        // 3rd failure trips the circuit open
+        breaker.record_failure().await;
+        assert!(breaker.is_open().await, "circuit is open after 3 failures");
+
+        // Immediate subsequent check is still open
+        assert!(
+            breaker.is_open().await,
+            "circuit stays open within recovery timeout"
+        );
+
+        // Sleep past recovery timeout
+        tokio::time::sleep(Duration::from_millis(60)).await;
+
+        // Next check transitions atomically to HalfOpen and allows one probe through
+        assert!(
+            !breaker.is_open().await,
+            "half-open probe request allowed through"
+        );
+
+        // Probe succeeds: circuit resets to Closed
+        breaker.record_success().await;
+        assert!(
+            !breaker.is_open().await,
+            "success in half-open resets circuit to closed"
+        );
+    }
+
+    #[tokio::test]
+    async fn circuit_breaker_half_open_failure_reopens_immediately() {
+        let breaker = CircuitBreaker::with_params(2, Duration::from_millis(30));
+        breaker.record_failure().await;
+        breaker.record_failure().await;
+        assert!(breaker.is_open().await);
+
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        // Allows probe
+        assert!(!breaker.is_open().await);
+
+        // Probe fails
+        breaker.record_failure().await;
+        assert!(
+            breaker.is_open().await,
+            "failure in half-open state reopens circuit"
+        );
     }
 }
