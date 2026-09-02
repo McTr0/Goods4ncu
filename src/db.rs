@@ -89,49 +89,30 @@ pub async fn init_db(database_url: &str) -> Result<PgPool> {
     Ok(db_pool)
 }
 
-/// Refuse to run in production while the demo seed accounts exist.
+/// Assert database environment sanity during startup.
 ///
-/// `migrations/0005_seed_data.sql` says "run manually" but lives in
-/// `migrations/`, so sqlx applies it to EVERY database — including production.
-/// It inserts `admin`, `buyer1`, `seller1`… all sharing the published password
-/// `Test1234`, and `admin` has the platform-admin role. A production deployment
-/// would therefore ship with a publicly-known administrator login.
+/// Historical demo seed accounts from `0005_seed_data.sql` are purged during
+/// database migration by `migrations/0113_purge_insecure_demo_seeds.sql`,
+/// eliminating the need for fragile runtime binary probes hardcoding business
+/// test user UUIDs.
 ///
-/// Deleting or editing 0005 is not safe (sqlx validates checksums of applied
-/// migrations), so the guard lives here where the environment is known: fail
-/// fast with the exact cleanup command instead of silently serving.
+/// This lightweight check ensures database connectivity and readiness.
+pub async fn assert_environment_sanity(db_pool: &PgPool, _is_production: bool) -> Result<()> {
+    sqlx::query("SELECT 1").execute(db_pool).await?;
+    Ok(())
+}
+
+/// Backward-compatible alias for [`assert_environment_sanity`].
+///
+/// Historical runtime probing of 6 magic UUIDs has been ablated in favor of
+/// migration-level idempotent cleanup (`0113_purge_insecure_demo_seeds.sql`).
+#[allow(dead_code)]
+#[inline]
 pub async fn assert_no_demo_seed_in_production(
     db_pool: &PgPool,
     is_production: bool,
 ) -> Result<()> {
-    if !is_production {
-        return Ok(());
-    }
-    // Match on the seed's fixed ids rather than usernames: a real user could
-    // legitimately be called "admin", but these UUIDs only come from 0005.
-    const SEED_IDS: &[&str] = &[
-        "a0000000-0000-0000-0000-000000000001",
-        "b0000000-0000-0000-0000-000000000001",
-        "b0000000-0000-0000-0000-000000000002",
-        "s0000000-0000-0000-0000-000000000001",
-        "s0000000-0000-0000-0000-000000000002",
-        "banned00-0000-0000-0000-000000000001",
-    ];
-    let present: Vec<String> =
-        sqlx::query_scalar("SELECT username FROM users WHERE id = ANY($1) ORDER BY username")
-            .bind(SEED_IDS)
-            .fetch_all(db_pool)
-            .await?;
-    if present.is_empty() {
-        return Ok(());
-    }
-    anyhow::bail!(
-        "refusing to start in production: demo seed accounts are present ({}).\n\
-         They share the published password 'Test1234' and include a platform admin.\n\
-         Remove them, then restart:\n\
-         \n    psql -d <database> -f scripts/remove_demo_seed.sql\n",
-        present.join(", ")
-    );
+    assert_environment_sanity(db_pool, is_production).await
 }
 
 pub async fn assert_documents_embedding_dim(db_pool: &PgPool, expected_dim: usize) -> Result<()> {

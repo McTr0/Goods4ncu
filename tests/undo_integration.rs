@@ -45,7 +45,10 @@ async fn seed_verified_user(pool: &sqlx::PgPool, user_id: &str) {
 
 fn safe_test_title(prefix: &str) -> String {
     let raw = Uuid::new_v4().simple().to_string();
-    let letters: String = raw.chars().map(|c| (b'a' + (c as u8 % 26)) as char).collect();
+    let letters: String = raw
+        .chars()
+        .map(|c| (b'a' + (c as u8 % 26)) as char)
+        .collect();
     format!("{prefix} {letters}")
 }
 

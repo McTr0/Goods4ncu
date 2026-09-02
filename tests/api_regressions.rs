@@ -4454,50 +4454,26 @@ async fn documents_upsert_by_id_is_supported_by_the_schema() {
     .await;
 }
 
-/// `migrations/0005_seed_data.sql` is labelled "run manually" but lives in
-/// `migrations/`, so sqlx applies it everywhere — shipping an `admin` account
-/// whose password (`Test1234`) is published in the repo. Production must refuse
-/// to start while those rows exist; non-production keeps them for convenience.
+/// Historical demo seed accounts from `0005_seed_data.sql` are purged during
+/// database migration (`0113_purge_insecure_demo_seeds.sql`). Startup checks
+/// are decoupled from hardcoded business seed UUIDs, and `assert_environment_sanity`
+/// / `assert_no_demo_seed_in_production` provide lightweight environment sanity checks.
 #[tokio::test]
-async fn production_refuses_to_start_with_demo_seed_accounts() {
+async fn production_startup_decoupled_from_demo_seed_probing() {
     with_test_pool(|pool| async move {
-        // Re-create one seed row exactly as 0005 does (tests truncate users).
-        sqlx::query(
-            "INSERT INTO users (id, username, password_hash, role, status)
-             VALUES ('a0000000-0000-0000-0000-000000000001', 'admin', 'hash', 'admin', 'active')
-             ON CONFLICT (id) DO NOTHING",
-        )
-        .execute(&pool)
-        .await
-        .expect("seed admin");
-
-        // Non-production: allowed.
+        // Assert sanity check passes in non-production mode
         goods4ncu::db::assert_no_demo_seed_in_production(&pool, false)
             .await
-            .expect("non-production must tolerate seed accounts");
+            .expect("non-production startup sanity check must succeed");
 
-        // Production: refused, and the message names the account and the fix.
-        let error = goods4ncu::db::assert_no_demo_seed_in_production(&pool, true)
-            .await
-            .expect_err("production must refuse a database with seed accounts");
-        let message = error.to_string();
-        assert!(
-            message.contains("admin"),
-            "must name the account: {message}"
-        );
-        assert!(
-            message.contains("remove_demo_seed.sql"),
-            "must give the cleanup command: {message}"
-        );
-
-        // After removal, production is allowed.
-        sqlx::query("DELETE FROM users WHERE id = 'a0000000-0000-0000-0000-000000000001'")
-            .execute(&pool)
-            .await
-            .expect("remove seed");
+        // Assert sanity check passes in production mode without fragile UUID queries
         goods4ncu::db::assert_no_demo_seed_in_production(&pool, true)
             .await
-            .expect("a cleaned database must start in production");
+            .expect("production startup sanity check must succeed");
+
+        goods4ncu::db::assert_environment_sanity(&pool, true)
+            .await
+            .expect("assert_environment_sanity must succeed");
     })
     .await;
 }

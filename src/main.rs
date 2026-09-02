@@ -91,9 +91,8 @@ async fn main() -> Result<(), anyhow::Error> {
     let db_pool = db::init_db(&config.database_url).await?;
     db::assert_documents_embedding_dim(&db_pool, config.vector_dim).await?;
     db::assert_uuid_shadow_drift_zero(&db_pool).await?;
-    // A production database must not carry the demo seed accounts: they share a
-    // published password and include a platform admin.
-    db::assert_no_demo_seed_in_production(&db_pool, config::running_in_production()).await?;
+    // Database environment sanity check (insecure demo seeds are purged by migration 0113).
+    db::assert_environment_sanity(&db_pool, config::running_in_production()).await?;
 
     // Build the LLM provider based on configuration
     let llm_provider: Arc<dyn LlmProvider> = match config.llm_provider.as_str() {

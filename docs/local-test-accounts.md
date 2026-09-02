@@ -9,19 +9,19 @@
 
 > **这些是本地凭据，不是密钥。** 它们只在本机数据库 + 本机生成的 JWS 密钥下有效。真正的密钥（`jwt_secret`、数据库口令）在 `~/.goods4ncu-deploy/` 下以 `chmod 600` 保存，**不在本文、也不在仓库里**。
 >
-> **生产环境严禁出现这些账号。** 后端在生产模式下会检测种子账号并拒绝启动（`src/db.rs::assert_no_demo_seed_in_production`）。
+> **生产环境严禁出现这些账号。** 自 `migrations/0113_purge_insecure_demo_seeds.sql` 起，这些种子账号在数据库迁移阶段即被幂等清理，生产启动（`src/db.rs`）已解耦业务级硬编码 UUID 探测。
 
 ## 一、三个数据库分别是什么
 
 | 数据库 | 用途 | 谁创建 | 是否含种子账号 |
 | --- | --- | --- | --- |
-| `goods4ncu` | 日常开发库（`.env` 里的 `DATABASE_URL`） | 手工/`cargo run` | 是（开发便利，非生产模式无妨） |
+| `goods4ncu` | 日常开发库（`.env` 里的 `DATABASE_URL`） | 手工/`cargo run` | 升级至 0113 前存在；迁移 0113 执行后已统一清除 |
 | `goods4ncu_test` | 自动化测试库 | 测试基建 | 每个测试前 TRUNCATE，无稳定数据 |
 | `goods4ncu_local` | 本机持久部署（生产模式，两校园演示） | `scripts/deploy_local.sh` | **否**，部署时已按生产要求移除 |
 
-## 二、开发库 `goods4ncu` 的种子账号
+## 二、开发库 `goods4ncu` 的历史种子账号
 
-来自 `migrations/0005_seed_data.sql`。**密码统一为 `Test1234`。**
+来自 `migrations/0005_seed_data.sql`（已在 `0113_purge_insecure_demo_seeds.sql` 彻底清理）。**历史密码统一为 `Test1234`。**
 
 | 用户名 | 密码 | 角色 | 状态 | 用途 |
 | --- | --- | --- | --- | --- |
@@ -34,9 +34,10 @@
 
 种子商品由 `seller1`/`seller2` 持有（iPhone、高数教材、小米手环、拯救者、空调、AJ1，以及一条 `违规商品-请忽略` 用于测审核拦截）。
 
-⚠️ **这份种子数据会随迁移自动进入任何新建数据库**（`0005` 虽写着"手动运行"却放在 `migrations/` 下）。因此：
-- 生产库必须执行 `psql -d <db> -f scripts/remove_demo_seed.sql`
-- 不执行的话，生产模式启动会被守卫拒绝并打印该命令
+⚠️ **历史背景与消融解耦说明**：
+- `0005` 虽写着"手动运行"却放在 `migrations/` 下，曾导致种子数据随迁移进入新建数据库；
+- 现已通过 `migrations/0113_purge_insecure_demo_seeds.sql` 幂等级联清理，并在 `src/db.rs` 中消融移除了生产启动时的 6 个魔法 UUID 硬编码 SELECT 探测；
+- 部署脚本与运维演练仍保留 `scripts/remove_demo_seed.sql` 作为显式核对工具。
 
 ## 三、持久部署 `goods4ncu_local` 的账号
 

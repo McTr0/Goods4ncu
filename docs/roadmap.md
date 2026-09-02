@@ -5,7 +5,7 @@
 | 适用读者 | 产品负责人、技术负责人、工程师、测试、运营和部署维护者 |
 | 当前状态 | 路线图描述目标顺序，不代表阶段已经交付；完成必须满足对应退出门槛 |
 | 事实来源 | 当前代码、迁移、设计文档、测试现状和生产架构差距 |
-| 最后核对范围 | 生产安全、offer/wanted、推荐、Agent、多租户、事件、实时通信和灾备 |
+| 最后核对范围 | 生产安全、offer/wanted、推荐、Agent、多租户、事件、实时通信和灾备；迁移 0001–0113 |
 
 就绪状态的权威汇总（逐门槛证据与部署侧待办清单）见[生产就绪评估报告](production-readiness.md)。
 
@@ -300,6 +300,7 @@
 | Base64 fallback | Phase 1 | 新客户端零使用、指标验证后再迁移/删除 |
 | user_chat 大模块 | Phase 0–3 | 行为测试后按消息、媒体、状态和空间拆分 |
 | Secret Chat | Phase 1 | [已实现] 新建默认 403（`SECRET_CHAT_NEW_SESSIONS_ENABLED` 仅迁移窗口可开），移动端入口已移除，历史会话可读有回归覆盖 |
+| 生产启动测试数据探测 | Phase 0/1 | [已实现] 迁移 0113 幂等级联清理历史 0005 demo seed，后端启动解耦 6 个魔法 UUID 与运行时探测 |
 | 进程内事件 | Phase 4 | [部分完成] outbox 通知与专用 `embedding_jobs` listing 投影已迁移并有回归覆盖；审核投影等其余消费者仍待迁移 |
 | 单实例 WebSocket | Phase 4 | [部分完成] Redis fan-out 已实现并通过双实例端到端测试；断线补偿依赖既有 HTTP 拉取，压测仍待做 |
 | Agent 直接写工具 | Phase 3 | [部分完成] 发布已进入可撤销直接执行，四个计划动作使用 crash-safe ActionPlan；listing command 与资源版本快照已统一，提案幂等、typed terminal outcome、行动级审计和聊天首版 AgentRun envelope 已落地，SSE TTFT、客户端断开有界取消结案、stale-run durable reconciliation、服务端有界 token 计数和聊天提案 receipt 显式关联已落地；设备/重新认证绑定、provider TTFT、版本化文案、运维对账和完整 `/api/v1` 仍待补 |

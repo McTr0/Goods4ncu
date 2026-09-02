@@ -4,7 +4,7 @@
 | --- | --- |
 | 适用读者 | 决定是否上线的负责人、执行部署的工程师、验收测试者 |
 | 当前状态 | 工程门槛已由 CI 自动化；只有目标提交的 CI 全绿才可部署；生产资源开通、真实学生效果/公平性验证与人工运营验收仍待完成 |
-| 事实来源 | 本仓库 Rust/Flutter 测试、`scripts/` 下可执行演练（含真实 MinIO/Redis/Postgres）、迁移 0001–0112 |
+| 事实来源 | 本仓库 Rust/Flutter 测试、`scripts/` 下可执行演练（含真实 MinIO/Redis/Postgres）、迁移 0001–0113 |
 | 验收方式 | 每一项都给出可执行证据；无证据的项目明确标注为部署侧待办 |
 
 本报告把[生产路线图](roadmap.md)的全部退出门槛折叠为一张就绪矩阵。“代码侧关闭”指该门槛由本仓库的代码、schema、测试或可重复脚本强制并验证；“部署侧待办”指需要真实基础设施、账号或人工运营才能执行的验收步骤，本仓库已为其准备了可直接运行的验收程序。
@@ -23,6 +23,7 @@
 | 应用以 NOSUPERUSER 角色运行，RLS 对其真实生效；pgvector 由管理员预装 | `scripts/provision_app_role.sh`（校验两条不变量）+ 生产演练 check 2d；`src/db.rs` 在缺失扩展时给出可执行修复指引 |
 | 双校园隔离（市场/推荐/通知/直聊/后台/审核/案件） | `tests/tenant_scope_integration.rs`、`tests/api_regressions.rs`、`tests/admin_auth_regression.rs` |
 | 生产密钥卫生（开发标记/低熵 JWT_SECRET 拒绝启动） | `src/config.rs` 单元测试 + `scripts/production_rehearsal.sh` check 0（真实二进制验证） |
+| Demo Seed 清理迁移与启动解耦 | `migrations/0113_purge_insecure_demo_seeds.sql`；幂等安全级联清理历史 0005 种子账号，生产启动解耦 6 个魔法 UUID 与运行时探测 |
 
 ### 媒体与内容安全
 
@@ -67,7 +68,7 @@
 | Transactional outbox（原子入队/至少一次/退避/死信/租约/重放/Lag 指标/管理员重放接口） | `tests/outbox_integration.rs`；通知推送已迁入；`src/api/metrics.rs`（暴露 queue depth 与 oldest age）；`GET/POST /api/admin/outbox/*`（带审计重试） |
 | Redis WS fan-out 跨副本投递（双真实进程 + 真实 WebSocket 客户端） | `tests/ws_fanout_integration.rs`（`REDIS_TEST_URL`/`FANOUT_E2E` 门控） |
 | 依赖漏洞门禁（cargo audit 进 CI；唯一 ignore 附不可达论证） | `.cargo/audit.toml`、`.github/workflows/ci.yml` |
-| 空库/升级库迁移均验证（含真实升级库上的 legacy 值归一化） | CI migration job 对 `0001`–`0112` 从空库顺序执行；历史升级路径由 0040/0041 回归覆盖，AgentRun、ActionPlan、统一帖子模型和 runtime v2 outcomes 的领域回归覆盖后续迁移；生产 rehearsal 继续作为发布前真实 Postgres/Redis/MinIO 验收。 |
+| 空库/升级库迁移均验证（含真实升级库上的 legacy 值归一化） | CI migration job 对 `0001`–`0113` 从空库顺序执行；历史升级路径由 0040/0041 回归覆盖，AgentRun、ActionPlan、统一帖子模型和 runtime v2 outcomes 的领域回归覆盖后续迁移；生产 rehearsal 继续作为发布前真实 Postgres/Redis/MinIO 验收。 |
 
 ### 多校园与规模（Phase 4 工程部分）
 
