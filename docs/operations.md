@@ -58,17 +58,23 @@
 ## GitHub Actions 一键部署（paratera 实例）
 
 由于本地交叉编译受限（macOS SQLx proc-macro 链接受损），生产二进制在 GitHub Actions
-上构建，workflow 为 `.github/workflows/deploy.yml`，推 main 或手动 `workflow_dispatch`
-即触发：构建 Rust release 二进制 + Flutter web，然后经 scp 上传到服务器并把进程
-替换重启，最后用 `GET /api/health` 自检。
+上构建。推送 `main` 或手动运行 `.github/workflows/ci.yml` 会先执行完整 CI；只有该次
+`main` CI 全部成功，`.github/workflows/deploy.yml` 才会构建 Rust release 二进制与
+Flutter web，经 scp 上传、替换并以 `GET /api/health` 验证。健康检查失败时 workflow
+自动恢复上一版二进制和 web 目录，并再次检查旧版本健康状态。
 
 仓库需要以下 Actions Secrets（实例重建后要更新，因为 Paratera 网关重启会换
 `ackcs-*` 实例 ID）：
 
 - `DEPLOY_HOST`（如 `ssh.zw1.paratera.com`）
 - `DEPLOY_PORT`（如 `2222`）
-- `DEPLOY_USER`（如 `root@ackcs-00gjhkuf`）
-- `DEPLOY_PASSWORD`
+- `DEPLOY_USER`（使用仅能管理 `/opt/goods4ncu` 的专用发布账号，不使用 root）
+- `DEPLOY_SSH_PRIVATE_KEY`（专用发布账号的私钥；公钥仅安装到该账号）
+- `DEPLOY_KNOWN_HOSTS`（经独立渠道核对指纹后的目标主机 `known_hosts` 记录）
+
+不要用在线首次连接得到的主机指纹直接填入 `DEPLOY_KNOWN_HOSTS`；应先通过云平台控制台
+或管理员核对 ED25519/RSA 指纹，再保存对应记录。轮换主机密钥时先核对新指纹，再更新
+Secret。生产 Environment 应配置 required reviewers，避免 secret 变更后未经复核直接发布。
 
 服务器目录约定：
 
@@ -87,6 +93,9 @@
 - ⚠️ 写远端 `stop.sh` 类脚本时**永远不要用 `pkill -f`**，会误杀当前 SSH 会话
   自身（其命令行中包含路径字符串），导致任务在远端被 SIGTERM。应该用
   pidfile 或 `pkill -x <进程名>`。
+- 发布账号需要对 `/opt/goods4ncu/bin`、`/opt/goods4ncu/web*`、
+  `/opt/goods4ncu/{start,stop}.sh` 和 `/tmp/goods4ncu-web.tar.gz` 拥有最小必要权限；
+  不应授予无口令的通用 sudo。
 - 生产模式强制要求：邮件投递 webhook、图片审核 API、`MEDIA_PRIVATE_BUCKET=true` + OSS
   凭据。缺任意一项都会 panic 拒绝启动。
 

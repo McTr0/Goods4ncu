@@ -3,8 +3,8 @@
 | 项目 | 内容 |
 | --- | --- |
 | 适用读者 | 决定是否上线的负责人、执行部署的工程师、验收测试者 |
-| 当前状态 | 关键工程安全门槛已关闭；本机已用真实 Postgres/Redis/MinIO 完成生产模式演练；生产资源开通、真实学生效果/公平性验证与人工运营验收仍待完成 |
-| 事实来源 | 本仓库 Rust/Flutter 测试、`scripts/` 下可执行演练（含真实 MinIO/Redis/Postgres）、迁移 0001–0079 |
+| 当前状态 | 工程门槛已由 CI 自动化；只有目标提交的 CI 全绿才可部署；生产资源开通、真实学生效果/公平性验证与人工运营验收仍待完成 |
+| 事实来源 | 本仓库 Rust/Flutter 测试、`scripts/` 下可执行演练（含真实 MinIO/Redis/Postgres）、迁移 0001–0111 |
 | 验收方式 | 每一项都给出可执行证据；无证据的项目明确标注为部署侧待办 |
 
 本报告把[生产路线图](roadmap.md)的全部退出门槛折叠为一张就绪矩阵。“代码侧关闭”指该门槛由本仓库的代码、schema、测试或可重复脚本强制并验证；“部署侧待办”指需要真实基础设施、账号或人工运营才能执行的验收步骤，本仓库已为其准备了可直接运行的验收程序。
@@ -65,7 +65,7 @@
 | Transactional outbox（原子入队/至少一次/退避/死信/租约/重放） | `tests/outbox_integration.rs`；通知推送已迁入 |
 | Redis WS fan-out 跨副本投递（双真实进程 + 真实 WebSocket 客户端） | `tests/ws_fanout_integration.rs`（`REDIS_TEST_URL`/`FANOUT_E2E` 门控） |
 | 依赖漏洞门禁（cargo audit 进 CI；唯一 ignore 附不可达论证） | `.cargo/audit.toml`、`.github/workflows/ci.yml` |
-| 空库/升级库迁移均验证（含真实升级库上的 legacy 值归一化） | CI migration job + 0040/0041 升级路径实测；当前测试库已升级到 `0080` 并通过 AgentRun/ActionPlan/RLS 回归，`0079`/`0080` 的完整空库/滚动升级仍由 migration job 作为发布门槛；`0068` 清理 attention 兼容影子列，`0069` 为媒体审核 processing 任务增加可回收 lease，`0070`/`0071` 的 persona asset 表现在只保留回滚/清理边界，`0080` 撤销旧素材并收敛系统目录，`0072` 为审核任务保存稳定对象 key，`0077`/`0078` 为 AgentRun envelope 及校园清理约束，`0079` 为 ActionPlan receipt 可空显式关联；2026-08-12 在 `0072` 后重跑 production rehearsal（通过 `PGHOST/PGPORT` 接入本地实例），双副本空库启动、真实 MinIO OSS probe、presigned PUT/GET、signed DELETE、撤销审计、远端对象清理、RLS、滚动重启、PITR 和有序排空均通过。`0080` 后 Persona 只需目录 token 验收。 |
+| 空库/升级库迁移均验证（含真实升级库上的 legacy 值归一化） | CI migration job 对 `0001`–`0111` 从空库顺序执行；历史升级路径由 0040/0041 回归覆盖，AgentRun、ActionPlan、统一帖子模型和 runtime v2 outcomes 的领域回归覆盖后续迁移；生产 rehearsal 继续作为发布前真实 Postgres/Redis/MinIO 验收。 |
 
 ### 多校园与规模（Phase 4 工程部分）
 
@@ -93,4 +93,4 @@
 
 ## 三、结论
 
-工程可交付的全部生产门槛已关闭并以可执行证据固定；一键 `scripts/production_rehearsal.sh` 与 `scripts/capacity_drill.sh` 即发布验收。上线决定所需的剩余工作全部属于第二节——基础设施开通与人工运营验收。在真实环境重跑第二节验收程序并全部通过之前，不应宣布对真实用户开放。
+工程门槛已由测试、脚本和 CI 固定；单次历史通过不代表任意新提交可发布，目标提交必须先取得完整 CI 成功结论，部署 workflow 才会运行。`scripts/production_rehearsal.sh` 与 `scripts/capacity_drill.sh` 是发布验收的一部分。上线决定所需的剩余工作属于第二节——基础设施开通与人工运营验收；在真实环境重跑并全部通过之前，不应宣布对真实用户开放。

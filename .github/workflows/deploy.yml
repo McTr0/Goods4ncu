@@ -1,9 +1,13 @@
 name: deploy
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: deploy-production
@@ -12,11 +16,14 @@ concurrency:
 jobs:
   build:
     name: Build release binary and Flutter web
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     outputs:
-      sha: ${{ github.sha }}
+      sha: ${{ github.event.workflow_run.head_sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -37,6 +44,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: 3.41.4
           channel: stable
           cache: true
 
@@ -55,7 +63,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dist
+          name: dist-${{ github.event.workflow_run.head_sha }}
           path: dist/
           retention-days: 14
 
@@ -67,48 +75,100 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: dist-${{ needs.build.outputs.sha }}
           path: dist
 
-      - name: Install sshpass
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Configure trusted SSH connection
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_SSH_PRIVATE_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_deploy ~/.ssh/known_hosts
 
       - name: Upload artifacts
         env:
-          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           set -euo pipefail
-          export SSHPASS="$DEPLOY_PASSWORD"
-          SSH_OPTS="-o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -P ${{ secrets.DEPLOY_PORT }}"
-          sshpass -e scp $SSH_OPTS dist/goods4ncu ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/goods4ncu/bin/goods4ncu.new
-          sshpass -e scp $SSH_OPTS dist/web.tar.gz ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/goods4ncu-web.tar.gz
+          SSH_OPTS=(-o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/id_deploy -P "$DEPLOY_PORT")
+          scp "${SSH_OPTS[@]}" dist/goods4ncu "$DEPLOY_USER@$DEPLOY_HOST:/opt/goods4ncu/bin/goods4ncu.new"
+          scp "${SSH_OPTS[@]}" dist/web.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/tmp/goods4ncu-web.tar.gz"
 
-      - name: Swap binaries and restart
+      - name: Swap release, verify health, and roll back on failure
         env:
-          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           set -euo pipefail
-          export SSHPASS="$DEPLOY_PASSWORD"
-          SSH_OPTS="-o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -p ${{ secrets.DEPLOY_PORT }}"
-          sshpass -e ssh $SSH_OPTS ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} '
-            set -e
-            chmod +x /opt/goods4ncu/bin/goods4ncu.new
-            mv /opt/goods4ncu/bin/goods4ncu.new /opt/goods4ncu/bin/goods4ncu
-            rm -rf /opt/goods4ncu/web.new && mkdir -p /opt/goods4ncu/web.new
-            tar -xzf /tmp/goods4ncu-web.tar.gz -C /opt/goods4ncu/web.new
-            rm -f /tmp/goods4ncu-web.tar.gz
-            /opt/goods4ncu/stop.sh
-            rm -rf /opt/goods4ncu/web && mv /opt/goods4ncu/web.new /opt/goods4ncu/web
-            /opt/goods4ncu/start.sh
-            sleep 3
-            for i in 1 2 3 4 5 6 7 8 9 10; do
+          SSH_OPTS=(-o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/id_deploy -p "$DEPLOY_PORT")
+          ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" 'bash -se' <<'REMOTE'
+          set -Eeuo pipefail
+          app_root=/opt/goods4ncu
+          binary_swapped=false
+          web_swapped=false
+
+          rollback() {
+            original_status=$?
+            trap - ERR
+            set +e
+            echo "deployment failed; restoring previous release" >&2
+            "$app_root/stop.sh"
+            if [[ "$binary_swapped" == true && -f "$app_root/bin/goods4ncu.previous" ]]; then
+              mv -f "$app_root/bin/goods4ncu.previous" "$app_root/bin/goods4ncu"
+            fi
+            if [[ "$web_swapped" == true && -d "$app_root/web.previous" ]]; then
+              rm -rf "$app_root/web.failed"
+              mv "$app_root/web" "$app_root/web.failed"
+              mv "$app_root/web.previous" "$app_root/web"
+            fi
+            "$app_root/start.sh"
+            for _ in {1..10}; do
               if curl -fsS http://127.0.0.1:3000/api/health > /dev/null; then
-                echo "backend healthy"
-                exit 0
+                echo "previous release restored" >&2
+                exit "$original_status"
               fi
               sleep 3
             done
-            echo "backend failed health check" >&2
-            tail -50 /opt/goods4ncu/logs/backend.log >&2 || true
-            exit 1
-          '
+            echo "rollback failed health check; manual intervention required" >&2
+            exit "$original_status"
+          }
+          trap rollback ERR
+
+          chmod +x "$app_root/bin/goods4ncu.new"
+          rm -f "$app_root/bin/goods4ncu.previous"
+          cp -p "$app_root/bin/goods4ncu" "$app_root/bin/goods4ncu.previous"
+
+          rm -rf "$app_root/web.new"
+          mkdir -p "$app_root/web.new"
+          tar -xzf /tmp/goods4ncu-web.tar.gz -C "$app_root/web.new"
+          rm -f /tmp/goods4ncu-web.tar.gz
+
+          "$app_root/stop.sh"
+          mv -f "$app_root/bin/goods4ncu.new" "$app_root/bin/goods4ncu"
+          binary_swapped=true
+          rm -rf "$app_root/web.previous"
+          mv "$app_root/web" "$app_root/web.previous"
+          mv "$app_root/web.new" "$app_root/web"
+          web_swapped=true
+          "$app_root/start.sh"
+
+          for _ in {1..10}; do
+            if curl -fsS http://127.0.0.1:3000/api/health > /dev/null; then
+              trap - ERR
+              echo "backend healthy"
+              exit 0
+            fi
+            sleep 3
+          done
+          tail -50 "$app_root/logs/backend.log" >&2 || true
+          false
+          REMOTE
