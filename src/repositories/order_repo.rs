@@ -36,42 +36,6 @@ impl PostgresOrderRepository {
         Self { pool }
     }
 
-    async fn resolve_shadow_fk_ids_in_tx(
-        tx: &mut Transaction<'_, Postgres>,
-        listing_id: &str,
-        buyer_id: &str,
-        seller_id: &str,
-    ) -> Result<(Uuid, Uuid, Uuid), ApiError> {
-        let row = sqlx::query(
-            r#"
-            SELECT i.new_id AS listing_uuid,
-                   buyer.new_id AS buyer_uuid,
-                   seller.new_id AS seller_uuid
-            FROM inventory i
-            JOIN users buyer ON buyer.id = $2
-            JOIN users seller ON seller.id = $3
-            WHERE i.id = $1
-            "#,
-        )
-        .bind(listing_id)
-        .bind(buyer_id)
-        .bind(seller_id)
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-        .ok_or_else(|| {
-            ApiError::Internal(anyhow::anyhow!(
-                "Missing UUID shadow dependency for order insert"
-            ))
-        })?;
-
-        Ok((
-            row.get("listing_uuid"),
-            row.get("buyer_uuid"),
-            row.get("seller_uuid"),
-        ))
-    }
-
     pub async fn create_pending_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -84,30 +48,23 @@ impl PostgresOrderRepository {
         let order_uuid = Uuid::parse_str(id).map_err(|e| {
             ApiError::Internal(anyhow::anyhow!("Order id must be UUID-compatible: {}", e))
         })?;
-        let (listing_uuid, buyer_uuid, seller_uuid) =
-            Self::resolve_shadow_fk_ids_in_tx(tx, listing_id, buyer_id, seller_id).await?;
 
         sqlx::query(
             r#"
             INSERT INTO orders (
                 id, new_id, campus_id,
-                listing_id, new_listing_id,
-                buyer_id, new_buyer_id,
-                seller_id, new_seller_id,
+                listing_id, buyer_id, seller_id,
                 final_price, status
             )
             VALUES ($1, $2, (SELECT campus_id FROM inventory WHERE id = $3),
-                    $3, $4, $5, $6, $7, $8, $9, 'intent_pending')
+                    $3, $4, $5, $6, 'intent_pending')
             "#,
         )
         .bind(id)
         .bind(order_uuid)
         .bind(listing_id)
-        .bind(listing_uuid)
         .bind(buyer_id)
-        .bind(buyer_uuid)
         .bind(seller_id)
-        .bind(seller_uuid)
         .bind(final_price)
         .execute(&mut **tx)
         .await
@@ -172,18 +129,13 @@ impl OrderRepository for PostgresOrderRepository {
             r#"
             INSERT INTO orders (
                 id, new_id, campus_id,
-                listing_id, new_listing_id,
-                buyer_id, new_buyer_id,
-                seller_id, new_seller_id,
+                listing_id, buyer_id, seller_id,
                 final_price, status
             )
             VALUES (
                 $1, $2,
                 (SELECT campus_id FROM inventory WHERE id = $3),
-                $3, (SELECT new_id FROM inventory WHERE id = $3),
-                $4, (SELECT new_id FROM users WHERE id = $4),
-                $5, (SELECT new_id FROM users WHERE id = $5),
-                $6, 'intent_pending'
+                $3, $4, $5, $6, 'intent_pending'
             )
             "#,
         )
@@ -415,6 +367,34 @@ mod tests {
             assert_eq!(row.get::<Uuid, _>("new_listing_id"), listing_uuid);
             assert_eq!(row.get::<Uuid, _>("new_buyer_id"), buyer_uuid);
             assert_eq!(row.get::<Uuid, _>("new_seller_id"), seller_uuid);
+
+            let mut tx = pool.begin().await.expect("begin tx");
+            let pending_order_id = Uuid::new_v4().to_string();
+            repo.create_pending_in_tx(
+                &mut tx,
+                &pending_order_id,
+                "listing-1",
+                "buyer-1",
+                "seller-1",
+                12000,
+            )
+            .await
+            .expect("create pending in tx");
+            tx.commit().await.expect("commit tx");
+            let pending_order_uuid = Uuid::parse_str(&pending_order_id).expect("uuid id");
+
+            let pending_row = sqlx::query(
+                "SELECT new_id, new_listing_id, new_buyer_id, new_seller_id FROM orders WHERE id = $1",
+            )
+            .bind(&pending_order_id)
+            .fetch_one(&pool)
+            .await
+            .expect("select pending order");
+
+            assert_eq!(pending_row.get::<Uuid, _>("new_id"), pending_order_uuid);
+            assert_eq!(pending_row.get::<Uuid, _>("new_listing_id"), listing_uuid);
+            assert_eq!(pending_row.get::<Uuid, _>("new_buyer_id"), buyer_uuid);
+            assert_eq!(pending_row.get::<Uuid, _>("new_seller_id"), seller_uuid);
         })
         .await;
     }
