@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Conditional import: only pull in flutter_secure_storage on non-web.
@@ -18,17 +18,26 @@ class TokenStorage {
   static const _jwtKey = 'jwt_token';
   static const _refreshKey = 'refresh_token';
 
+  bool _migrationChecked = false;
+
   // ---------------------------------------------------------------------------
   // Public API
   // ---------------------------------------------------------------------------
 
-  Future<String?> getAccessToken() async {
+  Future<void> _ensureMigrated() async {
+    if (kIsWeb || _migrationChecked) return;
+    _migrationChecked = true;
     await _migrateLegacyKeyIfNeeded(_jwtKey);
+    await _migrateLegacyKeyIfNeeded(_refreshKey);
+  }
+
+  Future<String?> getAccessToken() async {
+    await _ensureMigrated();
     return _read(_jwtKey);
   }
 
   Future<String?> getRefreshToken() async {
-    await _migrateLegacyKeyIfNeeded(_refreshKey);
+    await _ensureMigrated();
     return _read(_refreshKey);
   }
 
@@ -106,5 +115,10 @@ class TokenStorage {
 
     await secureWrite(key, legacyValue);
     await prefs.remove(key);
+  }
+
+  @visibleForTesting
+  void resetMigrationCheckForTesting() {
+    _migrationChecked = false;
   }
 }
