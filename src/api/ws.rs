@@ -13,11 +13,8 @@
 //! heartbeated via ping/pong. Dead connections are cleaned up automatically.
 
 use axum::extract::ws::Message as WsMsg;
-use axum::http::{HeaderMap, StatusCode};
-use axum::{
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    response::IntoResponse,
-};
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::response::Response;
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
@@ -25,10 +22,8 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::interval;
 
-use crate::api::auth::{
-    ensure_token_not_revoked, ensure_user_not_banned,
-    extract_auth_session_from_token_str_with_fallback,
-};
+use crate::api::error::ApiError;
+use crate::api::session::Session;
 use crate::api::AppState;
 use crate::services::campus::CampusService;
 
@@ -202,79 +197,21 @@ fn deliver_local_scoped(user_id: &str, campus_id: Option<uuid::Uuid>, payload: &
 
 /// GET /api/ws — WebSocket upgrade endpoint.
 ///
-/// Authentication is extracted from the Authorization header only.
+/// Authentication is extracted from the Authorization header via [`Session`].
 pub async fn ws_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
-    headers: HeaderMap,
+    Session(session): Session,
     ws: WebSocketUpgrade,
-) -> impl IntoResponse {
-    let token = match extract_bearer_token(&headers) {
-        Ok(token) => token,
-        Err(()) => {
-            tracing::warn!("WS auth failed: missing or malformed Authorization header");
-            return (
-                StatusCode::UNAUTHORIZED,
-                axum::response::Json(serde_json::json!({
-                    "error": "Unauthorized"
-                })),
-            )
-                .into_response();
-        }
-    };
-
-    if ensure_token_not_revoked(&state, token).await.is_err() {
-        tracing::warn!("WS auth failed: revoked token");
-        return (
-            StatusCode::UNAUTHORIZED,
-            axum::response::Json(serde_json::json!({
-                "error": "Unauthorized"
-            })),
-        )
-            .into_response();
-    }
-
-    let session = match extract_auth_session_from_token_str_with_fallback(
-        token,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    ) {
-        Ok(session) => session,
-        Err(err) => {
-            tracing::warn!(err = %err, "WS auth session extraction failed");
-            return (
-                StatusCode::UNAUTHORIZED,
-                axum::response::Json(serde_json::json!({
-                    "error": "Unauthorized"
-                })),
-            )
-                .into_response();
-        }
-    };
-    if let Err(err) = ensure_user_not_banned(&state, &session.user_id).await {
-        tracing::warn!(user_id = %session.user_id, "WS auth failed: user is not active");
-        return err.into_response();
-    }
+) -> Result<Response, ApiError> {
     if let Some(campus_id) = session.campus_id {
-        if let Err(error) = CampusService::new(state.infra.db.clone())
+        CampusService::new(state.infra.db.clone())
             .require_tenant_context_for_session(&session.user_id, Some(campus_id))
-            .await
-        {
-            return error.into_response();
-        }
+            .await?;
     }
 
-    ws.on_upgrade(move |socket| async move {
+    Ok(ws.on_upgrade(move |socket| async move {
         handle_socket(socket, session.user_id, session.campus_id).await;
-    })
-}
-
-fn extract_bearer_token(headers: &HeaderMap) -> Result<&str, ()> {
-    headers
-        .get("Authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .filter(|v| !v.is_empty())
-        .ok_or(())
+    }))
 }
 
 /// Handle a single WebSocket connection for its lifetime.
@@ -409,31 +346,6 @@ mod tests {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<WsConnections>();
         assert_send_sync::<Arc<WsConnections>>();
-    }
-
-    #[test]
-    fn test_extract_bearer_token_from_header() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "Authorization",
-            "Bearer eyJhbGciOiJIUzI1NiJ9.test".parse().expect("header"),
-        );
-
-        let token = extract_bearer_token(&headers).expect("token");
-        assert_eq!(token, "eyJhbGciOiJIUzI1NiJ9.test");
-    }
-
-    #[test]
-    fn test_extract_bearer_token_rejects_missing_header() {
-        let headers = HeaderMap::new();
-        assert!(extract_bearer_token(&headers).is_err());
-    }
-
-    #[test]
-    fn test_extract_bearer_token_rejects_malformed_header() {
-        let mut headers = HeaderMap::new();
-        headers.insert("Authorization", "Token abc".parse().expect("header"));
-        assert!(extract_bearer_token(&headers).is_err());
     }
 
     #[tokio::test]
