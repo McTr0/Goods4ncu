@@ -1,6 +1,6 @@
 use axum::{
-    extract::{Path, Query, State},
-    http::HeaderMap,
+    extract::{FromRequestParts, Path, Query, State},
+    http::{request::Parts, HeaderMap},
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -28,14 +28,144 @@ pub struct AdminScopeQuery {
     pub reason: Option<String>,
 }
 
-#[derive(Debug)]
-struct AdminScope {
-    actor_id: String,
-    campus_id: Uuid,
-    scope_reason: Option<String>,
-    is_platform_admin: bool,
-    recent_authentication_valid: bool,
-    recent_authentication_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+#[derive(Debug, Clone)]
+pub struct AdminScope {
+    pub actor_id: String,
+    pub campus_id: Uuid,
+    pub scope_reason: Option<String>,
+    pub is_platform_admin: bool,
+    pub recent_authentication_valid: bool,
+    pub recent_authentication_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl AdminScope {
+    /// Records a cross-campus read audit if this scope accessed a different campus.
+    pub async fn record_read(&self, state: &AppState, resource: &str) {
+        record_cross_campus_read(state, self, resource).await;
+    }
+}
+
+async fn extract_scope_query(
+    parts: &mut Parts,
+    state: &AppState,
+) -> Result<AdminScopeQuery, ApiError> {
+    Query::<AdminScopeQuery>::from_request_parts(parts, state)
+        .await
+        .map(|Query(query)| query)
+        .map_err(|e| ApiError::BadRequest(e.to_string()))
+}
+
+impl FromRequestParts<AppState> for AdminScope {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let query = extract_scope_query(parts, state).await?;
+        require_admin_scope(
+            state,
+            &parts.headers,
+            query.campus_id,
+            query.reason.as_deref(),
+            false,
+        )
+        .await
+    }
+}
+
+/// Extractor for platform-admin privileged operations (destructive mutations, cross-campus overrides).
+/// Enforces that the actor is a platform admin (`admin` role) and has recent authentication if required.
+#[derive(Debug, Clone)]
+pub struct PlatformAdminScope(pub AdminScope);
+
+impl std::ops::Deref for PlatformAdminScope {
+    type Target = AdminScope;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<AdminScope> for PlatformAdminScope {
+    fn as_ref(&self) -> &AdminScope {
+        &self.0
+    }
+}
+
+impl PlatformAdminScope {
+    #[allow(dead_code)]
+    pub fn into_inner(self) -> AdminScope {
+        self.0
+    }
+}
+
+impl FromRequestParts<AppState> for PlatformAdminScope {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let query = extract_scope_query(parts, state).await?;
+        let scope = require_admin_scope(
+            state,
+            &parts.headers,
+            query.campus_id,
+            query.reason.as_deref(),
+            true,
+        )
+        .await?;
+        Ok(PlatformAdminScope(scope))
+    }
+}
+
+/// Extractor for admin read operations. Automatically detects the resource name
+/// from the request URI path and emits a cross-campus audit log when accessing
+/// another campus.
+#[derive(Debug, Clone)]
+pub struct AdminReadScope(pub AdminScope);
+
+impl std::ops::Deref for AdminReadScope {
+    type Target = AdminScope;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<AdminScope> for AdminReadScope {
+    fn as_ref(&self) -> &AdminScope {
+        &self.0
+    }
+}
+
+impl AdminReadScope {
+    #[allow(dead_code)]
+    pub fn into_inner(self) -> AdminScope {
+        self.0
+    }
+}
+
+pub fn derive_resource_name(path: &str) -> String {
+    let trimmed = path
+        .strip_prefix("/api/admin/")
+        .unwrap_or(path.trim_start_matches('/'));
+    trimmed.replace(['/', '-'], "_")
+}
+
+impl FromRequestParts<AppState> for AdminReadScope {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let scope = AdminScope::from_request_parts(parts, state).await?;
+        let resource = derive_resource_name(parts.uri.path());
+        scope.record_read(state, &resource).await;
+        Ok(AdminReadScope(scope))
+    }
 }
 
 async fn active_campus_exists(state: &AppState, campus_id: Uuid) -> Result<bool, ApiError> {
@@ -232,19 +362,8 @@ pub struct AdminCapabilities {
 
 /// GET /api/admin/capabilities - authoritative active-campus admin access.
 pub async fn get_admin_capabilities(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Query(query): Query<AdminScopeQuery>,
+    scope: AdminReadScope,
 ) -> Result<Json<AdminCapabilities>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        false,
-    )
-    .await?;
-    record_cross_campus_read(&state, &scope, "capabilities").await;
     Ok(Json(AdminCapabilities {
         campus_id: scope.campus_id,
         is_platform_admin: scope.is_platform_admin,
@@ -289,19 +408,9 @@ pub struct CategoryCount {
 /// business surfacing it.
 pub async fn get_community_health(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: AdminReadScope,
     Query(query): Query<CommunityHealthQuery>,
 ) -> Result<Json<crate::services::community_health::CommunityHealth>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.scope.campus_id,
-        query.scope.reason.as_deref(),
-        false,
-    )
-    .await?;
-    record_cross_campus_read(&state, &scope, "community_health").await;
-
     let health =
         crate::services::community_health::CommunityHealthService::new(state.infra.db.clone())
             .measure(scope.campus_id, query.days.unwrap_or(30))
@@ -314,6 +423,7 @@ pub async fn get_community_health(
 #[derive(Deserialize)]
 pub struct CommunityHealthQuery {
     #[serde(flatten)]
+    #[allow(dead_code)]
     pub scope: AdminScopeQuery,
     /// Look-back window in days; clamped to 1–365 by the service.
     pub days: Option<i64>,
@@ -322,19 +432,8 @@ pub struct CommunityHealthQuery {
 /// GET /api/admin/stats - statistics for the selected administrative campus.
 pub async fn get_admin_stats(
     State(state): State<AppState>,
-    headers: HeaderMap,
-    Query(query): Query<AdminScopeQuery>,
+    scope: AdminReadScope,
 ) -> Result<Json<AdminStats>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        false,
-    )
-    .await?;
-    record_cross_campus_read(&state, &scope, "stats").await;
-
     let row = sqlx::query(
         "SELECT
             (SELECT COUNT(*) FROM inventory WHERE campus_id = $1) AS total_listings,
@@ -385,7 +484,9 @@ pub struct AdminListQuery {
     pub limit: Option<i64>,
     pub status: Option<String>,
     pub q: Option<String>,
+    #[allow(dead_code)]
     pub campus_id: Option<Uuid>,
+    #[allow(dead_code)]
     pub reason: Option<String>,
 }
 
@@ -421,18 +522,9 @@ pub struct UserInfo {
 /// GET /api/admin/users - users belonging to the selected campus.
 pub async fn get_admin_users(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: AdminReadScope,
     Query(query): Query<AdminListQuery>,
 ) -> Result<Json<AdminUsersResponse>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        false,
-    )
-    .await?;
-    record_cross_campus_read(&state, &scope, "users").await;
     let search_term = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty());
     let users = sqlx::query(
         "SELECT u.id, u.username, u.role, u.status, u.created_at,
@@ -531,18 +623,9 @@ pub struct AdminListingRestriction {
 /// GET /api/admin/listings - listings owned by the selected campus.
 pub async fn get_admin_listings(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: AdminReadScope,
     Query(query): Query<AdminListQuery>,
 ) -> Result<Json<AdminListingsResponse>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        false,
-    )
-    .await?;
-    record_cross_campus_read(&state, &scope, "listings").await;
     let listings = sqlx::query(
         "SELECT id, title, category, COALESCE(brand, '') AS brand, direction, condition_score,
                 suggested_price_cny, description, status, owner_id, created_at,
@@ -665,18 +748,9 @@ pub struct OrderInfo {
 
 pub async fn get_admin_orders(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: AdminReadScope,
     Query(query): Query<AdminListQuery>,
 ) -> Result<Json<AdminOrdersResponse>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        false,
-    )
-    .await?;
-    record_cross_campus_read(&state, &scope, "orders").await;
     let (items, total) = state
         .infra
         .order_service
@@ -743,18 +817,9 @@ pub struct ModerationJobsResponse {
 /// GET /api/admin/moderation/jobs - campus-scoped asynchronous moderation queue.
 pub async fn get_moderation_jobs(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: AdminReadScope,
     Query(query): Query<AdminListQuery>,
 ) -> Result<Json<ModerationJobsResponse>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        false,
-    )
-    .await?;
-    record_cross_campus_read(&state, &scope, "moderation_jobs").await;
     let mut jobs = sqlx::query_as::<_, ModerationJobInfo>(
         "SELECT id, campus_id, resource_type, resource_id, image_url, storage_key, status,
                 reject_reason, retry_count, created_at, processed_at
@@ -806,18 +871,9 @@ pub struct AdminModerationCasesResponse {
 /// GET /api/admin/moderation/cases - campus-scoped case queue.
 pub async fn get_moderation_cases(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: AdminReadScope,
     Query(query): Query<AdminListQuery>,
 ) -> Result<Json<AdminModerationCasesResponse>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        false,
-    )
-    .await?;
-    record_cross_campus_read(&state, &scope, "moderation_cases").await;
     let (cases, total) = ModerationCaseService::new(state.infra.db.clone())
         .list_for_admin(
             scope.campus_id,
@@ -843,19 +899,10 @@ pub struct ReviewModerationCaseBody {
 /// POST /api/admin/moderation/cases/{id}/review - platform moderation decision.
 pub async fn review_moderation_case(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: PlatformAdminScope,
     Path(case_id): Path<Uuid>,
-    Query(query): Query<AdminScopeQuery>,
     Json(body): Json<ReviewModerationCaseBody>,
 ) -> Result<Json<ModerationCaseRecord>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        true,
-    )
-    .await?;
     let action = match body.action.as_str() {
         "start_review" => CaseReviewAction::StartReview,
         "restrict" => CaseReviewAction::Restrict,
@@ -891,19 +938,10 @@ pub struct ReviewModerationAppealBody {
 /// POST /api/admin/moderation/appeals/{id}/review - independent appeal review.
 pub async fn review_moderation_appeal(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: PlatformAdminScope,
     Path(appeal_id): Path<Uuid>,
-    Query(query): Query<AdminScopeQuery>,
     Json(body): Json<ReviewModerationAppealBody>,
 ) -> Result<Json<ModerationAppealRecord>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        true,
-    )
-    .await?;
     let decision = match body.decision.as_str() {
         "uphold" => AppealDecision::Uphold,
         "overturn" => AppealDecision::Overturn,
@@ -929,18 +967,9 @@ pub async fn review_moderation_appeal(
 
 pub async fn ban_user(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: PlatformAdminScope,
     Path(target_user_id): Path<String>,
-    Query(query): Query<AdminScopeQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        true,
-    )
-    .await?;
     require_user_in_scope(&state, &target_user_id, scope.campus_id).await?;
     if scope.actor_id == target_user_id {
         return Err(ApiError::Forbidden);
@@ -977,18 +1006,9 @@ pub async fn ban_user(
 
 pub async fn unban_user(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: PlatformAdminScope,
     Path(target_user_id): Path<String>,
-    Query(query): Query<AdminScopeQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        true,
-    )
-    .await?;
     require_user_in_scope(&state, &target_user_id, scope.campus_id).await?;
     if scope.actor_id == target_user_id {
         return Err(ApiError::Forbidden);
@@ -1034,19 +1054,9 @@ pub struct CreateCampusRequest {
 /// separate audited step, so a half-configured campus can never accept users.
 pub async fn create_campus(
     State(state): State<AppState>,
-    headers: HeaderMap,
-    Query(query): Query<AdminScopeQuery>,
+    scope: PlatformAdminScope,
     Json(payload): Json<CreateCampusRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        true,
-    )
-    .await?;
-
     let slug = payload.slug.trim().to_ascii_lowercase();
     if payload.name_zh.trim().is_empty() || payload.name_en.trim().is_empty() {
         return Err(ApiError::BadRequest("校园名称不能为空".to_string()));
@@ -1120,18 +1130,9 @@ pub async fn create_campus(
 /// POST /api/admin/campuses/{id}/activate | /deactivate — audited status flip.
 pub async fn set_campus_status(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: PlatformAdminScope,
     Path((campus_id, action)): Path<(Uuid, String)>,
-    Query(query): Query<AdminScopeQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        true,
-    )
-    .await?;
     let new_status = match action.as_str() {
         "activate" => "active",
         "deactivate" => "inactive",
@@ -1169,19 +1170,10 @@ pub async fn set_campus_status(
 
 pub async fn takedown_listing(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: PlatformAdminScope,
     Path(listing_id): Path<String>,
-    Query(query): Query<AdminScopeQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        true,
-    )
-    .await?;
-    // `query.reason` is an internal cross-campus scope justification and must
+    // `scope.scope_reason` is an internal cross-campus scope justification and must
     // never be copied into the owner-visible moderation explanation.
     let public_reason = "该发布因平台安全审核被限制展示";
     let case_id = ModerationCaseService::new(state.infra.db.clone())
@@ -1202,18 +1194,10 @@ pub async fn takedown_listing(
 
 pub async fn restore_listing(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: PlatformAdminScope,
     Path(listing_id): Path<String>,
     Query(query): Query<AdminScopeQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        true,
-    )
-    .await?;
     let reason = query
         .reason
         .as_deref()
@@ -1242,18 +1226,9 @@ pub async fn restore_listing(
 
 pub async fn impersonate_user(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: PlatformAdminScope,
     Path(target_user_id): Path<String>,
-    Query(query): Query<AdminScopeQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        true,
-    )
-    .await?;
     require_user_in_scope(&state, &target_user_id, scope.campus_id).await?;
     let user = state
         .user_repo
@@ -1297,18 +1272,9 @@ pub async fn impersonate_user(
 
 pub async fn revoke_token(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: PlatformAdminScope,
     Path(jti): Path<String>,
-    Query(query): Query<AdminScopeQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        true,
-    )
-    .await?;
     let expires_at = chrono::Utc::now() + chrono::Duration::hours(24);
     revoke_access_token_jti(&state, &jti, expires_at).await?;
     let memo = format!("Revoked token jti={}", jti);
@@ -1338,19 +1304,10 @@ pub struct UpdateOrderStatusRequest {
 
 pub async fn update_order_status(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: PlatformAdminScope,
     Path(order_id): Path<String>,
-    Query(query): Query<AdminScopeQuery>,
     Json(payload): Json<UpdateOrderStatusRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        true,
-    )
-    .await?;
     let requested_status_raw = payload.status.trim();
     let requested_status = match requested_status_raw {
         "completed" => "confirmed",
@@ -1443,19 +1400,10 @@ pub struct UpdateRoleRequest {
 
 pub async fn update_user_role(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: PlatformAdminScope,
     Path(user_id): Path<String>,
-    Query(query): Query<AdminScopeQuery>,
     Json(payload): Json<UpdateRoleRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        true,
-    )
-    .await?;
     require_user_in_scope(&state, &user_id, scope.campus_id).await?;
     if scope.actor_id == user_id {
         return Err(ApiError::Forbidden);
@@ -1490,7 +1438,9 @@ pub async fn update_user_role(
 pub struct AdminAuditLogsQuery {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    #[allow(dead_code)]
     pub campus_id: Option<Uuid>,
+    #[allow(dead_code)]
     pub reason: Option<String>,
 }
 
@@ -1503,18 +1453,9 @@ pub struct AdminAuditLogsResponse {
 
 pub async fn get_admin_audit_logs(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: AdminReadScope,
     Query(query): Query<AdminAuditLogsQuery>,
 ) -> Result<Json<AdminAuditLogsResponse>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        false,
-    )
-    .await?;
-    record_cross_campus_read(&state, &scope, "audit_logs").await;
     let (logs, total) = state
         .infra
         .admin_service
@@ -1538,7 +1479,9 @@ pub async fn get_admin_audit_logs(
 pub struct AdminOutboxQuery {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    #[allow(dead_code)]
     pub campus_id: Option<Uuid>,
+    #[allow(dead_code)]
     pub reason: Option<String>,
 }
 
@@ -1550,18 +1493,9 @@ pub struct AdminDeadLetterOutboxResponse {
 
 pub async fn list_dead_letter_outbox_events(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _scope: AdminScope,
     Query(query): Query<AdminOutboxQuery>,
 ) -> Result<Json<AdminDeadLetterOutboxResponse>, ApiError> {
-    let _scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        false,
-    )
-    .await?;
-
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
     let offset = query.offset.unwrap_or(0).max(0);
 
@@ -1577,19 +1511,9 @@ pub async fn list_dead_letter_outbox_events(
 
 pub async fn replay_outbox_event(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    scope: PlatformAdminScope,
     Path(event_id): Path<i64>,
-    Query(query): Query<AdminScopeQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let scope = require_admin_scope(
-        &state,
-        &headers,
-        query.campus_id,
-        query.reason.as_deref(),
-        true, // Platform admin required for outbox replay
-    )
-    .await?;
-
     let replayed = crate::services::outbox::replay_dead_lettered(&state.infra.db, event_id)
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("Failed to replay outbox event: {}", e)))?;
@@ -1613,4 +1537,53 @@ pub async fn replay_outbox_event(
         "message": "事件已重新加入投递队列",
         "id": event_id
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_derive_resource_name() {
+        assert_eq!(derive_resource_name("/api/admin/stats"), "stats");
+        assert_eq!(
+            derive_resource_name("/api/admin/community-health"),
+            "community_health"
+        );
+        assert_eq!(
+            derive_resource_name("/api/admin/capabilities"),
+            "capabilities"
+        );
+        assert_eq!(derive_resource_name("/api/admin/users"), "users");
+        assert_eq!(derive_resource_name("/api/admin/listings"), "listings");
+        assert_eq!(derive_resource_name("/api/admin/orders"), "orders");
+        assert_eq!(derive_resource_name("/api/admin/audit-logs"), "audit_logs");
+        assert_eq!(
+            derive_resource_name("/api/admin/moderation/jobs"),
+            "moderation_jobs"
+        );
+        assert_eq!(
+            derive_resource_name("/api/admin/moderation/cases"),
+            "moderation_cases"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_query_extraction_handles_extra_parameters() {
+        use axum::http::Request;
+
+        let req = Request::builder()
+            .uri("/api/admin/listings?limit=50&offset=10&status=active&campus_id=c0000000-0000-0000-0000-000000000001&reason=test-reason")
+            .body(())
+            .unwrap();
+        let (parts, _) = req.into_parts();
+        let query = Query::<AdminScopeQuery>::try_from_uri(&parts.uri).map(|Query(q)| q);
+        assert!(query.is_ok());
+        let q = query.unwrap();
+        assert_eq!(
+            q.campus_id,
+            Some(uuid::Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap())
+        );
+        assert_eq!(q.reason.as_deref(), Some("test-reason"));
+    }
 }
