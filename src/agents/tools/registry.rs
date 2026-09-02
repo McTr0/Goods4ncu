@@ -96,6 +96,7 @@ impl ToolRegistry {
             ("find_related_posts", "Find related visible posts"),
             ("get_comments", "Read visible post comments"),
             ("draft_message", "Draft a private message for confirmation"),
+            ("draft_comment", "Draft a public reply for confirmation"),
         ];
         let mut builder = Self::builder();
         for (name, description) in readonly {
@@ -263,10 +264,11 @@ mod tests {
             "find_related_posts",
             "get_comments",
             "draft_message",
+            "draft_comment",
         ] {
             assert!(registry.find(name).is_some(), "missing {name}");
         }
-        assert_eq!(registry.specs().len(), 12);
+        assert_eq!(registry.specs().len(), 13);
         assert_eq!(
             registry.find("create_listing").unwrap().risk,
             RiskLevel::Recoverable

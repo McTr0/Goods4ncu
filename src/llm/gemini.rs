@@ -135,6 +135,7 @@ impl super::LlmProvider for GeminiProvider {
             .tool(crate::agents::tools::FindRelatedPostsTool { ctx: ctx.clone() })
             .tool(crate::agents::tools::GetCommentsTool { ctx: ctx.clone() })
             .tool(crate::agents::tools::DraftMessageTool { ctx: ctx.clone() })
+            .tool(crate::agents::tools::DraftCommentTool { ctx: ctx.clone() })
             .build();
 
         Ok(Box::new(GeminiMarketplaceAgent(agent)))

@@ -1,6 +1,6 @@
 # Companion Architecture
 
-> last-verified: 2026-08-24
+> last-verified: 2026-09-02
 
 
 The companion is a **runtime**, not a chat window: a persistent Dart-side
@@ -57,8 +57,9 @@ agency around the existing campus marketplace.
 
 Server side: persona layers (`persona/*.md`, `src/agents/persona.rs`),
 relationship state (`src/services/companion_relationship.rs`, table 0095),
-agent tools (`src/agents/tools.rs`), session/episodic/profile memory
-(`src/services/agent_memory.rs`).
+agent tools (`src/agents/tools/`; both provider paths install the same 13-tool
+set, including confirmation-only `draft_message` and `draft_comment`),
+session/episodic/profile memory (`src/services/agent_memory.rs`).
 
 ## Body renderer
 

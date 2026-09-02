@@ -332,7 +332,6 @@ pub struct DraftCommentArgs {
 }
 
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct DraftCommentTool {
     pub ctx: ToolContext,
 }

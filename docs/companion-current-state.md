@@ -1,11 +1,14 @@
-# Companion Runtime — Current State Audit
+# Companion Runtime — Historical Phase 0 Baseline
 
-> last-verified: 2026-08-24
+> baseline-captured: 2026-08-24
+>
+> current architecture: [companion-architecture.md](companion-architecture.md), last verified 2026-09-02
 
 
 > Phase 0 of the Companion master goal. Facts on the ground as of 2026-08-22,
-> gathered from code inspection. This document is the baseline every later
-> phase diffs against.
+> gathered from code inspection. This is retained as a historical baseline,
+> not a current-state authority; later phases should diff against it, while
+> operational decisions use the current architecture document linked above.
 
 ## Stack summary
 

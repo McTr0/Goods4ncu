@@ -265,6 +265,7 @@ impl super::LlmProvider for OpenAiCompatibleProvider {
                     .tool(crate::agents::tools::FindRelatedPostsTool { ctx: ctx.clone() })
                     .tool(crate::agents::tools::GetCommentsTool { ctx: ctx.clone() })
                     .tool(crate::agents::tools::DraftMessageTool { ctx: ctx.clone() })
+                    .tool(crate::agents::tools::DraftCommentTool { ctx: ctx.clone() })
                     .build();
                 Box::new($wrapper(agent)) as Box<dyn MarketplaceAgent>
             }};
