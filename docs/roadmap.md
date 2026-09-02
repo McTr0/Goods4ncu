@@ -78,6 +78,7 @@
 - [部分完成] 设备级 active campus session 已通过 JWT claim、refresh token 绑定和 token 轮换实现；平台管理员敏感写操作的 10 分钟密码 step-up 已实现。平台管理员 TOTP MFA 已实现：`POST /api/auth/mfa/totp/setup|confirm` 完成注册（需 admin 角色 + 10 分钟近期认证），确认后 `POST /api/auth/reauth` 除密码外强制要求单次有效动态验证码（RFC 6238，±1 步时钟容差，步进级防重放），已确认因子不可自助更换。资格定期刷新和校园运营 MFA 仍是目标态。
 - [已实现] 校园 `operator/admin` 与平台管理员读写边界已分离：校园角色只读本校后台，平台管理员执行敏感写入；跨校园读取和写入需要理由并审计。
 - [已实现] 登录用户的核心市场、推荐、公开用户页、通知、直聊、空间和 Agent 路径已使用 active campus session；游客仍使用 NCU public default。后台统计/列表、审核任务和审计已按校园过滤。普通用户 handler 已收敛为统一 extractor（`src/api/session.rs` 的 `Session`/`OptionalSession`/`VerifiedTenant`），零散的手写 token 解析已移除；仅 auth 生命周期、admin scope、审核 scope 等 5 个单点 helper 保留，均委托同一解码函数。
+- [已实现] 鉴权中间件性能硬化：`TokenDenylist` 引入 Moka 本地短 TTL 验证缓存（JTI 30s）与用户状态缓存（15s），高频合法请求直通内存，消除每请求打向 `revoked_access_tokens` 与 `users` 表的数据库读放大，同时保证登出撤销与管理员封禁即时失效。
 
 ### API 与数据
 
@@ -250,7 +251,7 @@
 
 - [部分完成] transactional outbox 基础设施已落地（`0037_outbox_events.sql` + `src/services/outbox.rs`）：业务事务内 `enqueue_in_tx`，worker 支持 lease（`FOR UPDATE SKIP LOCKED` + 到期回收）、指数退避、dead-letter 和 `replay_dead_lettered`；原子入队、至少一次投递、租约互斥和重放均有集成测试（`tests/outbox_integration.rs`）。
 - [部分完成] 通知推送已迁入 outbox：`NotificationService::create` 与通知行同事务入队 `notification.push`，由 worker 投递 WS，进程崩溃不再丢推送。listing embedding 已使用专用、按 listing 合并的 `embedding_jobs` 队列迁移；审核投影和其余 fan-out 仍待迁移。多副本 WS 已有 Redis pub/sub 路由，压测与更多实时信号仍待完成。
-- [目标态] lag metrics 告警与 dead-letter 的管理端受审计重放接口。
+- [已实现] lag metrics 监控指标与 dead-letter 的管理端受审计重放接口：`src/api/metrics.rs` 提供低基数 `outbox_queue_depth`（pending/processing/dead_lettered）、`outbox_queue_oldest_age_seconds` 与 `outbox_events_processed_total`；worker 批次处理与空闲时自动刷新；`GET /api/admin/outbox/dead-letter` 提供分页死信检查，`POST /api/admin/outbox/replay/{id}` 经平台管理员鉴权并以 `replay_outbox_event` 记录审计日志，集成测试覆盖死信拉取与重放投递闭环（`tests/outbox_integration.rs::dead_letter_listing_and_replay_updates_metrics_and_state`）。
 - 进程内 mpsc 只保留为演示/优化路径，不再承载通知投递。
 
 ### 多副本实时通信

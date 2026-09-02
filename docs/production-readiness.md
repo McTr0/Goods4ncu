@@ -4,7 +4,7 @@
 | --- | --- |
 | 适用读者 | 决定是否上线的负责人、执行部署的工程师、验收测试者 |
 | 当前状态 | 工程门槛已由 CI 自动化；只有目标提交的 CI 全绿才可部署；生产资源开通、真实学生效果/公平性验证与人工运营验收仍待完成 |
-| 事实来源 | 本仓库 Rust/Flutter 测试、`scripts/` 下可执行演练（含真实 MinIO/Redis/Postgres）、迁移 0001–0111 |
+| 事实来源 | 本仓库 Rust/Flutter 测试、`scripts/` 下可执行演练（含真实 MinIO/Redis/Postgres）、迁移 0001–0112 |
 | 验收方式 | 每一项都给出可执行证据；无证据的项目明确标注为部署侧待办 |
 
 本报告把[生产路线图](roadmap.md)的全部退出门槛折叠为一张就绪矩阵。“代码侧关闭”指该门槛由本仓库的代码、schema、测试或可重复脚本强制并验证；“部署侧待办”指需要真实基础设施、账号或人工运营才能执行的验收步骤，本仓库已为其准备了可直接运行的验收程序。
@@ -17,6 +17,7 @@
 | --- | --- |
 | 统一 session extractor（Session/OptionalSession/VerifiedTenant） | `src/api/session.rs`；全量回归套件 |
 | 平台管理员 TOTP MFA（注册/确认/step-up 强制/防重放） | `tests/admin_auth_regression.rs`（RFC 4226/6238 向量见 `src/services/totp.rs`） |
+| 鉴权中间件性能硬化（JTI 30s 与用户状态 15s Moka 本地缓存，消除每请求 DB 读放大） | `src/services/token_denylist.rs`，`src/api/auth.rs`；单元测试覆盖缓存命中、Token 撤销与封禁即时失效 |
 | 关键写接口 verified membership 门禁（含 STS 凭证） | `tests/api_regressions.rs::upload_token_requires_verified_campus_membership` |
 | 租户表 FORCE RLS（事务级 `app.campus_id` 武装，含 legacy persona asset 表） | `migrations/0042` 及后续领域迁移 + `tests/rls_integration.rs`（读隐藏、写拒绝与 feed controls 隔离） |
 | 应用以 NOSUPERUSER 角色运行，RLS 对其真实生效；pgvector 由管理员预装 | `scripts/provision_app_role.sh`（校验两条不变量）+ 生产演练 check 2d；`src/db.rs` 在缺失扩展时给出可执行修复指引 |
@@ -46,6 +47,7 @@
 | 计划绑定原校园；终态写失败时业务事实与计划状态原子回滚，可用同一 second token 重试 | `tests/agent_action_plan_integration.rs::{plans_are_not_visible_or_confirmable_from_another_campus,terminal_plan_update_failure_rolls_back_the_domain_fact_and_is_safely_retryable}` |
 | 工具层滥用测试集（跨校园/参数污染/自买自卖/未认证） | `tests/agent_injection_regression.rs` |
 | AgentRun 安全 envelope（trace 幂等、租户隔离、路由/provider/版本/检索/工具/终态聚合、SSE TTFT、取消结案、无正文事件、有界 token 计数、stale-run durable reconciliation） | `migrations/0077_agent_runs.sql`、`0078_agent_runs_campus_cleanup.sql`、`tests/agent_run_integration.rs`；provider 侧 TTFT、设备/重新认证绑定、版本化风险文案和对账界面仍为后续门槛 |
+| Agent 记忆语义检索 HNSW 索引 | `migrations/0112_agent_memories_hnsw_idx.sql`；pgvector 余弦相似度加速（`<=>`） |
 
 ### 信息流闭环（Phase 2）
 
@@ -62,10 +64,10 @@
 | --- | --- |
 | SIGTERM 有序排空（readiness 先摘流、worker 迭代间退出、监听后关） | `tests/lifecycle_probes_integration.rs` + rehearsal check 5 |
 | 全链路超时（HTTP 60s→504；LLM 连接 10s/读 60s；外呼各自超时） | `src/llm/mod.rs`、`src/api/mod.rs`（运行验证见 operations.md） |
-| Transactional outbox（原子入队/至少一次/退避/死信/租约/重放） | `tests/outbox_integration.rs`；通知推送已迁入 |
+| Transactional outbox（原子入队/至少一次/退避/死信/租约/重放/Lag 指标/管理员重放接口） | `tests/outbox_integration.rs`；通知推送已迁入；`src/api/metrics.rs`（暴露 queue depth 与 oldest age）；`GET/POST /api/admin/outbox/*`（带审计重试） |
 | Redis WS fan-out 跨副本投递（双真实进程 + 真实 WebSocket 客户端） | `tests/ws_fanout_integration.rs`（`REDIS_TEST_URL`/`FANOUT_E2E` 门控） |
 | 依赖漏洞门禁（cargo audit 进 CI；唯一 ignore 附不可达论证） | `.cargo/audit.toml`、`.github/workflows/ci.yml` |
-| 空库/升级库迁移均验证（含真实升级库上的 legacy 值归一化） | CI migration job 对 `0001`–`0111` 从空库顺序执行；历史升级路径由 0040/0041 回归覆盖，AgentRun、ActionPlan、统一帖子模型和 runtime v2 outcomes 的领域回归覆盖后续迁移；生产 rehearsal 继续作为发布前真实 Postgres/Redis/MinIO 验收。 |
+| 空库/升级库迁移均验证（含真实升级库上的 legacy 值归一化） | CI migration job 对 `0001`–`0112` 从空库顺序执行；历史升级路径由 0040/0041 回归覆盖，AgentRun、ActionPlan、统一帖子模型和 runtime v2 outcomes 的领域回归覆盖后续迁移；生产 rehearsal 继续作为发布前真实 Postgres/Redis/MinIO 验收。 |
 
 ### 多校园与规模（Phase 4 工程部分）
 
