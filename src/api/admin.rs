@@ -955,6 +955,10 @@ pub async fn ban_user(
     }
     state.user_repo.ban_user(&target_user_id).await?;
     state
+        .infra
+        .token_denylist
+        .invalidate_user_status(&target_user_id);
+    state
         .auth_repo
         .revoke_all_user_tokens(&target_user_id)
         .await?;
@@ -998,6 +1002,10 @@ pub async fn unban_user(
         return Err(ApiError::Forbidden);
     }
     state.user_repo.unban_user(&target_user_id).await?;
+    state
+        .infra
+        .token_denylist
+        .invalidate_user_status(&target_user_id);
     record_audit(
         &state,
         &scope,

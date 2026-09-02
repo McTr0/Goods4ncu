@@ -1052,6 +1052,10 @@ pub async fn ensure_token_not_revoked(state: &AppState, token: &str) -> Result<(
         return Err("Token revoked".to_string());
     }
 
+    if state.infra.token_denylist.is_verified(&jti) {
+        return Ok(());
+    }
+
     let persisted_exp = sqlx::query_scalar::<_, i64>(
         "SELECT EXTRACT(EPOCH FROM expires_at)::bigint
          FROM revoked_access_tokens
@@ -1066,18 +1070,30 @@ pub async fn ensure_token_not_revoked(state: &AppState, token: &str) -> Result<(
             state.infra.token_denylist.deny(&jti, exp as u64);
             Err("Token revoked".to_string())
         }
-        Ok(_) => Ok(()),
+        Ok(_) => {
+            state.infra.token_denylist.mark_verified(&jti);
+            Ok(())
+        }
         Err(e) => Err(format!("Denylist query failed: {}", e)),
     }
 }
 
 pub async fn ensure_user_not_banned(state: &AppState, user_id: &str) -> Result<(), ApiError> {
+    if let Some(cached_status) = state.infra.token_denylist.get_user_status(user_id) {
+        if cached_status.eq_ignore_ascii_case("banned") {
+            return Err(ApiError::AuthFailed("账号已被封禁".to_string()));
+        }
+        return Ok(());
+    }
+
     let status = sqlx::query_scalar::<_, String>("SELECT status FROM users WHERE id = $1")
         .bind(user_id)
         .fetch_optional(&state.infra.db)
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
         .ok_or(ApiError::Unauthorized)?;
+
+    state.infra.token_denylist.set_user_status(user_id, &status);
 
     if status.eq_ignore_ascii_case("banned") {
         return Err(ApiError::AuthFailed("账号已被封禁".to_string()));

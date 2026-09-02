@@ -1,34 +1,80 @@
 use crate::lifecycle::{tick_or_shutdown, ShutdownSignal};
 use dashmap::DashMap;
+use moka::sync::Cache;
 use sqlx::PgPool;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::time::{interval, Duration, MissedTickBehavior};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::time::{interval, MissedTickBehavior};
 
-/// In-memory denylist for revoked JWT access tokens.
+/// In-memory denylist for revoked JWT access tokens and short-lived auth caches.
 ///
-/// Keyed by `jti` (JWT ID), stores the token's expiry timestamp.
-/// Expired entries are periodically cleaned up to prevent unbounded growth.
+/// - `denied`: Keyed by `jti` (JWT ID), stores the token's expiry timestamp.
+/// - `verified_jti_cache`: Short-lived cache for verified active JTIs to avoid repeat DB queries.
+/// - `user_status_cache`: Short-lived cache for user status (`active`, `banned`) to reduce DB round-trips.
 #[derive(Clone)]
 pub struct TokenDenylist {
     denied: Arc<DashMap<String, u64>>,
+    verified_jti_cache: Cache<String, ()>,
+    user_status_cache: Cache<String, String>,
 }
 
 impl TokenDenylist {
     pub fn new() -> Self {
         Self {
             denied: Arc::new(DashMap::new()),
+            verified_jti_cache: Cache::builder()
+                .max_capacity(50_000)
+                .time_to_live(Duration::from_secs(30))
+                .build(),
+            user_status_cache: Cache::builder()
+                .max_capacity(50_000)
+                .time_to_live(Duration::from_secs(15))
+                .build(),
         }
     }
 
     /// Add a token to the denylist. It will be auto-cleaned after `expires_at`.
+    /// Also invalidates the verified cache for this JTI.
     pub fn deny(&self, jti: &str, expires_at: u64) {
         self.denied.insert(jti.to_string(), expires_at);
+        self.verified_jti_cache.invalidate(jti);
     }
 
     /// Check if a token's jti is on the denylist.
     pub fn is_denied(&self, jti: &str) -> bool {
         self.denied.contains_key(jti)
+    }
+
+    /// Check if a token's jti was recently verified as active/not-revoked.
+    pub fn is_verified(&self, jti: &str) -> bool {
+        self.verified_jti_cache.contains_key(jti)
+    }
+
+    /// Mark a token's jti as verified active.
+    pub fn mark_verified(&self, jti: &str) {
+        self.verified_jti_cache.insert(jti.to_string(), ());
+    }
+
+    /// Invalidate verified status for a token jti.
+    #[allow(dead_code)]
+    pub fn invalidate_verified(&self, jti: &str) {
+        self.verified_jti_cache.invalidate(jti);
+    }
+
+    /// Get cached user status if present.
+    pub fn get_user_status(&self, user_id: &str) -> Option<String> {
+        self.user_status_cache.get(user_id)
+    }
+
+    /// Set cached user status with TTL.
+    pub fn set_user_status(&self, user_id: &str, status: &str) {
+        self.user_status_cache
+            .insert(user_id.to_string(), status.to_string());
+    }
+
+    /// Invalidate cached user status (e.g. on ban or unban).
+    pub fn invalidate_user_status(&self, user_id: &str) {
+        self.user_status_cache.invalidate(user_id);
     }
 
     /// Remove expired entries from the denylist.
@@ -127,5 +173,34 @@ mod tests {
         assert!(!dl.is_empty());
         assert!(!dl.is_denied("old"));
         assert!(dl.is_denied("fresh"));
+    }
+
+    #[test]
+    fn test_verified_jti_cache() {
+        let dl = TokenDenylist::new();
+        assert!(!dl.is_verified("jti-123"));
+
+        dl.mark_verified("jti-123");
+        assert!(dl.is_verified("jti-123"));
+
+        // When denied, verified status is invalidated
+        dl.deny("jti-123", 9999999999);
+        assert!(dl.is_denied("jti-123"));
+        assert!(!dl.is_verified("jti-123"));
+    }
+
+    #[test]
+    fn test_user_status_cache() {
+        let dl = TokenDenylist::new();
+        assert_eq!(dl.get_user_status("user-1"), None);
+
+        dl.set_user_status("user-1", "active");
+        assert_eq!(dl.get_user_status("user-1"), Some("active".to_string()));
+
+        dl.invalidate_user_status("user-1");
+        assert_eq!(dl.get_user_status("user-1"), None);
+
+        dl.set_user_status("user-1", "banned");
+        assert_eq!(dl.get_user_status("user-1"), Some("banned".to_string()));
     }
 }
