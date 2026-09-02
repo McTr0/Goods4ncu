@@ -173,6 +173,7 @@ pub fn history_to_rig_messages(
 // Bearer token extraction
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)] // Prefer crate::api::session::Session extractor on handlers
 pub fn extract_bearer_token(
     headers: &axum::http::HeaderMap,
 ) -> Result<&str, crate::api::error::ApiError> {

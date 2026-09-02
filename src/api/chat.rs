@@ -8,7 +8,6 @@
 //! the assistant reply. Intent routing runs before any LLM call so blocked
 //! content and greetings never consume tokens.
 
-use crate::api::auth;
 use crate::api::error::ApiError;
 use crate::api::session::Session;
 use crate::api::{normalize_platform_media_url, AppState, PeerAddr};
@@ -438,6 +437,7 @@ pub(crate) async fn handle_chat(
 /// SSE streaming chat — shared logic for GET and POST paths.
 async fn handle_chat_stream_request(
     State(state): State<AppState>,
+    Session(session): Session,
     headers: HeaderMap,
     payload: ChatStreamRequest,
 ) -> Result<impl axum::response::IntoResponse, ApiError> {
@@ -499,21 +499,8 @@ async fn handle_chat_stream_request(
     let proposal_idempotency_key =
         crate::api::request_context::idempotency_key_from_headers(&headers)?;
 
-    let token = agent_chat::extract_bearer_token(&headers)?;
-
-    auth::ensure_token_not_revoked(&state, token)
-        .await
-        .map_err(|_| ApiError::Unauthorized)?;
-
-    let session = auth::extract_auth_session_from_token_str_with_fallback(
-        token,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
     let session_campus_id = session.campus_id;
     let current_user_id = session.user_id;
-    auth::ensure_user_not_banned(&state, &current_user_id).await?;
     let (conversation_id, response_conversation_id, is_assistant_conversation) =
         agent_chat::resolve_conversation_id(conversation_id, &current_user_id);
     let chat_svc = ChatService::new(state.infra.db.clone());
@@ -1196,10 +1183,11 @@ async fn handle_chat_stream_request(
 /// GET /api/chat/stream — text-only SSE compat path (query string params).
 pub(crate) async fn handle_chat_stream_get(
     state: State<AppState>,
+    session: Session,
     headers: HeaderMap,
     axum::extract::Query(payload): axum::extract::Query<ChatStreamRequest>,
 ) -> Result<impl axum::response::IntoResponse, ApiError> {
-    handle_chat_stream_request(state, headers, payload).await
+    handle_chat_stream_request(state, session, headers, payload).await
 }
 
 /// POST /api/agent/turns/:conversation_id/cancel — cancel an in-flight turn.
@@ -1216,10 +1204,11 @@ pub(crate) async fn cancel_turn(
 /// POST /api/chat/stream — preferred SSE path for authenticated JSON payloads.
 pub(crate) async fn handle_chat_stream_post(
     state: State<AppState>,
+    session: Session,
     headers: HeaderMap,
     Json(payload): Json<ChatStreamRequest>,
 ) -> Result<impl axum::response::IntoResponse, ApiError> {
-    handle_chat_stream_request(state, headers, payload).await
+    handle_chat_stream_request(state, session, headers, payload).await
 }
 
 #[cfg(test)]
