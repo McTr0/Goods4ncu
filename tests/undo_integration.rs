@@ -43,6 +43,12 @@ async fn seed_verified_user(pool: &sqlx::PgPool, user_id: &str) {
     .expect("insert membership");
 }
 
+fn safe_test_title(prefix: &str) -> String {
+    let raw = Uuid::new_v4().simple().to_string();
+    let letters: String = raw.chars().map(|c| (b'a' + (c as u8 % 26)) as char).collect();
+    format!("{prefix} {letters}")
+}
+
 fn create_args(title: &str) -> CreateListingArgs {
     CreateListingArgs {
         title: title.to_string(),
@@ -92,7 +98,7 @@ async fn publish_is_registered_undoable_and_undo_retracts_it() {
     with_test_pool(|pool| async move {
         let user_id = format!("undo-actor-{}", Uuid::new_v4().simple());
         seed_verified_user(&pool, &user_id).await;
-        let title = format!("Undo Target {}", Uuid::new_v4().simple());
+        let title = safe_test_title("Undo Target");
         let (listing_id, action_id) = publish(&pool, &user_id, &title).await;
 
         assert_eq!(status_of(&pool, &listing_id).await, "active");
@@ -128,7 +134,7 @@ async fn repeat_undo_is_idempotent() {
     with_test_pool(|pool| async move {
         let user_id = format!("undo-idem-{}", Uuid::new_v4().simple());
         seed_verified_user(&pool, &user_id).await;
-        let title = format!("Undo Idem {}", Uuid::new_v4().simple());
+        let title = safe_test_title("Undo Idem");
         let (listing_id, action_id) = publish(&pool, &user_id, &title).await;
 
         let service = UndoService::new(pool.clone());
@@ -168,7 +174,7 @@ async fn undo_refuses_when_the_listing_moved_on() {
     with_test_pool(|pool| async move {
         let user_id = format!("undo-conflict-{}", Uuid::new_v4().simple());
         seed_verified_user(&pool, &user_id).await;
-        let title = format!("Undo Conflict {}", Uuid::new_v4().simple());
+        let title = safe_test_title("Undo Conflict");
         let (listing_id, action_id) = publish(&pool, &user_id, &title).await;
 
         // It sells before the seller presses undo.
@@ -210,7 +216,7 @@ async fn undo_is_scoped_to_the_actor() {
         let outsider_id = format!("undo-outsider-{}", Uuid::new_v4().simple());
         seed_verified_user(&pool, &owner_id).await;
         seed_verified_user(&pool, &outsider_id).await;
-        let title = format!("Undo Scoped {}", Uuid::new_v4().simple());
+        let title = safe_test_title("Undo Scoped");
         let (listing_id, action_id) = publish(&pool, &owner_id, &title).await;
 
         let service = UndoService::new(pool.clone());
@@ -238,7 +244,7 @@ async fn undo_expires_with_its_window() {
     with_test_pool(|pool| async move {
         let user_id = format!("undo-expiry-{}", Uuid::new_v4().simple());
         seed_verified_user(&pool, &user_id).await;
-        let title = format!("Undo Expiry {}", Uuid::new_v4().simple());
+        let title = safe_test_title("Undo Expiry");
         let (listing_id, action_id) = publish(&pool, &user_id, &title).await;
 
         sqlx::query(
@@ -275,7 +281,7 @@ async fn concurrent_undos_apply_exactly_once() {
     with_test_pool(|pool| async move {
         let user_id = format!("undo-race-{}", Uuid::new_v4().simple());
         seed_verified_user(&pool, &user_id).await;
-        let title = format!("Undo Race {}", Uuid::new_v4().simple());
+        let title = safe_test_title("Undo Race");
         let (listing_id, action_id) = publish(&pool, &user_id, &title).await;
 
         let racing_pool = goods4ncu::test_infra::concurrent_test_pool(4).await;
@@ -317,7 +323,7 @@ async fn model_visible_reply_carries_no_undo_handle() {
     with_test_pool(|pool| async move {
         let user_id = format!("undo-leak-{}", Uuid::new_v4().simple());
         seed_verified_user(&pool, &user_id).await;
-        let title = format!("Undo Leak {}", Uuid::new_v4().simple());
+        let title = safe_test_title("Undo Leak");
 
         let tool = CreateListingTool {
             ctx: tool_ctx(pool.clone(), &user_id),
