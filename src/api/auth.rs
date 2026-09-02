@@ -419,6 +419,50 @@ pub struct ReauthenticateResponse {
     pub recent_auth_expires_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// Hash a password using Argon2id with a cryptographically secure random salt in a blocking task.
+pub async fn hash_password(password: String) -> Result<String, ApiError> {
+    let hash_result = tokio::task::spawn_blocking(move || {
+        let salt = SaltString::generate(&mut OsRng);
+        Argon2::default()
+            .hash_password(password.as_bytes(), &salt)
+            .map(|h| h.to_string())
+    })
+    .await;
+
+    match hash_result {
+        Ok(Ok(hash)) => Ok(hash),
+        Ok(Err(e)) => {
+            tracing::error!(err = %e, "Password hashing failed");
+            Err(ApiError::Internal(anyhow::anyhow!(
+                "Password hashing failed: {}",
+                e
+            )))
+        }
+        Err(e) => {
+            tracing::error!(err = %e, "Spawning hashing task failed");
+            Err(ApiError::Internal(anyhow::anyhow!("Internal error: {}", e)))
+        }
+    }
+}
+
+/// Verify a password against an Argon2 password hash in a blocking task.
+/// Returns `Ok(true)` if valid, `Ok(false)` if invalid or unparseable, or `Err(ApiError)` on runtime failure.
+pub async fn verify_password(password: String, password_hash: String) -> Result<bool, ApiError> {
+    tokio::task::spawn_blocking(move || {
+        let Ok(parsed_hash) = PasswordHash::new(&password_hash) else {
+            return false;
+        };
+        Argon2::default()
+            .verify_password(password.as_bytes(), &parsed_hash)
+            .is_ok()
+    })
+    .await
+    .map_err(|e| {
+        tracing::error!(err = %e, "Password verification task failed");
+        ApiError::Internal(anyhow::anyhow!("Password verification task failed: {}", e))
+    })
+}
+
 /// POST /api/auth/register — returns 201 Created on success, 409 Conflict on duplicate.
 pub async fn register(
     State(state): State<AppState>,
@@ -449,32 +493,7 @@ pub async fn register(
         ensure_campus_email_domain(&state.infra.db, domain).await?;
     }
 
-    let password = payload.password.clone();
-
-    // Hash password in a blocking task to avoid starving the tokio runtime
-    let hash_result = tokio::task::spawn_blocking(move || {
-        let salt = SaltString::generate(&mut OsRng);
-        let argon2 = Argon2::default();
-        argon2
-            .hash_password(password.as_bytes(), &salt)
-            .map(|h| h.to_string())
-    })
-    .await;
-
-    let password_hash = match hash_result {
-        Ok(Ok(hash)) => hash,
-        Ok(Err(e)) => {
-            tracing::error!(err = %e, "Password hashing failed");
-            return Err(ApiError::Internal(anyhow::anyhow!(
-                "Password hashing failed: {}",
-                e
-            )));
-        }
-        Err(e) => {
-            tracing::error!(err = %e, "Spawning hashing task failed");
-            return Err(ApiError::Internal(anyhow::anyhow!("Internal error: {}", e)));
-        }
-    };
+    let password_hash = hash_password(payload.password.clone()).await?;
 
     // Create user via repository
     let user_id = state
@@ -564,64 +583,40 @@ pub async fn login(
         return Err(ApiError::AuthFailed("账号已被封禁".to_string()));
     }
 
-    let password = payload.password.clone();
-    let hash_clone = user.password_hash.clone();
-
-    // Verify password in a blocking task
-    let verify_result = tokio::task::spawn_blocking(move || -> bool {
-        let parsed_hash = match PasswordHash::new(&hash_clone) {
-            Ok(h) => h,
-            Err(_) => return false,
-        };
-        Argon2::default()
-            .verify_password(password.as_bytes(), &parsed_hash)
-            .is_ok()
-    })
-    .await;
-
-    match verify_result {
-        Ok(true) => {
-            let campus_id = CampusService::new(state.infra.db.clone())
-                .resolve_user_campus(&user.id)
-                .await?;
-            let (token, _jti, _exp) = generate_access_token_for_campus(
-                &user.id,
-                &user.role,
-                Some(campus_id),
-                &state.secrets.jwt_secret,
-                ACCESS_TOKEN_TTL_SECS,
-            )?;
-            let refresh = generate_refresh_token();
-            store_refresh_token(
-                &state.auth_repo,
-                &user.id,
-                &refresh,
-                REFRESH_TOKEN_TTL_SECS,
-                Some(campus_id),
-            )
-            .await
-            .map_err(|e| {
-                ApiError::Internal(anyhow::anyhow!("Failed to store refresh token: {}", e))
-            })?;
-            Ok(Json(AuthResponse {
-                token,
-                refresh_token: refresh,
-                user_id: user.id,
-                username: user.username.clone(),
-                active_campus_id: Some(campus_id),
-                message: "登录成功".to_string(),
-            }))
-        }
-        Ok(false) => {
-            // Return 401 for wrong password — do NOT distinguish from wrong username
-            tracing::warn!(username = %payload.username, "Login failed — wrong password");
-            Err(ApiError::AuthFailed("用户名或密码错误".to_string()))
-        }
-        Err(e) => {
-            tracing::error!(err = %e, "Password verification task failed");
-            Err(ApiError::Internal(anyhow::anyhow!("Internal error: {}", e)))
-        }
+    if !verify_password(payload.password, user.password_hash).await? {
+        // Return 401 for wrong password — do NOT distinguish from wrong username
+        tracing::warn!(username = %payload.username, "Login failed — wrong password");
+        return Err(ApiError::AuthFailed("用户名或密码错误".to_string()));
     }
+
+    let campus_id = CampusService::new(state.infra.db.clone())
+        .resolve_user_campus(&user.id)
+        .await?;
+    let (token, _jti, _exp) = generate_access_token_for_campus(
+        &user.id,
+        &user.role,
+        Some(campus_id),
+        &state.secrets.jwt_secret,
+        ACCESS_TOKEN_TTL_SECS,
+    )?;
+    let refresh = generate_refresh_token();
+    store_refresh_token(
+        &state.auth_repo,
+        &user.id,
+        &refresh,
+        REFRESH_TOKEN_TTL_SECS,
+        Some(campus_id),
+    )
+    .await
+    .map_err(|e| ApiError::Internal(anyhow::anyhow!("Failed to store refresh token: {}", e)))?;
+    Ok(Json(AuthResponse {
+        token,
+        refresh_token: refresh,
+        user_id: user.id,
+        username: user.username,
+        active_campus_id: Some(campus_id),
+        message: "登录成功".to_string(),
+    }))
 }
 
 /// POST /api/auth/reauth — verify the current password and issue a recently-authenticated access token.
@@ -650,21 +645,7 @@ pub async fn reauthenticate(
         return Err(ApiError::Forbidden);
     }
 
-    let password = payload.password;
-    let password_hash = user.password_hash;
-    let verified = tokio::task::spawn_blocking(move || {
-        let Ok(parsed_hash) = PasswordHash::new(&password_hash) else {
-            return false;
-        };
-        Argon2::default()
-            .verify_password(password.as_bytes(), &parsed_hash)
-            .is_ok()
-    })
-    .await
-    .map_err(|error| {
-        ApiError::Internal(anyhow::anyhow!("Password verification failed: {}", error))
-    })?;
-    if !verified {
+    if !verify_password(payload.password, user.password_hash).await? {
         tracing::warn!(user_id = %session.user_id, "Recent authentication failed");
         return Err(ApiError::RecentAuthenticationFailed);
     }
@@ -864,38 +845,12 @@ pub async fn change_password(
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
         .ok_or(ApiError::Unauthorized)?;
 
-    let verify_result = tokio::task::spawn_blocking(move || -> bool {
-        let parsed_hash = match PasswordHash::new(&user.password_hash) {
-            Ok(h) => h,
-            Err(_) => return false,
-        };
-        Argon2::default()
-            .verify_password(payload.current_password.as_bytes(), &parsed_hash)
-            .is_ok()
-    })
-    .await;
-
-    match verify_result {
-        Ok(true) => {}
-        Ok(false) => {
-            tracing::warn!(user_id = %user_id, "Password change failed — wrong current password");
-            return Err(ApiError::AuthFailed("当前密码错误".to_string()));
-        }
-        Err(e) => {
-            tracing::error!(err = %e, "Password verification task failed");
-            return Err(ApiError::Internal(anyhow::anyhow!("Internal error: {}", e)));
-        }
+    if !verify_password(payload.current_password, user.password_hash).await? {
+        tracing::warn!(user_id = %user_id, "Password change failed — wrong current password");
+        return Err(ApiError::AuthFailed("当前密码错误".to_string()));
     }
 
-    let new_hash = tokio::task::spawn_blocking(move || {
-        let salt = SaltString::generate(&mut OsRng);
-        Argon2::default()
-            .hash_password(payload.new_password.as_bytes(), &salt)
-            .map(|h| h.to_string())
-    })
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("Hashing error: {}", e)))?
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("Hashing error: {}", e)))?;
+    let new_hash = hash_password(payload.new_password).await?;
 
     state
         .user_repo
@@ -1250,7 +1205,7 @@ pub fn extract_user_id_and_role_from_token_with_fallback(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::agents::router::IntentRouter;
     use crate::api::{ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
@@ -1261,7 +1216,7 @@ mod tests {
     use sqlx::Row;
     use std::sync::Arc;
 
-    fn build_test_state(pool: sqlx::PgPool) -> AppState {
+    pub(crate) fn build_test_state(pool: sqlx::PgPool) -> AppState {
         let (service_manager, _rx) = services::ServiceManager::new(pool.clone());
         let admin_service = service_manager.admin.clone();
         let event_tx = service_manager.event_tx.clone();
@@ -1850,15 +1805,9 @@ mod tests {
     #[tokio::test]
     async fn test_change_password_updates_hash_via_repository_path() {
         with_test_pool(|pool| async move {
-            let old_hash = tokio::task::spawn_blocking(|| {
-                let salt = SaltString::generate(&mut OsRng);
-                Argon2::default()
-                    .hash_password("current-pass-123".as_bytes(), &salt)
-                    .map(|h| h.to_string())
-            })
-            .await
-            .expect("hash task")
-            .expect("hash password");
+            let old_hash = hash_password("current-pass-123".to_string())
+                .await
+                .expect("hash password");
 
             let user_repo = PostgresUserRepository::new(pool.clone());
             let user_id = user_repo
@@ -1895,10 +1844,11 @@ mod tests {
                     .await
                     .expect("select updated hash");
 
-            let parsed_hash = PasswordHash::new(&updated_hash).expect("parse updated hash");
-            Argon2::default()
-                .verify_password("brand-new-pass-456".as_bytes(), &parsed_hash)
-                .expect("new password verifies");
+            assert!(
+                verify_password("brand-new-pass-456".to_string(), updated_hash)
+                    .await
+                    .expect("new password verifies")
+            );
         })
         .await;
     }
@@ -1907,11 +1857,9 @@ mod tests {
     async fn test_reauthenticate_rejects_wrong_password_and_issues_recent_token() {
         with_test_pool(|pool| async move {
             let password = "reauth-pass-123";
-            let salt = SaltString::generate(&mut OsRng);
-            let password_hash = Argon2::default()
-                .hash_password(password.as_bytes(), &salt)
-                .expect("hash password")
-                .to_string();
+            let password_hash = hash_password(password.to_string())
+                .await
+                .expect("hash password");
             let user_repo = PostgresUserRepository::new(pool.clone());
             let user_id = user_repo
                 .create(
@@ -2075,5 +2023,35 @@ mod tests {
             assert!(revoked);
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_hash_and_verify_password_round_trip() {
+        let password = "test_secure_password_123".to_string();
+        let hash = hash_password(password.clone())
+            .await
+            .expect("hash_password succeeds");
+        assert!(hash.starts_with("$argon2"));
+
+        let matches = verify_password(password, hash.clone())
+            .await
+            .expect("verify_password succeeds");
+        assert!(matches);
+
+        let wrong_matches = verify_password("wrong_password".to_string(), hash)
+            .await
+            .expect("verify_password succeeds");
+        assert!(!wrong_matches);
+    }
+
+    #[tokio::test]
+    async fn test_verify_password_invalid_hash_returns_false() {
+        let matches = verify_password(
+            "test_password".to_string(),
+            "invalid_hash_string".to_string(),
+        )
+        .await
+        .expect("verify_password with invalid hash should return Ok(false)");
+        assert!(!matches);
     }
 }
