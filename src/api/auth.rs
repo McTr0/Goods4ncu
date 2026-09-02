@@ -756,15 +756,14 @@ pub async fn switch_active_campus(
     headers: HeaderMap,
     Json(payload): Json<SwitchCampusRequest>,
 ) -> Result<Json<RefreshResponse>, ApiError> {
-    let context = extract_auth_session_from_token_with_fallback(
+    let claims = extract_claims_from_token_with_fallback(
         &headers,
         &state.secrets.jwt_secret,
         state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    )?;
     let campus_service = CampusService::new(state.infra.db.clone());
     campus_service
-        .require_verified_in_campus(&context.user_id, payload.campus_id)
+        .require_verified_in_campus(&claims.sub, payload.campus_id)
         .await?;
 
     let (new_access, new_refresh, active_campus_id) = rotate_refresh_token(
@@ -774,21 +773,14 @@ pub async fn switch_active_campus(
         &state.secrets.jwt_secret,
         &campus_service,
         Some(payload.campus_id),
-        Some(&context.user_id),
+        Some(&claims.sub),
     )
     .await
     .map_err(|error| {
-        tracing::warn!(err = %error, user_id = %context.user_id, "Campus switch failed");
+        tracing::warn!(err = %error, user_id = %claims.sub, "Campus switch failed");
         ApiError::Unauthorized
     })?;
 
-    let token = bearer_token(&headers)?;
-    let claims = decode_claims_from_token_str_with_fallback(
-        token,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
     if let Some(jti) = claims.jti.as_deref() {
         let expires_at = chrono::DateTime::<chrono::Utc>::from_timestamp(claims.exp as i64, 0)
             .unwrap_or_else(chrono::Utc::now);
@@ -808,24 +800,11 @@ pub async fn logout(
     headers: HeaderMap,
     Json(payload): Json<LogoutRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
+    let claims = extract_claims_from_token_with_fallback(
         &headers,
         &state.secrets.jwt_secret,
         state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
-
-    let token = headers
-        .get("Authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .ok_or(ApiError::Unauthorized)?;
-    let claims = decode_claims_from_token_str_with_fallback(
-        token,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    )?;
 
     if let Some(jti) = claims.jti.as_deref() {
         let expires_at = chrono::DateTime::<chrono::Utc>::from_timestamp(claims.exp as i64, 0)
@@ -836,9 +815,9 @@ pub async fn logout(
     if let Some(ref token) = payload.refresh_token {
         revoke_refresh_token(&state.auth_repo, token).await?;
     }
-    revoke_all_refresh_tokens(&state.auth_repo, &user_id).await?;
+    revoke_all_refresh_tokens(&state.auth_repo, &claims.sub).await?;
 
-    tracing::info!(user_id = %user_id, "User logged out, all sessions revoked");
+    tracing::info!(user_id = %claims.sub, "User logged out, all sessions revoked");
 
     Ok(Json(serde_json::json!({
         "message": "已退出登录"
@@ -1221,6 +1200,16 @@ fn bearer_token(headers: &HeaderMap) -> Result<&str, ApiError> {
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
         .ok_or(ApiError::Unauthorized)
+}
+
+fn extract_claims_from_token_with_fallback(
+    headers: &HeaderMap,
+    jwt_secret: &str,
+    jwt_secret_old: Option<&str>,
+) -> Result<Claims, ApiError> {
+    let token = bearer_token(headers)?;
+    decode_claims_from_token_str_with_fallback(token, jwt_secret, jwt_secret_old)
+        .map_err(|_| ApiError::Unauthorized)
 }
 
 /// Extract and validate the user_id and role from the Authorization header using the provided secret.
@@ -1662,6 +1651,70 @@ mod tests {
         );
         assert!(jti.is_err());
         assert_eq!(jti.unwrap_err(), "Token missing jti");
+    }
+
+    #[test]
+    fn test_extract_claims_from_token_with_fallback_success_and_compat() {
+        let current_secret = "test_current_secret_32_characters_long";
+        let old_secret = "test_old_secret_32_characters_long_x";
+        let campus_id = Uuid::new_v4();
+
+        // 1. Current secret token with claims
+        let (token, jti, exp) = generate_access_token_for_campus(
+            "user-1",
+            "user",
+            Some(campus_id),
+            current_secret,
+            3600,
+        )
+        .expect("generate current token");
+        let mut headers = HeaderMap::new();
+        headers.insert("Authorization", format!("Bearer {token}").parse().unwrap());
+
+        let claims =
+            extract_claims_from_token_with_fallback(&headers, current_secret, Some(old_secret))
+                .expect("extract claims with current secret");
+        assert_eq!(claims.sub, "user-1");
+        assert_eq!(claims.campus_id, Some(campus_id));
+        assert_eq!(claims.jti.as_deref(), Some(jti.as_str()));
+        assert_eq!(claims.exp, exp);
+
+        // 2. Old secret token fallback
+        let (old_token, old_jti, old_exp) =
+            generate_access_token_for_campus("user-2", "user", None, old_secret, 3600)
+                .expect("generate old token");
+        let mut old_headers = HeaderMap::new();
+        old_headers.insert(
+            "Authorization",
+            format!("Bearer {old_token}").parse().unwrap(),
+        );
+
+        let fallback_claims =
+            extract_claims_from_token_with_fallback(&old_headers, current_secret, Some(old_secret))
+                .expect("extract claims with old secret fallback");
+        assert_eq!(fallback_claims.sub, "user-2");
+        assert_eq!(fallback_claims.campus_id, None);
+        assert_eq!(fallback_claims.jti.as_deref(), Some(old_jti.as_str()));
+        assert_eq!(fallback_claims.exp, old_exp);
+
+        // 3. Missing Authorization header
+        let empty_headers = HeaderMap::new();
+        let err = extract_claims_from_token_with_fallback(
+            &empty_headers,
+            current_secret,
+            Some(old_secret),
+        );
+        assert!(matches!(err, Err(ApiError::Unauthorized)));
+
+        // 4. Invalid Authorization format
+        let mut malformed_headers = HeaderMap::new();
+        malformed_headers.insert("Authorization", "Basic 12345".parse().unwrap());
+        let err = extract_claims_from_token_with_fallback(
+            &malformed_headers,
+            current_secret,
+            Some(old_secret),
+        );
+        assert!(matches!(err, Err(ApiError::Unauthorized)));
     }
 
     #[tokio::test]
