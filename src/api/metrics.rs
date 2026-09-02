@@ -48,6 +48,10 @@ pub struct MetricsService {
     pub moderation_api_duration_seconds: Histogram,
     pub moderation_queue_depth: GaugeVec,
     pub moderation_queue_oldest_age_seconds: Gauge,
+    // Transactional outbox worker. Low-cardinality fixed labels only.
+    pub outbox_events_processed_total: CounterVec,
+    pub outbox_queue_depth: GaugeVec,
+    pub outbox_queue_oldest_age_seconds: Gauge,
 }
 
 impl MetricsService {
@@ -157,6 +161,27 @@ impl MetricsService {
             "Age of the oldest pending or processing image moderation job",
         )
         .expect("metric definition is valid");
+        let outbox_events_processed_total = CounterVec::new(
+            Opts::new(
+                "outbox_events_processed_total",
+                "Transactional outbox events dispatched by outcome",
+            ),
+            &["outcome"],
+        )
+        .expect("metric definition is valid");
+        let outbox_queue_depth = GaugeVec::new(
+            Opts::new(
+                "outbox_queue_depth",
+                "Current transactional outbox events by queue status",
+            ),
+            &["status"],
+        )
+        .expect("metric definition is valid");
+        let outbox_queue_oldest_age_seconds = Gauge::new(
+            "outbox_queue_oldest_age_seconds",
+            "Age of the oldest pending or processing outbox event in seconds",
+        )
+        .expect("metric definition is valid");
 
         // Register all metrics
         registry
@@ -213,6 +238,15 @@ impl MetricsService {
         registry
             .register(Box::new(moderation_queue_oldest_age_seconds.clone()))
             .expect("metric is unique");
+        registry
+            .register(Box::new(outbox_events_processed_total.clone()))
+            .expect("metric is unique");
+        registry
+            .register(Box::new(outbox_queue_depth.clone()))
+            .expect("metric is unique");
+        registry
+            .register(Box::new(outbox_queue_oldest_age_seconds.clone()))
+            .expect("metric is unique");
 
         Self {
             registry,
@@ -234,6 +268,9 @@ impl MetricsService {
             moderation_api_duration_seconds,
             moderation_queue_depth,
             moderation_queue_oldest_age_seconds,
+            outbox_events_processed_total,
+            outbox_queue_depth,
+            outbox_queue_oldest_age_seconds,
         }
     }
 
@@ -333,6 +370,34 @@ impl MetricsService {
             .set(oldest_age.max(0.0));
     }
 
+    /// Record an outbox event dispatch outcome (`processed`, `dead_lettered`, `retry`).
+    pub fn record_outbox_event(&self, outcome: &'static str) {
+        self.outbox_events_processed_total
+            .with_label_values(&[outcome])
+            .inc();
+    }
+
+    /// Set outbox queue gauges from one database snapshot.
+    pub fn set_outbox_queue(
+        &self,
+        pending: i64,
+        processing: i64,
+        dead_lettered: i64,
+        oldest_age: f64,
+    ) {
+        self.outbox_queue_depth
+            .with_label_values(&["pending"])
+            .set(pending as f64);
+        self.outbox_queue_depth
+            .with_label_values(&["processing"])
+            .set(processing as f64);
+        self.outbox_queue_depth
+            .with_label_values(&["dead_lettered"])
+            .set(dead_lettered as f64);
+        self.outbox_queue_oldest_age_seconds
+            .set(oldest_age.max(0.0));
+    }
+
     /// Render all metrics in Prometheus text format.
     pub fn render(&self) -> String {
         let encoder = TextEncoder::new();
@@ -371,5 +436,24 @@ mod tests {
         assert!(rendered.contains("moderation_queue_oldest_age_seconds 12.5"));
         assert!(!rendered.contains("job_id"));
         assert!(!rendered.contains("provider.example"));
+    }
+
+    #[test]
+    fn outbox_metrics_render_only_low_cardinality_series() {
+        let metrics = MetricsService::new();
+        metrics.record_outbox_event("processed");
+        metrics.record_outbox_event("dead_lettered");
+        metrics.set_outbox_queue(5, 2, 1, 45.0);
+
+        let rendered = metrics.render();
+        assert!(rendered.contains("outbox_events_processed_total"));
+        assert!(rendered.contains("outcome=\"processed\""));
+        assert!(rendered.contains("outcome=\"dead_lettered\""));
+        assert!(rendered.contains("outbox_queue_depth"));
+        assert!(rendered.contains("status=\"pending\""));
+        assert!(rendered.contains("status=\"dead_lettered\""));
+        assert!(rendered.contains("outbox_queue_oldest_age_seconds 45"));
+        assert!(!rendered.contains("event_id"));
+        assert!(!rendered.contains("topic"));
     }
 }

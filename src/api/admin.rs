@@ -1533,3 +1533,84 @@ pub async fn get_admin_audit_logs(
         logs,
     }))
 }
+
+#[derive(Default, Deserialize)]
+pub struct AdminOutboxQuery {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+    pub campus_id: Option<Uuid>,
+    pub reason: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct AdminDeadLetterOutboxResponse {
+    pub total: i64,
+    pub events: Vec<crate::services::outbox::DeadLetterOutboxEvent>,
+}
+
+pub async fn list_dead_letter_outbox_events(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<AdminOutboxQuery>,
+) -> Result<Json<AdminDeadLetterOutboxResponse>, ApiError> {
+    let _scope = require_admin_scope(
+        &state,
+        &headers,
+        query.campus_id,
+        query.reason.as_deref(),
+        false,
+    )
+    .await?;
+
+    let limit = query.limit.unwrap_or(50).clamp(1, 100);
+    let offset = query.offset.unwrap_or(0).max(0);
+
+    let (events, total) =
+        crate::services::outbox::list_dead_lettered(&state.infra.db, limit, offset)
+            .await
+            .map_err(|e| {
+                ApiError::Internal(anyhow::anyhow!("Failed to list dead letter outbox: {}", e))
+            })?;
+
+    Ok(Json(AdminDeadLetterOutboxResponse { total, events }))
+}
+
+pub async fn replay_outbox_event(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(event_id): Path<i64>,
+    Query(query): Query<AdminScopeQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let scope = require_admin_scope(
+        &state,
+        &headers,
+        query.campus_id,
+        query.reason.as_deref(),
+        true, // Platform admin required for outbox replay
+    )
+    .await?;
+
+    let replayed = crate::services::outbox::replay_dead_lettered(&state.infra.db, event_id)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("Failed to replay outbox event: {}", e)))?;
+
+    if !replayed {
+        return Err(ApiError::NotFound);
+    }
+
+    record_audit(
+        &state,
+        &scope,
+        "replay_outbox_event",
+        Some(&event_id.to_string()),
+        Some("dead_lettered"),
+        Some("pending"),
+        None,
+    )
+    .await;
+
+    Ok(Json(serde_json::json!({
+        "message": "事件已重新加入投递队列",
+        "id": event_id
+    })))
+}

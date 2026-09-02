@@ -302,3 +302,72 @@ async fn notification_create_enqueues_push_atomically() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn dead_letter_listing_and_replay_updates_metrics_and_state() {
+    with_test_pool(|pool| async move {
+        let mut tx = pool.begin().await.expect("begin");
+        let id = enqueue_in_tx(
+            &mut tx,
+            "test.dead_letter_replay",
+            &serde_json::json!({"msg": "fail"}),
+        )
+        .await
+        .expect("enqueue");
+        tx.commit().await.expect("commit");
+
+        // Force attempts to max_attempts - 1 so next failure dead-letters it
+        sqlx::query("UPDATE outbox_events SET attempts = max_attempts - 1 WHERE id = $1")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .expect("set attempts");
+
+        let dispatcher = RecordingDispatcher::new(1);
+        process_batch(&pool, "worker-dl", &dispatcher)
+            .await
+            .expect("batch");
+
+        // Verify it is dead-lettered
+        let (_, processed, dead, last_err) = event_row(&pool, id).await;
+        assert!(!processed);
+        assert!(dead);
+        assert!(last_err.is_some());
+
+        // Test list_dead_lettered
+        let (dead_list, total) = outbox::list_dead_lettered(&pool, 10, 0)
+            .await
+            .expect("list dead lettered");
+        assert!(total >= 1);
+        let found = dead_list
+            .iter()
+            .find(|e| e.id == id)
+            .expect("found in dead letter list");
+        assert_eq!(found.topic, "test.dead_letter_replay");
+        assert_eq!(found.payload["msg"], "fail");
+
+        // Test refresh_queue_metrics
+        outbox::refresh_queue_metrics(&pool).await;
+
+        // Test replay_dead_lettered
+        let replayed = replay_dead_lettered(&pool, id)
+            .await
+            .expect("replay dead lettered");
+        assert!(replayed);
+
+        let (attempts, processed, dead, _) = event_row(&pool, id).await;
+        assert_eq!(attempts, 0);
+        assert!(!processed);
+        assert!(!dead);
+
+        // Can be dispatched successfully now
+        let ok_dispatcher = RecordingDispatcher::new(0);
+        let claimed = process_batch(&pool, "worker-dl2", &ok_dispatcher)
+            .await
+            .expect("batch after replay");
+        assert_eq!(claimed, 1);
+        let (_, processed, _, _) = event_row(&pool, id).await;
+        assert!(processed);
+    })
+    .await;
+}

@@ -109,6 +109,11 @@ async fn mark_processed(pool: &PgPool, id: i64) -> anyhow::Result<()> {
     .bind(id)
     .execute(pool)
     .await?;
+
+    if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {
+        metrics.record_outbox_event("processed");
+    }
+
     Ok(())
 }
 
@@ -129,6 +134,9 @@ async fn mark_failed(pool: &PgPool, event: &ClaimedEvent, error: &str) -> anyhow
         .bind(error)
         .execute(pool)
         .await?;
+        if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {
+            metrics.record_outbox_event("dead_lettered");
+        }
         tracing::error!(
             event_id = event.id,
             topic = %event.topic,
@@ -151,6 +159,9 @@ async fn mark_failed(pool: &PgPool, event: &ClaimedEvent, error: &str) -> anyhow
         .bind(error)
         .execute(pool)
         .await?;
+        if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {
+            metrics.record_outbox_event("retry");
+        }
         tracing::warn!(
             event_id = event.id,
             topic = %event.topic,
@@ -181,9 +192,93 @@ pub async fn process_batch(
     Ok(claimed)
 }
 
+/// Refresh low-cardinality Prometheus queue metrics for outbox events.
+pub async fn refresh_queue_metrics(pool: &PgPool) {
+    let snapshot = sqlx::query_as::<_, (i64, i64, i64, f64)>(
+        r#"
+        SELECT
+            COUNT(*) FILTER (
+                WHERE processed_at IS NULL
+                  AND dead_lettered_at IS NULL
+                  AND (locked_until IS NULL OR locked_until <= NOW())
+            )::BIGINT,
+            COUNT(*) FILTER (
+                WHERE processed_at IS NULL
+                  AND dead_lettered_at IS NULL
+                  AND locked_until > NOW()
+            )::BIGINT,
+            COUNT(*) FILTER (
+                WHERE dead_lettered_at IS NOT NULL
+            )::BIGINT,
+            COALESCE(
+                EXTRACT(EPOCH FROM (
+                    CURRENT_TIMESTAMP - MIN(created_at)
+                    FILTER (WHERE processed_at IS NULL AND dead_lettered_at IS NULL)
+                ))::DOUBLE PRECISION,
+                0.0
+            )
+        FROM outbox_events
+        "#,
+    )
+    .fetch_one(pool)
+    .await;
+
+    match snapshot {
+        Ok((pending, processing, dead_lettered, oldest_age)) => {
+            if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {
+                metrics.set_outbox_queue(pending, processing, dead_lettered, oldest_age);
+            }
+        }
+        Err(error) => {
+            tracing::warn!(%error, "failed to refresh outbox queue metrics");
+        }
+    }
+}
+
+/// Represetation of a dead-lettered outbox event for operator inspection.
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+pub struct DeadLetterOutboxEvent {
+    pub id: i64,
+    pub topic: String,
+    pub payload: serde_json::Value,
+    pub attempts: i32,
+    pub max_attempts: i32,
+    pub last_error: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub dead_lettered_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// List dead-lettered outbox events with pagination.
+pub async fn list_dead_lettered(
+    pool: &PgPool,
+    limit: i64,
+    offset: i64,
+) -> anyhow::Result<(Vec<DeadLetterOutboxEvent>, i64)> {
+    let total = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*)::BIGINT FROM outbox_events WHERE dead_lettered_at IS NOT NULL",
+    )
+    .fetch_one(pool)
+    .await?;
+
+    let events = sqlx::query_as::<_, DeadLetterOutboxEvent>(
+        r#"
+        SELECT id, topic, payload, attempts, max_attempts, last_error, created_at, dead_lettered_at
+        FROM outbox_events
+        WHERE dead_lettered_at IS NOT NULL
+        ORDER BY dead_lettered_at DESC
+        LIMIT $1 OFFSET $2
+        "#,
+    )
+    .bind(limit.clamp(1, 100))
+    .bind(offset.max(0))
+    .fetch_all(pool)
+    .await?;
+
+    Ok((events, total))
+}
+
 /// Reset a dead-lettered event for another delivery attempt. Intended for
 /// operator-audited replay after the underlying failure is fixed.
-#[allow(dead_code)] // exercised via the lib crate by integration tests and ops tooling
 pub async fn replay_dead_lettered(pool: &PgPool, id: i64) -> anyhow::Result<bool> {
     let updated = sqlx::query(
         "UPDATE outbox_events
@@ -194,7 +289,12 @@ pub async fn replay_dead_lettered(pool: &PgPool, id: i64) -> anyhow::Result<bool
     .bind(id)
     .execute(pool)
     .await?;
-    Ok(updated.rows_affected() > 0)
+
+    let success = updated.rows_affected() > 0;
+    if success {
+        refresh_queue_metrics(pool).await;
+    }
+    Ok(success)
 }
 
 /// Long-running worker loop. Polls while idle, drains eagerly while busy, and
@@ -221,7 +321,12 @@ pub async fn run_outbox_worker(
             }
         };
 
+        if claimed > 0 {
+            refresh_queue_metrics(&pool).await;
+        }
+
         if claimed == 0 {
+            refresh_queue_metrics(&pool).await;
             if !sleep_or_shutdown(POLL_INTERVAL, &shutdown)
                 .await
                 .should_continue()

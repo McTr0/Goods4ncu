@@ -725,6 +725,14 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             post(admin::restore_listing),
         )
         .route(
+            "/api/admin/outbox/dead-letter",
+            get(admin::list_dead_letter_outbox_events),
+        )
+        .route(
+            "/api/admin/outbox/replay/{id}",
+            post(admin::replay_outbox_event),
+        )
+        .route(
             "/api/recommendations/feed",
             get(recommendations::get_recommendation_feed),
         )
