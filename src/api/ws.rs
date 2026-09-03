@@ -137,10 +137,12 @@ pub fn register_test_connection_for_campus(
 
 /// Deliver a payload to this instance's active connections for a user.
 /// Automatically removes dead senders (channel closed).
+#[allow(dead_code)]
 pub fn deliver_local(user_id: &str, payload: &str) {
     deliver_local_scoped(user_id, None, payload);
 }
 
+#[allow(dead_code)]
 pub fn deliver_local_for_campus(user_id: &str, campus_id: uuid::Uuid, payload: &str) {
     deliver_local_scoped(user_id, Some(campus_id), payload);
 }

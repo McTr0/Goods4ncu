@@ -305,6 +305,7 @@ async fn main() -> Result<(), anyhow::Error> {
     ));
 
     // Multi-replica topology is strictly governed by config.deployment_profile.
+    #[cfg(feature = "redis")]
     let (replicated_runtime, rate_limit_handle) = match config.deployment_profile {
         crate::config::DeploymentProfile::Local => {
             tracing::info!(
@@ -315,7 +316,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 config.rate_limit_window_secs,
             );
             (
-                None,
+                None::<std::sync::Arc<services::replicated_runtime::ReplicatedRuntime>>,
                 middleware::rate_limit::RateLimitStateHandle::new(factory.build_local()),
             )
         }
@@ -323,33 +324,35 @@ async fn main() -> Result<(), anyhow::Error> {
             tracing::info!(
                 "Deployment profile: replicated. Initializing bounded ReplicatedRuntime..."
             );
-            #[cfg(feature = "redis")]
-            {
-                let redis_url = config
-                    .redis_url
-                    .as_deref()
-                    .expect("config validation requires redis_url");
-                let runtime = services::replicated_runtime::ReplicatedRuntime::start(
-                    redis_url,
-                    config.rate_limit_max_requests,
-                    config.rate_limit_window_secs,
-                    &shutdown,
-                    std::time::Duration::from_secs(5),
-                )
-                .await
-                .unwrap_or_else(|err| {
-                    panic!("DEPLOYMENT_PROFILE=replicated failed fast during startup: {err}; refusing to boot");
-                });
-                let rate_limiter = runtime.rate_limiter();
-                (Some(runtime), rate_limiter)
-            }
-            #[cfg(not(feature = "redis"))]
-            {
-                panic!(
-                    "DEPLOYMENT_PROFILE=replicated requires binary compiled with --features redis"
-                );
-            }
+            let redis_url = config
+                .redis_url
+                .as_deref()
+                .expect("config validation requires redis_url");
+            let runtime = services::replicated_runtime::ReplicatedRuntime::start(
+                redis_url,
+                config.rate_limit_max_requests,
+                config.rate_limit_window_secs,
+                &shutdown,
+                std::time::Duration::from_secs(5),
+            )
+            .await
+            .unwrap_or_else(|err| {
+                panic!("DEPLOYMENT_PROFILE=replicated failed fast during startup: {err}; refusing to boot");
+            });
+            let rate_limiter = runtime.rate_limiter();
+            (Some(runtime), rate_limiter)
         }
+    };
+    #[cfg(not(feature = "redis"))]
+    let rate_limit_handle = {
+        tracing::info!(
+            "Deployment profile: local (compiled without redis). Using in-memory rate limiter and local WS delivery."
+        );
+        let factory = middleware::rate_limit::RateLimiterFactory::new(
+            config.rate_limit_max_requests,
+            config.rate_limit_window_secs,
+        );
+        middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
     };
 
     let app_state = api::AppState {

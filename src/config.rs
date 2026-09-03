@@ -404,6 +404,7 @@ impl AppConfig {
             #[cfg(not(feature = "redis"))]
             panic!("DEPLOYMENT_PROFILE=replicated requires the binary to be compiled with --features redis");
 
+            #[cfg(feature = "redis")]
             assert!(
                 redis_url.is_some(),
                 "DEPLOYMENT_PROFILE=replicated requires REDIS_URL to be set; refusing to boot with silent downgrade to local state"
