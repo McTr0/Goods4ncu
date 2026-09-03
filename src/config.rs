@@ -24,6 +24,16 @@ pub const DEFAULT_CATEGORIES: &[&str] = &[
     "other",
 ];
 
+/// Deployment topology mode. Local mode runs in-process; replicated mode
+/// coordinates multi-instance state via Redis and fails fast if Redis is unavailable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeploymentProfile {
+    #[default]
+    Local,
+    Replicated,
+}
+
 pub const SUPPORTED_LLM_PROVIDERS: &[&str] = &[
     "gemini",
     "minimax",
@@ -120,6 +130,7 @@ pub struct AppConfig {
     pub oss_bucket: String,
     pub oss_role_arn: Option<String>,
     pub redis_url: Option<String>,
+    pub deployment_profile: DeploymentProfile,
     pub rate_limit_max_requests: u64,
     pub rate_limit_window_secs: u64,
 
@@ -185,6 +196,7 @@ impl fmt::Debug for AppConfig {
                 &self.oss_access_key_secret.as_ref().map(|_| "[REDACTED]"),
             )
             .field("redis_url", &self.redis_url)
+            .field("deployment_profile", &self.deployment_profile)
             .field("rate_limit_max_requests", &self.rate_limit_max_requests)
             .field("rate_limit_window_secs", &self.rate_limit_window_secs)
             .field("server_host", &self.server_host)
@@ -379,6 +391,22 @@ impl AppConfig {
             .ok()
             .or_else(|| file.as_ref()?.rate_limit.redis_url.clone());
 
+        // Deployment profile: local vs replicated (fail-fast if replicated lacks redis)
+        let deployment_profile = match read_non_empty_env("DEPLOYMENT_PROFILE")
+            .or_else(|| read_non_empty_env("APP_PROFILE"))
+            .as_deref()
+        {
+            Some("replicated") | Some("cluster") => DeploymentProfile::Replicated,
+            _ => DeploymentProfile::Local,
+        };
+
+        if deployment_profile == DeploymentProfile::Replicated {
+            assert!(
+                redis_url.is_some(),
+                "DEPLOYMENT_PROFILE=replicated requires REDIS_URL to be set; refusing to boot with silent downgrade to local state"
+            );
+        }
+
         // Rate limit: env > file > default (fail-fast on invalid env value)
         let rate_limit_max_requests: u64 = if let Ok(v) = std::env::var("RATE_LIMIT_MAX_REQUESTS") {
             v.parse()
@@ -545,6 +573,7 @@ impl AppConfig {
             oss_access_key_id,
             oss_access_key_secret,
             redis_url,
+            deployment_profile,
             rate_limit_max_requests,
             rate_limit_window_secs,
             server_host,
@@ -595,6 +624,7 @@ impl AppConfig {
             oss_bucket: "test-bucket".to_string(),
             oss_role_arn: None,
             redis_url: None,
+            deployment_profile: DeploymentProfile::Local,
             rate_limit_max_requests: 100,
             rate_limit_window_secs: 60,
             server_host: "127.0.0.1".to_string(),
@@ -797,6 +827,7 @@ mod tests {
             oss_bucket: "goods4ncu".to_string(),
             oss_role_arn: None,
             redis_url: None,
+            deployment_profile: DeploymentProfile::Local,
             rate_limit_max_requests: 100,
             rate_limit_window_secs: 60,
             server_host: "0.0.0.0".to_string(),

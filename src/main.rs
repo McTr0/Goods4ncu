@@ -339,9 +339,11 @@ async fn main() -> Result<(), anyhow::Error> {
                             middleware::rate_limit::RateLimitStateHandle::new(limiter)
                         }
                         Err(error) => {
-                            // Fail closed to local limiting rather than
-                            // refusing to boot: a Redis outage should degrade
-                            // per-instance, not take the API down.
+                            if config.deployment_profile
+                                == crate::config::DeploymentProfile::Replicated
+                            {
+                                panic!("Deployment profile is replicated but Redis rate limiter failed: {error}; refusing to boot with silent degradation to local state");
+                            }
                             tracing::error!(%error, "Redis rate limiter unavailable; using local limiter");
                             middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
                         }
