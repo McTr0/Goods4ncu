@@ -51,6 +51,8 @@ fn build_state(pool: sqlx::PgPool, shutdown: ShutdownSignal) -> AppState {
             token_denylist: services::token_denylist::TokenDenylist::new(),
             media_signer: None,
             shutdown,
+            deployment_profile: goods4ncu::config::DeploymentProfile::Local,
+            redis_url: None,
         },
         agents: ApiAgents {
             llm_provider: Arc::new(
@@ -176,6 +178,22 @@ async fn probes_are_exempt_from_rate_limiting() {
             let (status, _) = get(app.clone(), "/api/readyz").await;
             assert_eq!(status, StatusCode::OK);
         }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn replicated_readiness_probe_fails_fast_when_redis_unreachable() {
+    with_test_pool(|pool| async move {
+        let mut state = build_state(pool, ShutdownSignal::never());
+        state.infra.deployment_profile = goods4ncu::config::DeploymentProfile::Replicated;
+        // Point to an unreachable port to verify fail-fast behavior
+        state.infra.redis_url = Some("redis://127.0.0.1:1/0".to_string());
+        let app = create_router(state, &[]);
+
+        let (status, body) = get(app, "/api/readyz").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(body.contains("redis_unreachable"));
     })
     .await;
 }

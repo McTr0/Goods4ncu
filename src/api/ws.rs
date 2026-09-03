@@ -72,8 +72,7 @@ pub fn install_fanout_publisher(mut conn: redis::aio::ConnectionManager) {
                 crate::services::ws_fanout::publish_scoped(&mut conn, &user_id, campus_id, &payload)
                     .await
             {
-                tracing::warn!(%error, user_id = %user_id, "WS fanout publish failed; delivering locally");
-                deliver_local_scoped(&user_id, campus_id, &payload);
+                tracing::error!(%error, user_id = %user_id, "WS fanout publish failed");
             }
         }
     });
@@ -102,7 +101,11 @@ fn broadcast_to_user_scoped(user_id: &str, campus_id: Option<uuid::Uuid>, payloa
         {
             return;
         }
-        tracing::warn!("WS fanout channel closed; delivering locally");
+        tracing::error!(
+            "WS fanout channel closed; dropped broadcast for user {}",
+            user_id
+        );
+        return;
     }
     deliver_local_scoped(user_id, campus_id, payload);
 }

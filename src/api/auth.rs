@@ -1247,6 +1247,8 @@ pub(crate) mod tests {
                 token_denylist: services::token_denylist::TokenDenylist::new(),
                 media_signer: None,
                 shutdown: crate::lifecycle::ShutdownSignal::never(),
+                deployment_profile: crate::config::DeploymentProfile::Local,
+                redis_url: None,
             },
             agents: ApiAgents {
                 llm_provider: Arc::new(

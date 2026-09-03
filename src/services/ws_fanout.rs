@@ -64,10 +64,13 @@ pub async fn publish_scoped(
 /// subscription loop until shutdown. On any subscription failure it retries
 /// with backoff — a replica that silently stops subscribing would look healthy
 /// while dropping every realtime push for its connected users.
-pub async fn run(redis_url: String, shutdown: ShutdownSignal) {
+pub async fn run(redis_url: String, shutdown: ShutdownSignal, is_replicated: bool) {
     let client = match redis::Client::open(redis_url.as_str()) {
         Ok(client) => client,
         Err(error) => {
+            if is_replicated {
+                panic!("WS fanout failed to open REDIS_URL in replicated mode: {error}");
+            }
             tracing::error!(%error, "WS fanout disabled: invalid REDIS_URL");
             return;
         }
@@ -80,6 +83,9 @@ pub async fn run(redis_url: String, shutdown: ShutdownSignal) {
             tracing::info!("WS fanout publisher installed (Redis)");
         }
         Err(error) => {
+            if is_replicated {
+                panic!("WS fanout failed to connect publisher in replicated mode: {error}");
+            }
             tracing::error!(%error, "WS fanout disabled: cannot connect publisher");
             return;
         }

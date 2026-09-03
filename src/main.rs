@@ -261,10 +261,13 @@ async fn main() -> Result<(), anyhow::Error> {
     // route through Redis pub/sub so any replica can deliver to the sockets it
     // Holds. Without it (or without the `redis` feature) delivery stays local.
     #[cfg(feature = "redis")]
-    let ws_fanout_handle = config
-        .redis_url
-        .clone()
-        .map(|redis_url| tokio::spawn(services::ws_fanout::run(redis_url, shutdown.clone())));
+    let ws_fanout_handle = config.redis_url.clone().map(|redis_url| {
+        tokio::spawn(services::ws_fanout::run(
+            redis_url,
+            shutdown.clone(),
+            config.deployment_profile == crate::config::DeploymentProfile::Replicated,
+        ))
+    });
 
     let token_denylist = services::token_denylist::TokenDenylist::new();
 
@@ -352,8 +355,12 @@ async fn main() -> Result<(), anyhow::Error> {
                     middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
                 };
                 #[cfg(not(feature = "redis"))]
-                let handle =
-                    middleware::rate_limit::RateLimitStateHandle::new(factory.build_local());
+                let handle = {
+                    if config.deployment_profile == crate::config::DeploymentProfile::Replicated {
+                        panic!("DEPLOYMENT_PROFILE=replicated requires the binary to be compiled with --features redis");
+                    }
+                    middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
+                };
                 handle
             },
             notification,
@@ -365,6 +372,8 @@ async fn main() -> Result<(), anyhow::Error> {
             token_denylist: token_denylist.clone(),
             media_signer: media_signer.clone(),
             shutdown: shutdown.clone(),
+            deployment_profile: config.deployment_profile,
+            redis_url: config.redis_url.clone(),
         },
         agents: api::ApiAgents {
             llm_provider: Arc::clone(&llm_provider),

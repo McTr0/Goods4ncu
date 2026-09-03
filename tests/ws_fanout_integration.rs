@@ -30,7 +30,7 @@ async fn broadcast_round_trips_through_redis_to_local_sockets() {
     let Some(url) = redis_url() else { return };
 
     let controller = ShutdownController::new();
-    let fanout = tokio::spawn(ws_fanout::run(url, controller.signal()));
+    let fanout = tokio::spawn(ws_fanout::run(url, controller.signal(), false));
 
     // Wait for the subscriber + publisher to come up.
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -70,7 +70,7 @@ async fn subscriber_shuts_down_cleanly() {
     let Some(url) = redis_url() else { return };
 
     let controller = ShutdownController::new();
-    let fanout = tokio::spawn(ws_fanout::run(url, controller.signal()));
+    let fanout = tokio::spawn(ws_fanout::run(url, controller.signal(), false));
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     controller.trigger();
@@ -78,6 +78,21 @@ async fn subscriber_shuts_down_cleanly() {
         .await
         .expect("fanout must honour shutdown")
         .expect("fanout task must not panic");
+}
+
+#[tokio::test]
+async fn fanout_fails_fast_in_replicated_mode_when_redis_unreachable() {
+    let controller = ShutdownController::new();
+    let fanout = tokio::spawn(ws_fanout::run(
+        "redis://127.0.0.1:1/0".to_string(),
+        controller.signal(),
+        true,
+    ));
+    let res = fanout.await;
+    assert!(
+        res.is_err(),
+        "fanout task must fail-fast / panic in replicated mode when redis is down"
+    );
 }
 
 /// Full two-instance topology: two independent server processes share only

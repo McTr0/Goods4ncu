@@ -391,16 +391,19 @@ impl AppConfig {
             .ok()
             .or_else(|| file.as_ref()?.rate_limit.redis_url.clone());
 
-        // Deployment profile: local vs replicated (fail-fast if replicated lacks redis)
-        let deployment_profile = match read_non_empty_env("DEPLOYMENT_PROFILE")
-            .or_else(|| read_non_empty_env("APP_PROFILE"))
-            .as_deref()
-        {
-            Some("replicated") | Some("cluster") => DeploymentProfile::Replicated,
-            _ => DeploymentProfile::Local,
+        // Deployment profile: strictly local or replicated (fail-fast on unknown, typo, or missing redis)
+        let deployment_profile = match read_non_empty_env("DEPLOYMENT_PROFILE").as_deref() {
+            Some("replicated") => DeploymentProfile::Replicated,
+            Some("local") | None => DeploymentProfile::Local,
+            Some(other) => panic!(
+                "invalid DEPLOYMENT_PROFILE: '{other}'. Only 'local' or 'replicated' are allowed."
+            ),
         };
 
         if deployment_profile == DeploymentProfile::Replicated {
+            #[cfg(not(feature = "redis"))]
+            panic!("DEPLOYMENT_PROFILE=replicated requires the binary to be compiled with --features redis");
+
             assert!(
                 redis_url.is_some(),
                 "DEPLOYMENT_PROFILE=replicated requires REDIS_URL to be set; refusing to boot with silent downgrade to local state"
