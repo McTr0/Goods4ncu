@@ -342,24 +342,6 @@ impl MediaSigner {
         }
         Some(self.bucket.presigned_get(&key, self.ttl_secs))
     }
-
-    /// Sign a direct upload for one server-generated object key.  This is
-    /// intentionally separate from `sign`: a client may PUT only to the exact
-    /// key returned by an owner-scoped asset endpoint, while the completion
-    /// endpoint remains the authority for size, MIME and file-header checks.
-    #[allow(dead_code)]
-    pub fn sign_put_key(&self, object_key: &str) -> Option<String> {
-        let key = object_key.trim().trim_start_matches('/');
-        if key.is_empty()
-            || key.contains("..")
-            || key.contains('?')
-            || key.contains('#')
-            || key.contains("://")
-        {
-            return None;
-        }
-        Some(self.bucket.presigned_put(key, self.ttl_secs))
-    }
 }
 
 /// LLM provider + intent routing.
@@ -1432,27 +1414,6 @@ mod tests {
             endpoint,
             "goods"
         ));
-    }
-
-    #[test]
-    fn media_signer_put_scope_rejects_untrusted_key_shapes() {
-        let signer = MediaSigner {
-            bucket: crate::services::storage::PrivateBucket {
-                endpoint: "https://oss.example.com".to_string(),
-                bucket: "goods".to_string(),
-                region: "oss-cn-beijing".to_string(),
-                access_key_id: "access".to_string(),
-                secret_access_key: "secret".to_string(),
-                path_style: false,
-            },
-            ttl_secs: 300,
-        };
-        assert!(signer
-            .sign_put_key("persona/campus/persona/asset")
-            .is_some());
-        for invalid in ["", "../secret", "https://evil.example/file", "key?x=1"] {
-            assert!(signer.sign_put_key(invalid).is_none(), "accepted {invalid}");
-        }
     }
 
     #[test]
