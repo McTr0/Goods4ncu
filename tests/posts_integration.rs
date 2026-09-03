@@ -806,6 +806,14 @@ async fn atomic_post_and_marketplace_creation_in_single_transaction() {
             ) -> Result<Option<Post>, ApiError> {
                 self.0.find_by_id(campus_id, id).await
             }
+            async fn find_by_id_in_tx(
+                &self,
+                tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+                campus_id: Uuid,
+                id: Uuid,
+            ) -> Result<Option<Post>, ApiError> {
+                self.0.find_by_id_in_tx(tx, campus_id, id).await
+            }
             async fn list_by_author(
                 &self,
                 campus_id: Uuid,

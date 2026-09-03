@@ -132,6 +132,13 @@ pub trait PostRepository: Send + Sync {
 
     async fn find_by_id(&self, campus_id: Uuid, id: Uuid) -> Result<Option<Post>, ApiError>;
 
+    async fn find_by_id_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        campus_id: Uuid,
+        id: Uuid,
+    ) -> Result<Option<Post>, ApiError>;
+
     async fn list_by_author(
         &self,
         campus_id: Uuid,
@@ -598,6 +605,27 @@ impl PostRepository for PostgresPostRepository {
             .bind(id)
             .bind(campus_id)
             .fetch_optional(&self.pool)
+            .await
+            .map(|row| row.as_ref().map(post_from_row))
+            .map_err(db_error)
+    }
+
+    async fn find_by_id_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        campus_id: Uuid,
+        id: Uuid,
+    ) -> Result<Option<Post>, ApiError> {
+        let query = format!(
+            "{} WHERE p.id = $1 AND p.campus_id = $2
+                AND p.status IN ('active', 'locked')
+                AND (p.listing_id IS NULL OR NOT listing_has_active_restriction(p.listing_id))",
+            Self::post_select()
+        );
+        sqlx::query(&query)
+            .bind(id)
+            .bind(campus_id)
+            .fetch_optional(&mut **tx)
             .await
             .map(|row| row.as_ref().map(post_from_row))
             .map_err(db_error)

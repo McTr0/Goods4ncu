@@ -6,7 +6,7 @@ use crate::repositories::{
     NewPost, Post, PostFilter, PostReply, PostRepository, PostgresPostRepository, UpdatePostInput,
 };
 use crate::services::moderation::ModerationService;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use std::collections::HashSet;
 use std::sync::{OnceLock, RwLock};
 use uuid::Uuid;
@@ -46,14 +46,120 @@ pub struct CreatePost {
     pub idempotency_key: Option<String>,
 }
 
-pub fn create_post_request_hash(input: &CreatePost) -> Result<String, ApiError> {
-    let canonical = serde_json::to_vec(input).map_err(|error| {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PublishPostPayload {
+    Discussion,
+    Announcement,
+    Offer(CreatePostMarketplaceInput),
+    Wanted(CreatePostMarketplaceInput),
+}
+
+impl PublishPostPayload {
+    pub fn category(&self) -> &'static str {
+        match self {
+            Self::Discussion => "discussion",
+            Self::Announcement => "announcement",
+            Self::Offer(_) => "offer",
+            Self::Wanted(_) => "wanted",
+        }
+    }
+
+    pub fn marketplace(&self) -> Option<&CreatePostMarketplaceInput> {
+        match self {
+            Self::Offer(mp) | Self::Wanted(mp) => Some(mp),
+            Self::Discussion | Self::Announcement => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublishPostCommand {
+    pub campus_id: Uuid,
+    pub author_id: String,
+    pub title: String,
+    pub body: String,
+    pub payload: PublishPostPayload,
+    pub tags: Vec<String>,
+    pub cover_image_url: Option<String>,
+    pub space_id: Option<Uuid>,
+    pub idempotency_key: Option<String>,
+}
+
+impl PublishPostCommand {
+    pub fn from_input(input: CreatePost, category: &str) -> Result<Self, ApiError> {
+        let payload = match category {
+            "discussion" => {
+                if input.marketplace.is_some() {
+                    return Err(ApiError::BadRequest(
+                        "非商品类别不能包含 marketplace 详细信息".to_string(),
+                    ));
+                }
+                PublishPostPayload::Discussion
+            }
+            "announcement" => {
+                if input.marketplace.is_some() {
+                    return Err(ApiError::BadRequest(
+                        "非商品类别不能包含 marketplace 详细信息".to_string(),
+                    ));
+                }
+                PublishPostPayload::Announcement
+            }
+            "offer" => {
+                let mp = input.marketplace.ok_or_else(|| {
+                    ApiError::BadRequest(
+                        "发布商品或求购 (offer) 必须提供 marketplace 详细信息".to_string(),
+                    )
+                })?;
+                PublishPostPayload::Offer(mp)
+            }
+            "wanted" => {
+                let mp = input.marketplace.ok_or_else(|| {
+                    ApiError::BadRequest(
+                        "发布商品或求购 (wanted) 必须提供 marketplace 详细信息".to_string(),
+                    )
+                })?;
+                PublishPostPayload::Wanted(mp)
+            }
+            other => return Err(ApiError::BadRequest(format!("未知分类: {other}"))),
+        };
+
+        Ok(Self {
+            campus_id: input.campus_id,
+            author_id: input.author_id,
+            title: input.title,
+            body: input.body,
+            payload,
+            tags: input.tags,
+            cover_image_url: input.cover_image_url,
+            space_id: input.space_id,
+            idempotency_key: input.idempotency_key,
+        })
+    }
+}
+
+impl TryFrom<CreatePost> for PublishPostCommand {
+    type Error = ApiError;
+
+    fn try_from(input: CreatePost) -> Result<Self, Self::Error> {
+        let category = input.category.trim().to_string();
+        Self::from_input(input, &category)
+    }
+}
+
+pub fn publish_post_request_hash(cmd: &PublishPostCommand) -> Result<String, ApiError> {
+    let canonical = serde_json::to_vec(cmd).map_err(|error| {
         ApiError::Internal(anyhow::anyhow!(
-            "Failed to serialize normalized post input: {}",
+            "Failed to serialize normalized post command: {}",
             error
         ))
     })?;
     Ok(hex::encode(Sha256::digest(canonical)))
+}
+
+#[allow(dead_code)]
+pub fn create_post_request_hash(input: &CreatePost) -> Result<String, ApiError> {
+    let cmd = PublishPostCommand::try_from(input.clone())?;
+    publish_post_request_hash(&cmd)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -293,27 +399,43 @@ impl<R: PostRepository> PostService<R> {
     }
 
     pub async fn create(&self, input: CreatePost) -> Result<Post, ApiError> {
-        let title = required_text(input.title, "title", MAX_POST_TITLE_CHARS)?;
-        let body = required_text(input.body, "body", MAX_POST_BODY_CHARS)?;
-        let category = normalize_post_category(&self.pool, Some(input.category)).await?;
-        if category == "announcement" {
-            self.ensure_can_announce(input.campus_id, input.author_id.as_str())
+        let category = normalize_post_category(&self.pool, Some(input.category.clone())).await?;
+        let cmd = PublishPostCommand::from_input(input, &category)?;
+        self.publish(cmd).await
+    }
+
+    pub async fn publish(&self, mut cmd: PublishPostCommand) -> Result<Post, ApiError> {
+        if matches!(cmd.payload, PublishPostPayload::Announcement) {
+            self.ensure_can_announce(cmd.campus_id, cmd.author_id.as_str())
                 .await?;
         }
+        cmd.tags = self.normalize_tags(cmd.tags).await?;
+        if let Some(space_id) = cmd.space_id {
+            ensure_space_member(&self.pool, cmd.author_id.as_str(), space_id).await?;
+        }
 
-        let is_goods = category == "offer" || category == "wanted";
-        if is_goods && input.marketplace.is_none() {
-            return Err(ApiError::BadRequest(format!(
-                "发布商品或求购 ({category}) 必须提供 marketplace 详细信息"
-            )));
-        }
-        if !is_goods && input.marketplace.is_some() {
-            return Err(ApiError::BadRequest(
-                "非商品类别不能包含 marketplace 详细信息".to_string(),
-            ));
-        }
-        if category == "offer" {
-            let mp = input.marketplace.as_ref().unwrap();
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
+        let post = self.publish_in_tx(&mut tx, cmd).await?;
+        tx.commit()
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
+        Ok(post)
+    }
+
+    pub async fn publish_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        cmd: PublishPostCommand,
+    ) -> Result<Post, ApiError> {
+        let title = required_text(cmd.title, "title", MAX_POST_TITLE_CHARS)?;
+        let body = required_text(cmd.body, "body", MAX_POST_BODY_CHARS)?;
+        let category = cmd.payload.category().to_string();
+
+        if let PublishPostPayload::Offer(ref mp) = cmd.payload {
             if mp.brand.trim().is_empty() {
                 return Err(ApiError::BadRequest(
                     "发布闲置商品 (offer) 必须提供品牌或来源".to_string(),
@@ -321,42 +443,32 @@ impl<R: PostRepository> PostService<R> {
             }
         }
 
-        let tags = self.normalize_tags(input.tags).await?;
-        let cover_image_url = normalize_cover_image_url(input.cover_image_url)?;
-        if let Some(space_id) = input.space_id {
-            ensure_space_member(&self.pool, input.author_id.as_str(), space_id).await?;
-        }
-        self.ensure_text_allowed(&format!("{title}\n{body}\n{}", tags.join(" ")))?;
+        let cover_image_url = normalize_cover_image_url(cmd.cover_image_url)?;
+        self.ensure_text_allowed(&format!("{title}\n{body}\n{}", cmd.tags.join(" ")))?;
 
-        let normalized_input = CreatePost {
-            campus_id: input.campus_id,
-            author_id: input.author_id.clone(),
-            category: category.clone(),
+        let normalized_cmd = PublishPostCommand {
+            campus_id: cmd.campus_id,
+            author_id: cmd.author_id.clone(),
             title: title.clone(),
             body: body.clone(),
-            tags: tags.clone(),
+            payload: cmd.payload.clone(),
+            tags: cmd.tags.clone(),
             cover_image_url: cover_image_url.clone(),
-            space_id: input.space_id,
-            marketplace: input.marketplace.clone(),
-            idempotency_key: input.idempotency_key.clone(),
+            space_id: cmd.space_id,
+            idempotency_key: cmd.idempotency_key.clone(),
         };
 
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
-
-        let request_hash = if input.idempotency_key.is_some() {
-            let hash = create_post_request_hash(&normalized_input)?;
-            let existing: Option<(Uuid, Option<String>)> = sqlx::query_as(
-                "SELECT id, idempotency_hash FROM posts WHERE author_id = $1 AND idempotency_key = $2",
-            )
-            .bind(&input.author_id)
-            .bind(input.idempotency_key.as_deref())
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
+        let request_hash = if cmd.idempotency_key.is_some() {
+            let hash = publish_post_request_hash(&normalized_cmd)?;
+            let existing: Option<(Uuid, Option<String>)> =
+                sqlx::query_as::<_, (Uuid, Option<String>)>(
+                    "SELECT id, idempotency_hash FROM posts WHERE author_id = $1 AND idempotency_key = $2",
+                )
+                .bind(&cmd.author_id)
+                .bind(cmd.idempotency_key.as_deref())
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
 
             if let Some((existing_id, existing_hash)) = existing {
                 if existing_hash.as_deref() != Some(&hash) {
@@ -364,38 +476,39 @@ impl<R: PostRepository> PostService<R> {
                         "Idempotency-Key 重复且请求体不一致".to_string(),
                     ));
                 }
-                tx.rollback()
-                    .await
-                    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
-                return self.get(input.campus_id, existing_id).await;
+                return self
+                    .repository
+                    .find_by_id_in_tx(tx, cmd.campus_id, existing_id)
+                    .await?
+                    .ok_or(ApiError::NotFound);
             }
             Some(hash)
         } else {
             None
         };
 
-        let listing_id = if let Some(mp) = input.marketplace {
+        let listing_id = if let Some(mp) = cmd.payload.marketplace() {
             let listing_service = crate::services::listing_command::ListingCommandService::new(
                 self.pool.clone(),
                 self.moderation.clone(),
             );
             let listing_res = listing_service
                 .create_in_tx(
-                    &mut tx,
+                    tx,
                     crate::services::listing_command::CreateListingDraft {
-                        campus_id: input.campus_id,
-                        owner_id: input.author_id.clone(),
+                        campus_id: cmd.campus_id,
+                        owner_id: cmd.author_id.clone(),
                         title: title.clone(),
-                        category: mp.category,
-                        brand: mp.brand,
+                        category: mp.category.clone(),
+                        brand: mp.brand.clone(),
                         direction: Some(category.clone()),
                         condition_score: mp.condition_score,
                         suggested_price_cny: mp.suggested_price_cny,
-                        defects: mp.defects,
-                        description: mp.description.or_else(|| Some(body.clone())),
+                        defects: mp.defects.clone(),
+                        description: mp.description.clone().or_else(|| Some(body.clone())),
                         image_url: cover_image_url.clone(),
                     },
-                    input.idempotency_key.as_deref(),
+                    cmd.idempotency_key.as_deref(),
                 )
                 .await?;
             Some(listing_res.id)
@@ -406,28 +519,29 @@ impl<R: PostRepository> PostService<R> {
         let post_res = self
             .repository
             .create_post_in_tx(
-                &mut tx,
+                tx,
                 NewPost {
-                    campus_id: input.campus_id,
-                    author_id: input.author_id.clone(),
+                    campus_id: cmd.campus_id,
+                    author_id: cmd.author_id.clone(),
                     category,
                     title,
                     body,
-                    tags,
+                    tags: cmd.tags,
                     image_url: cover_image_url.clone(),
                     listing_id,
-                    space_id: input.space_id,
-                    idempotency_key: input.idempotency_key.clone(),
+                    space_id: cmd.space_id,
+                    idempotency_key: cmd.idempotency_key.clone(),
                     idempotency_hash: request_hash,
                 },
             )
             .await?;
 
         if post_res.replayed {
-            tx.rollback()
-                .await
-                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
-            return self.get(input.campus_id, post_res.id).await;
+            return self
+                .repository
+                .find_by_id_in_tx(tx, cmd.campus_id, post_res.id)
+                .await?
+                .ok_or(ApiError::NotFound);
         }
 
         let post_id = post_res.id;
@@ -435,8 +549,8 @@ impl<R: PostRepository> PostService<R> {
         if let Some(ref image_url) = cover_image_url {
             self.moderation
                 .submit_image_job_in_tx(
-                    &mut tx,
-                    input.campus_id,
+                    tx,
+                    cmd.campus_id,
                     &post_id.to_string(),
                     image_url,
                     "post_image",
@@ -445,11 +559,10 @@ impl<R: PostRepository> PostService<R> {
                 .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
         }
 
-        tx.commit()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
-
-        self.get(input.campus_id, post_id).await
+        self.repository
+            .find_by_id_in_tx(tx, cmd.campus_id, post_id)
+            .await?
+            .ok_or(ApiError::NotFound)
     }
 
     pub async fn update(

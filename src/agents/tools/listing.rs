@@ -1,9 +1,7 @@
 use super::common::yuan;
 use super::common::*;
 use crate::api::error::ApiError;
-use crate::services::listing_command::{
-    CreateListingDraft, ListingCommandService, UpdateListingDraft,
-};
+use crate::services::listing_command::{ListingCommandService, UpdateListingDraft};
 use crate::utils::cents_to_yuan;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
@@ -165,62 +163,51 @@ pub(crate) async fn execute_create_listing_in_tx(
 ) -> Result<CreatedListing, ToolError> {
     let title = args.title.clone();
     let price_cents = args.suggested_price_cny;
-    let result = ListingCommandService::new(ctx.db_pool.clone(), ctx.moderation.clone())
-        .create_in_tx(
-            tx,
-            CreateListingDraft {
-                campus_id,
-                owner_id: owner.to_string(),
-                title: args.title,
+
+    let post_service =
+        crate::services::post::PostService::new(ctx.db_pool.clone(), ctx.moderation.clone());
+
+    let cmd = crate::services::post::PublishPostCommand {
+        campus_id,
+        author_id: owner.to_string(),
+        title: title.clone(),
+        body: if args.original_description.trim().is_empty() {
+            title.clone()
+        } else {
+            args.original_description.clone()
+        },
+        payload: crate::services::post::PublishPostPayload::Offer(
+            crate::services::post::CreatePostMarketplaceInput {
                 category: args.category,
                 brand: args.brand,
-                direction: Some("offer".to_string()),
                 condition_score: args.condition_score as i32,
                 suggested_price_cny: price_cents as f64 / 100.0,
                 defects: args.defects,
-                description: Some(args.original_description.clone()),
-                image_url: None,
+                description: Some(args.original_description),
             },
-            None,
-        )
-        .await
-        .map_err(|error| ToolError(format!("发布校验失败: {}", error)))?;
+        ),
+        tags: vec![],
+        cover_image_url: None,
+        space_id: None,
+        idempotency_key: None,
+    };
 
-    use crate::repositories::PostRepository;
-    let post_repo = crate::repositories::PostgresPostRepository::new(ctx.db_pool.clone());
-    let _post_res = post_repo
-        .create_post_in_tx(
-            tx,
-            crate::repositories::NewPost {
-                campus_id,
-                author_id: owner.to_string(),
-                category: "offer".to_string(),
-                title: title.clone(),
-                body: if args.original_description.trim().is_empty() {
-                    title.clone()
-                } else {
-                    args.original_description
-                },
-                tags: vec![],
-                image_url: None,
-                listing_id: Some(result.id.clone()),
-                space_id: None,
-                idempotency_key: None,
-                idempotency_hash: None,
-            },
-        )
+    let post = post_service
+        .publish_in_tx(tx, cmd)
         .await
-        .map_err(|error| ToolError(format!("创建帖子失败: {}", error)))?;
+        .map_err(|error| ToolError(format!("发布帖子失败: {:?}", error)))?;
+
+    let listing_id = post.listing_id.unwrap_or_default();
 
     Ok(CreatedListing {
         message: format!(
             "Successfully created listing '{}' (ID: {}, Price: {} CNY, Owner: {})",
             title,
-            result.id,
+            listing_id,
             cents_to_yuan(price_cents),
             owner
         ),
-        listing_id: result.id,
+        listing_id,
         campus_id,
     })
 }
