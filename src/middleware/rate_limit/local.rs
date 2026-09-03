@@ -249,12 +249,20 @@ impl RateLimitStateHandle {
     /// The error is logged at WARN rather than swallowed, because silently
     /// unprotected is its own kind of bad.
     pub async fn check_rate_limit(&self, ip: &str) -> bool {
-        match self.0.check_rate_limit(ip).await {
-            Ok(allowed) => allowed,
-            Err(error) => {
+        let check_future = self.0.check_rate_limit(ip);
+        match tokio::time::timeout(std::time::Duration::from_millis(250), check_future).await {
+            Ok(Ok(allowed)) => allowed,
+            Ok(Err(error)) => {
                 tracing::warn!(
                     %error,
                     "rate limiter unavailable — allowing the request; abuse \
+                     protection is degraded until it recovers",
+                );
+                true
+            }
+            Err(_) => {
+                tracing::warn!(
+                    "rate limiter timed out after 250ms — allowing the request; abuse \
                      protection is degraded until it recovers",
                 );
                 true

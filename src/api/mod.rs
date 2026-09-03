@@ -1144,10 +1144,6 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         // 504 (not the default 408): the timeout is the server's fault, and
         // 408 invites clients to blindly retry a request that may have already
         // committed its write.
-        .layer(TimeoutLayer::with_status_code(
-            axum::http::StatusCode::GATEWAY_TIMEOUT,
-            std::time::Duration::from_secs(60),
-        ))
         .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -1156,6 +1152,10 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .layer(middleware::from_fn_with_state(
             state.clone(),
             rate_limit_middleware,
+        ))
+        .layer(TimeoutLayer::with_status_code(
+            axum::http::StatusCode::GATEWAY_TIMEOUT,
+            std::time::Duration::from_secs(60),
         ))
         .layer(middleware::from_fn_with_state(
             state.clone(),

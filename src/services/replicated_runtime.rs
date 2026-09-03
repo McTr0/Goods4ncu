@@ -107,33 +107,48 @@ impl ReplicatedRuntime {
                         let Some((user_id, campus_id, payload)) = msg else {
                             break;
                         };
-                        if let Err(error) = crate::services::ws_fanout::publish_scoped(
+                        let pub_future = crate::services::ws_fanout::publish_scoped(
                             &mut p_worker_conn,
                             &user_id,
                             campus_id,
                             &payload,
+                        );
+                        let pub_result = tokio::time::timeout(
+                            std::time::Duration::from_millis(500),
+                            pub_future,
                         )
-                        .await
-                        {
-                            tracing::error!(
-                                %error,
-                                user_id = %user_id,
-                                "WS fanout publish failed; falling back to local delivery"
-                            );
-                            crate::api::ws::deliver_local_scoped(&user_id, campus_id, &payload);
+                        .await;
+                        match pub_result {
+                            Ok(Ok(())) => {}
+                            Ok(Err(error)) => {
+                                tracing::error!(
+                                    %error,
+                                    user_id = %user_id,
+                                    "WS fanout publish failed; falling back to local delivery"
+                                );
+                                crate::api::ws::deliver_local_scoped(&user_id, campus_id, &payload);
+                            }
+                            Err(_) => {
+                                tracing::error!(
+                                    user_id = %user_id,
+                                    "WS fanout publish timed out after 500ms; falling back to local delivery"
+                                );
+                                crate::api::ws::deliver_local_scoped(&user_id, campus_id, &payload);
+                            }
                         }
                     }
                 }
             }
             while let Ok((user_id, campus_id, payload)) = rx.try_recv() {
-                if let Err(_error) = crate::services::ws_fanout::publish_scoped(
+                let pub_future = crate::services::ws_fanout::publish_scoped(
                     &mut p_worker_conn,
                     &user_id,
                     campus_id,
                     &payload,
-                )
-                .await
-                {
+                );
+                let pub_result =
+                    tokio::time::timeout(std::time::Duration::from_millis(500), pub_future).await;
+                if !matches!(pub_result, Ok(Ok(()))) {
                     crate::api::ws::deliver_local_scoped(&user_id, campus_id, &payload);
                 }
             }
@@ -222,15 +237,25 @@ impl ReplicatedRuntime {
             return Err(ApiError::ServiceUnavailable("ws_subscriber_unhealthy"));
         }
         let mut conn = self.publisher.clone();
-        let pong: Result<String, _> = redis::cmd("PING").query_async(&mut conn).await;
-        match pong {
-            Ok(s) if s == "PONG" => Ok(()),
-            Ok(_) => {
+        let ping_result: Result<Result<String, redis::RedisError>, _> = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            redis::cmd("PING").query_async::<String>(&mut conn),
+        )
+        .await;
+        match ping_result {
+            Ok(Ok(s)) if s == "PONG" => Ok(()),
+            Ok(Ok(_)) => {
                 tracing::error!("Readiness check failed: unexpected Redis PING response");
                 Err(ApiError::ServiceUnavailable("redis_unreachable"))
             }
-            Err(error) => {
+            Ok(Err(error)) => {
                 tracing::error!(%error, "Readiness check failed: Redis publisher PING failed");
+                Err(ApiError::ServiceUnavailable("redis_unreachable"))
+            }
+            Err(_) => {
+                tracing::error!(
+                    "Readiness check failed: Redis publisher PING timed out after 500ms"
+                );
                 Err(ApiError::ServiceUnavailable("redis_unreachable"))
             }
         }

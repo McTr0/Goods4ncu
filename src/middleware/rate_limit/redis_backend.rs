@@ -6,11 +6,11 @@
 //! Requires the `redis` feature to be enabled.
 
 use async_trait::async_trait;
-use redis::{AsyncCommands, Client};
+use redis::Client;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::middleware::rate_limit::traits::RateLimiter;
-use crate::middleware::rate_limit::RateLimitResult;
+use crate::middleware::rate_limit::{RateLimitError, RateLimitResult};
 
 /// Returns the current Unix timestamp in seconds.
 fn unix_time_secs() -> u64 {
@@ -56,20 +56,25 @@ impl RedisRateLimiter {
     }
 }
 
+const REDIS_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(250);
+
 #[async_trait]
 impl RateLimiter for RedisRateLimiter {
     async fn check_rate_limit(&self, ip: &str) -> RateLimitResult<bool> {
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = tokio::time::timeout(
+            REDIS_TIMEOUT,
+            self.client.get_multiplexed_async_connection(),
+        )
+        .await
+        .map_err(|_| {
+            redis::RedisError::from((redis::ErrorKind::IoError, "Redis connection timeout"))
+        })?
+        .map_err(RateLimitError::Redis)?;
+
         let key = self.key(ip);
         let now_secs = unix_time_secs();
         let cutoff = now_secs.saturating_sub(self.window_secs);
 
-        // Sliding window rate limit using Redis sorted set:
-        // Score = Unix timestamp in seconds
-        // 1. Remove entries older than the window
-        // 2. Count entries in window
-        // 3. If under limit, add new entry and return 1
-        // 4. Otherwise return 0
         let script = r#"
             redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
             local count = redis.call('ZCARD', KEYS[1])
@@ -82,22 +87,44 @@ impl RateLimiter for RedisRateLimiter {
             end
         "#;
 
-        let result: i32 = redis::Script::new(script)
-            .key(&key)
-            .arg(cutoff)
-            .arg(now_secs)
-            .arg(self.max_tokens)
-            .arg(self.window_secs * 2)
-            .invoke_async(&mut conn)
-            .await?;
+        let result: i32 = tokio::time::timeout(
+            REDIS_TIMEOUT,
+            redis::Script::new(script)
+                .key(&key)
+                .arg(cutoff)
+                .arg(now_secs)
+                .arg(self.max_tokens)
+                .arg(self.window_secs * 2)
+                .invoke_async(&mut conn),
+        )
+        .await
+        .map_err(|_| redis::RedisError::from((redis::ErrorKind::IoError, "Redis script timeout")))?
+        .map_err(RateLimitError::Redis)?;
 
         Ok(result == 1)
     }
 
     async fn reset(&self, ip: &str) -> RateLimitResult<()> {
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = tokio::time::timeout(
+            REDIS_TIMEOUT,
+            self.client.get_multiplexed_async_connection(),
+        )
+        .await
+        .map_err(|_| {
+            redis::RedisError::from((redis::ErrorKind::IoError, "Redis connection timeout"))
+        })?
+        .map_err(RateLimitError::Redis)?;
+
         let key = self.key(ip);
-        conn.del::<_, ()>(&key).await?;
+        let mut cmd = redis::cmd("DEL");
+        cmd.arg(&key);
+        let del_result: Result<Result<(), redis::RedisError>, _> =
+            tokio::time::timeout(REDIS_TIMEOUT, cmd.query_async::<()>(&mut conn)).await;
+        del_result
+            .map_err(|_| {
+                redis::RedisError::from((redis::ErrorKind::IoError, "Redis command timeout"))
+            })?
+            .map_err(RateLimitError::Redis)?;
         Ok(())
     }
 }
