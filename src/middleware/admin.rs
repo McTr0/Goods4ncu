@@ -19,17 +19,10 @@ pub async fn admin_middleware(mut request: Request, next: Next) -> Response {
 /// Extract and validate admin role from Authorization header.
 /// Returns Ok(admin_id) if admin, Err(ApiError::Forbidden) otherwise.
 #[allow(dead_code)]
-pub fn require_admin(
-    headers: &HeaderMap,
-    jwt_secret: &str,
-    jwt_secret_old: Option<&str>,
-) -> Result<String, ApiError> {
-    let (user_id, role) = crate::api::auth::extract_user_id_and_role_from_token_with_fallback(
-        headers,
-        jwt_secret,
-        jwt_secret_old,
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+pub fn require_admin(headers: &HeaderMap, jwt_secret: &str) -> Result<String, ApiError> {
+    let (user_id, role) =
+        crate::api::auth::extract_user_id_and_role_from_token(headers, jwt_secret)
+            .map_err(|_| ApiError::Unauthorized)?;
 
     if role != "admin" {
         tracing::warn!(role = %role, "Non-admin user attempted to access admin endpoint");
@@ -61,7 +54,7 @@ mod tests {
     fn require_admin_accepts_admin_token() {
         let (token, _, _) = generate_access_token("admin-1", "admin", SECRET, 3600).expect("token");
         let headers = bearer_headers(&token);
-        let user_id = require_admin(&headers, SECRET, None).expect("admin should be accepted");
+        let user_id = require_admin(&headers, SECRET).expect("admin should be accepted");
         assert_eq!(user_id, "admin-1");
     }
 
@@ -69,25 +62,14 @@ mod tests {
     fn require_admin_rejects_non_admin_token() {
         let (token, _, _) = generate_access_token("user-1", "user", SECRET, 3600).expect("token");
         let headers = bearer_headers(&token);
-        let err = require_admin(&headers, SECRET, None).expect_err("non-admin rejected");
+        let err = require_admin(&headers, SECRET).expect_err("non-admin rejected");
         assert!(matches!(err, ApiError::Forbidden));
     }
 
     #[test]
     fn require_admin_rejects_missing_header() {
         let headers = HeaderMap::new();
-        let err = require_admin(&headers, SECRET, None).expect_err("missing header rejected");
+        let err = require_admin(&headers, SECRET).expect_err("missing header rejected");
         assert!(matches!(err, ApiError::Unauthorized));
-    }
-
-    #[test]
-    fn require_admin_accepts_old_secret_token() {
-        let old_secret = "old_test_jwt_secret_at_least_32_characters";
-        let (token, _, _) =
-            generate_access_token("admin-legacy", "admin", old_secret, 3600).expect("token");
-        let headers = bearer_headers(&token);
-        let user_id =
-            require_admin(&headers, SECRET, Some(old_secret)).expect("legacy admin accepted");
-        assert_eq!(user_id, "admin-legacy");
     }
 }

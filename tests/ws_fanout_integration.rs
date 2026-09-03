@@ -11,7 +11,6 @@
 
 use goods4ncu::api::ws;
 use goods4ncu::lifecycle::ShutdownController;
-use goods4ncu::services::ws_fanout;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -173,6 +172,76 @@ async fn two_instances_deliver_across_processes() {
     let token = register["token"].as_str().expect("token").to_string();
     let user_id = register["user_id"].as_str().expect("user_id").to_string();
 
+    // Register user B on instance B.
+    let username_b = format!("fanout_b_{}", Uuid::new_v4().simple());
+    let register_b: serde_json::Value = client
+        .post("http://127.0.0.1:4102/api/auth/register")
+        .json(&serde_json::json!({ "username": username_b, "password": "Fanout-e2e-pass1" }))
+        .send()
+        .await
+        .expect("register B")
+        .json()
+        .await
+        .expect("register B json");
+    let token_b = register_b["token"].as_str().expect("token B").to_string();
+    let user_b_id = register_b["user_id"]
+        .as_str()
+        .expect("user_b_id")
+        .to_string();
+
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://good4ncu_test:good4ncu_test@localhost:5432/good4ncu_test".to_string()
+    });
+    let pool = sqlx::PgPool::connect(&db_url).await.expect("connect DB");
+    let campus_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM campuses WHERE status = 'active' LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .expect("active campus");
+
+    for uid in [&user_id, &user_b_id] {
+        sqlx::query(
+            "INSERT INTO campus_memberships (campus_id, user_id, status, verification_method, verified_at)
+             VALUES ($1, $2, 'verified', 'manual', NOW())
+             ON CONFLICT (campus_id, user_id) DO UPDATE SET status = 'verified'",
+        )
+        .bind(campus_id)
+        .bind(uid)
+        .execute(&pool)
+        .await
+        .expect("insert membership");
+    }
+
+    let switch_a: serde_json::Value = client
+        .post("http://127.0.0.1:4101/api/auth/campus/switch")
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({
+            "campus_id": campus_id,
+            "refresh_token": register["refresh_token"]
+        }))
+        .send()
+        .await
+        .expect("switch A")
+        .json()
+        .await
+        .expect("switch A json");
+    let active_token_a = switch_a["token"].as_str().expect("token A");
+
+    let switch_b: serde_json::Value = client
+        .post("http://127.0.0.1:4102/api/auth/campus/switch")
+        .header("Authorization", format!("Bearer {token_b}"))
+        .json(&serde_json::json!({
+            "campus_id": campus_id,
+            "refresh_token": register_b["refresh_token"]
+        }))
+        .send()
+        .await
+        .expect("switch B")
+        .json()
+        .await
+        .expect("switch B json");
+    let active_token_b = switch_b["token"].as_str().expect("token B");
+
     let mut request =
         tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(
             "ws://127.0.0.1:4101/api/ws",
@@ -180,30 +249,39 @@ async fn two_instances_deliver_across_processes() {
         .expect("ws request");
     request.headers_mut().insert(
         "Authorization",
-        format!("Bearer {token}").parse().expect("header"),
+        format!("Bearer {active_token_a}").parse().expect("header"),
     );
     let (mut socket, _) = tokio_tungstenite::connect_async(request)
         .await
         .expect("ws connect to instance A");
 
-    // Publish from OUTSIDE instance A's process — exactly what instance B's
-    // outbox worker does for a user whose socket lives on A.
+    // Publish through instance B's real HTTP API — exercising Instance B's publisher
+    // path and Redis transport to deliver to the client connected on Instance A.
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let redis_client = redis::Client::open(url.as_str()).expect("redis client");
-    let mut conn = redis::aio::ConnectionManager::new(redis_client)
+    let create_resp = client
+        .post("http://127.0.0.1:4102/api/chat/conversations")
+        .header("Authorization", format!("Bearer {active_token_b}"))
+        .json(&serde_json::json!({
+            "client_request_id": Uuid::new_v4(),
+            "recipient_id": user_id,
+            "content": "Hello across instances!",
+            "mode": "realtime"
+        }))
+        .send()
         .await
-        .expect("redis conn");
-    let marker = format!("cross-process-{}", Uuid::new_v4().simple());
-    ws_fanout::publish(&mut conn, &user_id, &format!("{{\"event\":\"{marker}\"}}"))
-        .await
-        .expect("publish");
+        .expect("create conversation on instance B");
+    assert!(
+        create_resp.status().is_success(),
+        "create conversation on B failed: {:?}",
+        create_resp.text().await
+    );
 
     use futures_util::StreamExt;
     let frame = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             match socket.next().await {
                 Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) => {
-                    if text.contains(&marker) {
+                    if text.contains("conversation_created") {
                         return text.to_string();
                     }
                 }
@@ -214,7 +292,7 @@ async fn two_instances_deliver_across_processes() {
     })
     .await
     .expect("cross-process delivery within 10s");
-    assert!(frame.contains(&marker));
+    assert!(frame.contains("conversation_created"));
 
     // Orderly SIGTERM drain for both instances.
     for instance in [&mut instance_a, &mut instance_b] {

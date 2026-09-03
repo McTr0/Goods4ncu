@@ -58,7 +58,6 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
     AppState {
         secrets: ApiSecrets {
             jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),
-            jwt_secret_old: None,
             gemini_api_key: "test-gemini-key".to_string(),
             oss_endpoint: "https://oss-cn-beijing.aliyuncs.com".to_string(),
             oss_bucket: "test-bucket".to_string(),

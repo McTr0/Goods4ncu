@@ -169,7 +169,7 @@ cargo check --locked
 cargo run
 ```
 
-后端默认监听 `0.0.0.0:3000`，健康检查为 `GET /api/health`。
+后端默认监听 `0.0.0.0:3000`，健康检查为 `GET /api/readyz`。
 
 Flutter：
 

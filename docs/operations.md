@@ -20,7 +20,6 @@
 | `DATABASE_URL` | 是 | 后端主数据库连接串。 |
 | `TEST_DATABASE_URL` | 测试需要 | 数据库测试连接串，必须指向安全测试库。 |
 | `JWT_SECRET` | 是 | JWT 签名密钥，至少 32 字符。 |
-| `JWT_SECRET_OLD` | 可选 | JWT 密钥轮换期间用于兼容旧 token。 |
 | `CAMPUS_VERIFICATION_DELIVERY_URL` | 生产必需 | 校园邮箱验证码投递 webhook；开发省略时验证码只写本地后端日志。 |
 | `CAMPUS_VERIFICATION_DELIVERY_TOKEN` | 生产必需 | 调用验证码投递 webhook 的 bearer token。 |
 | `GEMINI_API_KEY` | 条件必需 | `gemini` provider 必需；其它 chat provider 当前也需要它做 embedding/RAG。 |
@@ -59,7 +58,7 @@
 由于本地交叉编译受限（macOS SQLx proc-macro 链接受损），生产二进制在 GitHub Actions
 上构建。推送 `main` 或手动运行 `.github/workflows/ci.yml` 会先执行完整 CI；只有该次
 `main` CI 全部成功，`.github/workflows/deploy.yml` 才会构建 Rust release 二进制与
-Flutter web，经 scp 上传、替换并以 `GET /api/health` 验证。健康检查失败时 workflow
+Flutter web，经 scp 上传、替换并以 `GET /api/readyz` 验证。健康检查失败时 workflow
 自动恢复上一版二进制和 web 目录，并再次检查旧版本健康状态。
 
 仓库需要以下 Actions Secrets（实例重建后要更新，因为 Paratera 网关重启会换
@@ -106,7 +105,7 @@ Secret。生产 Environment 应配置 required reviewers，避免 secret 变更�
 cp docs/.env.example .env
 # 至少填入 JWT_SECRET（≥32 字符）和可用的 LLM/embedding key
 docker compose up --build
-curl -s http://127.0.0.1:3000/api/health
+curl -s http://127.0.0.1:3000/api/readyz
 ```
 
 这不替代生产编排（密钥管理、HTTPS 终止、静态站点与备份仍需单独配置），但能缩短“空环境到可演示 API”的路径。
@@ -177,11 +176,10 @@ CORS_ORIGINS=https://your-app.example.com
 | --- | --- | --- | --- |
 | `GET /api/livez` | liveness | 只确认进程在运行，不查数据库 | 仍返回 200 |
 | `GET /api/readyz` | readiness | 排空状态 + 数据库连通性 | 返回 503 `service_unavailable` |
-| `GET /api/health` | 旧客户端兼容别名 | 与 `readyz` 相同 | 返回 503 |
 
 liveness 故意不查数据库。如果 liveness 依赖数据库，一次数据库故障会让编排器同时重启所有副本，删掉恢复所需的容量，把局部故障放大成全局故障。依赖健康属于 readiness：它摘流量但不杀进程。
 
-三个探针都在限流白名单里。编排器的探针频率远高于普通客户端，被限流会把健康实例误报为故障并触发重启循环。
+两个探针都在限流白名单里。编排器的探针频率远高于普通客户端，被限流会把健康实例误报为故障并触发重启循环。
 
 停机顺序（SIGTERM 与 SIGINT 走同一条路径）：
 
@@ -433,7 +431,7 @@ RETURNING listing_id, campus_id, desired_revision;
 | `chat_conversation_members` | 每个成员的 `archived_at`；新消息提示的本地查看位置不在数据库。 |
 | `chat_conversation_events` | 握手、ACK、关闭、过期等状态事件时间线。 |
 | `chat_blocks` | blocker/blocked 屏蔽关系。 |
-| `chat_messages` | conversation_id、direct_conversation_id、sender、receiver、媒体 URL/Base64、edited_at；`read_at/read_by` 已由 `0068_remove_chat_attention_compat_shadow` 删除。 |
+| `chat_messages` | conversation_id、direct_conversation_id、sender、receiver、媒体 URL、edited_at；`read_at/read_by` 已由 `0068_remove_chat_attention_compat_shadow` 删除。 |
 | `chat_message_acknowledgements` | 每条消息每个用户最多一条主动确认，`received/will_review/completed` 及创建/更新时间。 |
 | `chat_spaces` 及成员/消息表 | group/channel、owner、成员角色、发言权限和更新时间。 |
 | `chat_secret_sessions` 及消息表 | [实验中][待弃用] 密文、参与者、过期时间和兼容读取。 |
@@ -489,7 +487,7 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 
 如果消息看起来丢了，先查 `chat_messages.direct_conversation_id` 是否等于会话 id，再查 sender/receiver 是否是会话成员。新留言徽标来自接收设备的 `LOCALLY_SEEN`，服务器没有可查询的阅读位置。排查状态跳转时看 `chat_conversation_events`，它能说明会话是被接通、关闭、屏蔽还是 worker 过期。
 
-如果实时信号异常，确认 WebSocket 收到的是 `conversation_created`、`conversation_state_changed`、`new_message` 或 `message_acknowledgement_changed`。服务端不广播 `message_read`、`typing` 或在线状态。媒体问题先确认 `image_url`、`audio_url` 属于平台 bucket 或代理，Base64 字段只是兼容 fallback。
+如果实时信号异常，确认 WebSocket 收到的是 `conversation_created`、`conversation_state_changed`、`new_message` 或 `message_acknowledgement_changed`。服务端不广播 `message_read`、`typing` 或在线状态。媒体问题先确认 `image_url`、`audio_url` 属于平台 bucket 或代理，不支持 Base64。
 
 如果共享文件已显示 `revoked` 但 bucket 仍有对象，先查 `chat_shared_objects.cleanup_attempts/cleanup_next_attempt_at/cleanup_last_error` 和 `shared-object cleanup worker` 日志，再用平台 CLI 以同一 bucket 凭据确认对象是否存在。不要从消息 quote 或客户端 URL 反推清理状态；数据库完成时间只会在 signed DELETE 成功或平台返回 404 后写入。
 

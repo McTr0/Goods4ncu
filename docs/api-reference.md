@@ -1057,7 +1057,6 @@ listing 的生命周期和可用性是两个正交维度：`inventory.status` �
 
 - `GET /api/livez` 返回 `{"status":"alive"}`，只表示进程存活，不查数据库。用作 liveness probe。
 - `GET /api/readyz` 就绪时返回 `{"status":"ready"}`；进程排空中或数据库不可达时返回 `503` 和 `code=service_unavailable`。用作 readiness probe 和负载均衡摘流依据。
-- `GET /api/health` 是 `readyz` 的旧客户端兼容别名，就绪时返回纯文本 `OK`，排空中同样返回 `503`。
 
 探针语义和停机顺序见[运行、配置与排错](operations.md#健康探针与优雅停机)。
 

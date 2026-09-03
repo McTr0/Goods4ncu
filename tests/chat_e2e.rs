@@ -236,7 +236,7 @@ async fn resolve_base_url(client: &Client) -> anyhow::Result<Option<String>> {
         return Ok(None);
     };
 
-    let health_url = format!("{}/api/health", base_url);
+    let health_url = format!("{}/api/readyz", base_url);
     let health_res = client.get(&health_url).send().await;
     match health_res {
         Ok(resp) if resp.status().is_success() => Ok(Some(base_url)),

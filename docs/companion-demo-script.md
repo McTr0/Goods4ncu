@@ -6,7 +6,7 @@
 
 ## 前置条件
 
-1. 服务在跑：后端 `127.0.0.1:3000`（`/api/health` 返回 OK）、前端
+1. 服务在跑：后端 `127.0.0.1:3000`（`/api/readyz` 返回 ready）、前端
    `127.0.0.1:3001`。
 2. `.env` 里 `LLM_PROVIDER` / `LLM_MODEL` 可用（当前 nemotron free 档；
    journey 脚本 `scripts/agent_journey.sh` 先跑一遍确认全绿）。

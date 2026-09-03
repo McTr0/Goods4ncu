@@ -35,63 +35,62 @@ impl ToolResultEnvelope {
         self.resource_ids.push(id.into());
         self
     }
-}
-
-/// Parse legacy pipe-delimited strings into envelopes.
-/// These are transitional — new tools should return envelopes directly.
-pub mod legacy {
-    use super::*;
-
-    /// Convert one legacy string result into the structured channels used by
-    /// Runtime v2. Unknown tools keep their textual result but never create a
-    /// client-side action implicitly.
-    pub fn from_tool_result(tool_name: &str, result: &str) -> ToolResultEnvelope {
+    /// Convert a tool result into the structured channels used by Runtime v2.
+    pub fn from_tool_result(tool_name: &str, result: &str) -> Self {
         match tool_name {
-            "draft_message" => draft_message(result),
-            "draft_comment" => draft_comment(result),
-            "search_inventory" | "find_related_posts" | "get_user_posts" => listing_ids(result),
+            "draft_message" => Self::parse_draft_message(result),
+            "draft_comment" => Self::parse_draft_comment(result),
+            "search_inventory" | "find_related_posts" | "get_user_posts" => {
+                Self::parse_listing_ids(result)
+            }
             _ => None,
         }
-        .unwrap_or_else(|| ToolResultEnvelope::success(result))
+        .unwrap_or_else(|| Self::success(result))
     }
 
-    /// Parse `DRAFT_MESSAGE|{listing_id}|{receiver_id}|{text}`.
-    pub fn draft_message(result: &str) -> Option<ToolResultEnvelope> {
-        let parts: Vec<&str> = result.splitn(4, '|').collect();
-        if parts.len() != 4 || parts[0] != "DRAFT_MESSAGE" {
+    fn parse_draft_message(result: &str) -> Option<Self> {
+        let v: serde_json::Value = serde_json::from_str(result).ok()?;
+        if v.get("action").and_then(|a| a.as_str()) != Some("open_message_draft") {
             return None;
         }
+        let listing_id = v.get("listing_id").and_then(|s| s.as_str())?;
+        let receiver_id = v.get("receiver_id").and_then(|s| s.as_str())?;
+        let draft_text = v.get("draft_text").and_then(|s| s.as_str())?;
+
         Some(
-            ToolResultEnvelope::success("已为你生成一条私信草稿，请确认后发送。")
+            Self::success("已为你生成一条私信草稿，请确认后发送。")
                 .with_action(crate::llm::UiAction::open_message_draft(
-                    parts[2], parts[1], parts[3],
+                    receiver_id,
+                    listing_id,
+                    draft_text,
                 ))
-                .with_resource(parts[1]),
+                .with_resource(listing_id),
         )
     }
 
-    /// Parse `DRAFT_COMMENT|{post_id}|{text}`.
-    pub fn draft_comment(result: &str) -> Option<ToolResultEnvelope> {
-        let parts: Vec<&str> = result.splitn(3, '|').collect();
-        if parts.len() != 3 || parts[0] != "DRAFT_COMMENT" {
+    fn parse_draft_comment(result: &str) -> Option<Self> {
+        let v: serde_json::Value = serde_json::from_str(result).ok()?;
+        if v.get("action").and_then(|a| a.as_str()) != Some("open_comment_draft") {
             return None;
         }
+        let post_id = v.get("post_id").and_then(|s| s.as_str())?;
+        let draft_text = v.get("draft_text").and_then(|s| s.as_str())?;
+
         Some(
-            ToolResultEnvelope::success("已为你生成一条回复草稿，请确认后发布。")
-                .with_action(crate::llm::UiAction::open_comment_draft(parts[1], parts[2]))
-                .with_resource(parts[1]),
+            Self::success("已为你生成一条回复草稿，请确认后发布。")
+                .with_action(crate::llm::UiAction::open_comment_draft(
+                    post_id, draft_text,
+                ))
+                .with_resource(post_id),
         )
     }
 
-    /// Parse listing IDs from search results and create show_posts action.
-    pub fn listing_ids(result: &str) -> Option<ToolResultEnvelope> {
-        let Ok(ids) = crate::llm::extract_listing_ids(result) else {
-            return None;
-        };
+    fn parse_listing_ids(result: &str) -> Option<Self> {
+        let ids = crate::llm::extract_listing_ids(result).ok()?;
         if ids.is_empty() {
             return None;
         }
-        let mut envelope = ToolResultEnvelope::success(result);
+        let mut envelope = Self::success(result);
         envelope = envelope.with_action(crate::llm::UiAction::show_posts(ids.clone()));
         for id in &ids {
             envelope = envelope.with_resource(id.clone());
@@ -102,16 +101,30 @@ pub mod legacy {
 
 #[cfg(test)]
 mod tests {
-    use super::legacy;
+    use super::*;
 
     #[test]
     fn listing_results_keep_model_data_and_add_ui_action() {
         let result = "Found 1 item(s):\n- [listing-1] Math Book (Brand: None, Category: books, Condition: 8/10, Price: 20 CNY)\n";
-        let envelope = legacy::from_tool_result("search_inventory", result);
+        let envelope = ToolResultEnvelope::from_tool_result("search_inventory", result);
 
         assert_eq!(envelope.model_data, result);
         assert_eq!(envelope.resource_ids, vec!["listing-1".to_string()]);
         assert_eq!(envelope.ui_actions.len(), 1);
         assert_eq!(envelope.ui_actions[0].kind, "SHOW_POSTS");
+    }
+
+    #[test]
+    fn draft_comment_json_parses_to_ui_action() {
+        let json = serde_json::json!({
+            "action": "open_comment_draft",
+            "post_id": "post-123",
+            "draft_text": "hello"
+        })
+        .to_string();
+        let envelope = ToolResultEnvelope::from_tool_result("draft_comment", &json);
+        assert_eq!(envelope.ui_actions.len(), 1);
+        assert_eq!(envelope.ui_actions[0].kind, "OPEN_COMMENT_DRAFT");
+        assert_eq!(envelope.resource_ids, vec!["post-123".to_string()]);
     }
 }

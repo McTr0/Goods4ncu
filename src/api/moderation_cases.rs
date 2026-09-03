@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::api::auth::extract_auth_session_from_token_with_fallback;
+use crate::api::auth::extract_auth_session_from_token;
 use crate::api::error::ApiError;
 use crate::api::AppState;
 use crate::services::campus::CampusService;
@@ -131,12 +131,8 @@ async fn authenticated_scope(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<(String, Uuid), ApiError> {
-    let session = extract_auth_session_from_token_with_fallback(
-        headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let session = extract_auth_session_from_token(headers, &state.secrets.jwt_secret)
+        .map_err(|_| ApiError::Unauthorized)?;
     let campus_id = CampusService::new(state.infra.db.clone())
         .resolve_session_campus(&session.user_id, session.campus_id)
         .await?;

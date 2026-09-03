@@ -7,8 +7,6 @@ use super::request_context;
 
 pub(crate) fn error_payload(code: &str, message: &str, trace_id: &str) -> serde_json::Value {
     json!({
-        // Keep the legacy string while unversioned clients migrate.
-        "error": message,
         "code": code,
         "message": message,
         "trace_id": trace_id,
@@ -206,7 +204,6 @@ impl IntoResponse for ApiError {
 mod tests {
     use super::*;
     use axum::http::StatusCode;
-    use serde_json::json;
 
     // Helper to verify the response has correct status and JSON body format
     fn verify_error_response(
@@ -380,13 +377,12 @@ mod tests {
 
     #[test]
     fn test_api_error_json_format_matches_expected_structure() {
-        // Verify that ApiError's IntoResponse produces Json with {"error": "..."} format
-        // by testing the Json serialization directly
-        let error_msg = "测试错误消息";
-        let json_value = json!({"error": error_msg});
-        assert!(json_value.is_object());
-        assert!(json_value.as_object().unwrap().contains_key("error"));
-        assert_eq!(json_value["error"], "测试错误消息");
+        let payload = error_payload("test_code", "测试错误消息", "trace-123");
+        assert!(payload.is_object());
+        assert_eq!(payload["code"], "test_code");
+        assert_eq!(payload["message"], "测试错误消息");
+        assert_eq!(payload["trace_id"], "trace-123");
+        assert!(payload.get("error").is_none());
     }
 
     #[test]

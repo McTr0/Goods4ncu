@@ -5,7 +5,7 @@
 #   cp docs/.env.example .env   # fill DATABASE_URL is overridden below
 #   docker compose up --build
 #
-# API: http://127.0.0.1:3000/api/health
+# API: http://127.0.0.1:3000/api/readyz
 
 services:
   db:

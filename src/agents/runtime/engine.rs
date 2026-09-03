@@ -5,7 +5,7 @@
 //! terminal event contract.
 
 use crate::agents::runtime::budget::ExecutionBudget;
-use crate::agents::runtime::envelope::legacy;
+use crate::agents::runtime::envelope::ToolResultEnvelope;
 use crate::agents::runtime::event::{
     AgentEvent, EventData, ModelEvent, ModelStopReason, RuntimeErrorCode, ToolCallData,
     ToolCallInfo, TurnId, UsageSummary,
@@ -368,7 +368,7 @@ impl AgentRuntime {
                     },
                 });
 
-                let mut envelope = legacy::from_tool_result(&call.name, &raw_result);
+                let mut envelope = ToolResultEnvelope::from_tool_result(&call.name, &raw_result);
                 if call.name == "get_listing_details" {
                     if let Some(id) = call
                         .arguments

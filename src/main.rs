@@ -358,7 +358,6 @@ async fn main() -> Result<(), anyhow::Error> {
     let app_state = api::AppState {
         secrets: api::ApiSecrets {
             jwt_secret: config.jwt_secret.clone(),
-            jwt_secret_old: config.jwt_secret_old.clone(),
             gemini_api_key: config.gemini_api_key.clone(),
             oss_endpoint: config.oss_endpoint.clone(),
             oss_bucket: config.oss_bucket.clone(),

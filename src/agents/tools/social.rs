@@ -315,10 +315,13 @@ impl Tool for DraftMessageTool {
             ));
         }
 
-        Ok(format!(
-            "DRAFT_MESSAGE|{}|{}|{}",
-            args.listing_id, args.receiver_id, args.draft_text
-        ))
+        Ok(serde_json::json!({
+            "action": "open_message_draft",
+            "listing_id": args.listing_id,
+            "receiver_id": args.receiver_id,
+            "draft_text": args.draft_text,
+        })
+        .to_string())
     }
 }
 
@@ -375,9 +378,11 @@ impl Tool for DraftCommentTool {
             ));
         }
 
-        Ok(format!(
-            "DRAFT_COMMENT|{}|{}",
-            args.post_id, args.draft_text
-        ))
+        Ok(serde_json::json!({
+            "action": "open_comment_draft",
+            "post_id": args.post_id,
+            "draft_text": args.draft_text,
+        })
+        .to_string())
     }
 }

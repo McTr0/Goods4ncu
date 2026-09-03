@@ -207,7 +207,8 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).expect("error json");
         assert_eq!(json["trace_id"], header_request_id);
         assert_eq!(json["code"], "bad_request");
-        assert_eq!(json["error"], json["message"]);
+        assert!(json.get("error").is_none());
+        assert_eq!(json["message"], "请求错误: invalid input");
     }
 
     #[tokio::test]
@@ -249,7 +250,7 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).expect("error json");
         assert_eq!(json["trace_id"], header_request_id);
         assert_eq!(json["code"], "validation_failed");
-        assert_eq!(json["error"], json["message"]);
+        assert!(json.get("error").is_none());
         assert!(json["message"].as_str().unwrap().contains("missing field"));
     }
 

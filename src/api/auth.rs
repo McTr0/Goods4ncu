@@ -33,14 +33,14 @@ pub struct AuthResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Claims {
+pub(crate) struct Claims {
     sub: String,             // subject (user_id)
     role: String,            // user role: "user" or "admin"
     exp: usize,              // expiration time
-    jti: Option<String>,     // JWT ID for denylist revocation (optional for legacy tokens)
-    campus_id: Option<Uuid>, // active tenant (optional for legacy tokens)
+    jti: String,             // JWT ID for denylist revocation
+    campus_id: Option<Uuid>, // active tenant
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    auth_time: Option<i64>, // last password authentication time (optional for legacy tokens)
+    auth_time: Option<i64>, // last password authentication time
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,7 +134,7 @@ pub fn generate_access_token_for_campus_with_auth_time(
         sub: user_id.to_string(),
         role: role.to_string(),
         exp: expiration,
-        jti: Some(jti.clone()),
+        jti: jti.clone(),
         campus_id,
         auth_time,
     };
@@ -625,12 +625,8 @@ pub async fn reauthenticate(
     headers: HeaderMap,
     Json(payload): Json<ReauthenticateRequest>,
 ) -> Result<Json<ReauthenticateResponse>, ApiError> {
-    let session = extract_auth_session_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let session = extract_auth_session_from_token(&headers, &state.secrets.jwt_secret)
+        .map_err(|_| ApiError::Unauthorized)?;
     if payload.password.is_empty() || payload.password.len() > 128 {
         return Err(ApiError::RecentAuthenticationFailed);
     }
@@ -737,11 +733,7 @@ pub async fn switch_active_campus(
     headers: HeaderMap,
     Json(payload): Json<SwitchCampusRequest>,
 ) -> Result<Json<RefreshResponse>, ApiError> {
-    let claims = extract_claims_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )?;
+    let claims = extract_claims_from_token(&headers, &state.secrets.jwt_secret)?;
     let campus_service = CampusService::new(state.infra.db.clone());
     campus_service
         .require_verified_in_campus(&claims.sub, payload.campus_id)
@@ -762,11 +754,9 @@ pub async fn switch_active_campus(
         ApiError::Unauthorized
     })?;
 
-    if let Some(jti) = claims.jti.as_deref() {
-        let expires_at = chrono::DateTime::<chrono::Utc>::from_timestamp(claims.exp as i64, 0)
-            .unwrap_or_else(chrono::Utc::now);
-        revoke_access_token_jti(&state, jti, expires_at).await?;
-    }
+    let expires_at = chrono::DateTime::<chrono::Utc>::from_timestamp(claims.exp as i64, 0)
+        .unwrap_or_else(chrono::Utc::now);
+    revoke_access_token_jti(&state, &claims.jti, expires_at).await?;
 
     Ok(Json(RefreshResponse {
         token: new_access,
@@ -781,17 +771,11 @@ pub async fn logout(
     headers: HeaderMap,
     Json(payload): Json<LogoutRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let claims = extract_claims_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )?;
+    let claims = extract_claims_from_token(&headers, &state.secrets.jwt_secret)?;
 
-    if let Some(jti) = claims.jti.as_deref() {
-        let expires_at = chrono::DateTime::<chrono::Utc>::from_timestamp(claims.exp as i64, 0)
-            .unwrap_or_else(chrono::Utc::now);
-        revoke_access_token_jti(&state, jti, expires_at).await?;
-    }
+    let expires_at = chrono::DateTime::<chrono::Utc>::from_timestamp(claims.exp as i64, 0)
+        .unwrap_or_else(chrono::Utc::now);
+    revoke_access_token_jti(&state, &claims.jti, expires_at).await?;
 
     if let Some(ref token) = payload.refresh_token {
         revoke_refresh_token(&state.auth_repo, token).await?;
@@ -817,12 +801,8 @@ pub async fn change_password(
     headers: HeaderMap,
     Json(payload): Json<ChangePasswordRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = extract_user_id_from_token_with_fallback(
-        &headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let user_id = extract_user_id_from_token(&headers, &state.secrets.jwt_secret)
+        .map_err(|_| ApiError::Unauthorized)?;
 
     if payload.current_password.is_empty() {
         return Err(ApiError::BadRequest("当前密码不能为空".to_string()));
@@ -897,48 +877,9 @@ fn decode_claims_from_token_str(token: &str, jwt_secret: &str) -> Result<Claims,
     Ok(token_data.claims)
 }
 
-fn decode_claims_from_token_str_with_fallback(
-    token: &str,
-    jwt_secret: &str,
-    jwt_secret_old: Option<&str>,
-) -> Result<Claims, String> {
-    match decode_claims_from_token_str(token, jwt_secret) {
-        Ok(claims) => Ok(claims),
-        Err(primary_err) => {
-            if let Some(old) = jwt_secret_old {
-                decode_claims_from_token_str(token, old)
-                    .map_err(|_| format!("Invalid token (primary+fallback): {}", primary_err))
-            } else {
-                Err(primary_err)
-            }
-        }
-    }
-}
-
 pub fn extract_jti_from_token_str(token: &str, jwt_secret: &str) -> Result<String, String> {
     let claims = decode_claims_from_token_str(token, jwt_secret)?;
-    claims.jti.ok_or_else(|| "Token missing jti".to_string())
-}
-
-pub fn extract_jti_from_token_str_with_fallback(
-    token: &str,
-    jwt_secret: &str,
-    jwt_secret_old: Option<&str>,
-) -> Result<String, String> {
-    match extract_jti_from_token_str(token, jwt_secret) {
-        Ok(jti) => Ok(jti),
-        Err(primary_err) => {
-            if let Some(old) = jwt_secret_old {
-                match extract_jti_from_token_str(token, old) {
-                    Ok(jti) => Ok(jti),
-                    Err(fallback_err) if fallback_err == "Token missing jti" => Err(fallback_err),
-                    Err(_) => Err(format!("Invalid token (primary+fallback): {}", primary_err)),
-                }
-            } else {
-                Err(primary_err)
-            }
-        }
-    }
+    Ok(claims.jti)
 }
 
 pub(crate) async fn revoke_access_token_jti(
@@ -967,19 +908,8 @@ pub(crate) async fn revoke_access_token_jti(
 }
 
 /// Check whether a token is revoked via in-memory and persisted denylist.
-///
-/// For legacy tokens without jti, this returns Ok(()) to preserve backward compatibility
-/// during rollout; those tokens still expire normally via JWT exp.
 pub async fn ensure_token_not_revoked(state: &AppState, token: &str) -> Result<(), String> {
-    let jti = match extract_jti_from_token_str_with_fallback(
-        token,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    ) {
-        Ok(jti) => jti,
-        Err(err) if err.contains("Token missing jti") => return Ok(()),
-        Err(err) => return Err(err),
-    };
+    let jti = extract_jti_from_token_str(token, &state.secrets.jwt_secret)?;
 
     state.infra.token_denylist.cleanup_expired();
     if state.infra.token_denylist.is_denied(&jti) {
@@ -1036,42 +966,6 @@ pub async fn ensure_user_not_banned(state: &AppState, user_id: &str) -> Result<(
     Ok(())
 }
 
-pub fn extract_user_id_from_token_str_with_fallback(
-    token: &str,
-    jwt_secret: &str,
-    jwt_secret_old: Option<&str>,
-) -> Result<String, String> {
-    match extract_user_id_from_token_str(token, jwt_secret) {
-        Ok(user_id) => Ok(user_id),
-        Err(primary_err) => {
-            if let Some(old) = jwt_secret_old {
-                extract_user_id_from_token_str(token, old)
-                    .map_err(|_| format!("Invalid token (primary+fallback): {}", primary_err))
-            } else {
-                Err(primary_err)
-            }
-        }
-    }
-}
-
-pub fn extract_auth_session_from_token_str_with_fallback(
-    token: &str,
-    jwt_secret: &str,
-    jwt_secret_old: Option<&str>,
-) -> Result<AuthSessionContext, String> {
-    match extract_auth_session_from_token_str(token, jwt_secret) {
-        Ok(context) => Ok(context),
-        Err(primary_err) => {
-            if let Some(old) = jwt_secret_old {
-                extract_auth_session_from_token_str(token, old)
-                    .map_err(|_| format!("Invalid token (primary+fallback): {}", primary_err))
-            } else {
-                Err(primary_err)
-            }
-        }
-    }
-}
-
 /// Extract and validate the user_id and role from a raw JWT token string.
 /// Returns `Ok((user_id, role))` if the token is valid, or `Err(message)` if invalid.
 pub fn extract_user_id_and_role_from_token_str(
@@ -1081,24 +975,6 @@ pub fn extract_user_id_and_role_from_token_str(
     let claims = decode_claims_from_token_str(token, jwt_secret)?;
 
     Ok((claims.sub, claims.role))
-}
-
-pub fn extract_user_id_and_role_from_token_str_with_fallback(
-    token: &str,
-    jwt_secret: &str,
-    jwt_secret_old: Option<&str>,
-) -> Result<(String, String), String> {
-    match extract_user_id_and_role_from_token_str(token, jwt_secret) {
-        Ok(v) => Ok(v),
-        Err(primary_err) => {
-            if let Some(old) = jwt_secret_old {
-                extract_user_id_and_role_from_token_str(token, old)
-                    .map_err(|_| format!("Invalid token (primary+fallback): {}", primary_err))
-            } else {
-                Err(primary_err)
-            }
-        }
-    }
 }
 
 /// Extract and validate the user_id from the Authorization header using the provided secret.
@@ -1117,27 +993,9 @@ pub fn extract_user_id_from_token(headers: &HeaderMap, jwt_secret: &str) -> Resu
     extract_user_id_from_token_str(token, jwt_secret)
 }
 
-pub fn extract_user_id_from_token_with_fallback(
+pub fn extract_auth_session_from_token(
     headers: &HeaderMap,
     jwt_secret: &str,
-    jwt_secret_old: Option<&str>,
-) -> Result<String, String> {
-    let auth_header = headers
-        .get("Authorization")
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| "Missing Authorization header".to_string())?;
-
-    let token = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or_else(|| "Invalid Authorization format".to_string())?;
-
-    extract_user_id_from_token_str_with_fallback(token, jwt_secret, jwt_secret_old)
-}
-
-pub fn extract_auth_session_from_token_with_fallback(
-    headers: &HeaderMap,
-    jwt_secret: &str,
-    jwt_secret_old: Option<&str>,
 ) -> Result<AuthSessionContext, String> {
     let auth_header = headers
         .get("Authorization")
@@ -1146,7 +1004,7 @@ pub fn extract_auth_session_from_token_with_fallback(
     let token = auth_header
         .strip_prefix("Bearer ")
         .ok_or_else(|| "Invalid Authorization format".to_string())?;
-    extract_auth_session_from_token_str_with_fallback(token, jwt_secret, jwt_secret_old)
+    extract_auth_session_from_token_str(token, jwt_secret)
 }
 
 fn bearer_token(headers: &HeaderMap) -> Result<&str, ApiError> {
@@ -1157,14 +1015,12 @@ fn bearer_token(headers: &HeaderMap) -> Result<&str, ApiError> {
         .ok_or(ApiError::Unauthorized)
 }
 
-fn extract_claims_from_token_with_fallback(
+pub(crate) fn extract_claims_from_token(
     headers: &HeaderMap,
     jwt_secret: &str,
-    jwt_secret_old: Option<&str>,
 ) -> Result<Claims, ApiError> {
     let token = bearer_token(headers)?;
-    decode_claims_from_token_str_with_fallback(token, jwt_secret, jwt_secret_old)
-        .map_err(|_| ApiError::Unauthorized)
+    decode_claims_from_token_str(token, jwt_secret).map_err(|_| ApiError::Unauthorized)
 }
 
 /// Extract and validate the user_id and role from the Authorization header using the provided secret.
@@ -1186,24 +1042,6 @@ pub fn extract_user_id_and_role_from_token(
     extract_user_id_and_role_from_token_str(token, jwt_secret)
 }
 
-#[allow(dead_code)]
-pub fn extract_user_id_and_role_from_token_with_fallback(
-    headers: &HeaderMap,
-    jwt_secret: &str,
-    jwt_secret_old: Option<&str>,
-) -> Result<(String, String), String> {
-    let auth_header = headers
-        .get("Authorization")
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| "Missing Authorization header".to_string())?;
-
-    let token = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or_else(|| "Invalid Authorization format".to_string())?;
-
-    extract_user_id_and_role_from_token_str_with_fallback(token, jwt_secret, jwt_secret_old)
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1222,7 +1060,6 @@ pub(crate) mod tests {
         AppState {
             secrets: ApiSecrets {
                 jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),
-                jwt_secret_old: None,
                 gemini_api_key: "test-gemini-key".to_string(),
                 oss_endpoint: "https://oss-cn-beijing.aliyuncs.com".to_string(),
                 oss_bucket: "test-bucket".to_string(),
@@ -1268,13 +1105,6 @@ pub(crate) mod tests {
             auth_repo: PostgresAuthRepository::new(pool.clone()),
             order_repo: crate::repositories::PostgresOrderRepository::new(pool),
         }
-    }
-
-    #[derive(Serialize)]
-    struct LegacyClaims {
-        sub: String,
-        role: String,
-        exp: usize,
     }
 
     #[test]
@@ -1383,7 +1213,7 @@ pub(crate) mod tests {
             sub: "user-xyz".to_string(),
             role: "user".to_string(),
             exp: 1700000000,
-            jti: Some("jti-xyz".to_string()),
+            jti: "jti-xyz".to_string(),
             campus_id: None,
             auth_time: Some(1699999999),
         };
@@ -1400,19 +1230,15 @@ pub(crate) mod tests {
         assert_eq!(claims.sub, "user-123");
         assert_eq!(claims.role, "admin");
         assert_eq!(claims.exp, 1700000000);
-        assert_eq!(claims.jti.as_deref(), Some("jti-123"));
+        assert_eq!(claims.jti, "jti-123");
         assert!(claims.auth_time.is_none());
     }
 
     #[test]
-    fn test_claims_deserialization_legacy_without_jti() {
+    fn test_claims_deserialization_without_jti_fails() {
         let json = r#"{"sub": "user-legacy", "role": "user", "exp": 1700000000}"#;
-        let claims: Claims = serde_json::from_str(json).unwrap();
-        assert_eq!(claims.sub, "user-legacy");
-        assert_eq!(claims.role, "user");
-        assert_eq!(claims.exp, 1700000000);
-        assert!(claims.jti.is_none());
-        assert!(claims.auth_time.is_none());
+        let claims: Result<Claims, _> = serde_json::from_str(json);
+        assert!(claims.is_err());
     }
 
     #[test]
@@ -1455,69 +1281,43 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn test_extract_user_id_with_fallback_accepts_old_secret_token() {
-        let current_secret = "current_secret_1234567890123456789012";
-        let old_secret = "old_secret_12345678901234567890123456";
+    fn test_extract_user_id_accepts_valid_token() {
+        let secret = "secret_12345678901234567890123456789012";
         let (token, _jti, _exp) =
-            generate_access_token("legacy-user", "user", old_secret, 3600).unwrap();
+            generate_access_token("valid-user", "user", secret, 3600).unwrap();
 
-        let extracted =
-            extract_user_id_from_token_str_with_fallback(&token, current_secret, Some(old_secret));
-
+        let extracted = extract_user_id_from_token_str(&token, secret);
         assert!(extracted.is_ok());
-        assert_eq!(extracted.unwrap(), "legacy-user");
+        assert_eq!(extracted.unwrap(), "valid-user");
     }
 
     #[test]
-    fn test_extract_user_id_with_fallback_rejects_without_old_secret() {
-        let current_secret = "current_secret_1234567890123456789012";
-        let old_secret = "old_secret_12345678901234567890123456";
+    fn test_extract_user_id_rejects_wrong_secret() {
+        let secret = "secret_12345678901234567890123456789012";
+        let wrong_secret = "wrong_secret_1234567890123456789012345";
         let (token, _jti, _exp) =
-            generate_access_token("legacy-user", "user", old_secret, 3600).unwrap();
+            generate_access_token("valid-user", "user", secret, 3600).unwrap();
 
-        let extracted = extract_user_id_from_token_str_with_fallback(&token, current_secret, None);
-
+        let extracted = extract_user_id_from_token_str(&token, wrong_secret);
         assert!(extracted.is_err());
     }
 
     #[test]
-    fn test_extract_user_id_with_fallback_rejects_malformed_token() {
-        let result = extract_user_id_from_token_str_with_fallback(
-            "not.a.valid.jwt",
-            "current_secret_1234567890123456789012",
-            Some("old_secret_12345678901234567890123456"),
-        );
-
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("Invalid token (primary+fallback)"));
-    }
-
-    #[test]
-    fn test_extract_user_id_and_role_with_fallback_accepts_old_secret_token() {
-        let current_secret = "current_secret_1234567890123456789012";
-        let old_secret = "old_secret_12345678901234567890123456";
+    fn test_extract_user_id_and_role_accepts_valid_token() {
+        let secret = "secret_12345678901234567890123456789012";
         let (token, _jti, _exp) =
-            generate_access_token("legacy-admin", "admin", old_secret, 3600).unwrap();
+            generate_access_token("test-admin", "admin", secret, 3600).unwrap();
 
-        let extracted = extract_user_id_and_role_from_token_str_with_fallback(
-            &token,
-            current_secret,
-            Some(old_secret),
-        )
-        .unwrap();
-
-        assert_eq!(extracted.0, "legacy-admin");
+        let extracted = extract_user_id_and_role_from_token_str(&token, secret).unwrap();
+        assert_eq!(extracted.0, "test-admin");
         assert_eq!(extracted.1, "admin");
     }
 
     #[test]
-    fn test_extract_user_id_from_header_with_fallback_accepts_old_secret_token() {
-        let current_secret = "current_secret_1234567890123456789012";
-        let old_secret = "old_secret_12345678901234567890123456";
+    fn test_extract_user_id_from_header_accepts_valid_token() {
+        let secret = "secret_12345678901234567890123456789012";
         let (token, _jti, _exp) =
-            generate_access_token("legacy-user", "user", old_secret, 3600).unwrap();
+            generate_access_token("header-user", "user", secret, 3600).unwrap();
 
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -1525,102 +1325,48 @@ pub(crate) mod tests {
             format!("Bearer {}", token).parse().unwrap(),
         );
 
-        let extracted =
-            extract_user_id_from_token_with_fallback(&headers, current_secret, Some(old_secret));
-
+        let extracted = extract_user_id_from_token(&headers, secret);
         assert!(extracted.is_ok());
-        assert_eq!(extracted.unwrap(), "legacy-user");
+        assert_eq!(extracted.unwrap(), "header-user");
     }
 
     #[test]
-    fn test_extract_jti_with_fallback_preserves_legacy_missing_jti_error() {
-        let current_secret = "current_secret_1234567890123456789012";
-        let old_secret = "old_secret_12345678901234567890123456";
-        let now = chrono::Utc::now().timestamp();
-        let now = if now >= 0 { now as usize } else { 0usize };
-        let expiration = now + 3600;
+    fn test_extract_jti_from_token() {
+        let secret = "secret_12345678901234567890123456789012";
+        let (token, expected_jti, _exp) =
+            generate_access_token("user-jti", "user", secret, 3600).unwrap();
 
-        let legacy_token = encode(
-            &Header::default(),
-            &LegacyClaims {
-                sub: "legacy-user".to_string(),
-                role: "user".to_string(),
-                exp: expiration,
-            },
-            &EncodingKey::from_secret(old_secret.as_bytes()),
-        )
-        .unwrap();
-
-        let jti = extract_jti_from_token_str_with_fallback(
-            &legacy_token,
-            current_secret,
-            Some(old_secret),
-        );
-        assert!(jti.is_err());
-        assert_eq!(jti.unwrap_err(), "Token missing jti");
+        let jti = extract_jti_from_token_str(&token, secret).unwrap();
+        assert_eq!(jti, expected_jti);
     }
 
     #[test]
-    fn test_extract_claims_from_token_with_fallback_success_and_compat() {
-        let current_secret = "test_current_secret_32_characters_long";
-        let old_secret = "test_old_secret_32_characters_long_x";
+    fn test_extract_claims_from_token_success() {
+        let secret = "test_current_secret_32_characters_long";
         let campus_id = Uuid::new_v4();
 
-        // 1. Current secret token with claims
-        let (token, jti, exp) = generate_access_token_for_campus(
-            "user-1",
-            "user",
-            Some(campus_id),
-            current_secret,
-            3600,
-        )
-        .expect("generate current token");
+        let (token, jti, exp) =
+            generate_access_token_for_campus("user-1", "user", Some(campus_id), secret, 3600)
+                .expect("generate current token");
         let mut headers = HeaderMap::new();
         headers.insert("Authorization", format!("Bearer {token}").parse().unwrap());
 
         let claims =
-            extract_claims_from_token_with_fallback(&headers, current_secret, Some(old_secret))
-                .expect("extract claims with current secret");
+            extract_claims_from_token(&headers, secret).expect("extract claims with secret");
         assert_eq!(claims.sub, "user-1");
         assert_eq!(claims.campus_id, Some(campus_id));
-        assert_eq!(claims.jti.as_deref(), Some(jti.as_str()));
+        assert_eq!(claims.jti, jti);
         assert_eq!(claims.exp, exp);
 
-        // 2. Old secret token fallback
-        let (old_token, old_jti, old_exp) =
-            generate_access_token_for_campus("user-2", "user", None, old_secret, 3600)
-                .expect("generate old token");
-        let mut old_headers = HeaderMap::new();
-        old_headers.insert(
-            "Authorization",
-            format!("Bearer {old_token}").parse().unwrap(),
-        );
-
-        let fallback_claims =
-            extract_claims_from_token_with_fallback(&old_headers, current_secret, Some(old_secret))
-                .expect("extract claims with old secret fallback");
-        assert_eq!(fallback_claims.sub, "user-2");
-        assert_eq!(fallback_claims.campus_id, None);
-        assert_eq!(fallback_claims.jti.as_deref(), Some(old_jti.as_str()));
-        assert_eq!(fallback_claims.exp, old_exp);
-
-        // 3. Missing Authorization header
+        // Missing Authorization header
         let empty_headers = HeaderMap::new();
-        let err = extract_claims_from_token_with_fallback(
-            &empty_headers,
-            current_secret,
-            Some(old_secret),
-        );
+        let err = extract_claims_from_token(&empty_headers, secret);
         assert!(matches!(err, Err(ApiError::Unauthorized)));
 
-        // 4. Invalid Authorization format
+        // Invalid Authorization format
         let mut malformed_headers = HeaderMap::new();
         malformed_headers.insert("Authorization", "Basic 12345".parse().unwrap());
-        let err = extract_claims_from_token_with_fallback(
-            &malformed_headers,
-            current_secret,
-            Some(old_secret),
-        );
+        let err = extract_claims_from_token(&malformed_headers, secret);
         assert!(matches!(err, Err(ApiError::Unauthorized)));
     }
 

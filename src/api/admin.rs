@@ -8,8 +8,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::api::auth::{
-    extract_auth_session_from_token_with_fallback, generate_access_token_for_campus,
-    revoke_access_token_jti,
+    extract_auth_session_from_token, generate_access_token_for_campus, revoke_access_token_jti,
 };
 use crate::api::error::ApiError;
 use crate::api::AppState;
@@ -183,12 +182,8 @@ async fn require_admin_scope(
     reason: Option<&str>,
     require_platform_admin: bool,
 ) -> Result<AdminScope, ApiError> {
-    let session = extract_auth_session_from_token_with_fallback(
-        headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)?;
+    let session = extract_auth_session_from_token(headers, &state.secrets.jwt_secret)
+        .map_err(|_| ApiError::Unauthorized)?;
     let campus_service = CampusService::new(state.infra.db.clone());
     let actor = sqlx::query("SELECT role, status FROM users WHERE id = $1")
         .bind(&session.user_id)

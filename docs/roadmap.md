@@ -82,8 +82,8 @@
 
 ### API 与数据
 
-- [已实现] 当前 `/api/*` 响应提供 `X-Request-ID`，业务错误和框架拒绝提供稳定 `code/message/trace_id`，同时保留旧 `error` 字符串。
-- [已实现] `POST /api/listings` 支持 `Idempotency-Key`，同用户同 key 同内容只创建一次，不同内容返回冲突。
+- [已实现] 当前 `/api/*` 响应提供 `X-Request-ID`，业务错误和框架拒绝提供稳定 `code/message/trace_id`。
+- [已实现] `POST /api/posts` 支持 `Idempotency-Key`，同用户同 key 同内容只创建一次，不同内容返回冲突。
 - [已实现] `POST /api/listings/{id}/responses` 支持 responder 范围 `Idempotency-Key` 与 `replayed`；同 key 同内容重放原 response，同 key 改内容冲突且不重复通知。
 - [已实现] `POST /api/orders/{id}/confirm` 支持卖家范围内的 `Idempotency-Key`；重复确认不会重复下架，同 key 改变确认参数会安全冲突。
 - [目标态] 定义 `/api/v1` 嵌套错误对象和 cursor pagination，并把幂等扩展到联系、成交和 Agent confirm 等其余关键写接口。
@@ -96,7 +96,7 @@
 - [已实现] 媒体审核任务继承资源 campus，后台队列按校园和状态读取；Worker 的 processing 状态已纳入数据库约束，`0069_moderation_job_leases` 为每次领取写入 `locked_by/locked_until`，硬退出后可安全回收过期任务。
 - [已实现] 媒体隔离已覆盖 API、对象存储和审核任务三层。API 层（`0041`）：提交审核与资源置 `pending` 同事务；商品图、legacy 头像和共享对象在仍保留的公开读取路径按 `approved` 门槛输出，pending/rejected/failed 返回 null，所有者仍可见自己的待审图。SocialPersona Avatar 不使用照片或 `avatar_url`，角色/皮肤不接受用户上传，使用 `/api/persona/catalog` 的系统 token；legacy 头像媒体链路只为旧客户端兼容保留。存储层（`src/services/storage.rs`）：生产配置强制 `MEDIA_PRIVATE_BUCKET=true`，商品、legacy 头像和共享对象由 owner-scoped `upload-target` 返回只绑定服务器 key 的 presigned PUT，公开读取按 approved 门槛下发短期 presigned GET。开发/测试仍可关闭以兼容旧 fixture。审核任务由 `0072_moderation_job_storage_key` 保存稳定平台 key，私有 bucket worker 每次领取都重新签发短期 provider URL，legacy job 仍使用原始 `image_url` fallback。已对真实 S3 实现（MinIO）验证：匿名直连 403、未上传 key 亦拒绝、presigned PUT/GET 可取、签名篡改与过期均被拒（`tests/storage_acl_integration.rs`，并纳入生产演练 check 2b）。
 - 校验文件头、MIME、尺寸和解码，审核通过后生成公开 URL 和缩略图。
-- Base64 fallback 加指标和 feature flag，不再作为新客户端主路径。
+- [已实现] 彻底下线 Base64 媒体与回退机制，全链路使用平台标准 URL。
 - [已实现] `0034_moderation_cases.sql` 建立案件、状态事件和一次性申诉；机器拒绝和聊天举报自动关联，listing/user 也已有 `VerifiedTenant` 举报入口（同校目标由服务端派生、1–80/1000 字限制、每小时 10 条新举报）并与 ModerationCase 同事务关联。未处理的同一举报会更新 standing report，已处理后的新举报创建新 report/case。listing restrict/restore 已由 case-owned 可逆 effect 驱动；user 的多来源 restriction effect 仍待实现。
 - [已实现] 管理员紧急下架与 owner 删除已拆开：takedown 事务性创建/复用 manual case 及其 effect，不改 `inventory.status`；owner relist 在任一 active effect 下返回 `listing_restricted`。案件恢复、申诉改判和 manual restore 只释放自己拥有的 effect，组合限制不会被误清除，deleted/sold/fulfilled 不会被恢复动作复活。
 
@@ -297,7 +297,7 @@
 | 技术债 | 所属阶段 | 完成定义 |
 | --- | --- | --- |
 | TEXT/UUID 并存 | Phase 1 | 新写 UUID、旧数据兼容、核心 join 和 divergence 检查通过 |
-| Base64 fallback | Phase 1 | 新客户端零使用、指标验证后再迁移/删除 |
+| Base64 fallback | Phase 1 | [已实现] 彻底下线，新旧数据全链路收敛为平台标准 URL |
 | user_chat 大模块 | Phase 0–3 | 行为测试后按消息、媒体、状态和空间拆分 |
 | Secret Chat | Phase 1 | [已实现] 新建默认 403（`SECRET_CHAT_NEW_SESSIONS_ENABLED` 仅迁移窗口可开），移动端入口已移除，历史会话可读有回归覆盖 |
 | 生产启动测试数据探测 | Phase 0/1 | [已实现] 迁移 0113 幂等级联清理历史 0005 demo seed，后端启动解耦 6 个魔法 UUID 与运行时探测 |

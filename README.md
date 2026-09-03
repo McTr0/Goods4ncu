@@ -100,7 +100,7 @@ docker compose up --build
 cargo run
 ```
 
-健康检查：`http://127.0.0.1:3000/api/health`
+健康检查：`http://127.0.0.1:3000/api/readyz`
 
 ### 3. 启动 Flutter
 

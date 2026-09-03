@@ -111,7 +111,7 @@ flutter test
 
 协议改动要同时考虑四个位置：Rust request/response struct，Dart model，Dart service，测试 fixture。字段改名比新增字段危险，因为旧客户端可能还在发旧字段。能兼容时优先新增字段并保留旧字段一段时间。
 
-如果协议涉及媒体，优先使用 URL 字段，例如 `image_url` 和 `audio_url`。Base64 字段只作为 fallback，不应成为新功能的主路径。
+如果协议涉及媒体，必须使用规范平台 URL 字段，例如 `image_url` 和 `audio_url`。不支持 Base64 fallback。
 
 协议文档必须标明 `[已实现]` 或 `[目标态]`。目标字段可以先进入设计文档，但只有 router、struct、客户端解析和测试完成后才能改为已实现。
 

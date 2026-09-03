@@ -7,8 +7,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::api::auth::{
-    extract_auth_session_from_token_with_fallback, extract_user_id_from_token_with_fallback,
-    AuthSessionContext,
+    extract_auth_session_from_token, extract_user_id_from_token, AuthSessionContext,
 };
 use crate::api::error::ApiError;
 use crate::api::{ws, AppState};
@@ -536,24 +535,16 @@ pub(crate) fn authenticated_user(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<String, ApiError> {
-    extract_user_id_from_token_with_fallback(
-        headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)
+    extract_user_id_from_token(headers, &state.secrets.jwt_secret)
+        .map_err(|_| ApiError::Unauthorized)
 }
 
 pub(crate) fn authenticated_session(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<AuthSessionContext, ApiError> {
-    extract_auth_session_from_token_with_fallback(
-        headers,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)
+    extract_auth_session_from_token(headers, &state.secrets.jwt_secret)
+        .map_err(|_| ApiError::Unauthorized)
 }
 
 /// Active-campus tokens must not be able to read or mutate a conversation

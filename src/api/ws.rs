@@ -38,66 +38,124 @@ pub struct WsConnection {
     campus_id: Option<uuid::Uuid>,
 }
 
-/// Global WebSocket connections registry.
-/// Uses LazyLock so it is initialized on first access (at startup, not lazily per request).
-static WS_CONNECTIONS: std::sync::LazyLock<Arc<WsConnections>> =
-    std::sync::LazyLock::new(|| Arc::new(DashMap::new()));
+#[cfg(feature = "redis")]
+pub type FanoutMessage = (String, Option<uuid::Uuid>, String);
+#[cfg(feature = "redis")]
+pub type FanoutSender = tokio::sync::mpsc::Sender<FanoutMessage>;
+#[cfg(feature = "redis")]
+type FanoutPublisher = Arc<std::sync::RwLock<Option<FanoutSender>>>;
 
-pub fn new_ws_state() -> Arc<WsConnections> {
-    Arc::clone(&WS_CONNECTIONS)
+#[derive(Clone)]
+pub struct WsHub {
+    pub connections: Arc<WsConnections>,
+    #[cfg(feature = "redis")]
+    fanout_tx: FanoutPublisher,
 }
 
-/// Fanout publisher: when installed (Redis configured), broadcasts route
-/// through pub/sub so every replica delivers to its own sockets.
-#[cfg(feature = "redis")]
-static FANOUT_TX: std::sync::OnceLock<
-    tokio::sync::mpsc::Sender<(String, Option<uuid::Uuid>, String)>,
-> = std::sync::OnceLock::new();
+impl Default for WsHub {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-/// Install the Redis-backed fanout publisher sender.
+impl WsHub {
+    pub fn new() -> Self {
+        Self {
+            connections: Arc::new(DashMap::new()),
+            #[cfg(feature = "redis")]
+            fanout_tx: Arc::new(std::sync::RwLock::new(None)),
+        }
+    }
+
+    #[cfg(feature = "redis")]
+    pub fn set_fanout_publisher(
+        &self,
+        tx: tokio::sync::mpsc::Sender<(String, Option<uuid::Uuid>, String)>,
+    ) {
+        if let Ok(mut lock) = self.fanout_tx.write() {
+            *lock = Some(tx);
+        }
+    }
+
+    pub fn broadcast_to_user(&self, user_id: &str, payload: &str) {
+        self.broadcast_to_user_scoped(user_id, None, payload);
+    }
+
+    pub fn broadcast_to_user_in_campus(&self, user_id: &str, campus_id: uuid::Uuid, payload: &str) {
+        self.broadcast_to_user_scoped(user_id, Some(campus_id), payload);
+    }
+
+    fn broadcast_to_user_scoped(
+        &self,
+        user_id: &str,
+        campus_id: Option<uuid::Uuid>,
+        payload: &str,
+    ) {
+        #[cfg(feature = "redis")]
+        if let Ok(lock) = self.fanout_tx.read() {
+            if let Some(ref tx) = *lock {
+                match tx.try_send((user_id.to_string(), campus_id, payload.to_string())) {
+                    Ok(_) => return,
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        tracing::warn!(
+                            user_id = %user_id,
+                            "WS fanout publisher buffer full; falling back to local delivery"
+                        );
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                        tracing::error!(
+                            user_id = %user_id,
+                            "WS fanout publisher channel closed; falling back to local delivery"
+                        );
+                    }
+                }
+            }
+        }
+        self.deliver_local_scoped(user_id, campus_id, payload);
+    }
+
+    pub fn deliver_local_scoped(
+        &self,
+        user_id: &str,
+        campus_id: Option<uuid::Uuid>,
+        payload: &str,
+    ) {
+        deliver_local_scoped_internal(&self.connections, user_id, campus_id, payload);
+    }
+}
+
+/// Global WebSocket hub instance.
+static GLOBAL_WS_HUB: std::sync::LazyLock<Arc<WsHub>> =
+    std::sync::LazyLock::new(|| Arc::new(WsHub::new()));
+
+#[allow(dead_code)]
+pub fn global_ws_hub() -> Arc<WsHub> {
+    Arc::clone(&GLOBAL_WS_HUB)
+}
+
+pub fn new_ws_state() -> Arc<WsConnections> {
+    Arc::clone(&GLOBAL_WS_HUB.connections)
+}
+
+/// Install the Redis-backed fanout publisher sender into the global hub.
 #[cfg(feature = "redis")]
 pub fn install_fanout_publisher(
     tx: tokio::sync::mpsc::Sender<(String, Option<uuid::Uuid>, String)>,
 ) {
-    if FANOUT_TX.set(tx).is_err() {
-        tracing::warn!("WS fanout publisher already installed");
-    }
+    GLOBAL_WS_HUB.set_fanout_publisher(tx);
 }
 
 /// Broadcast a payload to a user. With the fanout installed this publishes to
 /// Redis and delivery happens on every replica (including this one) through
 /// the subscription; without it, it delivers to local sockets directly.
 pub fn broadcast_to_user(user_id: &str, payload: &str) {
-    broadcast_to_user_scoped(user_id, None, payload);
+    GLOBAL_WS_HUB.broadcast_to_user(user_id, payload);
 }
 
 /// Broadcast a chat event only to sockets authenticated for the conversation's
-/// active campus. Legacy sockets without a campus claim are intentionally not
-/// included; they can recover the durable event through the HTTP API.
+/// active campus.
 pub fn broadcast_to_user_in_campus(user_id: &str, campus_id: uuid::Uuid, payload: &str) {
-    broadcast_to_user_scoped(user_id, Some(campus_id), payload);
-}
-
-fn broadcast_to_user_scoped(user_id: &str, campus_id: Option<uuid::Uuid>, payload: &str) {
-    #[cfg(feature = "redis")]
-    if let Some(tx) = FANOUT_TX.get() {
-        match tx.try_send((user_id.to_string(), campus_id, payload.to_string())) {
-            Ok(_) => return,
-            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                tracing::warn!(
-                    user_id = %user_id,
-                    "WS fanout publisher buffer full; falling back to local delivery"
-                );
-            }
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                tracing::error!(
-                    user_id = %user_id,
-                    "WS fanout publisher channel closed; falling back to local delivery"
-                );
-            }
-        }
-    }
-    deliver_local_scoped(user_id, campus_id, payload);
+    GLOBAL_WS_HUB.broadcast_to_user_in_campus(user_id, campus_id, payload);
 }
 
 /// Register a bare connection sender for a user — the same registration the
@@ -115,7 +173,8 @@ pub fn register_test_connection_for_campus(
     campus_id: Option<uuid::Uuid>,
 ) -> mpsc::Receiver<Message> {
     let (tx, rx) = mpsc::channel(16);
-    WS_CONNECTIONS
+    GLOBAL_WS_HUB
+        .connections
         .entry(user_id.to_string())
         .or_default()
         .push(WsConnection {
@@ -137,10 +196,15 @@ pub fn deliver_local_for_campus(user_id: &str, campus_id: uuid::Uuid, payload: &
     deliver_local_scoped(user_id, Some(campus_id), payload);
 }
 
-pub(crate) fn deliver_local_scoped(user_id: &str, campus_id: Option<uuid::Uuid>, payload: &str) {
+fn deliver_local_scoped_internal(
+    connections_map: &WsConnections,
+    user_id: &str,
+    campus_id: Option<uuid::Uuid>,
+    payload: &str,
+) {
     let metrics = crate::api::metrics::GLOBAL_METRICS.get().cloned();
 
-    if let Some(connections) = WS_CONNECTIONS.get(user_id) {
+    if let Some(connections) = connections_map.get(user_id) {
         let mut dead_indices = vec![];
         for (i, connection) in connections.value().iter().enumerate() {
             if campus_id.is_some() && connection.campus_id != campus_id {
@@ -170,7 +234,7 @@ pub(crate) fn deliver_local_scoped(user_id: &str, campus_id: Option<uuid::Uuid>,
         // Remove dead connections (reverse order to preserve indices).
         if !dead_indices.is_empty() {
             let pruned = dead_indices.len();
-            if let Some(mut connections) = WS_CONNECTIONS.get_mut(user_id) {
+            if let Some(mut connections) = connections_map.get_mut(user_id) {
                 for i in dead_indices.into_iter().rev() {
                     connections.value_mut().remove(i);
                 }
@@ -179,11 +243,15 @@ pub(crate) fn deliver_local_scoped(user_id: &str, campus_id: Option<uuid::Uuid>,
                 }
                 if connections.value().is_empty() {
                     drop(connections);
-                    WS_CONNECTIONS.remove(user_id);
+                    connections_map.remove(user_id);
                 }
             }
         }
     }
+}
+
+pub(crate) fn deliver_local_scoped(user_id: &str, campus_id: Option<uuid::Uuid>, payload: &str) {
+    deliver_local_scoped_internal(&GLOBAL_WS_HUB.connections, user_id, campus_id, payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -230,7 +298,8 @@ async fn handle_socket(socket: WebSocket, user_id: String, campus_id: Option<uui
     let (tx, rx) = mpsc::channel::<Message>(64);
 
     // Register this connection.
-    WS_CONNECTIONS
+    GLOBAL_WS_HUB
+        .connections
         .entry(user_id.clone())
         .or_default()
         .push(WsConnection {
@@ -240,7 +309,7 @@ async fn handle_socket(socket: WebSocket, user_id: String, campus_id: Option<uui
 
     tracing::debug!(
         user_id = %user_id,
-        total_connections = WS_CONNECTIONS.get(&user_id).map(|c| c.value().len()).unwrap_or(0),
+        total_connections = GLOBAL_WS_HUB.connections.get(&user_id).map(|c| c.value().len()).unwrap_or(0),
         "WS connection registered"
     );
 
@@ -310,7 +379,7 @@ async fn handle_socket(socket: WebSocket, user_id: String, campus_id: Option<uui
     }
 
     // Socket closed. Clean up: remove this specific tx from the user's connection list.
-    if let Some(mut connections) = WS_CONNECTIONS.get_mut(&user_id) {
+    if let Some(mut connections) = GLOBAL_WS_HUB.connections.get_mut(&user_id) {
         let before = connections.value().len();
         connections
             .value_mut()
@@ -323,7 +392,7 @@ async fn handle_socket(socket: WebSocket, user_id: String, campus_id: Option<uui
         }
         if connections.value().is_empty() {
             drop(connections);
-            WS_CONNECTIONS.remove(&user_id);
+            GLOBAL_WS_HUB.connections.remove(&user_id);
             tracing::debug!(%user_id, "WS: last connection closed, user removed");
         } else {
             tracing::debug!(%user_id, remaining = connections.value().len(), "WS: connection cleaned up");

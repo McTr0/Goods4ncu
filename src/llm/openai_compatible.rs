@@ -482,26 +482,34 @@ impl MarketplaceAgent for OpenAiCompatibleMarketplaceAgent {
                                     }
                                 }
                                 "draft_comment" => {
-                                    // Parse DRAFT_COMMENT|post_id|text
-                                    let parts: Vec<&str> = result.splitn(3, '|').collect();
-                                    if parts.len() == 3 && parts[0] == "DRAFT_COMMENT" {
-                                        yield AgentStreamChunk::UiAction(
-                                            crate::llm::UiAction::open_comment_draft(
-                                                parts[1], parts[2],
-                                            ),
-                                        );
+                                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&result) {
+                                        if let (Some(post_id), Some(draft_text)) = (
+                                            v.get("post_id").and_then(|s| s.as_str()),
+                                            v.get("draft_text").and_then(|s| s.as_str()),
+                                        ) {
+                                            yield AgentStreamChunk::UiAction(
+                                                crate::llm::UiAction::open_comment_draft(
+                                                    post_id, draft_text,
+                                                ),
+                                            );
+                                        }
                                     }
                                 }
                                 "draft_message" => {
-                                    let parts: Vec<&str> = result.splitn(4, '|').collect();
-                                    if parts.len() == 4 && parts[0] == "DRAFT_MESSAGE" {
-                                        yield AgentStreamChunk::UiAction(
-                                            crate::llm::UiAction::open_message_draft(
-                                                parts[2],
-                                                parts[1],
-                                                parts[3],
-                                            ),
-                                        );
+                                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&result) {
+                                        if let (Some(listing_id), Some(receiver_id), Some(draft_text)) = (
+                                            v.get("listing_id").and_then(|s| s.as_str()),
+                                            v.get("receiver_id").and_then(|s| s.as_str()),
+                                            v.get("draft_text").and_then(|s| s.as_str()),
+                                        ) {
+                                            yield AgentStreamChunk::UiAction(
+                                                crate::llm::UiAction::open_message_draft(
+                                                    receiver_id,
+                                                    listing_id,
+                                                    draft_text,
+                                                ),
+                                            );
+                                        }
                                     }
                                 }
                                 _ => {}
@@ -706,7 +714,7 @@ impl MarketplaceAgent for OpenAiResponsesMarketplaceAgent {
                     history.push(Message::Assistant { id: None, content });
                 }
                 for (id, call_id, name, _arguments, result) in calls {
-                    for action in crate::agents::runtime::envelope::legacy::from_tool_result(&name, &result).ui_actions {
+                    for action in crate::agents::runtime::envelope::ToolResultEnvelope::from_tool_result(&name, &result).ui_actions {
                         yield AgentStreamChunk::UiAction(action);
                     }
                     let fenced = crate::llm::wrap_untrusted_platform_data(&name, &result);

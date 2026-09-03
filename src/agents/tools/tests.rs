@@ -509,10 +509,10 @@ async fn draft_comment_tool_rejects_missing_or_closed_post() {
             })
             .await
             .expect("valid draft");
-        assert_eq!(
-            valid,
-            format!("DRAFT_COMMENT|{}|{}", post_id, "请问周末可以自提吗？")
-        );
+        let parsed: serde_json::Value = serde_json::from_str(&valid).expect("json");
+        assert_eq!(parsed["action"], "open_comment_draft");
+        assert_eq!(parsed["post_id"], post_id);
+        assert_eq!(parsed["draft_text"], "请问周末可以自提吗？");
 
         let missing = tool
             .call(DraftCommentArgs {
@@ -543,7 +543,11 @@ async fn draft_message_tool_rejects_missing_listing_or_receiver() {
             })
             .await
             .expect("valid draft");
-        assert!(valid.starts_with("DRAFT_MESSAGE|"));
+        let parsed: serde_json::Value = serde_json::from_str(&valid).expect("json");
+        assert_eq!(parsed["action"], "open_message_draft");
+        assert_eq!(parsed["listing_id"], listing_id);
+        assert_eq!(parsed["receiver_id"], seller_id);
+        assert_eq!(parsed["draft_text"], "周末方便面交吗？");
 
         let missing_listing = tool
             .call(DraftMessageArgs {

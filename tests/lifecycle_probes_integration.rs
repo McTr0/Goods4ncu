@@ -26,7 +26,6 @@ fn build_state(pool: sqlx::PgPool, shutdown: ShutdownSignal) -> AppState {
     AppState {
         secrets: ApiSecrets {
             jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),
-            jwt_secret_old: None,
             gemini_api_key: "test-gemini-key".to_string(),
             oss_endpoint: "https://oss-cn-beijing.aliyuncs.com".to_string(),
             oss_bucket: "test-bucket".to_string(),
@@ -99,15 +98,10 @@ async fn probes_report_serving_while_the_process_is_running() {
         let parsed: Value = serde_json::from_str(&body).expect("livez json");
         assert_eq!(parsed["status"], "alive");
 
-        let (status, body) = get(app.clone(), "/api/readyz").await;
+        let (status, body) = get(app, "/api/readyz").await;
         assert_eq!(status, StatusCode::OK);
         let parsed: Value = serde_json::from_str(&body).expect("readyz json");
         assert_eq!(parsed["status"], "ready");
-
-        // The legacy path stays behaviour-compatible for existing probes.
-        let (status, body) = get(app, "/api/health").await;
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(body, "OK");
     })
     .await;
 }
@@ -123,7 +117,7 @@ async fn readiness_fails_once_draining_so_the_balancer_stops_routing_here() {
 
         controller.trigger();
 
-        let (status, body) = get(app.clone(), "/api/readyz").await;
+        let (status, body) = get(app, "/api/readyz").await;
         assert_eq!(
             status,
             StatusCode::SERVICE_UNAVAILABLE,
@@ -134,13 +128,6 @@ async fn readiness_fails_once_draining_so_the_balancer_stops_routing_here() {
         // 503 tells a client to retry elsewhere; 500 would surface as a hard
         // failure and be counted against the error budget.
         assert!(parsed["trace_id"].is_string());
-
-        let (status, _) = get(app, "/api/health").await;
-        assert_eq!(
-            status,
-            StatusCode::SERVICE_UNAVAILABLE,
-            "the legacy alias must drain too, or Compose keeps routing to it"
-        );
     })
     .await;
 }

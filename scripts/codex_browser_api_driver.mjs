@@ -54,7 +54,7 @@ Usage:
   node scripts/codex_browser_api_driver.mjs <command> [--base=http://127.0.0.1:3000] [--json]
 
 Commands:
-  health       Check /api/health.
+  health       Check /api/readyz.
   personas     Print seed persona usernames and ids.
   r2-chat      Exercise mail/realtime privacy, acknowledgements, and authoritative file/link objects.
   p0-chat      Prepare and assert one active buyer/seller chat with reply, reaction, hide, report.
@@ -165,13 +165,14 @@ async function login(baseUrl, key) {
 }
 
 async function runHealth(baseUrl) {
-  const response = await fetchWithHint(`${baseUrl}/api/health`);
+  const response = await fetchWithHint(`${baseUrl}/api/readyz`);
   const text = await response.text();
-  assert(response.ok, '/api/health should return 2xx', {
+  assert(response.ok, '/api/readyz should return 2xx', {
     status: response.status,
     body: text,
   });
-  assert(text.trim() === 'OK', '/api/health should return OK', text);
+  const data = JSON.parse(text);
+  assert(data.status === 'ready', '/api/readyz should return status ready', text);
   return { command: 'health', ok: true, status: response.status, body: text.trim() };
 }
 

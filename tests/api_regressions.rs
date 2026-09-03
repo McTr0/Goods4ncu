@@ -335,7 +335,6 @@ fn build_state_with_image_moderation(pool: sqlx::PgPool, image_enabled: bool) ->
     AppState {
         secrets: ApiSecrets {
             jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),
-            jwt_secret_old: None,
             gemini_api_key: "test-gemini-key".to_string(),
             oss_endpoint: "https://oss-cn-beijing.aliyuncs.com".to_string(),
             oss_bucket: "test-bucket".to_string(),
@@ -1206,7 +1205,7 @@ async fn banned_user_login_is_rejected() {
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
         let body = response_json(resp).await;
-        assert_eq!(body["error"], "认证失败: 账号已被封禁");
+        assert_eq!(body["message"], "认证失败: 账号已被封禁");
 
         let refresh_count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM refresh_tokens WHERE user_id = $1")
@@ -1326,7 +1325,7 @@ async fn admin_ban_immediately_blocks_active_sessions_and_refresh() {
         let resp = app.clone().oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         let body = response_json(resp).await;
-        assert_eq!(body["error"], "认证失败: 账号已被封禁");
+        assert_eq!(body["message"], "认证失败: 账号已被封禁");
 
         let req = Request::builder()
             .method("POST")

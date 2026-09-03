@@ -112,16 +112,12 @@ fn rate_limit_key_for_request(
     peer_addr: Option<SocketAddr>,
     secrets: &ApiSecrets,
 ) -> String {
-    auth::extract_user_id_from_token_with_fallback(
-        headers,
-        &secrets.jwt_secret,
-        secrets.jwt_secret_old.as_deref(),
-    )
-    .map(|user_id| format!("uid:{user_id}"))
-    .unwrap_or_else(|_| match peer_addr {
-        Some(peer_addr) => format!("ip:{}", peer_addr.ip()),
-        None => missing_peer_rate_limit_key(headers),
-    })
+    auth::extract_user_id_from_token(headers, &secrets.jwt_secret)
+        .map(|user_id| format!("uid:{user_id}"))
+        .unwrap_or_else(|_| match peer_addr {
+            Some(peer_addr) => format!("ip:{}", peer_addr.ip()),
+            None => missing_peer_rate_limit_key(headers),
+        })
 }
 
 /// Security headers applied to all responses.
@@ -211,14 +207,11 @@ pub async fn token_denylist_middleware(
             if auth::ensure_token_not_revoked(&state, token).await.is_err() {
                 return ApiError::Unauthorized.into_response();
             }
-            let session = match auth::extract_auth_session_from_token_str_with_fallback(
-                token,
-                &state.secrets.jwt_secret,
-                state.secrets.jwt_secret_old.as_deref(),
-            ) {
-                Ok(session) => session,
-                Err(_) => return ApiError::Unauthorized.into_response(),
-            };
+            let session =
+                match auth::extract_auth_session_from_token_str(token, &state.secrets.jwt_secret) {
+                    Ok(session) => session,
+                    Err(_) => return ApiError::Unauthorized.into_response(),
+                };
             if let Err(err) = auth::ensure_user_not_banned(&state, &session.user_id).await {
                 return err.into_response();
             }
@@ -280,7 +273,6 @@ pub async fn http_metrics_middleware(
 #[derive(Clone)]
 pub struct ApiSecrets {
     pub jwt_secret: String,
-    pub jwt_secret_old: Option<String>,
     pub gemini_api_key: String,
     /// Alibaba Cloud OSS configuration for STS direct-upload.
     pub oss_endpoint: String,
@@ -620,7 +612,6 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
 
     Router::new()
         .nest_service("/uploads", ServeDir::new("uploads"))
-        .route("/api/health", get(health_check))
         .route("/api/livez", get(livez))
         .route("/api/readyz", get(readyz))
         .route("/api/metrics", get(get_metrics))
@@ -1195,7 +1186,7 @@ async fn readyz(State(state): State<AppState>) -> Result<axum::Json<serde_json::
     Ok(axum::Json(serde_json::json!({ "status": "ready" })))
 }
 
-/// Shared readiness logic for `/api/readyz` and the legacy `/api/health`.
+/// Shared readiness logic for `/api/readyz`.
 async fn check_ready(state: &AppState) -> Result<(), ApiError> {
     if state.infra.shutdown.is_draining() {
         // Not an error condition: the instance is being retired on purpose.
@@ -1231,13 +1222,6 @@ async fn check_ready(state: &AppState) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// GET /api/health — legacy readiness alias kept for existing clients, probes
-/// and Compose health checks. Prefer `/api/readyz` and `/api/livez`.
-async fn health_check(State(state): State<AppState>) -> Result<&'static str, ApiError> {
-    check_ready(&state).await?;
-    Ok("OK")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1260,7 +1244,6 @@ mod tests {
         let peer_addr: SocketAddr = "127.0.0.1:3000".parse().expect("socket addr");
         let secrets = ApiSecrets {
             jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),
-            jwt_secret_old: None,
             gemini_api_key: String::new(),
             oss_endpoint: String::new(),
             oss_bucket: String::new(),
@@ -1279,7 +1262,6 @@ mod tests {
         let peer_addr: SocketAddr = "127.0.0.9:4000".parse().expect("socket addr");
         let secrets = ApiSecrets {
             jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),
-            jwt_secret_old: None,
             gemini_api_key: String::new(),
             oss_endpoint: String::new(),
             oss_bucket: String::new(),
@@ -1299,7 +1281,6 @@ mod tests {
         headers.insert("host", HeaderValue::from_static("example.test"));
         let secrets = ApiSecrets {
             jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),
-            jwt_secret_old: None,
             gemini_api_key: String::new(),
             oss_endpoint: String::new(),
             oss_bucket: String::new(),
@@ -1321,7 +1302,6 @@ mod tests {
         let headers = HeaderMap::new();
         let secrets = ApiSecrets {
             jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),
-            jwt_secret_old: None,
             gemini_api_key: String::new(),
             oss_endpoint: String::new(),
             oss_bucket: String::new(),

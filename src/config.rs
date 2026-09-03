@@ -109,7 +109,6 @@ pub struct AppConfig {
     pub gemini_api_key: String,
     pub llm_api_key: Option<String>,
     pub jwt_secret: String,
-    pub jwt_secret_old: Option<String>,
     pub database_url: String,
     pub oss_access_key_id: Option<String>,
     pub oss_access_key_secret: Option<String>,
@@ -170,10 +169,6 @@ impl fmt::Debug for AppConfig {
                 &self.llm_api_key.as_ref().map(|_| "[REDACTED]"),
             )
             .field("jwt_secret", &"[REDACTED]")
-            .field(
-                "jwt_secret_old",
-                &self.jwt_secret_old.as_ref().map(|_| "[REDACTED]"),
-            )
             .field("database_url", &"[REDACTED]")
             .field("llm_provider", &self.llm_provider)
             .field("llm_model", &self.llm_model)
@@ -346,8 +341,6 @@ impl AppConfig {
             validate_production_secret_hygiene(&jwt_secret)
                 .unwrap_or_else(|message| panic!("{message}"));
         }
-
-        let jwt_secret_old = std::env::var("JWT_SECRET_OLD").ok();
 
         validate_campus_verification_delivery(
             running_in_production(),
@@ -558,7 +551,6 @@ impl AppConfig {
             gemini_api_key: gemini_api_key.unwrap_or_default(),
             llm_api_key,
             jwt_secret,
-            jwt_secret_old,
             database_url: std::env::var("DATABASE_URL")
                 .expect("DATABASE_URL must be set in environment"),
             llm_provider,
@@ -613,7 +605,6 @@ impl AppConfig {
             gemini_api_key: "test-gemini-key".to_string(),
             llm_api_key: None,
             jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),
-            jwt_secret_old: None,
             database_url: "postgres://test/test".to_string(),
             oss_access_key_id: None,
             oss_access_key_secret: None,
@@ -816,7 +807,6 @@ mod tests {
             gemini_api_key: "gemini-secret".to_string(),
             llm_api_key: Some("generic-llm-secret".to_string()),
             jwt_secret: "jwt-secret-that-is-at-least-32-characters".to_string(),
-            jwt_secret_old: None,
             database_url: "postgres://user:pass@localhost/db".to_string(),
             oss_access_key_id: Some("oss-key-id".to_string()),
             oss_access_key_secret: Some("oss-key-secret".to_string()),

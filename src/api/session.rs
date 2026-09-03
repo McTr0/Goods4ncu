@@ -24,7 +24,7 @@
 use axum::http::request::Parts;
 use uuid::Uuid;
 
-use crate::api::auth::{extract_auth_session_from_token_str_with_fallback, AuthSessionContext};
+use crate::api::auth::{extract_auth_session_from_token_str, AuthSessionContext};
 use crate::api::error::ApiError;
 use crate::api::AppState;
 use crate::services::campus::CampusService;
@@ -38,12 +38,8 @@ fn bearer_token(parts: &Parts) -> Option<&str> {
 }
 
 fn decode_session(token: &str, state: &AppState) -> Result<AuthSessionContext, ApiError> {
-    extract_auth_session_from_token_str_with_fallback(
-        token,
-        &state.secrets.jwt_secret,
-        state.secrets.jwt_secret_old.as_deref(),
-    )
-    .map_err(|_| ApiError::Unauthorized)
+    extract_auth_session_from_token_str(token, &state.secrets.jwt_secret)
+        .map_err(|_| ApiError::Unauthorized)
 }
 
 /// A valid access token. See the module docs for when to use which extractor.

@@ -118,7 +118,7 @@ GOOD4NCU_API_BASE=http://127.0.0.1:3000 \
 | P0-05 | 打开聊天详情 | `p0-chat` 输出的 conversation id | 引用、反应、举报、删除后的状态合理。 |
 | P0-06 | 进入个人页 | 无 | 普通用户看不到管理后台入口。 |
 | P0-07 | 打开 `/admin` | 无 | 普通用户被重定向，不能看到后台数据。 |
-| P0-08 | 访问后端健康检查 | `health` | `/api/health` 返回 `OK`。 |
+| P0-08 | 访问后端健康检查 | `health` | `/api/readyz` 返回 `status: ready`。 |
 
 失败判定：
 

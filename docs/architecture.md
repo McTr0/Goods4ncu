@@ -70,13 +70,13 @@ WebSocket 用于低延迟提示，不是业务事实来源。事件包括 conver
 以发布 wanted 为例：
 
 ```text
-POST /api/listings
+POST /api/posts
   -> handler 解析 JWT、body 和 direction
   -> 文本审核和字段校验
-  -> repository/service 写 inventory
+  -> repository/service 写 posts / inventory
   -> 写或更新 documents embedding
   -> 可选提交媒体审核 job
-  -> 返回 listing JSON
+  -> 返回 post JSON
 ```
 
 当前已建立 `Campus`/`CampusMembership`、核心资源、通知、审核任务和管理审计的 `campus_id`、同校园写门禁和设备级 active campus session。新 access JWT 带可选 `campus_id`，refresh token 记录同一校园；登录、注册、刷新和切换都会保持二者一致。`CampusService` 在每次受保护操作重新验证 membership，不能只相信 claim。旧 token 缺少 claim 时才回退到首个可用 membership。推荐、公开用户页和通知已跟随活动校园；后台使用独立 `AdminScope` 复核数据库角色，校园运营可读本校，平台管理员跨校园必须给理由并审计。平台管理员写操作还要求 access token 的 `auth_time` 在 10 分钟内；refresh、切换校园和旧 token 会自动回到锁定状态。普通 handler 已收敛为统一 session extractor（`src/api/session.rs`：`Session` 要求有效 token，`VerifiedTenant` 额外要求 verified membership，`OptionalSession` 服务游客可用路径且无效 token 拒绝而非静默降级）。平台管理员已支持 TOTP MFA（确认后 reauth 强制第二因子）；校园运营 MFA 和关键表 RLS 尚未落地，因此不要把当前过渡实现描述成完整多租户。
@@ -116,7 +116,7 @@ wanted matches 使用活动 campus、分类、预算、成色和 active 状态�
 - `chat_conversations`：realtime/mail、参与者、状态、主题和过期时间。
 - `chat_conversation_members`：成员级归档；新留言的 `LOCALLY_SEEN` 由设备本地维护，不写入服务器。
 - `chat_conversation_events`：握手、关闭和过期时间线。
-- `chat_messages`：正文、媒体 URL/Base64 fallback、reply、quote、编辑和审核状态。
+- `chat_messages`：正文、媒体 URL、reply、quote、编辑和审核状态。
 - `chat_message_acknowledgements`：接收方主动选择的 `received`、`will_review` 或 `completed`，每用户每消息最多一条，可替换或撤销。
 - `chat_blocks`：屏蔽关系。
 
@@ -200,7 +200,7 @@ Flutter 的空间布局保持稳定的“对方左上 / 自己右下”映射，
 | 过渡期首校园默认值 | `0029` 为兼容旧 SQL 保留 NCU default；session、通知、后台和审核已显式带校园 | 第二校园前移除 DB default，把普通 handler 收敛到统一 TenantContext，并评估关键表 RLS |
 | 进程内事件 | 崩溃可能丢失异步动作 | transactional outbox |
 | 单实例 WebSocket | 多副本无法直接 fan-out | Redis pub/sub + HTTP 补偿 |
-| 媒体兼容路径 | URL-first 与 Base64、静态 uploads 并存 | 私有隔离对象存储和 CDN |
+| 媒体路径 | 私有隔离对象存储与规范平台媒体 URL | 私有隔离对象存储和 CDN |
 | Agent listing 写工具 | ActionPlan 已 crash-safe，HTTP 与 Agent 已共享 ListingCommandService；关键动作已有 `content_revision` 快照和冲突保护；提案按用户/校园和动作参数哈希幂等；typed terminal outcome 与行动级 receipt 已落地；聊天提案 receipt 可通过 `agent_run_id` 显式关联；AgentRun envelope 已覆盖路由/provider/检索聚合/工具类别/SSE TTFT/终态，服务端 token 计数、客户端断开有界取消结案和 stale-run durable reconciliation 已落地 | 设备/重新认证绑定、版本化风险文案、provider TTFT、运维对账和完整 `/api/v1` |
 | Secret Chat | 服务器不可读，治理边界冲突 | 停止生产承诺并迁移 |
 | TEXT/UUID 并存 | join 和 fixture 可能只覆盖一类 ID | repository 兼容封装和分阶段收敛 |
