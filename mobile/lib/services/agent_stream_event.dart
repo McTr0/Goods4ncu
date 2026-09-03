@@ -265,9 +265,7 @@ class AgentTurnValidator {
       throw const ProtocolViolationException('Missing or empty turn_id');
     }
 
-    if (_activeTurnId == null) {
-      _activeTurnId = turnId;
-    } else if (turnId != _activeTurnId) {
+    if (_activeTurnId != null && turnId != _activeTurnId) {
       throw ProtocolViolationException(
         'Turn ID mismatch: expected $_activeTurnId, got $turnId',
       );
@@ -278,9 +276,7 @@ class AgentTurnValidator {
       throw const ProtocolViolationException('Missing or empty conversation_id');
     }
 
-    if (expectedConversationId == null) {
-      expectedConversationId = convId;
-    } else if (convId != expectedConversationId) {
+    if (expectedConversationId != null && convId != expectedConversationId) {
       throw ProtocolViolationException(
         'Conversation ID mismatch: expected $expectedConversationId, got $convId',
       );
@@ -292,13 +288,16 @@ class AgentTurnValidator {
           'First event must be turn_started with seq=1, got ${event.type} with seq=${event.seq}',
         );
       }
-      _expectedSeq = 1;
     } else if (event.seq != _expectedSeq) {
       throw ProtocolViolationException(
         'Sequence gap or regression: expected seq $_expectedSeq, got ${event.seq} (type=${event.type})',
       );
     }
-    _expectedSeq = _expectedSeq! + 1;
+
+    // All validation passed: atomically commit state
+    _activeTurnId ??= turnId;
+    expectedConversationId ??= convId;
+    _expectedSeq = event.seq + 1;
 
     if (event.isTerminal) {
       _terminalEventSeen = true;

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -470,6 +471,71 @@ void main() {
         () => validator.assertTerminalEventSeen(),
         throwsA(isA<StreamTruncatedException>()),
       );
+    });
+
+    test('validateEvent does not mutate internal state when validation fails on first event', () {
+      final validator = AgentTurnValidator(expectedConversationId: 'expected-conv');
+      final evWrongConv = AgentStreamEvent(
+        type: 'turn_started',
+        seq: 1,
+        turnId: 'wrong-turn',
+        conversationId: 'wrong-conv',
+      );
+
+      expect(
+        () => validator.validateEvent(evWrongConv),
+        throwsA(isA<ProtocolViolationException>()),
+      );
+
+      // Now pass the genuine expected event with seq=1
+      final validEv = AgentStreamEvent(
+        type: 'turn_started',
+        seq: 1,
+        turnId: 'actual-turn',
+        conversationId: 'expected-conv',
+      );
+      expect(validator.validateEvent(validEv), isFalse);
+    });
+
+    test('protocol violation in chunk terminates stream immediately with single error and no EOF duplicate', () async {
+      final client = _QueuedClient([
+        _response(
+          200,
+          body:
+              'data: {"protocol_version":"2.0","type":"turn_started","seq":1,"turn_id":"t1","conversation_id":"c1"}\n\n'
+              'data: {"protocol_version":"2.0","type":"text_delta","seq":99,"turn_id":"t1","conversation_id":"c1","text":"gap"}\n\n'
+              'data: {"protocol_version":"2.0","type":"text_delta","seq":100,"turn_id":"t1","conversation_id":"c1","text":"after"}\n\n',
+        ),
+      ]);
+
+      final service = SseService(
+        baseUrl: 'http://example.test',
+        getAccessToken: () async => 'test-token',
+        clientFactory: () => client,
+      );
+
+      await service.connect(message: 'hi');
+
+      final events = <AgentStreamEvent>[];
+      final errors = <dynamic>[];
+
+      final completer = Completer<void>();
+      service.stream.listen(
+        events.add,
+        onError: (err) {
+          errors.add(err);
+        },
+        onDone: () {
+          completer.complete();
+        },
+      );
+
+      await completer.future;
+
+      expect(events.length, 1);
+      expect(events.first.type, 'turn_started');
+      expect(errors.length, 1);
+      expect(errors.first, isA<ProtocolViolationException>());
     });
   });
 }

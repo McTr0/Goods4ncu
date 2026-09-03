@@ -170,14 +170,8 @@ class SseService {
               pendingText: pendingSseText,
             );
           },
-          onError: (error) {
-            if (connectionId != _activeConnectionId) {
-              return;
-            }
-            _isConnected = false;
-            _streamSubscription = null;
-            _emitError(connectionId, error);
-            unawaited(_closeController(connectionId: connectionId));
+          onError: (error, st) {
+            _failProtocol(connectionId, error, st);
           },
           onDone: () {
             if (connectionId != _activeConnectionId) {
@@ -188,11 +182,12 @@ class SseService {
             try {
               _validator.assertTerminalEventSeen();
             } catch (error, st) {
-              _emitError(connectionId, error, st);
+              _failProtocol(connectionId, error, st);
+              return;
             }
             unawaited(_closeController(connectionId: connectionId));
           },
-          cancelOnError: false,
+          cancelOnError: true,
         );
   }
 
@@ -230,18 +225,36 @@ class SseService {
     }
   }
 
-  void _emitError(int connectionId, Object error, [StackTrace? stackTrace]) {
+  void _failProtocol(int connectionId, Object error, [StackTrace? stackTrace]) {
     if (connectionId != _activeConnectionId) {
       return;
     }
-    final controller = _controller;
-    if (controller == null || controller.isClosed) {
-      return;
-    }
+    _activeConnectionId += 1;
+    _isConnected = false;
+
+    final sub = _streamSubscription;
+    _streamSubscription = null;
     try {
-      controller.addError(error, stackTrace);
-    } catch (_) {
-      // Ignore stale emissions racing with disconnect.
+      sub?.cancel();
+    } catch (_) {}
+
+    final client = _client;
+    _client = null;
+    try {
+      client?.close();
+    } catch (_) {}
+
+    final controller = _controller;
+    _controller = null;
+    if (controller != null && !controller.isClosed) {
+      try {
+        controller.addError(error, stackTrace);
+      } catch (_) {}
+      if (!controller.hasListener) {
+        unawaited(controller.close());
+      } else {
+        controller.close();
+      }
     }
   }
 
@@ -280,6 +293,9 @@ class SseService {
     var updatedPendingText = pendingText + normalized;
 
     while (true) {
+      if (connectionId != _activeConnectionId) {
+        return '';
+      }
       final separatorIndex = updatedPendingText.indexOf('\n\n');
       if (separatorIndex < 0) {
         break;
@@ -333,7 +349,7 @@ class SseService {
       }
     } catch (e, st) {
       debugPrint('SSE validation error: $e — raw: $payload');
-      _emitError(connectionId, e, st);
+      _failProtocol(connectionId, e, st);
     }
   }
 
