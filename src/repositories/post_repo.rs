@@ -141,6 +141,12 @@ pub trait PostRepository: Send + Sync {
 
     async fn create_post(&self, input: NewPost) -> Result<Post, ApiError>;
 
+    async fn create_post_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        input: NewPost,
+    ) -> Result<Uuid, ApiError>;
+
     async fn update_post(
         &self,
         campus_id: Uuid,
@@ -636,6 +642,38 @@ impl PostRepository for PostgresPostRepository {
         self.find_by_id(input.campus_id, id)
             .await?
             .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("created post disappeared")))
+    }
+
+    async fn create_post_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        input: NewPost,
+    ) -> Result<Uuid, ApiError> {
+        let id: Uuid = sqlx::query_scalar(
+            "INSERT INTO posts (
+                 campus_id, author_id, category, title, body, tags,
+                 image_url, images_moderation_status,
+                 listing_id, space_id
+             ) VALUES (
+                 $1, $2, $3, $4, $5, $6, $7,
+                 CASE WHEN $7::text IS NULL THEN 'approved' ELSE 'pending' END,
+                 $8, $9
+             )
+             RETURNING id",
+        )
+        .bind(input.campus_id)
+        .bind(&input.author_id)
+        .bind(&input.category)
+        .bind(&input.title)
+        .bind(&input.body)
+        .bind(serde_json::json!(input.tags))
+        .bind(input.image_url.as_deref())
+        .bind(input.listing_id.as_deref())
+        .bind(input.space_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(db_error)?;
+        Ok(id)
     }
 
     async fn update_post(

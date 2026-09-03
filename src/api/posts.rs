@@ -41,6 +41,19 @@ pub struct ReplyListQuery {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct CreatePostMarketplacePayload {
+    pub category: String,
+    #[serde(default)]
+    pub brand: String,
+    pub condition_score: i32,
+    pub suggested_price_cny: f64,
+    #[serde(default)]
+    pub defects: Vec<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct CreatePostRequest {
     pub title: String,
     pub body: String,
@@ -51,6 +64,7 @@ pub struct CreatePostRequest {
     pub cover_image_url: Option<String>,
     pub listing_id: Option<String>,
     pub space_id: Option<Uuid>,
+    pub marketplace: Option<CreatePostMarketplacePayload>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -442,6 +456,17 @@ pub async fn create_post(
 ) -> Result<Json<PostDetail>, ApiError> {
     let cover_image_url =
         normalize_platform_media_url(&state, payload.cover_image_url, "cover_image_url")?;
+    let marketplace =
+        payload
+            .marketplace
+            .map(|mp| crate::services::post::CreatePostMarketplaceInput {
+                category: mp.category,
+                brand: mp.brand,
+                condition_score: mp.condition_score,
+                suggested_price_cny: mp.suggested_price_cny,
+                defects: mp.defects,
+                description: mp.description,
+            });
     let post = post_service(&state)
         .create(CreatePost {
             campus_id: tenant.campus_id,
@@ -453,6 +478,7 @@ pub async fn create_post(
             cover_image_url,
             listing_id: payload.listing_id,
             space_id: payload.space_id,
+            marketplace,
         })
         .await?;
     Ok(Json(detail_view(

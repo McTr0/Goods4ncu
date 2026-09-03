@@ -4,11 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:uuid/uuid.dart';
-
 import '../l10n/app_localizations.dart';
 import '../services/api_service.dart';
-import '../services/listing_service.dart';
 import '../services/post_service.dart';
 import '../services/upload_service.dart';
 import '../theme/app_theme.dart';
@@ -45,7 +42,6 @@ class CreatePostPage extends StatefulWidget {
     super.key,
     this.postService,
     this.uploadService,
-    this.listingService,
     this.imagePicker,
     this.initialCategory = 'discussion',
     this.spaceId,
@@ -53,7 +49,6 @@ class CreatePostPage extends StatefulWidget {
 
   final PostService? postService;
   final UploadService? uploadService;
-  final ListingService? listingService;
   final PostImagePicker? imagePicker;
 
   /// offer | wanted | discussion — preselected kind for the unified form.
@@ -72,7 +67,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
   final _bodyController = TextEditingController();
   late final PostService _postService;
   late final UploadService _uploadService;
-  late final ListingService _listingService;
   final ImagePicker _nativeImagePicker = ImagePicker();
   PickedPostImage? _coverImage;
   bool _submitting = false;
@@ -95,7 +89,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
     super.initState();
     _postService = widget.postService ?? context.read<PostService>();
     _uploadService = widget.uploadService ?? context.read<UploadService>();
-    _listingService = widget.listingService ?? ListingService();
     _probeAnnouncePermission();
   }
 
@@ -212,7 +205,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
 
       final tags = _selectedTags.toList(growable: false);
 
-      String? listingId;
       if (_needsGoods && _goodsCategory == null) {
         if (!mounted) return;
         ScaffoldMessenger.of(
@@ -221,20 +213,17 @@ class _CreatePostPageState extends State<CreatePostPage> {
         setState(() => _submitting = false);
         return;
       }
-      if (_needsGoods) {
-        listingId = await _listingService.createListing(
-          title: _titleController.text.trim(),
-          category: _goodsCategory!,
-          brand: _goodsBrandController.text.trim(),
-          conditionScore: _conditionScore.round(),
-          suggestedPriceCny:
-              double.tryParse(_goodsPriceController.text.trim()) ?? 0,
-          defects: const [],
-          description: _bodyController.text.trim(),
-          direction: _category,
-          idempotencyKey: const Uuid().v4(),
-        );
-      }
+      final marketplace = _needsGoods
+          ? {
+              'category': _goodsCategory!,
+              'brand': _goodsBrandController.text.trim(),
+              'condition_score': _conditionScore.round(),
+              'suggested_price_cny':
+                  double.tryParse(_goodsPriceController.text.trim()) ?? 0.0,
+              'defects': const <String>[],
+              'description': _bodyController.text.trim(),
+            }
+          : null;
 
       final post = await _postService.createPost(
         title: _titleController.text,
@@ -242,8 +231,8 @@ class _CreatePostPageState extends State<CreatePostPage> {
         category: _category,
         tags: tags,
         coverImageUrl: coverImageUrl,
-        listingId: listingId,
         spaceId: widget.spaceId,
+        marketplace: marketplace,
       );
       if (!mounted) return;
       context.go('/posts/${post.id}');

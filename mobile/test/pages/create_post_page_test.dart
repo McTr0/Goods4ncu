@@ -38,6 +38,7 @@ class _FakePostService extends PostService {
     String? coverImageUrl,
     String? listingId,
     String? spaceId,
+    Map<String, dynamic>? marketplace,
   }) async {
     this.coverImageUrl = coverImageUrl;
     return CampusPost.fromJson({

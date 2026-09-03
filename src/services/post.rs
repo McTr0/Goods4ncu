@@ -17,6 +17,16 @@ pub const MAX_REPLY_BODY_CHARS: usize = 20_000;
 pub const MAX_TAG_CHARS: usize = 32;
 
 #[derive(Debug, Clone)]
+pub struct CreatePostMarketplaceInput {
+    pub category: String,
+    pub brand: String,
+    pub condition_score: i32,
+    pub suggested_price_cny: f64,
+    pub defects: Vec<String>,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct CreatePost {
     pub campus_id: Uuid,
     pub author_id: String,
@@ -30,6 +40,8 @@ pub struct CreatePost {
     pub listing_id: Option<String>,
     /// Group scope; when set the post is visible to space members only.
     pub space_id: Option<Uuid>,
+    /// When set, atomically creates inventory listing in the same database transaction.
+    pub marketplace: Option<CreatePostMarketplaceInput>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -271,33 +283,103 @@ impl PostService {
             ensure_space_member(&self.pool, input.author_id.as_str(), space_id).await?;
         }
         self.ensure_text_allowed(&format!("{title}\n{body}\n{}", tags.join(" ")))?;
-        let created = self
-            .repository
-            .create_post(NewPost {
-                campus_id: input.campus_id,
-                author_id: input.author_id,
-                category,
-                title,
-                body,
-                tags,
-                image_url: cover_image_url.clone(),
-                listing_id: input.listing_id,
-                space_id: input.space_id,
-            })
-            .await?;
-        if let Some(image_url) = cover_image_url {
-            self.moderation
-                .submit_image_job(
-                    &self.pool,
-                    input.campus_id,
-                    &created.id.to_string(),
-                    &image_url,
-                    "post_image",
-                )
+
+        let created_id = if let Some(mp) = input.marketplace {
+            let mut tx = self
+                .pool
+                .begin()
                 .await
-                .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
-        }
-        self.get(input.campus_id, created.id).await
+                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
+            let listing_service = crate::services::listing_command::ListingCommandService::new(
+                self.pool.clone(),
+                self.moderation.clone(),
+            );
+            let listing_res = listing_service
+                .create_in_tx(
+                    &mut tx,
+                    crate::services::listing_command::CreateListingDraft {
+                        campus_id: input.campus_id,
+                        owner_id: input.author_id.clone(),
+                        title: title.clone(),
+                        category: mp.category,
+                        brand: mp.brand,
+                        direction: Some(category.clone()),
+                        condition_score: mp.condition_score,
+                        suggested_price_cny: mp.suggested_price_cny,
+                        defects: mp.defects,
+                        description: mp.description.or_else(|| Some(body.clone())),
+                        image_url: cover_image_url.clone(),
+                    },
+                    None,
+                )
+                .await?;
+
+            let post_id = self
+                .repository
+                .create_post_in_tx(
+                    &mut tx,
+                    NewPost {
+                        campus_id: input.campus_id,
+                        author_id: input.author_id.clone(),
+                        category,
+                        title,
+                        body,
+                        tags,
+                        image_url: cover_image_url.clone(),
+                        listing_id: Some(listing_res.id),
+                        space_id: input.space_id,
+                    },
+                )
+                .await?;
+
+            if let Some(ref image_url) = cover_image_url {
+                self.moderation
+                    .submit_image_job_in_tx(
+                        &mut tx,
+                        input.campus_id,
+                        &post_id.to_string(),
+                        image_url,
+                        "post_image",
+                    )
+                    .await
+                    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
+            }
+
+            tx.commit()
+                .await
+                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
+            post_id
+        } else {
+            let created = self
+                .repository
+                .create_post(NewPost {
+                    campus_id: input.campus_id,
+                    author_id: input.author_id,
+                    category,
+                    title,
+                    body,
+                    tags,
+                    image_url: cover_image_url.clone(),
+                    listing_id: input.listing_id,
+                    space_id: input.space_id,
+                })
+                .await?;
+            if let Some(image_url) = cover_image_url {
+                self.moderation
+                    .submit_image_job(
+                        &self.pool,
+                        input.campus_id,
+                        &created.id.to_string(),
+                        &image_url,
+                        "post_image",
+                    )
+                    .await
+                    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
+            }
+            created.id
+        };
+
+        self.get(input.campus_id, created_id).await
     }
 
     pub async fn update(

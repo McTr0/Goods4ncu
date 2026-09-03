@@ -6,7 +6,7 @@ use goods4ncu::config::AppConfig;
 use goods4ncu::repositories::{PostFilter, PostSort};
 use goods4ncu::services::feed::{FeedFeedbackAction, FeedResourceType, FeedService};
 use goods4ncu::services::moderation::ModerationService;
-use goods4ncu::services::post::{CreatePost, EditPost, PostService};
+use goods4ncu::services::post::{CreatePost, CreatePostMarketplaceInput, EditPost, PostService};
 use goods4ncu::test_infra::with_test_pool;
 use uuid::Uuid;
 
@@ -75,6 +75,7 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                marketplace: None,
             })
             .await;
         assert!(matches!(unknown, Err(ApiError::BadRequest(_))));
@@ -91,6 +92,7 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                marketplace: None,
             })
             .await;
         assert!(matches!(duplicate_group, Err(ApiError::BadRequest(_))));
@@ -107,6 +109,7 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                marketplace: None,
             })
             .await
             .expect("catalog tags accepted");
@@ -139,6 +142,7 @@ async fn group_posts_are_hidden_from_non_members_and_feeds() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: Some(space_id),
+                marketplace: None,
             })
             .await
             .expect("create group post");
@@ -214,6 +218,7 @@ async fn discussion_policy_rejection_happens_before_persistence() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                marketplace: None,
             })
             .await;
         assert!(matches!(result, Err(ApiError::ContentViolation(_))));
@@ -250,6 +255,7 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                marketplace: None,
             })
             .await
             .expect("create discussion");
@@ -264,6 +270,7 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                marketplace: None,
             })
             .await
             .expect("create second discussion");
@@ -401,6 +408,7 @@ async fn discussion_images_stay_private_until_moderation_approval() {
                 cover_image_url: Some(image_url.to_string()),
                 listing_id: None,
                 space_id: None,
+                marketplace: None,
             })
             .await
             .expect("create discussion with image");
@@ -480,6 +488,7 @@ async fn listings_are_references_and_marketplace_filters_follow_category() {
                 cover_image_url: None,
                 listing_id: Some(listing_id.clone()),
                 space_id: None,
+                marketplace: None,
             })
             .await
             .expect("create offer post with reference");
@@ -588,6 +597,7 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                marketplace: None,
             })
             .await
             .expect("relevant post");
@@ -602,6 +612,7 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                marketplace: None,
             })
             .await
             .expect("unrelated post");
@@ -616,6 +627,7 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                marketplace: None,
             })
             .await
             .expect("same tag post");
@@ -630,6 +642,7 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 cover_image_url: None,
                 listing_id: None,
                 space_id: None,
+                marketplace: None,
             })
             .await
             .expect("viewer post");
@@ -710,6 +723,100 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
         assert!(
             score_after < score_before,
             "less_like should lower the score: {score_before} -> {score_after}"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn atomic_post_and_marketplace_creation_in_single_transaction() {
+    with_test_pool(|pool| async move {
+        let campus_id = campus(&pool).await;
+        let author = user(&pool, "marketplace-seller").await;
+        let mut config = AppConfig::test_defaults();
+        config.blocked_keywords = vec!["campuspolicytoken".to_string()];
+        config.moderation_image_enabled = false;
+        let service = PostService::new(pool.clone(), ModerationService::new(&config));
+
+        // 1. Success case: creates post and listing in one transaction.
+        let post = service
+            .create(CreatePost {
+                campus_id,
+                author_id: author.clone(),
+                category: "offer".to_string(),
+                title: "九成新机械键盘".to_string(),
+                body: "红轴手感很好，箱说全。".to_string(),
+                tags: vec![],
+                cover_image_url: None,
+                listing_id: None,
+                space_id: None,
+                marketplace: Some(CreatePostMarketplaceInput {
+                    category: "electronics".to_string(),
+                    brand: "Keychron".to_string(),
+                    condition_score: 9,
+                    suggested_price_cny: 250.0,
+                    defects: vec![],
+                    description: None,
+                }),
+            })
+            .await
+            .expect("create post with marketplace");
+
+        assert!(post.listing_id.is_some());
+        let listing_id = post.listing_id.unwrap();
+
+        // Verify inventory row exists and belongs to author with correct price and status.
+        let inv_row: (String, String, i64) = sqlx::query_as(
+            "SELECT owner_id, category, suggested_price_cny FROM inventory WHERE id = $1",
+        )
+        .bind(&listing_id)
+        .fetch_one(&pool)
+        .await
+        .expect("fetch created inventory");
+        assert_eq!(inv_row.0, author);
+        assert_eq!(inv_row.1, "electronics");
+        assert_eq!(inv_row.2, 25000); // 250.0 CNY -> 25000 cents
+
+        // 2. Failure rollback case: text policy rejection does not leave orphan inventory.
+        let initial_inv_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE owner_id = $1")
+                .bind(&author)
+                .fetch_one(&pool)
+                .await
+                .expect("count inventory");
+
+        let failed = service
+            .create(CreatePost {
+                campus_id,
+                author_id: author.clone(),
+                category: "offer".to_string(),
+                title: "campusp0licytoken".to_string(),
+                body: "正文包含违禁词".to_string(),
+                tags: vec![],
+                cover_image_url: None,
+                listing_id: None,
+                space_id: None,
+                marketplace: Some(CreatePostMarketplaceInput {
+                    category: "electronics".to_string(),
+                    brand: "Keychron".to_string(),
+                    condition_score: 9,
+                    suggested_price_cny: 250.0,
+                    defects: vec![],
+                    description: None,
+                }),
+            })
+            .await;
+        assert!(matches!(failed, Err(ApiError::ContentViolation(_))));
+
+        let post_inv_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE owner_id = $1")
+                .bind(&author)
+                .fetch_one(&pool)
+                .await
+                .expect("count inventory after failed post");
+        assert_eq!(
+            post_inv_count, initial_inv_count,
+            "transaction rollback must not leak orphan listing"
         );
     })
     .await;

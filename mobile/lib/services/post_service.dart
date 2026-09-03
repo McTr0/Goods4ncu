@@ -136,6 +136,7 @@ class PostService extends BaseService {
     String? coverImageUrl,
     String? listingId,
     String? spaceId,
+    Map<String, dynamic>? marketplace,
   }) async {
     final headers = await authHeaders();
     final response = await post(
@@ -149,6 +150,7 @@ class PostService extends BaseService {
           'cover_image_url': coverImageUrl.trim(),
         'listing_id': ?listingId,
         'space_id': ?spaceId,
+        'marketplace': ?marketplace,
         'tags': tags
             .map((tag) => tag.trim())
             .where((tag) => tag.isNotEmpty)
