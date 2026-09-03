@@ -28,6 +28,7 @@ class SseService {
   StreamSubscription<String>? _streamSubscription;
   bool _isConnected = false;
   int _activeConnectionId = 0;
+  final _validator = AgentTurnValidator();
 
   SseService({
     String? baseUrl,
@@ -91,6 +92,7 @@ class SseService {
     _client = client;
     // Single-subscription stream preserves events that arrive before UI listener attaches.
     _controller = StreamController<AgentStreamEvent>();
+    _validator.reset();
 
     final uri = Uri.parse('$_baseUrl/api/chat/stream');
     final body = <String, dynamic>{'message': message};
@@ -183,6 +185,11 @@ class SseService {
             }
             _isConnected = false;
             _streamSubscription = null;
+            try {
+              _validator.assertTerminalEventSeen();
+            } catch (error, st) {
+              _emitError(connectionId, error, st);
+            }
             unawaited(_closeController(connectionId: connectionId));
           },
           cancelOnError: false,
@@ -223,7 +230,7 @@ class SseService {
     }
   }
 
-  void _emitError(int connectionId, Object error) {
+  void _emitError(int connectionId, Object error, [StackTrace? stackTrace]) {
     if (connectionId != _activeConnectionId) {
       return;
     }
@@ -232,7 +239,7 @@ class SseService {
       return;
     }
     try {
-      controller.addError(error);
+      controller.addError(error, stackTrace);
     } catch (_) {
       // Ignore stale emissions racing with disconnect.
     }
@@ -317,37 +324,29 @@ class SseService {
       return;
     }
 
-    final decoded = _decodeSseData(payload);
-    if (decoded != null) {
-      _emitEvent(connectionId, decoded);
-    }
-  }
-
-  /// Decode a single SSE data field into a typed [AgentStreamEvent].
-  AgentStreamEvent? _decodeSseData(String jsonStr) {
-    if (jsonStr.isEmpty) return null;
     try {
-      final decoded = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final decodedJson = jsonDecode(payload) as Map<String, dynamic>;
 
       // Raw gateway error envelope (e.g. proxy timeout).
-      final error = decoded['error'];
+      final error = decodedJson['error'];
       if (error is String && error.isNotEmpty) {
-        return AgentStreamEvent(
+        final errorEvent = AgentStreamEvent(
           type: 'turn_failed',
           seq: 0,
           errorMessage: error,
         );
+        _emitEvent(connectionId, errorEvent);
+        return;
       }
 
-      // Heartbeat frames are keep-alive signals; no state action needed.
-      if (decoded['type'] == 'heartbeat') {
-        return null;
+      final event = AgentStreamEvent.fromJson(decodedJson);
+      final isHeartbeat = _validator.validateEvent(event);
+      if (!isHeartbeat) {
+        _emitEvent(connectionId, event);
       }
-
-      return AgentStreamEvent.fromJson(decoded);
-    } catch (e) {
-      debugPrint('SSE JSON parse error: $e — raw: $jsonStr');
-      return null;
+    } catch (e, st) {
+      debugPrint('SSE validation error: $e — raw: $payload');
+      _emitError(connectionId, e, st);
     }
   }
 

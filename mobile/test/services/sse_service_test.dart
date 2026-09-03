@@ -33,6 +33,8 @@ void main() {
   group('SseService', () {
     test('parses server error events', () {
       final event = AgentStreamEvent.fromJson({
+        'protocol_version': '2.0',
+        'turn_id': 'turn-err-1',
         'type': 'turn_failed',
         'seq': 1,
         'error': {'code': 'provider_error', 'message': 'provider unavailable'},
@@ -299,5 +301,74 @@ void main() {
         expect(request.headers['Authorization'], 'Bearer token-123');
       },
     );
+
+    test('emits StreamTruncatedException when stream ends without terminal event', () async {
+      final body = [
+        'data: {"protocol_version":"2.0","turn_id":"t1","conversation_id":"__agent__","seq":1,"type":"turn_started"}\n\n',
+        'data: {"protocol_version":"2.0","turn_id":"t1","conversation_id":"__agent__","seq":2,"type":"text_delta","text":"partial"}\n\n',
+      ].join();
+      final client = _QueuedClient([_response(200, body: body)]);
+      final service = SseService(
+        baseUrl: 'https://api.test',
+        getAccessToken: () async => 'token-123',
+        refreshAccessToken: () async => false,
+        clientFactory: () => client,
+      );
+
+      await service.connect(message: 'hi');
+      expect(
+        service.stream.toList(),
+        throwsA(isA<StreamTruncatedException>()),
+      );
+    });
+
+    test('validates monotonic sequence and rejects gaps', () async {
+      final validator = AgentTurnValidator();
+      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1');
+      final ev3 = AgentStreamEvent(type: 'text_delta', seq: 3, turnId: 't1', text: 'hi');
+
+      expect(validator.validateEvent(ev1), isFalse);
+      expect(
+        () => validator.validateEvent(ev3),
+        throwsA(isA<ProtocolViolationException>()),
+      );
+    });
+
+    test('heartbeat advances sequence count and is flagged for filtering', () {
+      final validator = AgentTurnValidator();
+      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1');
+      final evHb = AgentStreamEvent(type: 'heartbeat', seq: 2, turnId: 't1');
+      final ev3 = AgentStreamEvent(type: 'text_delta', seq: 3, turnId: 't1', text: 'hi');
+
+      expect(validator.validateEvent(ev1), isFalse);
+      expect(validator.validateEvent(evHb), isTrue);
+      expect(validator.validateEvent(ev3), isFalse);
+    });
+
+    test('rejects events after terminal event', () {
+      final validator = AgentTurnValidator();
+      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1');
+      final evTerm = AgentStreamEvent(type: 'turn_completed', seq: 2, turnId: 't1');
+      final evPost = AgentStreamEvent(type: 'text_delta', seq: 3, turnId: 't1', text: 'extra');
+
+      expect(validator.validateEvent(ev1), isFalse);
+      expect(validator.validateEvent(evTerm), isFalse);
+      expect(validator.hasSeenTerminalEvent, isTrue);
+      expect(
+        () => validator.validateEvent(evPost),
+        throwsA(isA<ProtocolViolationException>()),
+      );
+    });
+
+    test('assertTerminalEventSeen throws if stream ends prematurely', () {
+      final validator = AgentTurnValidator();
+      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1');
+      validator.validateEvent(ev1);
+
+      expect(
+        () => validator.assertTerminalEventSeen(),
+        throwsA(isA<StreamTruncatedException>()),
+      );
+    });
   });
 }

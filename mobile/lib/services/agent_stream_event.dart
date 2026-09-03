@@ -43,10 +43,27 @@ class AgentStreamEvent {
   });
 
   factory AgentStreamEvent.fromJson(Map<String, dynamic> json) {
-    final type = json['type'] as String? ?? '';
-    final seq = (json['seq'] as num?)?.toInt() ?? 0;
-    final protocolVersion = json['protocol_version'] as String? ?? '2.0';
+    final type = json['type'] as String?;
+    if (type == null || type.trim().isEmpty) {
+      throw const FormatException('Missing or empty event type');
+    }
+    final rawSeq = json['seq'];
+    if (rawSeq is! num) {
+      throw const FormatException('Missing seq in agent stream event');
+    }
+    final seq = rawSeq.toInt();
+    final protocolVersion = json['protocol_version'] as String?;
+    if (protocolVersion == null || protocolVersion != '2.0') {
+      throw FormatException(
+        'Invalid protocol version: $protocolVersion (expected 2.0)',
+      );
+    }
     final turnId = json['turn_id'] as String?;
+    if (turnId == null || turnId.trim().isEmpty) {
+      throw const FormatException(
+        'Missing or empty turn_id in agent stream event',
+      );
+    }
     final conversationId = json['conversation_id'] as String?;
     String? text;
     String? toolName;
@@ -131,88 +148,93 @@ class AgentStreamEvent {
       type == 'turn_cancelled';
 }
 
-enum AgentTurnState {
-  idle,
-  connecting,
-  routing,
-  thinking,
-  runningTool,
-  answering,
-  completed,
-  failed,
-  cancelled,
+class StreamTruncatedException implements Exception {
+  final String message;
+  const StreamTruncatedException([
+    this.message =
+        'Agent stream terminated prematurely without a terminal event',
+  ]);
+
+  @override
+  String toString() => 'StreamTruncatedException: $message';
 }
 
-/// Tracks the lifecycle of one agent turn.
-class AgentTurnTracker {
-  AgentTurnState _state = AgentTurnState.idle;
+class ProtocolViolationException implements Exception {
+  final String message;
+  const ProtocolViolationException(this.message);
 
-  AgentTurnState get state => _state;
+  @override
+  String toString() => 'ProtocolViolationException: $message';
+}
 
-  bool get isActive =>
-      _state != AgentTurnState.idle &&
-      _state != AgentTurnState.completed &&
-      _state != AgentTurnState.failed &&
-      _state != AgentTurnState.cancelled;
+/// Validates protocol 2.0 stream monotonicity, turn ID consistency,
+/// and terminal completion before stream termination.
+class AgentTurnValidator {
+  String? _activeTurnId;
+  int? _expectedSeq;
+  bool _terminalEventSeen = false;
 
-  void start() {
-    _state = AgentTurnState.connecting;
-  }
+  bool get hasSeenTerminalEvent => _terminalEventSeen;
 
-  bool consumeEvent(AgentStreamEvent event) {
-    switch (event.type) {
-      case 'turn_started':
-        return _transition(AgentTurnState.routing);
-      case 'status_changed':
-        return _applyStatus(event.status);
-      case 'tool_started':
-        return _transition(AgentTurnState.runningTool);
-      case 'tool_finished':
-        return _transition(AgentTurnState.thinking);
-      case 'text_delta':
-        if (_state != AgentTurnState.answering) {
-          return _transition(AgentTurnState.answering);
-        }
-        return false;
-      case 'turn_completed':
-        return _transition(AgentTurnState.completed);
-      case 'turn_failed':
-        return _transition(AgentTurnState.failed);
-      case 'turn_cancelled':
-        return _transition(AgentTurnState.cancelled);
-      default:
-        return false;
+  /// Validates an incoming parsed [AgentStreamEvent].
+  /// Returns `true` if the event is a heartbeat frame that should be filtered
+  /// after sequence validation.
+  bool validateEvent(AgentStreamEvent event) {
+    if (_terminalEventSeen) {
+      throw ProtocolViolationException(
+        'Event ${event.type} (seq=${event.seq}) received after terminal event was already received',
+      );
     }
+
+    if (event.protocolVersion != '2.0') {
+      throw ProtocolViolationException(
+        'Protocol version mismatch: expected 2.0, got ${event.protocolVersion}',
+      );
+    }
+
+    final turnId = event.turnId;
+    if (turnId == null || turnId.trim().isEmpty) {
+      throw const ProtocolViolationException('Missing or empty turn_id');
+    }
+
+    if (_activeTurnId == null) {
+      _activeTurnId = turnId;
+    } else if (turnId != _activeTurnId) {
+      throw ProtocolViolationException(
+        'Turn ID mismatch: expected $_activeTurnId, got $turnId',
+      );
+    }
+
+    if (_expectedSeq == null) {
+      _expectedSeq = event.seq;
+    } else if (event.seq != _expectedSeq) {
+      throw ProtocolViolationException(
+        'Sequence gap or regression: expected seq $_expectedSeq, got ${event.seq} (type=${event.type})',
+      );
+    }
+    _expectedSeq = _expectedSeq! + 1;
+
+    if (event.isTerminal) {
+      _terminalEventSeen = true;
+    }
+
+    return event.type == 'heartbeat';
   }
 
-  void onStreamClosed() {
-    if (isActive) _transition(AgentTurnState.failed);
-  }
-
-  void onCancelled() {
-    if (isActive) _transition(AgentTurnState.cancelled);
+  /// Call on stream EOF (`onDone`).
+  /// Throws [StreamTruncatedException] if the stream closed before receiving
+  /// a terminal event (`turn_completed`, `turn_failed`, or `turn_cancelled`).
+  void assertTerminalEventSeen() {
+    if (!_terminalEventSeen) {
+      throw const StreamTruncatedException(
+        'Agent stream closed (EOF) before terminal event was received',
+      );
+    }
   }
 
   void reset() {
-    _state = AgentTurnState.idle;
-  }
-
-  bool _applyStatus(String? status) {
-    switch (status) {
-      case 'thinking':
-        return _transition(AgentTurnState.thinking);
-      case 'running_tool':
-        return _transition(AgentTurnState.runningTool);
-      case 'answering':
-        return _transition(AgentTurnState.answering);
-      default:
-        return false;
-    }
-  }
-
-  bool _transition(AgentTurnState next) {
-    if (next == _state) return false;
-    _state = next;
-    return true;
+    _activeTurnId = null;
+    _expectedSeq = null;
+    _terminalEventSeen = false;
   }
 }

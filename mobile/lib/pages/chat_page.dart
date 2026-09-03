@@ -14,6 +14,7 @@ import 'package:uuid/uuid.dart';
 import '../services/api_service.dart';
 import '../services/chat_service.dart';
 import '../services/companion_character_service.dart';
+import '../services/agent_stream_event.dart';
 import '../services/sse_service.dart';
 import '../services/upload_service.dart';
 import '../services/companion_memory_service.dart';
@@ -1164,8 +1165,12 @@ class _ChatPageState extends State<ChatPage> {
       );
       String fullReply = '';
       var companionSawFirstToken = false;
+      var turnCompleted = false;
       await for (final event in _sseService.stream) {
         if (!mounted) break;
+        if (event.type == 'turn_completed') {
+          turnCompleted = true;
+        }
         if (event.type == 'turn_failed') {
           throw Exception(event.errorMessage ?? 'Turn failed');
         }
@@ -1220,6 +1225,12 @@ class _ChatPageState extends State<ChatPage> {
             }
           });
         }
+      }
+
+      if (!turnCompleted) {
+        throw const StreamTruncatedException(
+          'Agent turn completed without terminal turn_completed event',
+        );
       }
       _lipSyncDriver.onStreamComplete();
       _companionOnStreamEnd(failed: false);
