@@ -67,9 +67,9 @@ Widget _app(_RecordingUserService service) {
             Scaffold(body: Text('detail-${state.pathParameters['id']}')),
       ),
       GoRoute(
-        path: '/my-listings/new',
+        path: '/publish',
         builder: (context, state) =>
-            const Scaffold(body: Text('structured-create')),
+            Scaffold(body: Text('publish-${state.uri.queryParameters['category']}')),
       ),
     ],
   );
@@ -128,7 +128,7 @@ void main() {
 
     await tester.tap(action);
     await tester.pumpAndSettle();
-    expect(find.text('structured-create'), findsOneWidget);
+    expect(find.text('publish-offer'), findsOneWidget);
   });
 
   testWidgets('renders lifecycle and moderation as separate badges', (
@@ -175,6 +175,6 @@ void main() {
 
     await tester.tap(action);
     await tester.pumpAndSettle();
-    expect(find.text('structured-create'), findsOneWidget);
+    expect(find.text('publish-offer'), findsOneWidget);
   });
 }

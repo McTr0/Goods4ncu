@@ -357,4 +357,58 @@ void main() {
     expect(find.byKey(const ValueKey('post-card-post-20')), findsOneWidget);
     expect(find.byKey(const ValueKey('post-feed-retry')), findsNothing);
   });
+
+  testWidgets('empty state CTA navigates to /publish?category=discussion', (
+    tester,
+  ) async {
+    final posts = _FakePostService(
+      const PostsResponse(
+        items: [],
+        total: 0,
+        limit: 20,
+        offset: 0,
+      ),
+    );
+    String? navigatedRoute;
+    final router = GoRouter(
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (context, state) => HomePage(
+            postService: posts,
+            feedbackService: FeedFeedbackService(),
+          ),
+        ),
+        GoRoute(
+          path: '/publish',
+          builder: (context, state) {
+            navigatedRoute = state.uri.toString();
+            return Scaffold(body: Text('publish-target: $navigatedRoute'));
+          },
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp.router(
+        theme: AppTheme.light,
+        locale: const Locale('zh'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        routerConfig: router,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final cta = find.widgetWithText(FilledButton, '发起讨论');
+    expect(cta, findsOneWidget);
+    await tester.tap(cta);
+    await tester.pumpAndSettle();
+
+    expect(navigatedRoute, '/publish?category=discussion');
+    expect(
+      find.text('publish-target: /publish?category=discussion'),
+      findsOneWidget,
+    );
+  });
 }
