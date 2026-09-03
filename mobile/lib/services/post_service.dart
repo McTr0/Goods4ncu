@@ -134,11 +134,14 @@ class PostService extends BaseService {
     required String category,
     List<String> tags = const [],
     String? coverImageUrl,
-    String? listingId,
     String? spaceId,
     Map<String, dynamic>? marketplace,
+    String? idempotencyKey,
   }) async {
     final headers = await authHeaders();
+    if (idempotencyKey != null && idempotencyKey.trim().isNotEmpty) {
+      headers['Idempotency-Key'] = idempotencyKey.trim();
+    }
     final response = await post(
       Uri.parse('$baseUrl/api/posts'),
       headers,
@@ -148,7 +151,6 @@ class PostService extends BaseService {
         'category': category,
         if (coverImageUrl != null && coverImageUrl.trim().isNotEmpty)
           'cover_image_url': coverImageUrl.trim(),
-        'listing_id': ?listingId,
         'space_id': ?spaceId,
         'marketplace': ?marketplace,
         'tags': tags

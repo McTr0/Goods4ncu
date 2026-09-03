@@ -349,8 +349,6 @@ void main() {
         'conversation_id': 'conv-456',
         'sender': 'user-789',
         'content': 'Hello, World!',
-        'image_base64': 'abc123',
-        'audio_base64': 'def456',
         'sent_at': '2024-01-15T10:30:00Z',
         'status': 'read',
         'edited_at': '2024-01-15T10:40:00Z',
@@ -441,7 +439,7 @@ void main() {
       expect(message.sentAt, DateTime.parse('2024-01-15T10:30:00Z'));
     });
 
-    test('fromJson handles image_base64', () {
+    test('fromJson handles image_url', () {
       final json = {
         'id': '123',
         'conversation_id': 'conv-456',

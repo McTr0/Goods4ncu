@@ -156,8 +156,6 @@ struct ConversationListResponse {
 struct SendMessageBody {
     client_message_id: String,
     content: String,
-    image_base64: Option<String>,
-    audio_base64: Option<String>,
     image_url: Option<String>,
     audio_url: Option<String>,
 }
@@ -171,8 +169,6 @@ struct MessageEntry {
     sender: String,
     content: String,
     timestamp: String,
-    image_data: Option<String>,
-    audio_data: Option<String>,
     image_url: Option<String>,
     audio_url: Option<String>,
     status: String,
@@ -388,8 +384,6 @@ async fn send_text_message(
         .json(&SendMessageBody {
             client_message_id: Uuid::new_v4().to_string(),
             content: content.to_string(),
-            image_base64: None,
-            audio_base64: None,
             image_url: None,
             audio_url: None,
         })
@@ -731,8 +725,6 @@ async fn test_cannot_send_to_non_active_realtime_conversation() -> anyhow::Resul
         .json(&SendMessageBody {
             client_message_id: Uuid::new_v4().to_string(),
             content: "This should fail".to_string(),
-            image_base64: None,
-            audio_base64: None,
             image_url: None,
             audio_url: None,
         })

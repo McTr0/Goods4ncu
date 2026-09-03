@@ -617,7 +617,7 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
 
 ### GET `/api/chat/conversations/{id}/messages`
 
-需要登录且必须是会话成员。支持 `limit`、`offset`。返回 `conversation_id`、`messages` 和 `total`。消息字段包括 `id`、`client_message_id`、`sender`、`content`、`timestamp`、`image_url`、`audio_url`、Base64 fallback 字段、`reply_to_message_id`、`reply_preview`、`quote`、`reactions`、`acknowledgements`、`status`、`kind` 和 `edited_at`。新客户端看到的 `status` 只有 `sending | sent | failed`；旧数据库中的 `delivered/read` 会映射为 `sent`。消息列表不包含服务器阅读位置。
+需要登录且必须是会话成员。支持 `limit`、`offset`。返回 `conversation_id`、`messages` 和 `total`。消息字段包括 `id`、`client_message_id`、`sender`、`content`、`timestamp`、`image_url`、`audio_url`、`reply_to_message_id`、`reply_preview`、`quote`、`reactions`、`acknowledgements`、`status`、`kind` 和 `edited_at`。新客户端看到的 `status` 只有 `sending | sent | failed`；旧数据库中的 `delivered/read` 会映射为 `sent`。消息列表不包含服务器阅读位置。
 
 ### POST `/api/chat/conversations/{id}/messages`
 
@@ -633,9 +633,7 @@ wanted 使用同一请求形状，但价格解释为预算上限、成色解释�
     "ref_id": "listing-id"
   },
   "image_url": "https://<platform-bucket>.<oss-endpoint>/chat/photo.jpg",
-  "audio_url": null,
-  "image_base64": null,
-  "audio_base64": null
+  "audio_url": null
 }
 ```
 

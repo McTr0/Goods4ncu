@@ -10,8 +10,6 @@ void main() {
           'conversation_id': 'conv-456',
           'sender': 'user-789',
           'content': 'Hello, how are you?',
-          'image_base64': 'iVBORw0KGgoAAAANSUhEUg==',
-          'audio_base64': 'SUQzBAAAAAAAI1RTU0U=',
           'sent_at': '2024-01-15T10:30:00Z',
           'status': 'delivered',
           'edited_at': '2024-01-15T11:00:00Z',
@@ -82,8 +80,8 @@ void main() {
         expect(message.sentAt, DateTime.parse('2024-01-15T10:00:00Z'));
       });
 
-      test('handles image_base64', () {
-        final jsonWithBase64 = {
+      test('handles image_url', () {
+        final jsonWithUrl = {
           'id': 'msg-1',
           'conversation_id': 'conv-1',
           'sender': 'user-1',
@@ -93,7 +91,7 @@ void main() {
         };
 
         expect(
-          ConversationMessage.fromJson(jsonWithBase64).imageUrl,
+          ConversationMessage.fromJson(jsonWithUrl).imageUrl,
           'https://example.com/img.jpg',
         );
       });

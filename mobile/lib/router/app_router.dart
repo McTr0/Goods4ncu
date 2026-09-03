@@ -319,37 +319,6 @@ final GoRouter appRouter = GoRouter(
           ),
         ),
         GoRoute(
-          path: PublishNavigation.discussion,
-          redirect: (context, state) => PublishNavigation.hub,
-        ),
-        GoRoute(
-          path: PublishNavigation.listingPath,
-          redirect: (context, state) {
-            final direction = state.uri.queryParameters['direction'] == 'wanted'
-                ? 'wanted'
-                : 'offer';
-            return Uri(
-              path: PublishNavigation.hub,
-              queryParameters: {'category': direction},
-            ).toString();
-          },
-        ),
-        GoRoute(
-          path: '/create',
-          redirect: (context, state) =>
-              PublishNavigation.redirectLegacy(state.uri),
-        ),
-        GoRoute(
-          path: '/create/post',
-          redirect: (context, state) =>
-              PublishNavigation.redirectLegacy(state.uri),
-        ),
-        GoRoute(
-          path: '/create/listing',
-          redirect: (context, state) =>
-              PublishNavigation.redirectLegacy(state.uri),
-        ),
-        GoRoute(
           path: '/profile',
           pageBuilder: (context, state) =>
               const NoTransitionPage(child: ProfilePage()),
@@ -358,11 +327,6 @@ final GoRouter appRouter = GoRouter(
           path: '/my-posts',
           pageBuilder: (context, state) =>
               const NoTransitionPage(child: MyPostsPage()),
-        ),
-        GoRoute(
-          path: '/my-listings/new',
-          redirect: (context, state) =>
-              PublishNavigation.redirectLegacy(state.uri),
         ),
         GoRoute(
           path: '/my-listings',
@@ -433,7 +397,6 @@ class _ShellScaffoldState extends State<_ShellScaffold> {
       return 3;
     }
     if (location == '/profile' ||
-        location == '/my-listings/new' ||
         location == '/my-listings' ||
         location == '/orders' ||
         location.startsWith('/orders/') ||

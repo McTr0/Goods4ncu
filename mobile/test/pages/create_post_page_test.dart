@@ -36,9 +36,9 @@ class _FakePostService extends PostService {
     required String category,
     List<String> tags = const [],
     String? coverImageUrl,
-    String? listingId,
     String? spaceId,
     Map<String, dynamic>? marketplace,
+    String? idempotencyKey,
   }) async {
     this.coverImageUrl = coverImageUrl;
     return CampusPost.fromJson({
