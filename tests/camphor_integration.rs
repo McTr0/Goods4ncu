@@ -93,7 +93,6 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
                 None,
                 None,
             ),
-            router: goods4ncu::agents::router::IntentRouter::new(vec![]),
             agent_enabled: true,
         },
         listing_repo: goods4ncu::repositories::PostgresListingRepository::new(pool.clone()),

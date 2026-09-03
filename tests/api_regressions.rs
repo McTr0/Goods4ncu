@@ -362,7 +362,6 @@ fn build_state_with_image_moderation(pool: sqlx::PgPool, image_enabled: bool) ->
                 None,
                 None,
             ),
-            router: IntentRouter::new(vec![]),
             agent_enabled: true,
         },
         listing_repo: PostgresListingRepository::new(pool.clone()),

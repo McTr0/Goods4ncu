@@ -11,14 +11,13 @@
 use crate::api::error::ApiError;
 use crate::api::session::Session;
 use crate::api::{normalize_platform_media_url, AppState, PeerAddr};
-use crate::llm::{AgentStreamChunk, MarketplaceAgent};
+use crate::llm::MarketplaceAgent;
 use crate::services::agent_chat;
 use crate::services::chat::{ChatService, AGENT_CONVERSATION_SENTINEL};
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::Json;
-use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
 /// A dropped SSE body cannot await a database write from its `Drop` path.  The
@@ -445,10 +444,6 @@ async fn handle_chat_stream_request(
             "AI assistant is disabled on this server.",
         ));
     }
-    // Feature flag: route to v2 runtime when enabled for this user.
-    // Phase 3 will wire the actual v2 engine; currently falls through
-    // to legacy regardless (the flag is infrastructure-only).
-    let use_v2_protocol = std::env::var("AGENT_RUNTIME").as_deref() == Ok("v2");
     let ChatStreamRequest {
         message,
         listing_id,
@@ -674,277 +669,81 @@ async fn handle_chat_stream_request(
         }
     };
 
-    if use_v2_protocol {
-        use crate::agents::runtime::api_drivers::{
-            ApiStyle, ChatCompletionsDriver, ResponsesDriver,
-        };
-        use crate::agents::runtime::driver::MarketplaceDriver;
-        use crate::agents::runtime::engine::{
-            AgentRuntime, RuntimeContext, ToolExecutor, TurnEvent,
-        };
-        use crate::agents::runtime::event::{EventData, TurnId};
-        use crate::agents::runtime::hooks::{CategoryTagPolicy, HookChain, MetricsHook};
-        use crate::agents::runtime::model::{ModelDriver, ModelRequest};
+    use crate::agents::runtime::api_drivers::{ApiStyle, ChatCompletionsDriver, ResponsesDriver};
+    use crate::agents::runtime::driver::MarketplaceDriver;
+    use crate::agents::runtime::engine::{AgentRuntime, RuntimeContext, ToolExecutor, TurnEvent};
+    use crate::agents::runtime::event::{EventData, TurnId};
+    use crate::agents::runtime::hooks::{CategoryTagPolicy, HookChain, MetricsHook};
+    use crate::agents::runtime::model::{ModelDriver, ModelRequest};
 
-        let agent: std::sync::Arc<dyn MarketplaceAgent> = agent.into();
-        let driver: std::sync::Arc<dyn ModelDriver> = match state.agents.llm_provider.api_style() {
-            Some(ApiStyle::Responses) => std::sync::Arc::new(ResponsesDriver {
-                agent: std::sync::Arc::clone(&agent),
-                provider_name: provider_name.clone(),
-                model_name: provider_model.clone(),
-            }),
-            Some(ApiStyle::ChatCompletions) => std::sync::Arc::new(ChatCompletionsDriver {
-                agent: std::sync::Arc::clone(&agent),
-                provider_name: provider_name.clone(),
-                model_name: provider_model.clone(),
-            }),
-            Some(ApiStyle::Auto) | None => std::sync::Arc::new(MarketplaceDriver::new(
-                std::sync::Arc::clone(&agent),
-                provider_name.clone(),
-                provider_model.clone(),
-            )),
-        };
-        let executor_agent = std::sync::Arc::clone(&agent);
-        let execute_tool: ToolExecutor = std::sync::Arc::new(move |name, arguments| {
-            let agent = std::sync::Arc::clone(&executor_agent);
-            let name = name.to_string();
-            let arguments = arguments.to_string();
-            Box::pin(async move { agent.execute_tool(&name, &arguments).await })
-        });
-        let registry_key =
-            crate::agents::runtime::turn_registry_key(&current_user_id, &response_conversation_id);
-        let registration = crate::agents::runtime::TurnRegistration::register(registry_key);
-        let cancellation = registration.cancellation();
-        let policy_category = page_context
-            .as_ref()
-            .and_then(|context| context.get("category"))
-            .and_then(|value| value.as_str())
-            .unwrap_or_else(|| intent_result.intent.as_str())
-            .to_string();
-        let runtime_context = RuntimeContext {
-            cancellation,
-            registry: std::sync::Arc::new(
-                crate::agents::tools::registry::ToolRegistry::marketplace(),
-            ),
-            hooks: std::sync::Arc::new(
-                HookChain::builder()
-                    .push_hook(Box::new(CategoryTagPolicy))
-                    .push_hook(Box::new(MetricsHook))
-                    .build(),
-            ),
-            category: policy_category,
-            route: intent_result.intent.as_str().to_string(),
-            user_id: current_user_id.clone(),
-        };
-        let request = ModelRequest::user(prompt_msg, chat_history);
-        let turn_id = TurnId::generate();
-        let runtime_conversation_id = response_conversation_id.clone();
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-        tokio::spawn(async move {
-            AgentRuntime::new(crate::agents::runtime::budget::ExecutionBudget::default())
-                .run_turn(
-                    driver.as_ref(),
-                    request,
-                    execute_tool,
-                    turn_id,
-                    &runtime_conversation_id,
-                    runtime_context,
-                    &mut |event| {
-                        let _ = event_tx.send(event);
-                    },
-                )
-                .await;
-        });
+    let agent: std::sync::Arc<dyn MarketplaceAgent> = agent.into();
+    let driver: std::sync::Arc<dyn ModelDriver> = match state.agents.llm_provider.api_style() {
+        Some(ApiStyle::Responses) => std::sync::Arc::new(ResponsesDriver {
+            agent: std::sync::Arc::clone(&agent),
+            provider_name: provider_name.clone(),
+            model_name: provider_model.clone(),
+        }),
+        Some(ApiStyle::ChatCompletions) => std::sync::Arc::new(ChatCompletionsDriver {
+            agent: std::sync::Arc::clone(&agent),
+            provider_name: provider_name.clone(),
+            model_name: provider_model.clone(),
+        }),
+        Some(ApiStyle::Auto) | None => std::sync::Arc::new(MarketplaceDriver::new(
+            std::sync::Arc::clone(&agent),
+            provider_name.clone(),
+            provider_model.clone(),
+        )),
+    };
+    let executor_agent = std::sync::Arc::clone(&agent);
+    let execute_tool: ToolExecutor = std::sync::Arc::new(move |name, arguments| {
+        let agent = std::sync::Arc::clone(&executor_agent);
+        let name = name.to_string();
+        let arguments = arguments.to_string();
+        Box::pin(async move { agent.execute_tool(&name, &arguments).await })
+    });
+    let registry_key =
+        crate::agents::runtime::turn_registry_key(&current_user_id, &response_conversation_id);
+    let registration = crate::agents::runtime::TurnRegistration::register(registry_key);
+    let cancellation = registration.cancellation();
+    let policy_category = page_context
+        .as_ref()
+        .and_then(|context| context.get("category"))
+        .and_then(|value| value.as_str())
+        .unwrap_or_else(|| intent_result.intent.as_str())
+        .to_string();
+    let runtime_context = RuntimeContext {
+        cancellation,
+        registry: std::sync::Arc::new(crate::agents::tools::registry::ToolRegistry::marketplace()),
+        hooks: std::sync::Arc::new(
+            HookChain::builder()
+                .push_hook(Box::new(CategoryTagPolicy))
+                .push_hook(Box::new(MetricsHook))
+                .build(),
+        ),
+        category: policy_category,
+        route: intent_result.intent.as_str().to_string(),
+        user_id: current_user_id.clone(),
+    };
+    let request = ModelRequest::user(prompt_msg, chat_history);
+    let turn_id = TurnId::generate();
+    let runtime_conversation_id = response_conversation_id.clone();
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        AgentRuntime::new(crate::agents::runtime::budget::ExecutionBudget::default())
+            .run_turn(
+                driver.as_ref(),
+                request,
+                execute_tool,
+                turn_id,
+                &runtime_conversation_id,
+                runtime_context,
+                &mut |event| {
+                    let _ = event_tx.send(event);
+                },
+            )
+            .await;
+    });
 
-        let log_page = page_context
-            .as_ref()
-            .and_then(|ctx| ctx.get("page"))
-            .and_then(|value| value.as_str())
-            .unwrap_or("chat")
-            .to_string();
-        let log_route = intent_result.intent.as_str().to_string();
-        let log_request_id = crate::api::request_context::current_or_new_request_id();
-        let run_for_stream = run.clone();
-        let reconciliation_tx = run.clone().map(agent_chat::schedule_reconciliation);
-        let persisted_conversation_id = conversation_id.clone();
-        let public_conversation_id = response_conversation_id.clone();
-        let persisted_listing_id = resolved_listing_id.clone();
-        let persisted_user_id = current_user_id.clone();
-        let persisted_campus_id = session_campus_id;
-        let persist_service = chat_svc.clone();
-
-        const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
-        let sse_stream = async_stream::stream! {
-            let _registration = registration;
-            let mut full_reply = String::new();
-            let mut completed = false;
-            let mut cancelled = false;
-            let mut prompt_tokens = None;
-            let mut completion_tokens = None;
-            let mut tool_calls = 0_u32;
-            let mut ttft_recorded = false;
-            let mut first_token_ms = None;
-            let stream_started_at = std::time::Instant::now();
-            let mut transport_seq = 0_u64;
-            let mut heartbeat_ticker = tokio::time::interval(HEARTBEAT_INTERVAL);
-            heartbeat_ticker.tick().await;
-
-            loop {
-                let turn_event = tokio::select! {
-                    event = event_rx.recv() => match event {
-                        Some(event) => event,
-                        None => break,
-                    },
-                    _ = heartbeat_ticker.tick() => {
-                        transport_seq += 1;
-                        let heartbeat = crate::agents::runtime::event::AgentEvent::new(
-                            turn_id,
-                            &public_conversation_id,
-                            transport_seq,
-                            EventData::Heartbeat,
-                        );
-                        yield Ok::<_, std::convert::Infallible>(encode_sse_data(
-                            &serde_json::to_value(heartbeat).unwrap_or_default(),
-                        ));
-                        continue;
-                    }
-                };
-
-                let TurnEvent::Emit(mut event) = turn_event else {
-                    if let TurnEvent::ToolResult { tool_name, .. } = turn_event {
-                        if let Some(run) = &run_for_stream {
-                            if let Err(error) = run
-                                .service
-                                .record_tool(
-                                    &run.trace_id,
-                                    run.campus_id,
-                                    &run.user_id,
-                                    &tool_name,
-                                    None,
-                                    "completed",
-                                )
-                                .await
-                            {
-                                tracing::warn!(
-                                    %error,
-                                    trace_id = %run.trace_id,
-                                    tool = %tool_name,
-                                    "failed to record Runtime v2 tool event"
-                                );
-                            }
-                        }
-                    }
-                    continue;
-                };
-                transport_seq += 1;
-                event.seq = transport_seq;
-                match &event.data {
-                    EventData::TextDelta { text } => {
-                        if !ttft_recorded {
-                            if let Some(run) = &run_for_stream {
-                                let ttft_ms = run.started_at.elapsed().as_millis().min(i32::MAX as u128) as i32;
-                                first_token_ms = Some(ttft_ms);
-                                if let Err(error) = run
-                                    .service
-                                    .record_ttft(
-                                        &run.trace_id,
-                                        run.campus_id,
-                                        &run.user_id,
-                                        ttft_ms,
-                                    )
-                                    .await
-                                {
-                                    tracing::debug!(%error, trace_id = %run.trace_id, "failed to record AgentRun TTFT");
-                                }
-                            }
-                            ttft_recorded = true;
-                        }
-                        full_reply.push_str(text);
-                    }
-                    EventData::ToolStarted { .. } => tool_calls += 1,
-                    EventData::TurnCompleted { usage } => {
-                        completed = true;
-                        prompt_tokens = usage.prompt_tokens;
-                        completion_tokens = usage.completion_tokens;
-                    }
-                    EventData::TurnCancelled { .. } => cancelled = true,
-                    _ => {}
-                }
-                let is_terminal = event.is_terminal();
-                let json = serde_json::to_value(&event).unwrap_or_default();
-                yield Ok::<_, std::convert::Infallible>(encode_sse_data(&json));
-                if is_terminal {
-                    break;
-                }
-            }
-
-            if completed && !full_reply.trim().is_empty() {
-                if let Err(error) = agent_chat::persist_context_message(
-                    &persist_service,
-                    &persisted_conversation_id,
-                    &persisted_listing_id,
-                    &persisted_user_id,
-                    None,
-                    true,
-                    &full_reply,
-                    None,
-                    None,
-                    None,
-                    None,
-                    persisted_campus_id,
-                )
-                .await
-                {
-                    tracing::warn!(%error, "failed to persist streamed assistant reply");
-                }
-            }
-
-            let finished = if let Some(run) = &run_for_stream {
-                if completed {
-                    agent_chat::finish_agent_run_with_usage(
-                        run,
-                        "completed",
-                        "runtime_completed",
-                        None,
-                        prompt_tokens,
-                        completion_tokens,
-                    )
-                    .await
-                } else if cancelled {
-                    agent_chat::finish_agent_run(run, "cancelled", "user_cancelled", Some("cancelled")).await
-                } else {
-                    agent_chat::finish_agent_run(run, "failed", "runtime_failed", Some("runtime_error")).await
-                }
-            } else {
-                true
-            };
-            tracing::info!(
-                request_id = %log_request_id,
-                user_id = %persisted_user_id,
-                conversation_id = %public_conversation_id,
-                page = %log_page,
-                route = %log_route,
-                provider = %provider_name,
-                model = %provider_model,
-                tool_calls,
-                ttft_ms = first_token_ms.unwrap_or(0),
-                total_ms = stream_started_at.elapsed().as_millis() as u64,
-                completed,
-                cancelled,
-                "agent runtime stream finished"
-            );
-            if finished {
-                if let Some(done_tx) = reconciliation_tx {
-                    let _ = done_tx.send(());
-                }
-            }
-        };
-
-        let body = axum::body::Body::from_stream(sse_stream);
-        return build_sse_response(&response_conversation_id, body);
-    }
-
-    let mut stream = agent.stream_chat(prompt_msg, chat_history);
     let log_page = page_context
         .as_ref()
         .and_then(|ctx| ctx.get("page"))
@@ -961,79 +760,77 @@ async fn handle_chat_stream_request(
     let persisted_user_id = current_user_id.clone();
     let persisted_campus_id = session_campus_id;
     let persist_service = chat_svc.clone();
-    // Register cancellation token so POST cancel endpoint can reach it.
-    let turn_registration = crate::agents::runtime::TurnRegistration::register(
-        crate::agents::runtime::turn_registry_key(&current_user_id, &response_conversation_id),
-    );
-    let turn_cancellation = turn_registration.cancellation();
 
     const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
     let sse_stream = async_stream::stream! {
-        let _turn_registration = turn_registration;
+        let _registration = registration;
         let mut full_reply = String::new();
-        let mut usage = None;
-        let mut completed = true;
+        let mut completed = false;
+        let mut cancelled = false;
+        let mut prompt_tokens = None;
+        let mut completion_tokens = None;
+        let mut tool_calls = 0_u32;
         let mut ttft_recorded = false;
-        let mut tool_calls: u32 = 0;
-        let mut first_token_ms: Option<i32> = None;
+        let mut first_token_ms = None;
         let stream_started_at = std::time::Instant::now();
-        let mut seq: u64 = 0;
-
-        // Emit initial heartbeat so the client knows the connection is alive.
-        yield Ok(encode_sse_data(&serde_json::json!({
-            "type": "heartbeat",
-            "protocol_version": "2.0"
-        })));
-
+        let mut transport_seq = 0_u64;
         let mut heartbeat_ticker = tokio::time::interval(HEARTBEAT_INTERVAL);
-        heartbeat_ticker.tick().await; // consume first immediate tick
+        heartbeat_ticker.tick().await;
 
         loop {
-            // Check for user-initiated cancellation.
-            if turn_cancellation.is_cancelled() {
-                completed = false;
-                let cancel_payload = serde_json::json!({
-                    "type": "turn_cancelled",
-                    "reason": "user_requested",
-                });
-                yield Ok(encode_sse_data(&cancel_payload));
-                break;
-            }
-
-            // Stream, heartbeat, and cancellation compete in the same select.
-            // No unconditional tick before reading the stream — that was
-            // blocking every chunk by up to 10 seconds.
-            let result = tokio::select! {
-                r = stream.next() => match r {
-                    Some(r) => r,
+            let turn_event = tokio::select! {
+                event = event_rx.recv() => match event {
+                    Some(event) => event,
                     None => break,
                 },
                 _ = heartbeat_ticker.tick() => {
-                    yield Ok(encode_sse_data(&serde_json::json!({
-                        "type": "heartbeat",
-                        "protocol_version": "2.0"
-                    })));
+                    transport_seq += 1;
+                    let heartbeat = crate::agents::runtime::event::AgentEvent::new(
+                        turn_id,
+                        &public_conversation_id,
+                        transport_seq,
+                        EventData::Heartbeat,
+                    );
+                    yield Ok::<_, std::convert::Infallible>(encode_sse_data(
+                        &serde_json::to_value(heartbeat).unwrap_or_default(),
+                    ));
                     continue;
-                },
-                _ = turn_cancellation.cancelled() => {
-                    completed = false;
-                    yield Ok::<_, std::convert::Infallible>(encode_sse_data(&serde_json::json!({
-                        "type": "turn_cancelled",
-                        "reason": "user_requested",
-                    })));
-                    break;
                 }
             };
 
-            let bytes = match result {
-                Ok(AgentStreamChunk::Text(token)) => {
+            let TurnEvent::Emit(mut event) = turn_event else {
+                if let TurnEvent::ToolResult { tool_name, .. } = turn_event {
+                    if let Some(run) = &run_for_stream {
+                        if let Err(error) = run
+                            .service
+                            .record_tool(
+                                &run.trace_id,
+                                run.campus_id,
+                                &run.user_id,
+                                &tool_name,
+                                None,
+                                "completed",
+                            )
+                            .await
+                        {
+                            tracing::warn!(
+                                %error,
+                                trace_id = %run.trace_id,
+                                tool = %tool_name,
+                                "failed to record Runtime v2 tool event"
+                            );
+                        }
+                    }
+                }
+                continue;
+            };
+            transport_seq += 1;
+            event.seq = transport_seq;
+            match &event.data {
+                EventData::TextDelta { text } => {
                     if !ttft_recorded {
                         if let Some(run) = &run_for_stream {
-                            let ttft_ms = run
-                                .started_at
-                                .elapsed()
-                                .as_millis()
-                                .min(i32::MAX as u128) as i32;
+                            let ttft_ms = run.started_at.elapsed().as_millis().min(i32::MAX as u128) as i32;
                             first_token_ms = Some(ttft_ms);
                             if let Err(error) = run
                                 .service
@@ -1045,93 +842,46 @@ async fn handle_chat_stream_request(
                                 )
                                 .await
                             {
-                                tracing::debug!(
-                                    %error,
-                                    trace_id = %run.trace_id,
-                                    "failed to record AgentRun TTFT"
-                                );
+                                tracing::debug!(%error, trace_id = %run.trace_id, "failed to record AgentRun TTFT");
                             }
                         }
                         ttft_recorded = true;
                     }
-                    full_reply.push_str(&token);
-
-                    // v2: emit versioned event envelope.
-                    if use_v2_protocol {
-                        seq += 1;
-                        let v2_event = serde_json::json!({
-                            "type": "text_delta",
-                            "protocol_version": "2.0",
-                            "turn_id": run_for_stream.as_ref().map(|r| r.trace_id.clone()).unwrap_or_default(),
-                            "conversation_id": public_conversation_id,
-                            "seq": seq,
-                            "text": token,
-                        });
-                        encode_sse_data(&v2_event)
-                    } else {
-                        // v1: legacy format.
-                        let payload = serde_json::json!({
-                            "token": token,
-                            "conversation_id": public_conversation_id
-                        });
-                        encode_sse_data(&payload)
-                    }
+                    full_reply.push_str(text);
                 }
-                Ok(AgentStreamChunk::Usage(reported_usage)) => {
-                    usage = Some(reported_usage);
-                    continue;
+                EventData::ToolStarted { .. } => tool_calls += 1,
+                EventData::TurnCompleted { usage } => {
+                    completed = true;
+                    prompt_tokens = usage.prompt_tokens;
+                    completion_tokens = usage.completion_tokens;
                 }
-                Ok(AgentStreamChunk::ToolActivity { tool }) => {
-                    tool_calls += 1;
-                    let payload = serde_json::json!({
-                        "tool_activity": {
-                            "tool": tool,
-                        },
-                        "conversation_id": public_conversation_id,
-                    });
-                    encode_sse_data(&payload)
-                }
-                Ok(AgentStreamChunk::UiAction(action)) => {
-                    let payload = serde_json::json!({
-                        "ui_action": {
-                            "type": action.kind,
-                            "payload": action.payload,
-                        },
-                        "conversation_id": public_conversation_id
-                    });
-                    encode_sse_data(&payload)
-                }
-                Err(error) => {
-                    completed = false;
-                    // Goal §49: raw provider/SQL internals must not reach the
-                    // client; the full error is already in the server log.
-                    tracing::error!(err = %error, "chat stream failed");
-                    let payload = serde_json::json!({ "error": "assistant_stream_failed" });
-                    encode_sse_data(&payload)
-                }
-            };
-            yield Ok::<_, std::convert::Infallible>(bytes);
-            if !completed {
+                EventData::TurnCancelled { .. } => cancelled = true,
+                _ => {}
+            }
+            let is_terminal = event.is_terminal();
+            let json = serde_json::to_value(&event).unwrap_or_default();
+            yield Ok::<_, std::convert::Infallible>(encode_sse_data(&json));
+            if is_terminal {
                 break;
             }
         }
 
         if completed && !full_reply.trim().is_empty() {
             if let Err(error) = agent_chat::persist_context_message(
-                    &persist_service,
-                    &persisted_conversation_id,
-                    &persisted_listing_id,
-                    &persisted_user_id,
-                    None,
-                    true,
-                    &full_reply,
-                    None,
-                    None,
-                    None,
-                    None,
-                    persisted_campus_id,
-                )
-                .await
+                &persist_service,
+                &persisted_conversation_id,
+                &persisted_listing_id,
+                &persisted_user_id,
+                None,
+                true,
+                &full_reply,
+                None,
+                None,
+                None,
+                None,
+                persisted_campus_id,
+            )
+            .await
             {
                 tracing::warn!(%error, "failed to persist streamed assistant reply");
             }
@@ -1140,19 +890,22 @@ async fn handle_chat_stream_request(
         let finished = if let Some(run) = &run_for_stream {
             if completed {
                 agent_chat::finish_agent_run_with_usage(
-        run, "completed", "llm_completed", None,
-        usage.as_ref().map(|u| u.input_tokens),
-        usage.as_ref().map(|u| u.output_tokens),
-    ).await
+                    run,
+                    "completed",
+                    "runtime_completed",
+                    None,
+                    prompt_tokens,
+                    completion_tokens,
+                )
+                .await
+            } else if cancelled {
+                agent_chat::finish_agent_run(run, "cancelled", "user_cancelled", Some("cancelled")).await
             } else {
-                agent_chat::finish_agent_run(run, "failed", "llm_failed", Some("provider_error")).await
+                agent_chat::finish_agent_run(run, "failed", "runtime_failed", Some("runtime_error")).await
             }
         } else {
             true
         };
-        // Goal §75: one structured line per agent turn. Message bodies,
-        // tokens, and keys never enter logs; per-tool detail lives in
-        // agent_runs DB events instead of stdout.
         tracing::info!(
             request_id = %log_request_id,
             user_id = %persisted_user_id,
@@ -1165,7 +918,8 @@ async fn handle_chat_stream_request(
             ttft_ms = first_token_ms.unwrap_or(0),
             total_ms = stream_started_at.elapsed().as_millis() as u64,
             completed,
-            "agent stream finished"
+            cancelled,
+            "agent runtime stream finished"
         );
         if finished {
             if let Some(done_tx) = reconciliation_tx {

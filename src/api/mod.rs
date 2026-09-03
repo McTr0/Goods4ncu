@@ -1,4 +1,3 @@
-use crate::agents::router::IntentRouter;
 use crate::api::metrics::MetricsService;
 use crate::llm::LlmProvider;
 use crate::services::moderation::ModerationService;
@@ -391,8 +390,6 @@ impl MediaSigner {
 #[derive(Clone)]
 pub struct ApiAgents {
     pub llm_provider: Arc<dyn LlmProvider>,
-    #[allow(dead_code)]
-    pub router: IntentRouter,
     pub tri_tier_router: crate::agents::router::TriTierIntentRouter,
     /// When false, AI assistant endpoints return ServiceUnavailable.
     pub agent_enabled: bool,

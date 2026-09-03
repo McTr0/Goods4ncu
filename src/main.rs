@@ -367,11 +367,10 @@ async fn main() -> Result<(), anyhow::Error> {
         agents: api::ApiAgents {
             llm_provider: Arc::clone(&llm_provider),
             tri_tier_router: crate::agents::router::TriTierIntentRouter::new(
-                router.clone(),
+                router,
                 Some(db_pool.clone()),
                 Some(llm_provider.clone().embedding_generator()),
             ),
-            router,
             agent_enabled: config.agent_enabled,
         },
         listing_repo: repositories::PostgresListingRepository::new(db_pool.clone()),

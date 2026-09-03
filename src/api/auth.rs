@@ -1258,7 +1258,6 @@ pub(crate) mod tests {
                     None,
                     None,
                 ),
-                router: IntentRouter::new(vec![]),
                 agent_enabled: true,
             },
             listing_repo: crate::repositories::PostgresListingRepository::new(pool.clone()),

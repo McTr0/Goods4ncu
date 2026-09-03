@@ -62,7 +62,6 @@ fn build_state(pool: sqlx::PgPool, shutdown: ShutdownSignal) -> AppState {
                 None,
                 None,
             ),
-            router: IntentRouter::new(vec![]),
             agent_enabled: true,
         },
         listing_repo: PostgresListingRepository::new(pool.clone()),
