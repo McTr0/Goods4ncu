@@ -125,7 +125,7 @@ async fn listing_create_commits_one_quarantined_image_job_and_replays_without_du
             "title": "Atomic image listing",
             "body": "Atomic image listing description",
             "category": "offer",
-            "cover_image_url": "https://cdn.example.com/atomic.jpg",
+            "cover_image_url": "https://test-bucket.oss-cn-beijing.aliyuncs.com/atomic.jpg",
             "marketplace": {
                 "category": "other",
                 "brand": "Test",

@@ -404,12 +404,12 @@ publish() {
         return
     fi
     local resp
-    resp=$(curl -s -X POST "$API/api/listings" -H 'Content-Type: application/json' \
+    resp=$(curl -s -X POST "$API/api/posts" -H 'Content-Type: application/json' \
         -H "Authorization: Bearer $token" \
         -H "Idempotency-Key: $(printf '%s' "deploy-$title" | shasum | cut -c1-32)" \
-        -d "{\"title\":\"$title\",\"category\":\"$category\",\"brand\":\"$brand\",\"condition_score\":$condition,\"suggested_price_cny\":$price,\"direction\":\"$direction\",\"description\":\"$description\",\"defects\":[]}")
+        -d "{\"title\":\"$title\",\"body\":\"$description\",\"category\":\"$direction\",\"marketplace\":{\"category\":\"$category\",\"brand\":\"$brand\",\"condition_score\":$condition,\"suggested_price_cny\":$price,\"direction\":\"$direction\",\"description\":\"$description\",\"defects\":[]}}")
     local id
-    id=$(printf '%s' "$resp" | jq_get id)
+    id=$(printf '%s' "$resp" | jq_get listing_id)
     if [ -z "$id" ]; then
         fail "publishing '$title' failed: $resp"
     fi
