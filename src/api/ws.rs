@@ -51,31 +51,17 @@ pub fn new_ws_state() -> Arc<WsConnections> {
 /// through pub/sub so every replica delivers to its own sockets.
 #[cfg(feature = "redis")]
 static FANOUT_TX: std::sync::OnceLock<
-    tokio::sync::mpsc::UnboundedSender<(String, Option<uuid::Uuid>, String)>,
+    tokio::sync::mpsc::Sender<(String, Option<uuid::Uuid>, String)>,
 > = std::sync::OnceLock::new();
 
-/// Install the Redis-backed fanout publisher. Spawns a forwarding task that
-/// owns the connection; broadcast callers stay synchronous. On publish failure
-/// the message is delivered locally instead — degraded to single-instance
-/// semantics, never silently dropped.
+/// Install the Redis-backed fanout publisher sender.
 #[cfg(feature = "redis")]
-pub fn install_fanout_publisher(mut conn: redis::aio::ConnectionManager) {
-    let (tx, mut rx) =
-        tokio::sync::mpsc::unbounded_channel::<(String, Option<uuid::Uuid>, String)>();
+pub fn install_fanout_publisher(
+    tx: tokio::sync::mpsc::Sender<(String, Option<uuid::Uuid>, String)>,
+) {
     if FANOUT_TX.set(tx).is_err() {
         tracing::warn!("WS fanout publisher already installed");
-        return;
     }
-    tokio::spawn(async move {
-        while let Some((user_id, campus_id, payload)) = rx.recv().await {
-            if let Err(error) =
-                crate::services::ws_fanout::publish_scoped(&mut conn, &user_id, campus_id, &payload)
-                    .await
-            {
-                tracing::error!(%error, user_id = %user_id, "WS fanout publish failed");
-            }
-        }
-    });
 }
 
 /// Broadcast a payload to a user. With the fanout installed this publishes to
@@ -95,17 +81,21 @@ pub fn broadcast_to_user_in_campus(user_id: &str, campus_id: uuid::Uuid, payload
 fn broadcast_to_user_scoped(user_id: &str, campus_id: Option<uuid::Uuid>, payload: &str) {
     #[cfg(feature = "redis")]
     if let Some(tx) = FANOUT_TX.get() {
-        if tx
-            .send((user_id.to_string(), campus_id, payload.to_string()))
-            .is_ok()
-        {
-            return;
+        match tx.try_send((user_id.to_string(), campus_id, payload.to_string())) {
+            Ok(_) => return,
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                tracing::warn!(
+                    user_id = %user_id,
+                    "WS fanout publisher buffer full; falling back to local delivery"
+                );
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                tracing::error!(
+                    user_id = %user_id,
+                    "WS fanout publisher channel closed; falling back to local delivery"
+                );
+            }
         }
-        tracing::error!(
-            "WS fanout channel closed; dropped broadcast for user {}",
-            user_id
-        );
-        return;
     }
     deliver_local_scoped(user_id, campus_id, payload);
 }
@@ -147,7 +137,7 @@ pub fn deliver_local_for_campus(user_id: &str, campus_id: uuid::Uuid, payload: &
     deliver_local_scoped(user_id, Some(campus_id), payload);
 }
 
-fn deliver_local_scoped(user_id: &str, campus_id: Option<uuid::Uuid>, payload: &str) {
+pub(crate) fn deliver_local_scoped(user_id: &str, campus_id: Option<uuid::Uuid>, payload: &str) {
     let metrics = crate::api::metrics::GLOBAL_METRICS.get().cloned();
 
     if let Some(connections) = WS_CONNECTIONS.get(user_id) {

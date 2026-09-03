@@ -67,8 +67,7 @@ async fn broadcast_round_trips_through_redis_to_local_sockets() {
     );
 
     controller.trigger();
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    drop(runtime);
+    runtime.shutdown().await;
 }
 
 #[tokio::test]
@@ -87,8 +86,7 @@ async fn subscriber_shuts_down_cleanly() {
     .expect("replicated runtime starts");
 
     controller.trigger();
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    drop(runtime);
+    runtime.shutdown().await;
 }
 
 #[tokio::test]
@@ -131,6 +129,7 @@ async fn two_instances_deliver_across_processes() {
         std::process::Command::new(env!("CARGO_BIN_EXE_goods4ncu"))
             .env("SERVER_PORT", port.to_string())
             .env("REDIS_URL", &url)
+            .env("DEPLOYMENT_PROFILE", "replicated")
             .env("SHUTDOWN_DRAIN_SECS", "0")
             .env("SHUTDOWN_TIMEOUT_SECS", "5")
             .stdout(std::process::Stdio::null())

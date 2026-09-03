@@ -33,7 +33,8 @@ pub struct ReplicatedRuntime {
     rate_limiter: RateLimitStateHandle,
     publisher: redis::aio::ConnectionManager,
     is_healthy: Arc<AtomicBool>,
-    _subscriber_handle: tokio::task::JoinHandle<()>,
+    subscriber_handle: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    publisher_handle: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl ReplicatedRuntime {
@@ -88,9 +89,56 @@ impl ReplicatedRuntime {
             )));
         }
 
-        // Install fanout publisher into api::ws
-        crate::api::ws::install_fanout_publisher(publisher.clone());
+        // Install bounded fanout publisher into api::ws
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(String, Option<uuid::Uuid>, String)>(4096);
+        crate::api::ws::install_fanout_publisher(tx);
         tracing::info!("WS fanout publisher installed (Redis)");
+
+        let mut p_worker_conn = publisher.clone();
+        let pub_shutdown = shutdown.clone();
+        let publisher_handle = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = pub_shutdown.wait() => {
+                        break;
+                    }
+                    msg = rx.recv() => {
+                        let Some((user_id, campus_id, payload)) = msg else {
+                            break;
+                        };
+                        if let Err(error) = crate::services::ws_fanout::publish_scoped(
+                            &mut p_worker_conn,
+                            &user_id,
+                            campus_id,
+                            &payload,
+                        )
+                        .await
+                        {
+                            tracing::error!(
+                                %error,
+                                user_id = %user_id,
+                                "WS fanout publish failed; falling back to local delivery"
+                            );
+                            crate::api::ws::deliver_local_scoped(&user_id, campus_id, &payload);
+                        }
+                    }
+                }
+            }
+            while let Ok((user_id, campus_id, payload)) = rx.try_recv() {
+                if let Err(_error) = crate::services::ws_fanout::publish_scoped(
+                    &mut p_worker_conn,
+                    &user_id,
+                    campus_id,
+                    &payload,
+                )
+                .await
+                {
+                    crate::api::ws::deliver_local_scoped(&user_id, campus_id, &payload);
+                }
+            }
+            tracing::info!("WS fanout publisher stopped");
+        });
 
         // 3. Connect subscriber pubsub & subscribe to channel
         let mut pubsub = client
@@ -143,8 +191,21 @@ impl ReplicatedRuntime {
             rate_limiter,
             publisher,
             is_healthy,
-            _subscriber_handle: subscriber_handle,
+            subscriber_handle: tokio::sync::Mutex::new(Some(subscriber_handle)),
+            publisher_handle: tokio::sync::Mutex::new(Some(publisher_handle)),
         }))
+    }
+
+    /// Gracefully wait for subscriber and publisher tasks to shut down.
+    pub async fn shutdown(&self) {
+        let sub = self.subscriber_handle.lock().await.take();
+        if let Some(handle) = sub {
+            let _ = handle.await;
+        }
+        let pub_h = self.publisher_handle.lock().await.take();
+        if let Some(handle) = pub_h {
+            let _ = handle.await;
+        }
     }
 
     /// Obtain handle to the distributed rate limiter.

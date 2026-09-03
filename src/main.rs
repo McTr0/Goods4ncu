@@ -380,7 +380,7 @@ async fn main() -> Result<(), anyhow::Error> {
             shutdown: shutdown.clone(),
             deployment_profile: config.deployment_profile,
             #[cfg(feature = "redis")]
-            replicated_runtime,
+            replicated_runtime: replicated_runtime.clone(),
         },
         agents: api::ApiAgents {
             llm_provider: Arc::clone(&llm_provider),
@@ -491,6 +491,11 @@ async fn main() -> Result<(), anyhow::Error> {
             if let Err(e) = result {
                 tracing::error!(worker = name, %e, "Worker task failed during shutdown");
             }
+        }
+
+        #[cfg(feature = "redis")]
+        if let Some(runtime) = replicated_runtime.as_ref() {
+            runtime.shutdown().await;
         }
     };
 
