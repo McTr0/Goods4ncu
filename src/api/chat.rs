@@ -1,12 +1,10 @@
 //! AI-powered marketplace chat endpoints.
 //!
-//! POST /api/chat        — single-turn JSON request/response
-//! GET  /api/chat/stream — SSE streaming (query-string, text-only compat)
-//! POST /api/chat/stream — SSE streaming (JSON body, preferred)
+//! POST /api/chat/stream    — SSE streaming (JSON body)
+//! GET  /api/chat/assistant — history retrieval
 //!
-//! Both paths persist the user turn first, then invoke the LLM, then persist
-//! the assistant reply. Intent routing runs before any LLM call so blocked
-//! content and greetings never consume tokens.
+//! Intent routing runs before any LLM call so blocked content and greetings never
+//! consume tokens.
 
 use crate::api::error::ApiError;
 use crate::api::session::Session;

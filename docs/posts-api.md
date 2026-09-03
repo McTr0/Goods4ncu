@@ -8,14 +8,15 @@ Unified post structure (migration 0109): one `posts` table covers
 
 - `post_type` / `post_kind` are gone; the inventory→post mirror trigger was
   removed. Listings are optional references (`listing_id`, SET NULL on listing
-  delete) — a standalone listing has no post until someone writes one.
+  delete).
 - Tags must come from the curated `post_tag_catalog` (location and TTL groups);
   each group allows at most one tag. There is no errand-specific metadata or
   lifecycle.
 - `space_id` scopes a post to one chat space: member-only visibility in feeds,
   detail reads and replies; NULL means campus-wide.
-- Clients create goods inline: POST `/api/listings` first, then POST
-  `/api/posts` with the returned `listing_id`.
+- All posts (discussions and marketplace goods) are published via `POST /api/posts`
+  in a single atomic transaction. For marketplace items, supply the nested
+  `marketplace` payload. External `listing_id` input is not accepted.
 
 ## Read endpoints
 
@@ -156,8 +157,10 @@ clients and is applied to the linked listing post by the unified ranker.
 
 ### `POST /api/posts`
 
-Creates a discussion topic. Products must still be created with
-`POST /api/listings`.
+Unified post creation endpoint. Creates discussion topics or marketplace listings
+within a single atomic database transaction.
+
+For ordinary discussions:
 
 ```json
 {
@@ -169,10 +172,26 @@ Creates a discussion topic. Products must still be created with
 }
 ```
 
-`cover_image_url` is optional and must point at the configured platform object
-storage. Mobile clients should upload the image first, then pass the returned
-platform URL. The response is the new post detail; until moderation approves
-the image, its `cover_image_url` is `null`.
+For goods / marketplace items (category `offer` or `wanted`):
+
+```json
+{
+  "title": "Dorm monitor",
+  "body": "24-inch monitor in good condition",
+  "category": "offer",
+  "tags": [],
+  "marketplace": {
+    "category": "electronics",
+    "condition_score": 8,
+    "suggested_price_cny": 100.0,
+    "direction": "offer"
+  },
+  "cover_image_url": "https://bucket.example.com/post/image/cover.jpg"
+}
+```
+
+In both cases, `marketplace detail -> post -> moderation job` execute within
+a single database transaction and commit atomically.
 
 Help requests are not a special API shape: publish them in the same endpoint
 with a suitable category (for example `wanted`, `question`, or `discussion`)

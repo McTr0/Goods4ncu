@@ -833,17 +833,9 @@ Flutter 在 wanted 详情按当前用户身份展示“收到的推荐”或“�
 
 需要登录。读取当前用户最近的小昌消息。支持 `limit`（1–100，默认 50）和 `offset`。返回 `conversation_id: "__agent__"`、`messages` 和 `total`；每条消息包含 `id`、`role`（`user` 或 `assistant`）、`content`、可选媒体 URL 和 `timestamp`。
 
-### POST `/api/chat`
-
-单轮 JSON AI 请求。会持久化用户消息，经过意图路由后调用工具或 LLM。若请求可能触发 Agent 的待确认写操作，可携带 `Idempotency-Key` 请求头；同一认证用户、活动校园和相同动作参数的重试会复用原 ActionPlan，不会创建第二个待确认操作。相同 key 改变动作、风险等级或参数会安全拒绝。该 key 不会进入模型上下文。
-
-### GET `/api/chat/stream`
-
-SSE 兼容路径，使用 query 参数传递文本。用于旧客户端或简单调试。
-
 ### POST `/api/chat/stream`
 
-推荐的 SSE 路径，使用 JSON body，适合认证上下文和移动端流式显示。小昌请求必须携带 `conversation_id: "__agent__"`。服务端先读取该用户此前的最近历史，再保存当前用户消息；流式响应正常结束后保存完整 AI 回复。中断或 provider 失败时不保存不完整的 AI 回复，但已经提交的用户消息仍会保留。重试可能产生写计划时应复用同一个 `Idempotency-Key`；服务端按用户/校园和动作参数哈希复用计划，不能用同 key 改写另一项操作。
+唯一的 SSE 流式路径，使用 JSON body，适合认证上下文和移动端流式显示。小昌请求必须携带 `conversation_id: "__agent__"`。服务端先读取该用户此前的最近历史，再保存当前用户消息；流式响应正常结束后保存完整 AI 回复。中断或 provider 失败时不保存不完整的 AI 回复，但已经提交的用户消息仍会保留。重试可能产生写计划时应复用同一个 `Idempotency-Key`；服务端按用户/校园和动作参数哈希复用计划，不能用同 key 改写另一项操作。
 
 ## WebSocket
 
@@ -1181,5 +1173,5 @@ GET  /api/v1/moderation/appeals/{id}
 普通用户只能读取自己的案件摘要和提交申诉，不获得举报人、审核者身份、命中词和内部阈值。校园运营使用独立 tenant-scoped 管理接口；平台管理员跨校园处理需要理由和审计。
 
 ### Secret Chat 下线
- 
+
 `/api/chat/secret-sessions*` 已全面下线：禁止新建、移除移动端入口、兼容窗口关闭并彻底移除发送与创建路由。不把服务器不可读 E2EE 迁入 `/api/v1`。
