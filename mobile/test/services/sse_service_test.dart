@@ -35,6 +35,7 @@ void main() {
       final event = AgentStreamEvent.fromJson({
         'protocol_version': '2.0',
         'turn_id': 'turn-err-1',
+        'conversation_id': 'conv-err-1',
         'type': 'turn_failed',
         'seq': 1,
         'error': {'code': 'provider_error', 'message': 'provider unavailable'},
@@ -51,8 +52,11 @@ void main() {
           _response(401),
           _response(
             200,
-            body:
-                'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"conv-1","seq":1,"type":"text_delta","text":"ok"}\n\n',
+            body: [
+              'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"conv-1","seq":1,"type":"turn_started"}\n\n',
+              'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"conv-1","seq":2,"type":"text_delta","text":"ok"}\n\n',
+              'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"conv-1","seq":3,"type":"turn_completed","usage":{"model_steps":1,"tool_calls":0}}\n\n',
+            ].join(),
           ),
         ]);
 
@@ -258,10 +262,11 @@ void main() {
 
     test('decodes complete Runtime v2 event envelopes', () async {
       final body = [
-        'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"__agent__","seq":1,"type":"text_delta","text":"你好"}\n\n',
-        'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"__agent__","seq":2,"type":"tool_started","call":{"name":"search_inventory","status":"started"}}\n\n',
-        'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"__agent__","seq":3,"type":"ui_action","action":{"action_type":"SHOW_POSTS","payload":{"postIds":["p1"]}}}\n\n',
-        'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"__agent__","seq":4,"type":"turn_completed","usage":{"model_steps":1,"tool_calls":1}}\n\n',
+        'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"__agent__","seq":1,"type":"turn_started"}\n\n',
+        'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"__agent__","seq":2,"type":"text_delta","text":"你好"}\n\n',
+        'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"__agent__","seq":3,"type":"tool_started","call":{"name":"search_inventory","status":"started"}}\n\n',
+        'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"__agent__","seq":4,"type":"ui_action","action":{"action_type":"SHOW_POSTS","payload":{"postIds":["p1"]}}}\n\n',
+        'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"__agent__","seq":5,"type":"turn_completed","usage":{"model_steps":1,"tool_calls":1}}\n\n',
       ].join();
       final client = _QueuedClient([_response(200, body: body)]);
       final service = SseService(
@@ -274,12 +279,13 @@ void main() {
       await service.connect(message: '找书', conversationId: '__agent__');
       final events = await service.stream.toList();
 
-      expect(events, hasLength(4));
-      expect(events[0].text, '你好');
-      expect(events[1].toolName, 'search_inventory');
-      expect(events[2].actionType, 'SHOW_POSTS');
-      expect(events[3].type, 'turn_completed');
-      expect(events[3].usage?.modelSteps, 1);
+      expect(events, hasLength(5));
+      expect(events[0].type, 'turn_started');
+      expect(events[1].text, '你好');
+      expect(events[2].toolName, 'search_inventory');
+      expect(events[3].actionType, 'SHOW_POSTS');
+      expect(events[4].type, 'turn_completed');
+      expect(events[4].usage?.modelSteps, 1);
     });
 
     test(
@@ -324,8 +330,8 @@ void main() {
 
     test('validates monotonic sequence and rejects gaps', () async {
       final validator = AgentTurnValidator();
-      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1');
-      final ev3 = AgentStreamEvent(type: 'text_delta', seq: 3, turnId: 't1', text: 'hi');
+      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1', conversationId: 'c1');
+      final ev3 = AgentStreamEvent(type: 'text_delta', seq: 3, turnId: 't1', conversationId: 'c1', text: 'hi');
 
       expect(validator.validateEvent(ev1), isFalse);
       expect(
@@ -334,11 +340,106 @@ void main() {
       );
     });
 
+    test('rejects first event when not turn_started or seq != 1', () {
+      final validator = AgentTurnValidator();
+      final evText = AgentStreamEvent(type: 'text_delta', seq: 1, turnId: 't1', conversationId: 'c1', text: 'hi');
+      expect(
+        () => validator.validateEvent(evText),
+        throwsA(isA<ProtocolViolationException>()),
+      );
+
+      validator.reset();
+      final evTurnStartedSeq2 = AgentStreamEvent(type: 'turn_started', seq: 2, turnId: 't1', conversationId: 'c1');
+      expect(
+        () => validator.validateEvent(evTurnStartedSeq2),
+        throwsA(isA<ProtocolViolationException>()),
+      );
+    });
+
+    test('rejects conversation ID mismatch', () {
+      final validator = AgentTurnValidator(expectedConversationId: 'expected-conv');
+      final evWrongConv = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1', conversationId: 'other-conv');
+      expect(
+        () => validator.validateEvent(evWrongConv),
+        throwsA(isA<ProtocolViolationException>()),
+      );
+
+      final dynamicValidator = AgentTurnValidator();
+      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1', conversationId: 'conv-a');
+      dynamicValidator.validateEvent(ev1);
+      final ev2 = AgentStreamEvent(type: 'text_delta', seq: 2, turnId: 't1', conversationId: 'conv-b', text: 'hi');
+      expect(
+        () => dynamicValidator.validateEvent(ev2),
+        throwsA(isA<ProtocolViolationException>()),
+      );
+    });
+
+    test('AgentStreamEvent.fromJson rejects invalid seq, unknown types, or missing fields', () {
+      // Float seq
+      expect(
+        () => AgentStreamEvent.fromJson({
+          'protocol_version': '2.0',
+          'turn_id': 't1',
+          'conversation_id': 'c1',
+          'type': 'turn_started',
+          'seq': 1.5,
+        }),
+        throwsA(isA<FormatException>()),
+      );
+
+      // Negative seq
+      expect(
+        () => AgentStreamEvent.fromJson({
+          'protocol_version': '2.0',
+          'turn_id': 't1',
+          'conversation_id': 'c1',
+          'type': 'turn_started',
+          'seq': -1,
+        }),
+        throwsA(isA<FormatException>()),
+      );
+
+      // Unknown event type
+      expect(
+        () => AgentStreamEvent.fromJson({
+          'protocol_version': '2.0',
+          'turn_id': 't1',
+          'conversation_id': 'c1',
+          'type': 'custom_unknown_type',
+          'seq': 1,
+        }),
+        throwsA(isA<FormatException>()),
+      );
+
+      // Missing conversation_id
+      expect(
+        () => AgentStreamEvent.fromJson({
+          'protocol_version': '2.0',
+          'turn_id': 't1',
+          'type': 'turn_started',
+          'seq': 1,
+        }),
+        throwsA(isA<FormatException>()),
+      );
+
+      // text_delta missing text
+      expect(
+        () => AgentStreamEvent.fromJson({
+          'protocol_version': '2.0',
+          'turn_id': 't1',
+          'conversation_id': 'c1',
+          'type': 'text_delta',
+          'seq': 2,
+        }),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
     test('heartbeat advances sequence count and is flagged for filtering', () {
       final validator = AgentTurnValidator();
-      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1');
-      final evHb = AgentStreamEvent(type: 'heartbeat', seq: 2, turnId: 't1');
-      final ev3 = AgentStreamEvent(type: 'text_delta', seq: 3, turnId: 't1', text: 'hi');
+      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1', conversationId: 'c1');
+      final evHb = AgentStreamEvent(type: 'heartbeat', seq: 2, turnId: 't1', conversationId: 'c1');
+      final ev3 = AgentStreamEvent(type: 'text_delta', seq: 3, turnId: 't1', conversationId: 'c1', text: 'hi');
 
       expect(validator.validateEvent(ev1), isFalse);
       expect(validator.validateEvent(evHb), isTrue);
@@ -347,9 +448,9 @@ void main() {
 
     test('rejects events after terminal event', () {
       final validator = AgentTurnValidator();
-      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1');
-      final evTerm = AgentStreamEvent(type: 'turn_completed', seq: 2, turnId: 't1');
-      final evPost = AgentStreamEvent(type: 'text_delta', seq: 3, turnId: 't1', text: 'extra');
+      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1', conversationId: 'c1');
+      final evTerm = AgentStreamEvent(type: 'turn_completed', seq: 2, turnId: 't1', conversationId: 'c1');
+      final evPost = AgentStreamEvent(type: 'text_delta', seq: 3, turnId: 't1', conversationId: 'c1', text: 'extra');
 
       expect(validator.validateEvent(ev1), isFalse);
       expect(validator.validateEvent(evTerm), isFalse);
@@ -362,7 +463,7 @@ void main() {
 
     test('assertTerminalEventSeen throws if stream ends prematurely', () {
       final validator = AgentTurnValidator();
-      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1');
+      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1', conversationId: 'c1');
       validator.validateEvent(ev1);
 
       expect(

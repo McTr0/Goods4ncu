@@ -42,16 +42,33 @@ class AgentStreamEvent {
     this.usage,
   });
 
+  static const Set<String> _knownTypes = {
+    'turn_started',
+    'status_changed',
+    'text_delta',
+    'tool_started',
+    'tool_finished',
+    'ui_action',
+    'usage',
+    'heartbeat',
+    'turn_completed',
+    'turn_failed',
+    'turn_cancelled',
+  };
+
   factory AgentStreamEvent.fromJson(Map<String, dynamic> json) {
     final type = json['type'] as String?;
     if (type == null || type.trim().isEmpty) {
       throw const FormatException('Missing or empty event type');
     }
-    final rawSeq = json['seq'];
-    if (rawSeq is! num) {
-      throw const FormatException('Missing seq in agent stream event');
+    if (!_knownTypes.contains(type)) {
+      throw FormatException('Unknown event type: $type');
     }
-    final seq = rawSeq.toInt();
+    final rawSeq = json['seq'];
+    if (rawSeq is! int || rawSeq < 1) {
+      throw const FormatException('seq must be a positive integer >= 1');
+    }
+    final seq = rawSeq;
     final protocolVersion = json['protocol_version'] as String?;
     if (protocolVersion == null || protocolVersion != '2.0') {
       throw FormatException(
@@ -65,6 +82,11 @@ class AgentStreamEvent {
       );
     }
     final conversationId = json['conversation_id'] as String?;
+    if (conversationId == null || conversationId.trim().isEmpty) {
+      throw const FormatException(
+        'Missing or empty conversation_id in agent stream event',
+      );
+    }
     String? text;
     String? toolName;
     String? toolStatus;
@@ -78,33 +100,75 @@ class AgentStreamEvent {
 
     switch (type) {
       case 'text_delta':
-        text = json['text'] as String?;
+        final rawText = json['text'];
+        if (rawText is! String) {
+          throw const FormatException('Missing or invalid text in text_delta event');
+        }
+        text = rawText;
       case 'tool_started' || 'tool_finished':
-        final call = json['call'] as Map<String, dynamic>?;
-        toolName = call?['name'] as String?;
-        toolStatus = call?['status'] as String?;
+        final call = json['call'];
+        if (call is! Map) {
+          throw FormatException('Missing or invalid call in $type event');
+        }
+        toolName = call['name'] as String?;
+        toolStatus = call['status'] as String?;
+        if (toolName == null || toolName.trim().isEmpty) {
+          throw FormatException('Missing or empty call name in $type event');
+        }
       case 'ui_action':
-        final action = json['action'] as Map<String, dynamic>?;
-        actionType = action?['action_type'] as String?;
-        if (action?['payload'] != null) {
-          actionPayload = Map<String, dynamic>.from(action!['payload']);
+        final action = json['action'];
+        if (action is! Map) {
+          throw const FormatException('Missing or invalid action in ui_action event');
+        }
+        actionType = action['action_type'] as String?;
+        if (actionType == null || actionType.trim().isEmpty) {
+          throw const FormatException('Missing or empty action_type in ui_action event');
+        }
+        if (action['payload'] != null) {
+          actionPayload = Map<String, dynamic>.from(action['payload'] as Map);
         }
       case 'status_changed':
-        status = json['status'] as String?;
+        final rawStatus = json['status'];
+        if (rawStatus is! String || rawStatus.trim().isEmpty) {
+          throw const FormatException('Missing or empty status in status_changed event');
+        }
+        status = rawStatus;
       case 'turn_started':
         status = 'started';
       case 'turn_completed':
-        if (json['usage'] is Map<String, dynamic>) {
-          usage = AgentUsageSummary.fromJson(
-            json['usage'] as Map<String, dynamic>,
-          );
+        final rawUsage = json['usage'];
+        if (rawUsage is! Map) {
+          throw const FormatException('Missing usage in turn_completed event');
         }
+        usage = AgentUsageSummary.fromJson(
+          Map<String, dynamic>.from(rawUsage),
+        );
       case 'turn_failed':
-        final error = json['error'] as Map<String, dynamic>?;
-        errorCode = error?['code'] as String?;
-        errorMessage = error?['message'] as String?;
+        final error = json['error'];
+        if (error is! Map) {
+          throw const FormatException('Missing error in turn_failed event');
+        }
+        errorCode = error['code'] as String?;
+        errorMessage = error['message'] as String?;
+        if (errorCode == null || errorCode.trim().isEmpty || errorMessage == null || errorMessage.trim().isEmpty) {
+          throw const FormatException('Missing error code or message in turn_failed event');
+        }
       case 'turn_cancelled':
-        cancelReason = json['reason'] as String?;
+        final reason = json['reason'];
+        if (reason is! String || reason.trim().isEmpty) {
+          throw const FormatException('Missing reason in turn_cancelled event');
+        }
+        cancelReason = reason;
+      case 'heartbeat':
+        break;
+      case 'usage':
+        final rawUsage = json['usage'];
+        if (rawUsage is! Map) {
+          throw const FormatException('Missing usage in usage event');
+        }
+        usage = AgentUsageSummary.fromJson(
+          Map<String, dynamic>.from(rawUsage),
+        );
     }
 
     return AgentStreamEvent(
@@ -168,8 +232,12 @@ class ProtocolViolationException implements Exception {
 }
 
 /// Validates protocol 2.0 stream monotonicity, turn ID consistency,
+/// expected conversation ID, fixed start (turn_started with seq=1),
 /// and terminal completion before stream termination.
 class AgentTurnValidator {
+  AgentTurnValidator({this.expectedConversationId});
+
+  String? expectedConversationId;
   String? _activeTurnId;
   int? _expectedSeq;
   bool _terminalEventSeen = false;
@@ -205,8 +273,26 @@ class AgentTurnValidator {
       );
     }
 
+    final convId = event.conversationId;
+    if (convId == null || convId.trim().isEmpty) {
+      throw const ProtocolViolationException('Missing or empty conversation_id');
+    }
+
+    if (expectedConversationId == null) {
+      expectedConversationId = convId;
+    } else if (convId != expectedConversationId) {
+      throw ProtocolViolationException(
+        'Conversation ID mismatch: expected $expectedConversationId, got $convId',
+      );
+    }
+
     if (_expectedSeq == null) {
-      _expectedSeq = event.seq;
+      if (event.type != 'turn_started' || event.seq != 1) {
+        throw ProtocolViolationException(
+          'First event must be turn_started with seq=1, got ${event.type} with seq=${event.seq}',
+        );
+      }
+      _expectedSeq = 1;
     } else if (event.seq != _expectedSeq) {
       throw ProtocolViolationException(
         'Sequence gap or regression: expected seq $_expectedSeq, got ${event.seq} (type=${event.type})',
@@ -232,7 +318,8 @@ class AgentTurnValidator {
     }
   }
 
-  void reset() {
+  void reset({String? expectedConversationId}) {
+    this.expectedConversationId = expectedConversationId;
     _activeTurnId = null;
     _expectedSeq = null;
     _terminalEventSeen = false;

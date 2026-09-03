@@ -92,7 +92,7 @@ class SseService {
     _client = client;
     // Single-subscription stream preserves events that arrive before UI listener attaches.
     _controller = StreamController<AgentStreamEvent>();
-    _validator.reset();
+    _validator.reset(expectedConversationId: conversationId);
 
     final uri = Uri.parse('$_baseUrl/api/chat/stream');
     final body = <String, dynamic>{'message': message};
@@ -326,19 +326,6 @@ class SseService {
 
     try {
       final decodedJson = jsonDecode(payload) as Map<String, dynamic>;
-
-      // Raw gateway error envelope (e.g. proxy timeout).
-      final error = decodedJson['error'];
-      if (error is String && error.isNotEmpty) {
-        final errorEvent = AgentStreamEvent(
-          type: 'turn_failed',
-          seq: 0,
-          errorMessage: error,
-        );
-        _emitEvent(connectionId, errorEvent);
-        return;
-      }
-
       final event = AgentStreamEvent.fromJson(decodedJson);
       final isHeartbeat = _validator.validateEvent(event);
       if (!isHeartbeat) {
