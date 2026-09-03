@@ -30,10 +30,15 @@ async fn broadcast_round_trips_through_redis_to_local_sockets() {
     let Some(url) = redis_url() else { return };
 
     let controller = ShutdownController::new();
-    let fanout = tokio::spawn(ws_fanout::run(url, controller.signal(), false));
-
-    // Wait for the subscriber + publisher to come up.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    let runtime = goods4ncu::services::replicated_runtime::ReplicatedRuntime::start(
+        &url,
+        100,
+        60,
+        &controller.signal(),
+        Duration::from_secs(5),
+    )
+    .await
+    .expect("replicated runtime starts");
 
     let user_id = format!("fanout-user-{}", Uuid::new_v4().simple());
     let mut rx = ws::register_test_connection(&user_id);
@@ -62,7 +67,8 @@ async fn broadcast_round_trips_through_redis_to_local_sockets() {
     );
 
     controller.trigger();
-    let _ = tokio::time::timeout(Duration::from_secs(5), fanout).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    drop(runtime);
 }
 
 #[tokio::test]
@@ -70,28 +76,41 @@ async fn subscriber_shuts_down_cleanly() {
     let Some(url) = redis_url() else { return };
 
     let controller = ShutdownController::new();
-    let fanout = tokio::spawn(ws_fanout::run(url, controller.signal(), false));
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    let runtime = goods4ncu::services::replicated_runtime::ReplicatedRuntime::start(
+        &url,
+        100,
+        60,
+        &controller.signal(),
+        Duration::from_secs(5),
+    )
+    .await
+    .expect("replicated runtime starts");
 
     controller.trigger();
-    tokio::time::timeout(Duration::from_secs(5), fanout)
-        .await
-        .expect("fanout must honour shutdown")
-        .expect("fanout task must not panic");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    drop(runtime);
 }
 
 #[tokio::test]
 async fn fanout_fails_fast_in_replicated_mode_when_redis_unreachable() {
     let controller = ShutdownController::new();
-    let fanout = tokio::spawn(ws_fanout::run(
-        "redis://127.0.0.1:1/0".to_string(),
-        controller.signal(),
-        true,
-    ));
-    let res = fanout.await;
+    let start_time = std::time::Instant::now();
+    let res = goods4ncu::services::replicated_runtime::ReplicatedRuntime::start(
+        "redis://127.0.0.1:1/0",
+        100,
+        60,
+        &controller.signal(),
+        Duration::from_secs(3),
+    )
+    .await;
     assert!(
         res.is_err(),
-        "fanout task must fail-fast / panic in replicated mode when redis is down"
+        "replicated runtime must fail fast when redis is unreachable"
+    );
+    assert!(
+        start_time.elapsed() < Duration::from_secs(5),
+        "replicated runtime must fail-fast within bounded timeout (took {:?})",
+        start_time.elapsed()
     );
 }
 

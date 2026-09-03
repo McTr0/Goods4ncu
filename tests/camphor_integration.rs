@@ -83,7 +83,8 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
             media_signer: None,
             shutdown: goods4ncu::lifecycle::ShutdownSignal::never(),
             deployment_profile: goods4ncu::config::DeploymentProfile::Local,
-            redis_url: None,
+            #[cfg(feature = "redis")]
+            replicated_runtime: None,
         },
         agents: ApiAgents {
             llm_provider: Arc::new(

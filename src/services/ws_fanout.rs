@@ -21,10 +21,8 @@
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 
-use crate::lifecycle::ShutdownSignal;
-
 /// Redis channel carrying all user-directed WS payloads.
-const CHANNEL: &str = "goods4ncu:ws:fanout";
+pub const CHANNEL: &str = "goods4ncu:ws:fanout";
 
 #[derive(Serialize, Deserialize)]
 struct FanoutMessage {
@@ -60,102 +58,21 @@ pub async fn publish_scoped(
     Ok(())
 }
 
-/// Start the fan-out: registers a publisher with the WS layer and runs the
-/// subscription loop until shutdown. On any subscription failure it retries
-/// with backoff — a replica that silently stops subscribing would look healthy
-/// while dropping every realtime push for its connected users.
-pub async fn run(redis_url: String, shutdown: ShutdownSignal, is_replicated: bool) {
-    let client = match redis::Client::open(redis_url.as_str()) {
-        Ok(client) => client,
-        Err(error) => {
-            if is_replicated {
-                panic!("WS fanout failed to open REDIS_URL in replicated mode: {error}");
+pub fn handle_fanout_payload(raw: &str) {
+    match serde_json::from_str::<FanoutMessage>(raw) {
+        Ok(fanout) => {
+            if let Some(campus_id) = fanout.campus_id {
+                crate::api::ws::deliver_local_for_campus(
+                    &fanout.user_id,
+                    campus_id,
+                    &fanout.payload,
+                );
+            } else {
+                crate::api::ws::deliver_local(&fanout.user_id, &fanout.payload);
             }
-            tracing::error!(%error, "WS fanout disabled: invalid REDIS_URL");
-            return;
-        }
-    };
-
-    // Publisher connection: auto-reconnecting manager handed to the WS layer.
-    match redis::aio::ConnectionManager::new(client.clone()).await {
-        Ok(manager) => {
-            crate::api::ws::install_fanout_publisher(manager);
-            tracing::info!("WS fanout publisher installed (Redis)");
         }
         Err(error) => {
-            if is_replicated {
-                panic!("WS fanout failed to connect publisher in replicated mode: {error}");
-            }
-            tracing::error!(%error, "WS fanout disabled: cannot connect publisher");
-            return;
-        }
-    }
-
-    let mut backoff_secs = 1u64;
-    loop {
-        if shutdown.is_draining() {
-            break;
-        }
-        match subscribe_loop(&client, &shutdown).await {
-            Ok(()) => break, // clean shutdown
-            Err(error) => {
-                tracing::warn!(%error, backoff_secs, "WS fanout subscription lost; reconnecting");
-                if !crate::lifecycle::sleep_or_shutdown(
-                    std::time::Duration::from_secs(backoff_secs),
-                    &shutdown,
-                )
-                .await
-                .should_continue()
-                {
-                    break;
-                }
-                backoff_secs = (backoff_secs * 2).min(30);
-            }
-        }
-    }
-
-    tracing::info!("WS fanout subscriber stopped");
-}
-
-async fn subscribe_loop(client: &redis::Client, shutdown: &ShutdownSignal) -> anyhow::Result<()> {
-    let mut pubsub = client.get_async_pubsub().await?;
-    pubsub.subscribe(CHANNEL).await?;
-    tracing::info!(channel = CHANNEL, "WS fanout subscribed");
-
-    use futures_util::StreamExt;
-    let mut stream = pubsub.on_message();
-    loop {
-        tokio::select! {
-            biased;
-            _ = shutdown.wait() => return Ok(()),
-            message = stream.next() => {
-                let Some(message) = message else {
-                    anyhow::bail!("fanout pubsub stream ended");
-                };
-                let raw: String = match message.get_payload() {
-                    Ok(raw) => raw,
-                    Err(error) => {
-                        tracing::warn!(%error, "WS fanout: undecodable payload");
-                        continue;
-                    }
-                };
-                match serde_json::from_str::<FanoutMessage>(&raw) {
-                    Ok(fanout) => {
-                        if let Some(campus_id) = fanout.campus_id {
-                            crate::api::ws::deliver_local_for_campus(
-                                &fanout.user_id,
-                                campus_id,
-                                &fanout.payload,
-                            );
-                        } else {
-                            crate::api::ws::deliver_local(&fanout.user_id, &fanout.payload);
-                        }
-                    }
-                    Err(error) => {
-                        tracing::warn!(%error, "WS fanout: malformed message");
-                    }
-                }
-            }
+            tracing::warn!(%error, "WS fanout: malformed message");
         }
     }
 }

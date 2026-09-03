@@ -52,7 +52,8 @@ fn build_state(pool: sqlx::PgPool, shutdown: ShutdownSignal) -> AppState {
             media_signer: None,
             shutdown,
             deployment_profile: goods4ncu::config::DeploymentProfile::Local,
-            redis_url: None,
+            #[cfg(feature = "redis")]
+            replicated_runtime: None,
         },
         agents: ApiAgents {
             llm_provider: Arc::new(
@@ -187,8 +188,7 @@ async fn replicated_readiness_probe_fails_fast_when_redis_unreachable() {
     with_test_pool(|pool| async move {
         let mut state = build_state(pool, ShutdownSignal::never());
         state.infra.deployment_profile = goods4ncu::config::DeploymentProfile::Replicated;
-        // Point to an unreachable port to verify fail-fast behavior
-        state.infra.redis_url = Some("redis://127.0.0.1:1/0".to_string());
+        // In replicated mode with uninitialized / unreachable redis runtime, probe fails fast
         let app = create_router(state, &[]);
 
         let (status, body) = get(app, "/api/readyz").await;

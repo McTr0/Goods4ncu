@@ -257,18 +257,6 @@ async fn main() -> Result<(), anyhow::Error> {
         shutdown.clone(),
     ));
 
-    // Multi-replica realtime: when REDIS_URL is configured, WS broadcasts
-    // route through Redis pub/sub so any replica can deliver to the sockets it
-    // Holds. Without it (or without the `redis` feature) delivery stays local.
-    #[cfg(feature = "redis")]
-    let ws_fanout_handle = config.redis_url.clone().map(|redis_url| {
-        tokio::spawn(services::ws_fanout::run(
-            redis_url,
-            shutdown.clone(),
-            config.deployment_profile == crate::config::DeploymentProfile::Replicated,
-        ))
-    });
-
     let token_denylist = services::token_denylist::TokenDenylist::new();
 
     // Private-bucket media: build the presigner when enabled and fully
@@ -316,6 +304,54 @@ async fn main() -> Result<(), anyhow::Error> {
         shutdown.clone(),
     ));
 
+    // Multi-replica topology is strictly governed by config.deployment_profile.
+    let (replicated_runtime, rate_limit_handle) = match config.deployment_profile {
+        crate::config::DeploymentProfile::Local => {
+            tracing::info!(
+                "Deployment profile: local. Using in-memory rate limiter and local WS delivery."
+            );
+            let factory = middleware::rate_limit::RateLimiterFactory::new(
+                config.rate_limit_max_requests,
+                config.rate_limit_window_secs,
+            );
+            (
+                None,
+                middleware::rate_limit::RateLimitStateHandle::new(factory.build_local()),
+            )
+        }
+        crate::config::DeploymentProfile::Replicated => {
+            tracing::info!(
+                "Deployment profile: replicated. Initializing bounded ReplicatedRuntime..."
+            );
+            #[cfg(feature = "redis")]
+            {
+                let redis_url = config
+                    .redis_url
+                    .as_deref()
+                    .expect("config validation requires redis_url");
+                let runtime = services::replicated_runtime::ReplicatedRuntime::start(
+                    redis_url,
+                    config.rate_limit_max_requests,
+                    config.rate_limit_window_secs,
+                    &shutdown,
+                    std::time::Duration::from_secs(5),
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    panic!("DEPLOYMENT_PROFILE=replicated failed fast during startup: {err}; refusing to boot");
+                });
+                let rate_limiter = runtime.rate_limiter();
+                (Some(runtime), rate_limiter)
+            }
+            #[cfg(not(feature = "redis"))]
+            {
+                panic!(
+                    "DEPLOYMENT_PROFILE=replicated requires binary compiled with --features redis"
+                );
+            }
+        }
+    };
+
     let app_state = api::AppState {
         secrets: api::ApiSecrets {
             jwt_secret: config.jwt_secret.clone(),
@@ -329,40 +365,7 @@ async fn main() -> Result<(), anyhow::Error> {
         },
         infra: api::ApiInfrastructure {
             db: db_pool.clone(),
-            rate_limit: {
-                let factory = middleware::rate_limit::RateLimiterFactory::new(
-                    config.rate_limit_max_requests,
-                    config.rate_limit_window_secs,
-                );
-                #[cfg(feature = "redis")]
-                let handle = if let Some(redis_url) = config.redis_url.as_deref() {
-                    match factory.build_redis(redis_url).await {
-                        Ok(limiter) => {
-                            tracing::info!("Distributed rate limiting enabled (Redis)");
-                            middleware::rate_limit::RateLimitStateHandle::new(limiter)
-                        }
-                        Err(error) => {
-                            if config.deployment_profile
-                                == crate::config::DeploymentProfile::Replicated
-                            {
-                                panic!("Deployment profile is replicated but Redis rate limiter failed: {error}; refusing to boot with silent degradation to local state");
-                            }
-                            tracing::error!(%error, "Redis rate limiter unavailable; using local limiter");
-                            middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
-                        }
-                    }
-                } else {
-                    middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
-                };
-                #[cfg(not(feature = "redis"))]
-                let handle = {
-                    if config.deployment_profile == crate::config::DeploymentProfile::Replicated {
-                        panic!("DEPLOYMENT_PROFILE=replicated requires the binary to be compiled with --features redis");
-                    }
-                    middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
-                };
-                handle
-            },
+            rate_limit: rate_limit_handle,
             notification,
             ws_connections: ws_state,
             metrics: Arc::clone(&metrics),
@@ -373,7 +376,8 @@ async fn main() -> Result<(), anyhow::Error> {
             media_signer: media_signer.clone(),
             shutdown: shutdown.clone(),
             deployment_profile: config.deployment_profile,
-            redis_url: config.redis_url.clone(),
+            #[cfg(feature = "redis")]
+            replicated_runtime,
         },
         agents: api::ApiAgents {
             llm_provider: Arc::clone(&llm_provider),
@@ -468,12 +472,6 @@ async fn main() -> Result<(), anyhow::Error> {
             intent_expiry_handle,
             embedding_worker_handle,
         );
-        #[cfg(feature = "redis")]
-        if let Some(handle) = ws_fanout_handle {
-            if let Err(e) = handle.await {
-                tracing::error!(worker = "ws_fanout", %e, "Worker task failed during shutdown");
-            }
-        }
         for (name, result) in [
             ("hitl_expire", workers.0),
             ("moderation_worker", workers.1),

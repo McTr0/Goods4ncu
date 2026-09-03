@@ -1248,7 +1248,8 @@ pub(crate) mod tests {
                 media_signer: None,
                 shutdown: crate::lifecycle::ShutdownSignal::never(),
                 deployment_profile: crate::config::DeploymentProfile::Local,
-                redis_url: None,
+                #[cfg(feature = "redis")]
+                replicated_runtime: None,
             },
             agents: ApiAgents {
                 llm_provider: Arc::new(

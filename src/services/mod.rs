@@ -29,6 +29,8 @@ pub mod order;
 pub mod outbox;
 pub mod post;
 pub mod price_discovery;
+#[cfg(feature = "redis")]
+pub mod replicated_runtime;
 pub mod reputation;
 pub mod shared_object_cleanup;
 pub mod social_persona;

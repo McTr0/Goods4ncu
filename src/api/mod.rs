@@ -312,7 +312,8 @@ pub struct ApiInfrastructure {
     /// correct behaviour for tests and any embedding without a supervisor.
     pub shutdown: crate::lifecycle::ShutdownSignal,
     pub deployment_profile: crate::config::DeploymentProfile,
-    pub redis_url: Option<String>,
+    #[cfg(feature = "redis")]
+    pub replicated_runtime: Option<Arc<crate::services::replicated_runtime::ReplicatedRuntime>>,
 }
 
 /// Serves approved media from a private bucket via presigned URLs.
@@ -1215,30 +1216,12 @@ async fn check_ready(state: &AppState) -> Result<(), ApiError> {
     if state.infra.deployment_profile == crate::config::DeploymentProfile::Replicated {
         #[cfg(feature = "redis")]
         {
-            let redis_url = state.infra.redis_url.as_deref().ok_or_else(|| {
-                tracing::error!("Readiness check failed: replicated profile missing redis_url");
-                ApiError::ServiceUnavailable("redis_unconfigured")
-            })?;
-            let client = redis::Client::open(redis_url).map_err(|e| {
-                tracing::error!(%e, "Readiness check failed: invalid redis URL");
-                ApiError::ServiceUnavailable("redis_unreachable")
-            })?;
-            let mut conn = client
-                .get_multiplexed_async_connection()
-                .await
-                .map_err(|e| {
-                    tracing::error!(%e, "Readiness check failed: redis connection failed");
-                    ApiError::ServiceUnavailable("redis_unreachable")
-                })?;
-            let pong: String = redis::cmd("PING")
-                .query_async(&mut conn)
-                .await
-                .map_err(|e| {
-                    tracing::error!(%e, "Readiness check failed: redis PING failed");
-                    ApiError::ServiceUnavailable("redis_unreachable")
-                })?;
-            if pong != "PONG" {
-                tracing::error!(pong = %pong, "Readiness check failed: unexpected redis PING reply");
+            if let Some(runtime) = &state.infra.replicated_runtime {
+                runtime.check_health().await?;
+            } else {
+                tracing::error!(
+                    "Readiness check failed: replicated profile missing replicated_runtime"
+                );
                 return Err(ApiError::ServiceUnavailable("redis_unreachable"));
             }
         }
