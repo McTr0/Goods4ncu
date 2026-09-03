@@ -48,34 +48,6 @@ class ApiService extends BaseService {
   // Conversations (legacy — prefer ChatService)
   // -----------------------------------------------------------------
 
-  /// Get conversations (legacy endpoint — prefer ChatService.getConnections).
-  /// GET /api/conversations
-  Future<List<dynamic>> getConversations() async {
-    final headers = await authHeaders();
-    final response = await get(
-      Uri.parse('$baseUrl/api/conversations'),
-      headers,
-    );
-    return handleResponse(response, (data) => data as List<dynamic>);
-  }
-
-  /// Get conversation messages (legacy — prefer ChatService.getChatConversationMessages).
-  /// GET /api/conversations/{conversationId}/messages
-  Future<Map<String, dynamic>> getConversationMessages(
-    String conversationId, {
-    int limit = 50,
-    int offset = 0,
-  }) async {
-    final headers = await authHeaders();
-    final response = await get(
-      Uri.parse(
-        '$baseUrl/api/conversations/$conversationId/messages?limit=$limit&offset=$offset',
-      ),
-      headers,
-    );
-    return handleResponse(response, (data) => data as Map<String, dynamic>);
-  }
-
   // -----------------------------------------------------------------
   // Backward-compatibility wrappers (delegate to ChatService)
   // -----------------------------------------------------------------

@@ -300,7 +300,6 @@ pub(crate) async fn handle_chat(
         .clone()
         .create_marketplace_agent(
             &state.infra.db,
-            state.infra.event_tx.clone(),
             Some(current_user_id.clone()),
             session.campus_id,
             proposal_idempotency_key.clone(),
@@ -653,7 +652,6 @@ async fn handle_chat_stream_request(
     let agent: Box<dyn MarketplaceAgent> = match std::sync::Arc::clone(&state.agents.llm_provider)
         .create_marketplace_agent(
             &state.infra.db,
-            state.infra.event_tx.clone(),
             Some(current_user_id.clone()),
             session.campus_id,
             proposal_idempotency_key,

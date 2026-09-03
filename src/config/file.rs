@@ -27,9 +27,6 @@ pub struct FileConfig {
     pub rate_limit: RateLimitConfig,
 
     #[serde(default)]
-    pub event_bus: EventBusConfig,
-
-    #[serde(default)]
     pub workers: WorkersConfig,
 
     #[serde(default)]
@@ -40,9 +37,6 @@ pub struct FileConfig {
 
     #[serde(default)]
     pub moderation: ModerationConfig,
-
-    #[serde(default)]
-    pub chat: ChatConfig,
 
     #[serde(default)]
     pub cors: CorsConfig,
@@ -107,13 +101,6 @@ pub struct RateLimitConfig {
     pub redis_url: Option<String>,
 }
 
-/// Event bus channel capacity. Defaults to 2048.
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct EventBusConfig {
-    #[serde(default)]
-    pub capacity: Option<usize>,
-}
-
 /// Background worker configuration.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct WorkersConfig {
@@ -158,16 +145,6 @@ pub struct MarketplaceConfig {
     /// Allowed listing categories.
     #[serde(default)]
     pub categories: Option<Vec<String>>,
-}
-
-/// Chat feature configuration.
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct ChatConfig {
-    /// Whether new Secret Chat sessions may be created. Secret Chat is
-    /// deprecated (it conflicts with server-side moderation duties); existing
-    /// sessions stay readable regardless of this flag. Defaults to false.
-    #[serde(default)]
-    pub secret_new_sessions_enabled: Option<bool>,
 }
 
 /// Content moderation configuration.

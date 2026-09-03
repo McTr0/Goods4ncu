@@ -55,9 +55,7 @@ async fn seed_verified_user(pool: &sqlx::PgPool) -> (String, String) {
 }
 
 fn build_state(pool: sqlx::PgPool) -> AppState {
-    let (service_manager, _rx) = goods4ncu::services::ServiceManager::new(pool.clone());
-    let admin_service = service_manager.admin.clone();
-    let event_tx = service_manager.event_tx.clone();
+    let admin_service = goods4ncu::services::admin::AdminService::new(pool.clone());
     AppState {
         secrets: ApiSecrets {
             jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),
@@ -71,7 +69,6 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
         },
         infra: ApiInfrastructure {
             db: pool.clone(),
-            event_tx,
             rate_limit: {
                 let factory =
                     goods4ncu::middleware::rate_limit::RateLimiterFactory::new(10_000, 60);
@@ -84,7 +81,6 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
             admin_service,
             moderation: goods4ncu::services::moderation::ModerationService::new_for_test(false),
             token_denylist: goods4ncu::services::token_denylist::TokenDenylist::new(),
-            secret_chat_new_sessions_enabled: false,
             media_signer: None,
             shutdown: goods4ncu::lifecycle::ShutdownSignal::never(),
         },
@@ -103,7 +99,6 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
         },
         listing_repo: goods4ncu::repositories::PostgresListingRepository::new(pool.clone()),
         user_repo: goods4ncu::repositories::PostgresUserRepository::new(pool.clone()),
-        chat_repo: goods4ncu::repositories::PostgresChatRepository::new(pool.clone()),
         auth_repo: goods4ncu::repositories::PostgresAuthRepository::new(pool.clone()),
         order_repo: goods4ncu::repositories::PostgresOrderRepository::new(pool),
     }

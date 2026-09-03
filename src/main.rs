@@ -142,13 +142,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let shutdown_controller = lifecycle::ShutdownController::new();
     let shutdown = shutdown_controller.signal();
 
-    let (services, event_rx) = services::ServiceManager::new(db_pool.clone());
-    let event_tx = services.event_tx.clone();
-    let admin_service = services.admin.clone();
-
-    let event_loop_handle = tokio::spawn(async move {
-        services.run_event_loop(event_rx).await;
-    });
+    let admin_service = services::admin::AdminService::new(db_pool.clone());
 
     // WebSocket global state — shared across all connections.
     let ws_state = api::ws::new_ws_state();
@@ -214,13 +208,6 @@ async fn main() -> Result<(), anyhow::Error> {
 
     // HITL expiration worker: scans every 10 min for pending requests > 48h old.
     let hitl_expire_handle = tokio::spawn(services::hitl_expire::run(
-        db_pool.clone(),
-        Arc::clone(&broadcast),
-        shutdown.clone(),
-    ));
-
-    // Order lifecycle worker is a no-op in offline deal mode.
-    let order_worker_handle = tokio::spawn(services::order_worker::run(
         db_pool.clone(),
         Arc::clone(&broadcast),
         shutdown.clone(),
@@ -339,7 +326,6 @@ async fn main() -> Result<(), anyhow::Error> {
         },
         infra: api::ApiInfrastructure {
             db: db_pool.clone(),
-            event_tx: event_tx.clone(),
             rate_limit: {
                 let factory = middleware::rate_limit::RateLimiterFactory::new(
                     config.rate_limit_max_requests,
@@ -375,7 +361,6 @@ async fn main() -> Result<(), anyhow::Error> {
             admin_service,
             moderation: services::moderation::ModerationService::new(&config),
             token_denylist: token_denylist.clone(),
-            secret_chat_new_sessions_enabled: config.secret_chat_new_sessions_enabled,
             media_signer: media_signer.clone(),
             shutdown: shutdown.clone(),
         },
@@ -391,7 +376,6 @@ async fn main() -> Result<(), anyhow::Error> {
         },
         listing_repo: repositories::PostgresListingRepository::new(db_pool.clone()),
         user_repo: repositories::PostgresUserRepository::new(db_pool.clone()),
-        chat_repo: repositories::PostgresChatRepository::new(db_pool.clone()),
         auth_repo: repositories::PostgresAuthRepository::new(db_pool.clone()),
         order_repo: repositories::PostgresOrderRepository::new(db_pool.clone()),
     };
@@ -463,7 +447,6 @@ async fn main() -> Result<(), anyhow::Error> {
         // off mid-transaction.
         let workers = tokio::join!(
             hitl_expire_handle,
-            order_worker_handle,
             moderation_worker_handle,
             shared_object_cleanup_handle,
             token_cleanup_handle,
@@ -483,17 +466,16 @@ async fn main() -> Result<(), anyhow::Error> {
         }
         for (name, result) in [
             ("hitl_expire", workers.0),
-            ("order_worker", workers.1),
-            ("moderation_worker", workers.2),
-            ("shared_object_cleanup", workers.3),
-            ("token_cleanup", workers.4),
-            ("chat_expiry", workers.5),
-            ("agent_run_reconciler", workers.6),
-            ("denylist_cleanup", workers.7),
-            ("outbox", workers.8),
-            ("undo_prune", workers.9),
-            ("intent_expiry", workers.10),
-            ("embedding_worker", workers.11),
+            ("moderation_worker", workers.1),
+            ("shared_object_cleanup", workers.2),
+            ("token_cleanup", workers.3),
+            ("chat_expiry", workers.4),
+            ("agent_run_reconciler", workers.5),
+            ("denylist_cleanup", workers.6),
+            ("outbox", workers.7),
+            ("undo_prune", workers.8),
+            ("intent_expiry", workers.9),
+            ("embedding_worker", workers.10),
         ] {
             if let Err(e) = result {
                 tracing::error!(worker = name, %e, "Worker task failed during shutdown");
@@ -510,10 +492,6 @@ async fn main() -> Result<(), anyhow::Error> {
             "Graceful shutdown timed out; abandoning remaining work"
         );
     }
-
-    // The event loop drains last: workers and handlers can still emit events
-    // while they finish, and aborting it earlier would silently drop them.
-    event_loop_handle.abort();
 
     // Close the pool so Postgres reclaims connections promptly instead of
     // waiting for TCP timeouts, which otherwise slow the next deploy's

@@ -880,53 +880,10 @@ mod tests {
     use super::*;
 
     fn make_config(keywords: Vec<String>) -> AppConfig {
-        // Build a minimal AppConfig for testing.
-        // We only need blocked_keywords and image fields.
-        AppConfig {
-            blocked_keywords: keywords,
-            gemini_api_key: String::new(),
-            llm_api_key: None,
-            jwt_secret: "test-jwt-secret-that-is-at-least-32-chars".to_string(),
-            jwt_secret_old: None,
-            database_url: String::new(),
-            llm_provider: "gemini".to_string(),
-            llm_model: "gemini-3-flash-preview".to_string(),
-            llm_base_url: None,
-            agent_enabled: true,
-            llm_api_style: crate::agents::runtime::api_drivers::ApiStyle::ChatCompletions,
-            vector_dim: 768,
-            cors_origins: vec![],
-            oss_endpoint: String::new(),
-            oss_bucket: String::new(),
-            oss_role_arn: None,
-            oss_access_key_id: None,
-            oss_access_key_secret: None,
-            redis_url: None,
-            rate_limit_max_requests: 100,
-            rate_limit_window_secs: 60,
-            server_host: "127.0.0.1".to_string(),
-            server_port: 3000,
-            shutdown_drain_secs: 5,
-            shutdown_timeout_secs: 25,
-            event_bus_capacity: 2048,
-            hitl_expire_scan_interval_secs: 600,
-            hitl_expire_timeout_hours: 48,
-            moka_cache_max_capacity: 100_000,
-            access_token_ttl_secs: 86400,
-            refresh_token_ttl_secs: 604800,
-            conversation_history_limit: 10,
-            max_keyword_len: 200,
-            price_tolerance: 0.5,
-            categories: vec![],
-            moderation_image_enabled: true,
-            moderation_image_api_url: None,
-            moderation_image_api_key: None,
-            secret_chat_new_sessions_enabled: false,
-            media_private_bucket: false,
-            media_url_ttl_secs: 600,
-            media_path_style: true,
-            media_region: "us-east-1".to_string(),
-        }
+        let mut config = AppConfig::test_defaults();
+        config.blocked_keywords = keywords;
+        config.moderation_image_enabled = true;
+        config
     }
 
     #[test]

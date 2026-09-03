@@ -332,26 +332,6 @@ fn confirm_request_hash(order_id: &str, auto_delist: bool) -> String {
     hex::encode(Sha256::digest(canonical.to_string().as_bytes()))
 }
 
-pub async fn pay_order(
-    State(_state): State<AppState>,
-    _headers: HeaderMap,
-    Path(_order_id): Path<String>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::BadRequest(
-        "平台不负责资金中转，请在线下自行确认付款方式".to_string(),
-    ))
-}
-
-pub async fn ship_order(
-    State(_state): State<AppState>,
-    _headers: HeaderMap,
-    Path(_order_id): Path<String>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    Err(ApiError::BadRequest(
-        "平台不跟踪物流发货，请双方在线下约定交接方式".to_string(),
-    ))
-}
-
 pub async fn confirm_order(
     State(state): State<AppState>,
     headers: HeaderMap,

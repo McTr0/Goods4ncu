@@ -111,45 +111,6 @@ pub struct CallView {
     pub created_at: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct CreateSecretSessionBody {
-    pub recipient_id: String,
-    pub initiator_key_fingerprint: String,
-    pub recipient_key_fingerprint: String,
-    pub expires_at: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SecretSessionView {
-    pub id: String,
-    pub initiator_id: String,
-    pub recipient_id: String,
-    pub status: String,
-    pub expires_at: Option<String>,
-    pub created_at: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SendSecretMessageBody {
-    pub client_message_id: Uuid,
-    pub ciphertext: String,
-    pub nonce: String,
-    pub key_fingerprint: String,
-    pub expires_at: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SecretMessageView {
-    pub id: i64,
-    pub session_id: String,
-    pub sender_id: String,
-    pub ciphertext: String,
-    pub nonce: String,
-    pub key_fingerprint: String,
-    pub expires_at: Option<String>,
-    pub created_at: String,
-}
-
 pub async fn create_space(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -511,102 +472,6 @@ pub async fn end_call(
     Ok(Json(view))
 }
 
-pub async fn create_secret_session(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(body): Json<CreateSecretSessionBody>,
-) -> Result<Json<SecretSessionView>, ApiError> {
-    // Secret Chat conflicts with the platform's server-side moderation duties
-    // and is deprecated. Creation is refused unless a deployment explicitly
-    // opts in for a migration window; history endpoints stay available so
-    // existing sessions remain readable.
-    if !state.infra.secret_chat_new_sessions_enabled {
-        return Err(ApiError::Forbidden);
-    }
-    let session = authenticated_session(&state, &headers)?;
-    let user_id = session.user_id;
-    if user_id == body.recipient_id {
-        return Err(ApiError::BadRequest("不能和自己创建加密聊天".to_string()));
-    }
-    let tenant = crate::services::campus::CampusService::new(state.infra.db.clone())
-        .require_shared_verified_campus_for_session(&user_id, &body.recipient_id, session.campus_id)
-        .await?;
-    let row = sqlx::query(
-        "INSERT INTO chat_secret_sessions (
-            campus_id, initiator_id, recipient_id, initiator_key_fingerprint,
-            recipient_key_fingerprint, expires_at
-         )
-         VALUES ($1, $2, $3, $4, $5, $6::TIMESTAMPTZ)
-         RETURNING id, initiator_id, recipient_id, status, expires_at, created_at",
-    )
-    .bind(tenant.campus_id)
-    .bind(&user_id)
-    .bind(&body.recipient_id)
-    .bind(&body.initiator_key_fingerprint)
-    .bind(&body.recipient_key_fingerprint)
-    .bind(body.expires_at.as_deref())
-    .fetch_one(&state.infra.db)
-    .await
-    .map_err(db_error)?;
-    Ok(Json(row_to_secret_session(row)))
-}
-
-pub async fn send_secret_message(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(session_id): Path<Uuid>,
-    Json(body): Json<SendSecretMessageBody>,
-) -> Result<Json<SecretMessageView>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
-    ensure_secret_member(&state, session_id, &user_id).await?;
-    let row = sqlx::query(
-        "INSERT INTO chat_secret_messages (
-            session_id, sender_id, client_message_id, ciphertext, nonce,
-            key_fingerprint, expires_at
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7::TIMESTAMPTZ)
-         ON CONFLICT (session_id, sender_id, client_message_id)
-         DO UPDATE SET ciphertext = chat_secret_messages.ciphertext
-         RETURNING id, session_id, sender_id, ciphertext, nonce, key_fingerprint, expires_at, created_at",
-    )
-    .bind(session_id)
-    .bind(&user_id)
-    .bind(body.client_message_id)
-    .bind(&body.ciphertext)
-    .bind(&body.nonce)
-    .bind(&body.key_fingerprint)
-    .bind(body.expires_at.as_deref())
-    .fetch_one(&state.infra.db)
-    .await
-    .map_err(db_error)?;
-    Ok(Json(row_to_secret_message(row)))
-}
-
-pub async fn list_secret_messages(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(session_id): Path<Uuid>,
-    Query(query): Query<MessagePageQuery>,
-) -> Result<Json<Vec<SecretMessageView>>, ApiError> {
-    let user_id = authenticated_user(&state, &headers)?;
-    ensure_secret_member(&state, session_id, &user_id).await?;
-    let rows = sqlx::query(
-        "SELECT id, session_id, sender_id, ciphertext, nonce, key_fingerprint, expires_at, created_at
-         FROM chat_secret_messages
-         WHERE session_id = $1
-           AND (expires_at IS NULL OR expires_at > NOW())
-         ORDER BY created_at DESC, id DESC
-         LIMIT $2 OFFSET $3",
-    )
-    .bind(session_id)
-    .bind(query.limit.unwrap_or(50).clamp(1, 100))
-    .bind(query.offset.unwrap_or(0).max(0))
-    .fetch_all(&state.infra.db)
-    .await
-    .map_err(db_error)?;
-    Ok(Json(rows.into_iter().map(row_to_secret_message).collect()))
-}
-
 fn normalize_space_kind(kind: &str) -> Result<&str, ApiError> {
     match kind.trim() {
         "group" => Ok("group"),
@@ -829,32 +694,6 @@ async fn load_active_realtime_conversation(
     }
 }
 
-async fn ensure_secret_member(
-    state: &AppState,
-    session_id: Uuid,
-    user_id: &str,
-) -> Result<(), ApiError> {
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(
-            SELECT 1 FROM chat_secret_sessions
-            WHERE id = $1
-              AND status = 'active'
-              AND (expires_at IS NULL OR expires_at > NOW())
-              AND (initiator_id = $2 OR recipient_id = $2)
-         )",
-    )
-    .bind(session_id)
-    .bind(user_id)
-    .fetch_one(&state.infra.db)
-    .await
-    .map_err(db_error)?;
-    if exists {
-        Ok(())
-    } else {
-        Err(ApiError::Forbidden)
-    }
-}
-
 fn row_to_space_message(row: sqlx::postgres::PgRow) -> SpaceMessageView {
     SpaceMessageView {
         id: row.get("id"),
@@ -879,38 +718,6 @@ fn row_to_call(row: sqlx::postgres::PgRow) -> CallView {
         state: row.get("state"),
         offer_sdp: row.get("offer_sdp"),
         answer_sdp: row.get("answer_sdp"),
-        created_at: row
-            .get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-            .to_rfc3339(),
-    }
-}
-
-fn row_to_secret_session(row: sqlx::postgres::PgRow) -> SecretSessionView {
-    SecretSessionView {
-        id: row.get::<Uuid, _>("id").to_string(),
-        initiator_id: row.get("initiator_id"),
-        recipient_id: row.get("recipient_id"),
-        status: row.get("status"),
-        expires_at: row
-            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("expires_at")
-            .map(|value| value.to_rfc3339()),
-        created_at: row
-            .get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-            .to_rfc3339(),
-    }
-}
-
-fn row_to_secret_message(row: sqlx::postgres::PgRow) -> SecretMessageView {
-    SecretMessageView {
-        id: row.get("id"),
-        session_id: row.get::<Uuid, _>("session_id").to_string(),
-        sender_id: row.get("sender_id"),
-        ciphertext: row.get("ciphertext"),
-        nonce: row.get("nonce"),
-        key_fingerprint: row.get("key_fingerprint"),
-        expires_at: row
-            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("expires_at")
-            .map(|value| value.to_rfc3339()),
         created_at: row
             .get::<chrono::DateTime<chrono::Utc>, _>("created_at")
             .to_rfc3339(),

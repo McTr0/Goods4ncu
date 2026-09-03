@@ -1,7 +1,6 @@
 pub mod gemini;
 pub mod openai_compatible;
 
-use crate::services::BusinessEvent;
 use async_trait::async_trait;
 use futures::Stream;
 use rig::completion::Message;
@@ -9,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
 
 /// Shared reqwest client for all LLM provider traffic.
 ///
@@ -338,7 +336,6 @@ pub trait LlmProvider: Send + Sync {
     async fn create_marketplace_agent(
         self: Arc<Self>,
         db_pool: &sqlx::PgPool,
-        event_tx: mpsc::Sender<BusinessEvent>,
         current_user_id: Option<String>,
         current_campus_id: Option<uuid::Uuid>,
         proposal_idempotency_key: Option<String>,

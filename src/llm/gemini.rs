@@ -5,7 +5,6 @@ use super::{
 };
 use crate::agents::models::Document;
 use crate::agents::tools::ToolContext;
-use crate::services::BusinessEvent;
 use async_trait::async_trait;
 use futures::Stream;
 use futures::StreamExt;
@@ -18,7 +17,6 @@ use rig::streaming::{StreamedAssistantContent, StreamingCompletion};
 use sqlx::PgPool;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 
 pub struct GeminiProvider {
     client: gemini::Client,
@@ -102,7 +100,6 @@ impl super::LlmProvider for GeminiProvider {
     async fn create_marketplace_agent(
         self: Arc<Self>,
         db_pool: &PgPool,
-        _event_tx: mpsc::Sender<BusinessEvent>,
         current_user_id: Option<String>,
         current_campus_id: Option<uuid::Uuid>,
         proposal_idempotency_key: Option<String>,

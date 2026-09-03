@@ -53,30 +53,6 @@ class OrderService extends BaseService {
     return handleResponse(response, (data) => data as Map<String, dynamic>);
   }
 
-  /// Legacy endpoint: platform no longer intermediates payment.
-  /// POST /api/orders/{id}/pay
-  Future<void> payOrder(String orderId) async {
-    final headers = await authHeaders();
-    final response = await post(
-      Uri.parse('$baseUrl/api/orders/$orderId/pay'),
-      headers,
-      '{}',
-    );
-    handleResponse(response, (_) {});
-  }
-
-  /// Legacy endpoint: platform no longer tracks logistics.
-  /// POST /api/orders/{id}/ship
-  Future<void> shipOrder(String orderId) async {
-    final headers = await authHeaders();
-    final response = await post(
-      Uri.parse('$baseUrl/api/orders/$orderId/ship'),
-      headers,
-      '{}',
-    );
-    handleResponse(response, (_) {});
-  }
-
   /// Seller confirms the offline deal.
   /// POST /api/orders/{id}/confirm
   Future<void> confirmOrder(

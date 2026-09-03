@@ -128,7 +128,6 @@ pub struct AppConfig {
     pub server_port: u16,
     pub shutdown_drain_secs: u64,
     pub shutdown_timeout_secs: u64,
-    pub event_bus_capacity: usize,
     pub hitl_expire_scan_interval_secs: u64,
     pub hitl_expire_timeout_hours: u64,
     pub moka_cache_max_capacity: u64,
@@ -143,8 +142,6 @@ pub struct AppConfig {
     pub moderation_image_enabled: bool,
     pub moderation_image_api_url: Option<String>,
     pub moderation_image_api_key: Option<String>,
-    // Chat features
-    pub secret_chat_new_sessions_enabled: bool,
     // Media serving: when the bucket is private, approved media is served via
     // short-lived presigned URLs instead of raw bucket links.
     pub media_private_bucket: bool,
@@ -194,7 +191,6 @@ impl fmt::Debug for AppConfig {
             .field("server_port", &self.server_port)
             .field("shutdown_drain_secs", &self.shutdown_drain_secs)
             .field("shutdown_timeout_secs", &self.shutdown_timeout_secs)
-            .field("event_bus_capacity", &self.event_bus_capacity)
             .field(
                 "hitl_expire_scan_interval_secs",
                 &self.hitl_expire_scan_interval_secs,
@@ -217,10 +213,6 @@ impl fmt::Debug for AppConfig {
             .field(
                 "moderation_image_api_key",
                 &self.moderation_image_api_key.as_ref().map(|_| "[REDACTED]"),
-            )
-            .field(
-                "secret_chat_new_sessions_enabled",
-                &self.secret_chat_new_sessions_enabled,
             )
             .field("media_private_bucket", &self.media_private_bucket)
             .finish()
@@ -437,11 +429,6 @@ impl AppConfig {
                     .unwrap_or(25)
             };
 
-        let event_bus_capacity = file
-            .as_ref()
-            .and_then(|f| f.event_bus.capacity)
-            .unwrap_or(2048);
-
         let hitl_expire_scan_interval_secs = file
             .as_ref()
             .and_then(|f| f.workers.hitl_expire.scan_interval_secs)
@@ -535,14 +522,6 @@ impl AppConfig {
         )
         .unwrap_or_else(|message| panic!("{message}"));
 
-        // Secret Chat is deprecated: default OFF, opt-in only during the
-        // migration window. env > file > default like the other flags.
-        let secret_chat_new_sessions_enabled =
-            read_non_empty_env("SECRET_CHAT_NEW_SESSIONS_ENABLED")
-                .and_then(|v| v.parse::<bool>().ok())
-                .or_else(|| file.as_ref()?.chat.secret_new_sessions_enabled)
-                .unwrap_or(false);
-
         Arc::new(Self {
             gemini_api_key: gemini_api_key.unwrap_or_default(),
             llm_api_key,
@@ -572,7 +551,6 @@ impl AppConfig {
             server_port,
             shutdown_drain_secs,
             shutdown_timeout_secs,
-            event_bus_capacity,
             hitl_expire_scan_interval_secs,
             hitl_expire_timeout_hours,
             moka_cache_max_capacity,
@@ -585,7 +563,6 @@ impl AppConfig {
             moderation_image_enabled,
             moderation_image_api_url,
             moderation_image_api_key,
-            secret_chat_new_sessions_enabled,
             media_private_bucket,
             media_url_ttl_secs,
             media_path_style,
@@ -624,7 +601,6 @@ impl AppConfig {
             server_port: 3000,
             shutdown_drain_secs: 5,
             shutdown_timeout_secs: 25,
-            event_bus_capacity: 2048,
             hitl_expire_scan_interval_secs: 600,
             hitl_expire_timeout_hours: 48,
             moka_cache_max_capacity: 100_000,
@@ -641,7 +617,6 @@ impl AppConfig {
             moderation_image_enabled: false,
             moderation_image_api_url: None,
             moderation_image_api_key: None,
-            secret_chat_new_sessions_enabled: false,
             media_private_bucket: false,
             media_url_ttl_secs: 600,
             media_path_style: true,
@@ -828,7 +803,6 @@ mod tests {
             server_port: 3000,
             shutdown_drain_secs: 5,
             shutdown_timeout_secs: 25,
-            event_bus_capacity: 2048,
             hitl_expire_scan_interval_secs: 600,
             hitl_expire_timeout_hours: 48,
             moka_cache_max_capacity: 100_000,
@@ -845,7 +819,6 @@ mod tests {
             moderation_image_enabled: true,
             moderation_image_api_url: None,
             moderation_image_api_key: Some("test-api-key".to_string()),
-            secret_chat_new_sessions_enabled: false,
             media_private_bucket: false,
             media_url_ttl_secs: 600,
             media_path_style: true,

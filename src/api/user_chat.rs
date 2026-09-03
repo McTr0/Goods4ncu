@@ -34,9 +34,8 @@ pub use shared_object::{
     revoke_shared_object,
 };
 pub use telegram::{
-    add_space_member, answer_call, create_call, create_secret_session, create_space, end_call,
-    get_space, list_secret_messages, list_space_messages, list_spaces, remove_space_member,
-    send_secret_message, send_space_message,
+    add_space_member, answer_call, create_call, create_space, end_call, get_space,
+    list_space_messages, list_spaces, remove_space_member, send_space_message,
 };
 
 pub(crate) use connection::{

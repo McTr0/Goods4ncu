@@ -8,8 +8,8 @@ use goods4ncu::agents::router::IntentRouter;
 use goods4ncu::api::auth::{generate_access_token, generate_access_token_for_campus};
 use goods4ncu::api::{create_router, ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
 use goods4ncu::repositories::{
-    CreateListingInput, PostgresAuthRepository, PostgresChatRepository, PostgresListingRepository,
-    PostgresOrderRepository, PostgresUserRepository,
+    CreateListingInput, PostgresAuthRepository, PostgresListingRepository, PostgresOrderRepository,
+    PostgresUserRepository,
 };
 use goods4ncu::services::intent::slots::{PriceSlot, Slots};
 use goods4ncu::services::intent::{kinds, status, IntentService, NewIntent};
@@ -321,9 +321,9 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
 }
 
 fn build_state_with_image_moderation(pool: sqlx::PgPool, image_enabled: bool) -> AppState {
-    let (service_manager, _rx) = services::ServiceManager::new(pool.clone());
-    let admin_service = service_manager.admin.clone();
-    let event_tx = service_manager.event_tx.clone();
+    let admin_service = services::admin::AdminService::new(pool.clone());
+    let mut config = goods4ncu::config::AppConfig::test_defaults();
+    config.moderation_image_enabled = image_enabled;
 
     AppState {
         secrets: ApiSecrets {
@@ -338,7 +338,6 @@ fn build_state_with_image_moderation(pool: sqlx::PgPool, image_enabled: bool) ->
         },
         infra: ApiInfrastructure {
             db: pool.clone(),
-            event_tx,
             rate_limit: {
                 let factory = goods4ncu::middleware::rate_limit::RateLimiterFactory::new(100, 60);
                 goods4ncu::middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
@@ -348,56 +347,8 @@ fn build_state_with_image_moderation(pool: sqlx::PgPool, image_enabled: bool) ->
             metrics: Arc::new(goods4ncu::api::metrics::MetricsService::new()),
             order_service: services::order::OrderService::new(pool.clone()),
             admin_service,
-            moderation: services::moderation::ModerationService::new(
-                &goods4ncu::config::AppConfig {
-                    gemini_api_key: "test-gemini-key".to_string(),
-                    llm_api_key: None,
-                    jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),
-                    jwt_secret_old: None,
-                    database_url: "postgres://test/test".to_string(),
-                    oss_access_key_id: None,
-                    oss_access_key_secret: None,
-                    llm_provider: "gemini".to_string(),
-                    llm_model: "gemini-3-flash-preview".to_string(),
-                    llm_base_url: None,
-                    agent_enabled: true,
-                    llm_api_style:
-                        goods4ncu::agents::runtime::api_drivers::ApiStyle::ChatCompletions,
-                    vector_dim: 768,
-                    cors_origins: vec![],
-                    oss_endpoint: "https://oss-cn-beijing.aliyuncs.com".to_string(),
-                    oss_bucket: "test-bucket".to_string(),
-                    oss_role_arn: None,
-                    redis_url: None,
-                    rate_limit_max_requests: 100,
-                    rate_limit_window_secs: 60,
-                    server_host: "127.0.0.1".to_string(),
-                    server_port: 3000,
-                    shutdown_drain_secs: 5,
-                    shutdown_timeout_secs: 25,
-                    event_bus_capacity: 2048,
-                    hitl_expire_scan_interval_secs: 600,
-                    hitl_expire_timeout_hours: 48,
-                    moka_cache_max_capacity: 100_000,
-                    access_token_ttl_secs: 86_400,
-                    refresh_token_ttl_secs: 604_800,
-                    conversation_history_limit: 10,
-                    max_keyword_len: 200,
-                    price_tolerance: 0.5,
-                    categories: vec!["other".to_string()],
-                    blocked_keywords: vec![],
-                    moderation_image_enabled: image_enabled,
-                    moderation_image_api_url: None,
-                    moderation_image_api_key: None,
-                    secret_chat_new_sessions_enabled: false,
-                    media_private_bucket: false,
-                    media_url_ttl_secs: 600,
-                    media_path_style: true,
-                    media_region: "us-east-1".to_string(),
-                },
-            ),
+            moderation: services::moderation::ModerationService::new(&config),
             token_denylist: services::token_denylist::TokenDenylist::new(),
-            secret_chat_new_sessions_enabled: false,
             media_signer: None,
             shutdown: goods4ncu::lifecycle::ShutdownSignal::never(),
         },
@@ -416,7 +367,6 @@ fn build_state_with_image_moderation(pool: sqlx::PgPool, image_enabled: bool) ->
         },
         listing_repo: PostgresListingRepository::new(pool.clone()),
         user_repo: PostgresUserRepository::new(pool.clone()),
-        chat_repo: PostgresChatRepository::new(pool.clone()),
         auth_repo: PostgresAuthRepository::new(pool.clone()),
         order_repo: PostgresOrderRepository::new(pool),
     }
@@ -1015,122 +965,6 @@ async fn upload_token_requires_verified_campus_membership() {
             StatusCode::FORBIDDEN,
             "a verified member must pass the campus gate"
         );
-    })
-    .await;
-}
-
-/// Secret Chat is deprecated: new sessions are refused unless a deployment
-/// explicitly opts in, while message history on existing sessions stays
-/// readable so nothing a user already wrote becomes inaccessible.
-#[tokio::test]
-async fn secret_chat_creation_is_disabled_by_default_but_history_stays_readable() {
-    with_test_pool(|pool| async move {
-        let password_hash = hash_password("Test1234");
-        let alice_id = Uuid::new_v4().to_string();
-        let bob_id = Uuid::new_v4().to_string();
-        insert_user(
-            &pool,
-            &alice_id,
-            &format!("secret_alice_{}", Uuid::new_v4()),
-            &password_hash,
-            "user",
-            "active",
-        )
-        .await;
-        insert_user(
-            &pool,
-            &bob_id,
-            &format!("secret_bob_{}", Uuid::new_v4()),
-            &password_hash,
-            "user",
-            "active",
-        )
-        .await;
-
-        // A pre-existing session, as left behind by a deployment that had the
-        // feature enabled.
-        let session_id: Uuid = sqlx::query_scalar(
-            "INSERT INTO chat_secret_sessions (
-                campus_id, initiator_id, recipient_id,
-                initiator_key_fingerprint, recipient_key_fingerprint
-             )
-             SELECT id, $1, $2, 'fp-alice', 'fp-bob' FROM campuses WHERE slug = 'ncu'
-             RETURNING id",
-        )
-        .bind(&alice_id)
-        .bind(&bob_id)
-        .fetch_one(&pool)
-        .await
-        .expect("seed legacy secret session");
-
-        let (token, _, _) = generate_access_token(
-            &alice_id,
-            "user",
-            "test_jwt_secret_at_least_32_characters_long",
-            3600,
-        )
-        .expect("token");
-        let create_body = json!({
-            "recipient_id": bob_id,
-            "initiator_key_fingerprint": "fp-alice-2",
-            "recipient_key_fingerprint": "fp-bob-2",
-        });
-
-        // Default configuration: creation is refused even for a verified member.
-        let app = create_router(build_state(pool.clone()), &[]);
-        let denied = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/chat/secret-sessions")
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", bearer(&token))
-                    .body(Body::from(create_body.to_string()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            denied.status(),
-            StatusCode::FORBIDDEN,
-            "deprecated secret chat must not accept new sessions by default"
-        );
-
-        // History on the legacy session must remain readable.
-        let history = app
-            .oneshot(
-                Request::builder()
-                    .uri(format!("/api/chat/secret-sessions/{}/messages", session_id))
-                    .header("Authorization", bearer(&token))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            history.status(),
-            StatusCode::OK,
-            "existing sessions must stay readable after deprecation"
-        );
-
-        // Explicit opt-in (migration window) restores creation.
-        let mut opted_in_state = build_state(pool.clone());
-        opted_in_state.infra.secret_chat_new_sessions_enabled = true;
-        let opted_in = create_router(opted_in_state, &[]);
-        let created = opted_in
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/chat/secret-sessions")
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", bearer(&token))
-                    .body(Body::from(create_body.to_string()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(created.status(), StatusCode::OK);
     })
     .await;
 }

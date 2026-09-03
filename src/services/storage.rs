@@ -122,6 +122,7 @@ impl PrivateBucket {
     /// The caller must obtain the object key from a server-owned row.  The
     /// signature is intentionally scoped to one exact key; the completion
     /// endpoint still probes the resulting object and validates its bytes.
+    #[allow(dead_code)]
     pub fn presigned_put(&self, object_key: &str, expires_in_secs: u32) -> String {
         self.presigned_request_at("PUT", object_key, expires_in_secs, chrono::Utc::now())
     }

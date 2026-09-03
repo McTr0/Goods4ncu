@@ -6,7 +6,6 @@ use super::{
 use crate::agents::models::Document;
 use crate::agents::runtime::api_drivers::ApiStyle;
 use crate::agents::tools::ToolContext;
-use crate::services::BusinessEvent;
 use async_trait::async_trait;
 use futures::StreamExt;
 use rig::agent::Agent;
@@ -19,7 +18,6 @@ use rig::streaming::{StreamedAssistantContent, StreamingCompletion};
 use sqlx::PgPool;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 
 fn stream_single_model_step<M>(
     agent: Agent<M>,
@@ -233,7 +231,6 @@ impl super::LlmProvider for OpenAiCompatibleProvider {
     async fn create_marketplace_agent(
         self: Arc<Self>,
         db_pool: &PgPool,
-        _event_tx: mpsc::Sender<BusinessEvent>,
         current_user_id: Option<String>,
         current_campus_id: Option<uuid::Uuid>,
         proposal_idempotency_key: Option<String>,

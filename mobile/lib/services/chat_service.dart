@@ -861,28 +861,6 @@ class ChatService extends BaseService {
     return handleResponse(response, (data) => data as Map<String, dynamic>);
   }
 
-  Future<Map<String, dynamic>> sendSecretMessage(
-    String sessionId, {
-    required String ciphertext,
-    required String nonce,
-    required String keyFingerprint,
-    String? expiresAt,
-  }) async {
-    final headers = await authHeaders();
-    final response = await post(
-      Uri.parse('$baseUrl/api/chat/secret-sessions/$sessionId/messages'),
-      headers,
-      jsonEncode({
-        'client_message_id': _uuid.v4(),
-        'ciphertext': ciphertext,
-        'nonce': nonce,
-        'key_fingerprint': keyFingerprint,
-        'expires_at': ?expiresAt,
-      }),
-    );
-    return handleResponse(response, (data) => data as Map<String, dynamic>);
-  }
-
   Future<List<ConversationMessage>> getChatConversationMessages(
     String conversationId, {
     int limit = 50,

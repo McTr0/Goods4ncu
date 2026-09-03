@@ -4,7 +4,6 @@ use crate::llm::LlmProvider;
 use crate::services::moderation::ModerationService;
 use crate::services::notification::NotificationService;
 use crate::services::order;
-use crate::services::BusinessEvent;
 use axum::{
     extract::State,
     middleware,
@@ -24,7 +23,6 @@ pub mod campuses;
 pub mod chat;
 pub mod companion;
 pub mod content_reports;
-pub mod conversations;
 pub mod error;
 pub mod feed;
 pub mod intents;
@@ -56,7 +54,6 @@ use sqlx::PgPool;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::LazyLock;
-use tokio::sync::mpsc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::services::ServeDir;
@@ -324,7 +321,6 @@ pub struct ApiSecrets {
 #[derive(Clone)]
 pub struct ApiInfrastructure {
     pub db: PgPool,
-    pub event_tx: mpsc::Sender<BusinessEvent>,
     pub rate_limit: RateLimitStateHandle,
     pub notification: NotificationService,
     #[allow(dead_code)]
@@ -334,9 +330,6 @@ pub struct ApiInfrastructure {
     pub admin_service: crate::services::admin::AdminService,
     pub moderation: ModerationService,
     pub token_denylist: crate::services::token_denylist::TokenDenylist,
-    /// Secret Chat is deprecated; new sessions are refused unless explicitly
-    /// enabled for a migration window. Existing sessions stay readable.
-    pub secret_chat_new_sessions_enabled: bool,
     /// When set, the media bucket is private and approved media is served as
     /// short-lived presigned URLs instead of raw bucket links. `None` keeps the
     /// legacy public-bucket behaviour.
@@ -379,6 +372,7 @@ impl MediaSigner {
     /// intentionally separate from `sign`: a client may PUT only to the exact
     /// key returned by an owner-scoped asset endpoint, while the completion
     /// endpoint remains the authority for size, MIME and file-header checks.
+    #[allow(dead_code)]
     pub fn sign_put_key(&self, object_key: &str) -> Option<String> {
         let key = object_key.trim().trim_start_matches('/');
         if key.is_empty()
@@ -411,7 +405,6 @@ pub struct AppState {
     pub agents: ApiAgents,
     pub listing_repo: crate::repositories::PostgresListingRepository,
     pub user_repo: crate::repositories::PostgresUserRepository,
-    pub chat_repo: crate::repositories::PostgresChatRepository,
     pub auth_repo: crate::repositories::PostgresAuthRepository,
     #[allow(dead_code)]
     pub order_repo: crate::repositories::PostgresOrderRepository,
@@ -1011,13 +1004,6 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .route("/api/orders/{id}", get(orders::get_order))
         .route("/api/orders/{id}/cancel", post(orders::cancel_order))
         .route("/api/orders/{id}/confirm", post(orders::confirm_order))
-        .route("/api/orders/{id}/pay", post(orders::pay_order))
-        .route("/api/orders/{id}/ship", post(orders::ship_order))
-        .route("/api/conversations", get(conversations::list_conversations))
-        .route(
-            "/api/conversations/{id}/messages",
-            get(conversations::get_conversation_messages),
-        )
         .route("/api/watchlist", get(watchlist::get_watchlist))
         .route(
             "/api/watchlist/{listing_id}",
@@ -1197,14 +1183,6 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .route("/api/chat/calls", post(user_chat::create_call))
         .route("/api/chat/calls/{id}/answer", post(user_chat::answer_call))
         .route("/api/chat/calls/{id}/end", post(user_chat::end_call))
-        .route(
-            "/api/chat/secret-sessions",
-            post(user_chat::create_secret_session),
-        )
-        .route(
-            "/api/chat/secret-sessions/{id}/messages",
-            get(user_chat::list_secret_messages).post(user_chat::send_secret_message),
-        )
         .route("/api/upload/token", get(upload::get_upload_token))
         .route("/api/ws", get(ws::ws_handler))
         // Bound time-to-response so a hung handler (stuck DB query, wedged

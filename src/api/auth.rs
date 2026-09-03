@@ -1217,9 +1217,7 @@ pub(crate) mod tests {
     use std::sync::Arc;
 
     pub(crate) fn build_test_state(pool: sqlx::PgPool) -> AppState {
-        let (service_manager, _rx) = services::ServiceManager::new(pool.clone());
-        let admin_service = service_manager.admin.clone();
-        let event_tx = service_manager.event_tx.clone();
+        let admin_service = services::admin::AdminService::new(pool.clone());
 
         AppState {
             secrets: ApiSecrets {
@@ -1234,7 +1232,6 @@ pub(crate) mod tests {
             },
             infra: ApiInfrastructure {
                 db: pool.clone(),
-                event_tx,
                 rate_limit: {
                     let factory = crate::middleware::rate_limit::RateLimiterFactory::new(100, 60);
                     crate::middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
@@ -1245,55 +1242,9 @@ pub(crate) mod tests {
                 order_service: services::order::OrderService::new(pool.clone()),
                 admin_service,
                 moderation: services::moderation::ModerationService::new(
-                    &crate::config::AppConfig {
-                        gemini_api_key: "test-gemini-key".to_string(),
-                        llm_api_key: None,
-                        jwt_secret: "test_jwt_secret_at_least_32_characters_long".to_string(),
-                        jwt_secret_old: None,
-                        database_url: "postgres://test/test".to_string(),
-                        oss_access_key_id: None,
-                        oss_access_key_secret: None,
-                        llm_provider: "gemini".to_string(),
-                        llm_model: "gemini-3-flash-preview".to_string(),
-                        llm_base_url: None,
-                        agent_enabled: true,
-                        llm_api_style:
-                            crate::agents::runtime::api_drivers::ApiStyle::ChatCompletions,
-                        vector_dim: 768,
-                        cors_origins: vec![],
-                        oss_endpoint: "https://oss-cn-beijing.aliyuncs.com".to_string(),
-                        oss_bucket: "test-bucket".to_string(),
-                        oss_role_arn: None,
-                        redis_url: None,
-                        rate_limit_max_requests: 100,
-                        rate_limit_window_secs: 60,
-                        server_host: "127.0.0.1".to_string(),
-                        server_port: 3000,
-                        shutdown_drain_secs: 5,
-                        shutdown_timeout_secs: 25,
-                        event_bus_capacity: 2048,
-                        hitl_expire_scan_interval_secs: 600,
-                        hitl_expire_timeout_hours: 48,
-                        moka_cache_max_capacity: 100_000,
-                        access_token_ttl_secs: 86_400,
-                        refresh_token_ttl_secs: 604_800,
-                        conversation_history_limit: 10,
-                        max_keyword_len: 200,
-                        price_tolerance: 0.5,
-                        categories: vec!["other".to_string()],
-                        blocked_keywords: vec![],
-                        moderation_image_enabled: false,
-                        moderation_image_api_url: None,
-                        moderation_image_api_key: None,
-                        secret_chat_new_sessions_enabled: false,
-                        media_private_bucket: false,
-                        media_url_ttl_secs: 600,
-                        media_path_style: true,
-                        media_region: "us-east-1".to_string(),
-                    },
+                    &crate::config::AppConfig::test_defaults(),
                 ),
                 token_denylist: services::token_denylist::TokenDenylist::new(),
-                secret_chat_new_sessions_enabled: false,
                 media_signer: None,
                 shutdown: crate::lifecycle::ShutdownSignal::never(),
             },
@@ -1312,7 +1263,6 @@ pub(crate) mod tests {
             },
             listing_repo: crate::repositories::PostgresListingRepository::new(pool.clone()),
             user_repo: PostgresUserRepository::new(pool.clone()),
-            chat_repo: crate::repositories::PostgresChatRepository::new(pool.clone()),
             auth_repo: PostgresAuthRepository::new(pool.clone()),
             order_repo: crate::repositories::PostgresOrderRepository::new(pool),
         }
