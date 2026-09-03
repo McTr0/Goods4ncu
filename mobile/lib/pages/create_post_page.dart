@@ -205,13 +205,23 @@ class _CreatePostPageState extends State<CreatePostPage> {
 
       final tags = _selectedTags.toList(growable: false);
 
-      if (_needsGoods && _goodsCategory == null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('请先选择商品分区')));
-        setState(() => _submitting = false);
-        return;
+      if (_needsGoods) {
+        if (_goodsCategory == null) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('请先选择商品分区')));
+          setState(() => _submitting = false);
+          return;
+        }
+        if (_category == 'offer' && _goodsBrandController.text.trim().isEmpty) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('请填写品牌或来源')));
+          setState(() => _submitting = false);
+          return;
+        }
       }
       final marketplace = _needsGoods
           ? {
@@ -586,8 +596,19 @@ class _CreatePostPageState extends State<CreatePostPage> {
           ),
           const SizedBox(height: AppTheme.sp12),
           TextFormField(
+            key: const ValueKey('publish-goods-brand-field'),
             controller: _goodsBrandController,
-            decoration: InputDecoration(labelText: l.publishBrandLabel),
+            decoration: InputDecoration(
+              labelText: _category == 'offer'
+                  ? '品牌 / 来源（必填）'
+                  : l.publishBrandLabel,
+            ),
+            validator: (value) {
+              if (_category == 'offer' && (value == null || value.trim().isEmpty)) {
+                return '请填写品牌或来源';
+              }
+              return null;
+            },
           ),
           const SizedBox(height: AppTheme.sp12),
           TextFormField(

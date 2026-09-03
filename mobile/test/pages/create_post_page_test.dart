@@ -196,4 +196,62 @@ void main() {
     expect(postService.coverImageUrl, 'https://cdn.test/post-cover.jpg');
     expect(find.text('created'), findsOneWidget);
   });
+
+  testWidgets('validates required brand when publishing an offer listing', (tester) async {
+    final postService = _FakePostService();
+    final uploadService = _FakeUploadService();
+
+    final router = GoRouter(
+      initialLocation: '/create',
+      routes: [
+        GoRoute(
+          path: '/create',
+          builder: (_, _) => CreatePostPage(
+            postService: postService,
+            uploadService: uploadService,
+            imagePicker: () async => null,
+            initialCategory: 'offer',
+          ),
+        ),
+        GoRoute(path: '/posts/:id', builder: (_, _) => const Text('created')),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp.router(
+        theme: AppTheme.light,
+        locale: const Locale('zh'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        routerConfig: router,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify brand label indicates required for offer
+    expect(find.text('品牌 / 来源（必填）'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('post-title-field')),
+      '出售自行车',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('post-body-field')),
+      '九成新山地车。',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('publish-goods-price-field')),
+      '200',
+    );
+
+    // Leave brand empty and submit -> validation fails
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('post-publish-action')),
+    );
+    await tester.tap(find.byKey(const ValueKey('post-publish-action')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('请填写品牌或来源'), findsOneWidget);
+    expect(find.text('created'), findsNothing);
+  });
 }
