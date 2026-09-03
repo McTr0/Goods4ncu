@@ -4,11 +4,11 @@
 
 Accepted — 2026-08-24
 
-Production path wired — 2026-08-26. With `AGENT_RUNTIME=v2`, chat requests
-now enter `AgentRuntime`; providers stream raw model steps, while the runtime
+Canonical path established — 2026-08-26 / 2026-09-03. `POST /api/chat/stream`
+enters `AgentRuntime`; providers stream raw model steps, while the runtime
 executes registered tools, applies hooks/budgets/cancellation, feeds back
-correlated tool results, and emits one terminal v2 event. The legacy path is
-retained only for rollout rollback.
+correlated tool results, and emits canonical v2 events. The legacy path and
+temporary `AGENT_RUNTIME` flag have been fully retired.
 
 ## Context
 
@@ -78,11 +78,10 @@ Rebuild the agent execution layer in-place as **Agent Runtime v2**:
 
 ## Rollout
 
-Feature flag `AGENT_RUNTIME=legacy|v2`. Gradual:
-local → dev → read-only → full → delete legacy after production stability is
-confirmed. `LLM_API_STYLE=auto|chat_completions|responses` independently
-selects the OpenAI-compatible wire API; both styles normalize into the same
-runtime events and retain provider tool-call correlation IDs.
+Legacy path and `AGENT_RUNTIME` flag fully retired; runtime v2 is now the single
+authoritative execution path. `LLM_API_STYLE=auto|chat_completions|responses`
+independently selects the OpenAI-compatible wire API; both styles normalize into
+the same runtime events and retain provider tool-call correlation IDs.
 
 ## Consequences
 

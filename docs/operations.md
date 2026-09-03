@@ -31,18 +31,17 @@
 | `LLM_BASE_URL` | 可选 | OpenAI-compatible 自定义 base URL；命名 alias 有默认 base URL，可覆盖。 |
 | `LLM_API_KEY` | 条件必需 | OpenAI-compatible 通用 key；也可用 `MINIMAX_API_KEY`、`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`、`GROQ_API_KEY`、`OPENROUTER_API_KEY`、`XAI_API_KEY`、`TOGETHER_API_KEY`。 |
 | `LLM_API_STYLE` | 可选 | `auto`（默认）、`chat_completions` 或 `responses`。`auto` 对 MiniMax 选择 Responses，其余 OpenAI-compatible provider 选择 Chat Completions；非法值会阻止启动。 |
-| `AGENT_RUNTIME` | 可选 | `v2` 启用统一 Runtime、结构化 SSE、取消、预算和 Hook；其它值暂走 legacy，供灰度回退。 |
 | `VECTOR_DIM` | 可选 | embedding 维度，默认 768，必须与 `documents.embedding` 一致。 |
 | `CORS_ORIGINS` | 生产必需 | 逗号分隔允许来源；生产环境不允许空配置或 `*`。 |
 | `APP_ENV`、`ENVIRONMENT`、`RUST_ENV` | 可选 | 任一值为 `production` 或 `prod` 时启用生产 CORS 防护。 |
 | `SERVER_HOST`、`SERVER_PORT` | 可选 | 覆盖后端监听地址和端口。 |
 | `SHUTDOWN_DRAIN_SECS` | 可选 | 收到 SIGTERM 后继续接受流量的排空秒数，默认 5，期间 `/api/readyz` 已返回 503。 |
 | `SHUTDOWN_TIMEOUT_SECS` | 可选 | 关闭监听后等待在途请求和 Worker 的秒数，默认 25。 |
-| `REDIS_URL` | 可选 | 设置后启用分布式限流与 WebSocket 跨副本 fan-out；未设置时单机限流、本地投递。Redis 故障时限流降级单机、fan-out 降级本地，不影响启动。 |
+| `DEPLOYMENT_PROFILE` | 可选 | `local`（默认）或 `replicated`。`replicated` 严格要求配置 `REDIS_URL`，启动时 Redis 故障直接 fail-fast，readiness 探针检查 Redis，拒绝隐式降级单机状态。 |
+| `REDIS_URL` | 条件必需 | `DEPLOYMENT_PROFILE=replicated` 时必需。用于分布式限流与 WebSocket 跨副本 fan-out。 |
 | `RATE_LIMIT_MAX_REQUESTS` | 可选 | 每窗口最大请求数。 |
 | `RATE_LIMIT_WINDOW_SECS` | 可选 | 限流窗口秒数。 |
 | `BLOCKED_KEYWORDS` | 可选 | 逗号分隔本地策略关键词。内置规则已覆盖违禁交易、低俗成人、博彩、诈骗、暴力风险、骚扰、隐私泄露、联系方式和外链。 |
-| `SECRET_CHAT_NEW_SESSIONS_ENABLED` | 可选 | Secret Chat 已弃用；默认 `false`，新建会话返回 403。仅迁移窗口可临时置 `true`，历史会话始终可读。 |
 | `MODERATION_IMAGE_ENABLED` | 可选 | 是否启用图片审核；生产开启时必须同时提供合法的 provider URL 和 key。 |
 | `MODERATION_IMAGE_API_URL` | 生产图片审核开启时必需 | 图片审核 API URL；生产启动会校验为 `http(s)` URL。Worker 发送 `{"image_url":"短期 URL","source":"goods4ncu"}`，使用 Bearer key。 |
 | `MODERATION_IMAGE_API_KEY` | 生产图片审核开启时必需 | 图片审核 API key；生产启动会拒绝空值或过短 key。Provider 必须返回 `approved: true/false`，或受文档约束的 `status/result/verdict` 状态词。 |
@@ -126,7 +125,7 @@ curl -s http://127.0.0.1:3000/api/health
   > 代码默认值
 ```
 
-TOML 适合放 server、LLM provider、限流、event bus、worker 扫描间隔、token TTL、marketplace 参数、审核开关、CORS origin 和 OSS endpoint/bucket。真实 API key、JWT secret、数据库连接串和 OSS secret 必须留在环境变量。
+TOML 适合放 server、LLM provider、限流、worker 扫描间隔、token TTL、marketplace 参数、审核开关、CORS origin 和 OSS endpoint/bucket。真实 API key、JWT secret、数据库连接串和 OSS secret 必须留在环境变量。
 
 ## PostgreSQL 和 pgvector
 

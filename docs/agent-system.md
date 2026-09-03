@@ -22,7 +22,7 @@ Agent 的价值是把用户意图翻译为可理解、可检查、可撤销的�
 
 ## 当前实现
 
-[已实现] 当前后端支持 Gemini、MiniMax 和多种 OpenAI-compatible provider。OpenAI-compatible provider 可用 `LLM_API_STYLE` 选择 Chat Completions 或 Responses；两种协议都保留真实工具关联 ID，并归一化到同一 Runtime 事件。`AGENT_RUNTIME=v2` 时模型只产出工具调用，统一 Runtime 执行搜索、详情、发布、更新、删除、成交意向、议价和“我的发布”等工具，应用取消、时限、Hook 和结构化结果回注。
+[已实现] 当前后端支持 Gemini、MiniMax 和多种 OpenAI-compatible provider。OpenAI-compatible provider 可用 `LLM_API_STYLE` 选择 Chat Completions 或 Responses；两种协议都保留真实工具关联 ID，并归一化到同一 Runtime 事件。统一 Runtime 下模型只产出工具调用，执行搜索、详情、发布、更新、删除、成交意向、议价和“我的发布”等工具，应用取消、时限、Hook 和结构化结果回注。
 
 [已实现] Runtime v2 的工具执行事件会写入 `agent_run_events`，仅保存工具名、风险等级和 outcome 等安全字段，不保存工具参数或结果；`runtime_completed`、`runtime_failed` 和 `user_cancelled` 终态由 `0111_agent_runtime_v2_outcomes.sql` 纳入数据库约束。
 

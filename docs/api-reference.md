@@ -780,13 +780,9 @@ Group 成员按角色发言；Channel 只有 owner/admin 发言，成员可读�
 
 任一通话成员结束 signaling，会产生 `call_ended` 事件。
 
-### POST `/api/chat/secret-sessions` [待弃用]
+### `/api/chat/secret-sessions*` [已下线]
 
-[已实现] 默认返回 `403 forbidden`：Secret Chat 与服务器可治理通信目标冲突，新会话创建已停止。仅在迁移窗口内由 `SECRET_CHAT_NEW_SESSIONS_ENABLED=true` 临时恢复。移动端不再提供创建入口。
-
-### GET/POST `/api/chat/secret-sessions/{id}/messages` [待弃用]
-
-读写密文、nonce、公钥指纹和过期时间。服务器不接收明文。历史会话保持可读可写以兼容存量数据；生产迁移方向见[信任与安全](trust-safety.md)。
+Secret Chat 与校园安全治理目标冲突，历史迁移窗口已结束，相关路由与发送接口已彻底移除。
 
 ## Wanted 生命周期与响应动作
 
@@ -1184,13 +1180,6 @@ GET  /api/v1/moderation/appeals/{id}
 
 普通用户只能读取自己的案件摘要和提交申诉，不获得举报人、审核者身份、命中词和内部阈值。校园运营使用独立 tenant-scoped 管理接口；平台管理员跨校园处理需要理由和审计。
 
-### Secret Chat 弃用
-
-当前 `/api/chat/secret-sessions*` 进入弃用后：
-
-1. [已实现] 禁止生产新建（默认 403，仅迁移开关可恢复）并从默认 UI 移除。
-2. 在兼容窗口保留授权用户的只读历史能力。
-3. 发布弃用 metrics、客户端版本门槛和截止时间。
-4. 最终移除发送和创建路由，不把服务器不可读 E2EE 迁入 `/api/v1`。
-
-新的加密消息仍使用普通 Conversation API，只改变服务端存储和授权解密实现，不向客户端承诺服务器不可读。
+### Secret Chat 下线
+ 
+`/api/chat/secret-sessions*` 已全面下线：禁止新建、移除移动端入口、兼容窗口关闭并彻底移除发送与创建路由。不把服务器不可读 E2EE 迁入 `/api/v1`。

@@ -36,7 +36,7 @@
 | SocialPersona 只使用系统角色/皮肤目录 | `0080_system_persona_catalog_only`、`/api/persona/catalog`、`tests/social_persona_integration.rs`；服务端目录与写入白名单一致，旧用户素材撤销、公开引用清空，旧 assets 上传路由不再注册，公开投影只返回静态 token |
 | 审核 worker 崩溃恢复与低基数可观测性 | `0069_moderation_job_leases.sql`、`tests/moderation_worker_integration.rs`；`src/api/metrics.rs` 暴露 job outcome、provider latency、pending/processing depth 和 oldest age，且不含 job/campus/provider 高基数标签；`scripts/production_rehearsal.sh` check 1 验证双副本实际暴露队列 gauge |
 | listing case-owned 组合限制：紧急 manual case、案件 restrict/restore、申诉单 case 释放、owner relist 门禁、全公开/交易面 fail-closed、并发与跨校园隔离 | `0056_listing_restriction_effects.sql`；`tests/admin_auth_regression.rs::{listing_restrictions_compose_and_never_overwrite_owner_lifecycle,listing_appeal_releases_only_the_appealed_case_effect,admin_listing_restriction_http_contract_gates_public_and_commercial_paths,restricted_wanted_keeps_its_current_epoch_pending_response_frozen,concurrent_manual_restore_and_appeal_review_release_once_without_deadlock}`；`tests/rls_integration.rs::armed_tenant_context_isolates_listing_restriction_effects` |
-| Secret Chat 弃用（默认 403 新建、移动端入口移除、历史可读） | `tests/api_regressions.rs::secret_chat_creation_is_disabled_by_default_but_history_stays_readable` |
+| Secret Chat 完全下线（接口及路由全面切除，代码库零残留） | 废弃路由与辅助数据结构彻底移除，历史迁移保持向后兼容 |
 
 ### Agent 行动系统（Phase 3）
 

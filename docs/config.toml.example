@@ -29,14 +29,6 @@ shutdown_drain_secs = 5
 shutdown_timeout_secs = 25
 
 # -----------------------------------------------------------------------
-# Chat features
-# -----------------------------------------------------------------------
-[chat]
-# Secret Chat is deprecated; new sessions are refused (403) unless this is
-# explicitly set to true for a migration window. History stays readable.
-secret_new_sessions_enabled = false
-
-# -----------------------------------------------------------------------
 # LLM
 # -----------------------------------------------------------------------
 [llm]
