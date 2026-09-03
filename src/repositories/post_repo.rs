@@ -71,6 +71,8 @@ pub struct NewPost {
     pub image_url: Option<String>,
     pub listing_id: Option<String>,
     pub space_id: Option<Uuid>,
+    pub idempotency_key: Option<String>,
+    pub idempotency_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -620,11 +622,11 @@ impl PostRepository for PostgresPostRepository {
             "INSERT INTO posts (
                  campus_id, author_id, category, title, body, tags,
                  image_url, images_moderation_status,
-                 listing_id, space_id
+                 listing_id, space_id, idempotency_key, idempotency_hash
              ) VALUES (
                  $1, $2, $3, $4, $5, $6, $7,
                  CASE WHEN $7::text IS NULL THEN 'approved' ELSE 'pending' END,
-                 $8, $9
+                 $8, $9, $10, $11
              )
              RETURNING id",
         )
@@ -637,6 +639,8 @@ impl PostRepository for PostgresPostRepository {
         .bind(input.image_url.as_deref())
         .bind(input.listing_id.as_deref())
         .bind(input.space_id)
+        .bind(input.idempotency_key.as_deref())
+        .bind(input.idempotency_hash.as_deref())
         .fetch_one(&self.pool)
         .await
         .map_err(db_error)?;
@@ -654,11 +658,11 @@ impl PostRepository for PostgresPostRepository {
             "INSERT INTO posts (
                  campus_id, author_id, category, title, body, tags,
                  image_url, images_moderation_status,
-                 listing_id, space_id
+                 listing_id, space_id, idempotency_key, idempotency_hash
              ) VALUES (
                  $1, $2, $3, $4, $5, $6, $7,
                  CASE WHEN $7::text IS NULL THEN 'approved' ELSE 'pending' END,
-                 $8, $9
+                 $8, $9, $10, $11
              )
              RETURNING id",
         )
@@ -671,6 +675,8 @@ impl PostRepository for PostgresPostRepository {
         .bind(input.image_url.as_deref())
         .bind(input.listing_id.as_deref())
         .bind(input.space_id)
+        .bind(input.idempotency_key.as_deref())
+        .bind(input.idempotency_hash.as_deref())
         .fetch_one(&mut **tx)
         .await
         .map_err(db_error)?;

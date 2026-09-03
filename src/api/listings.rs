@@ -16,9 +16,7 @@ use crate::categories::MARKETPLACE_CATEGORIES;
 use crate::repositories::CreateListingInput;
 use crate::repositories::{ListingRepository, UpdateOwnedResult};
 use crate::services::campus::CampusService;
-use crate::services::listing_command::{
-    CreateListingDraft, ListingCommandService, UpdateListingDraft,
-};
+use crate::services::listing_command::{ListingCommandService, UpdateListingDraft};
 use crate::services::notification::NewNotification;
 use crate::services::wanted_match::WantedMatchService;
 use crate::utils::cents_to_yuan;
@@ -136,27 +134,6 @@ pub struct ListingRestrictionDetail {
     pub restricted_at: chrono::DateTime<chrono::Utc>,
     pub moderation_case_id: uuid::Uuid,
     pub can_appeal: bool,
-}
-
-/// Request body for POST /api/listings
-#[derive(Deserialize)]
-pub struct CreateListingRequest {
-    pub title: String,
-    pub category: String,
-    pub brand: String,
-    pub direction: Option<String>,
-    pub condition_score: i32,
-    pub suggested_price_cny: f64,
-    pub defects: Vec<String>,
-    pub description: Option<String>,
-    pub image_url: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct CreateListingResponse {
-    pub id: String,
-    pub message: String,
-    pub replayed: bool,
 }
 
 #[derive(Deserialize)]
@@ -500,57 +477,6 @@ pub async fn get_listing(
         restriction_reason,
         available_actions,
         created_at,
-    }))
-}
-
-/// POST /api/listings — auth required; bypasses agent for form-based creation
-pub async fn create_listing(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    tenant: VerifiedTenant,
-    Json(payload): Json<CreateListingRequest>,
-) -> Result<Json<CreateListingResponse>, ApiError> {
-    let session = tenant.session.clone();
-    let idempotency_key = idempotency_key_from_headers(&headers)?;
-    let command =
-        ListingCommandService::new(state.infra.db.clone(), state.infra.moderation.clone());
-    let mut tx = state
-        .infra
-        .db
-        .begin()
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-    let create_result = command
-        .create_in_tx(
-            &mut tx,
-            CreateListingDraft {
-                campus_id: tenant.campus_id,
-                owner_id: session.user_id,
-                title: payload.title,
-                category: payload.category,
-                brand: payload.brand,
-                direction: payload.direction,
-                condition_score: payload.condition_score,
-                suggested_price_cny: payload.suggested_price_cny,
-                defects: payload.defects,
-                description: payload.description,
-                image_url: payload.image_url,
-            },
-            idempotency_key.as_deref(),
-        )
-        .await?;
-    tx.commit()
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-    Ok(Json(CreateListingResponse {
-        id: create_result.id,
-        message: if create_result.direction == "wanted" {
-            "需求发布成功".to_string()
-        } else {
-            "商品发布成功".to_string()
-        },
-        replayed: create_result.replayed,
     }))
 }
 
@@ -1364,56 +1290,6 @@ mod tests {
         assert_eq!(query.category, Some("electronics".to_string()));
         assert_eq!(query.search, Some("iphone".to_string()));
         assert_eq!(query.sort, Some("newest".to_string()));
-    }
-
-    #[test]
-    fn test_create_listing_request_deserialization() {
-        let json = r#"{
-            "title": "iPhone 13",
-            "category": "electronics",
-            "brand": "Apple",
-            "condition_score": 8,
-            "suggested_price_cny": 4999.0,
-            "defects": ["Minor scratch"],
-            "description": "Like new"
-        }"#;
-        let req: CreateListingRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(req.title, "iPhone 13");
-        assert_eq!(req.category, "electronics");
-        assert_eq!(req.brand, "Apple");
-        assert_eq!(req.condition_score, 8);
-        assert_eq!(req.suggested_price_cny, 4999.0);
-        assert_eq!(req.defects.len(), 1);
-        assert_eq!(req.description, Some("Like new".to_string()));
-    }
-
-    #[test]
-    fn test_create_listing_request_without_optional_fields() {
-        let json = r#"{
-            "title": "Book",
-            "category": "books",
-            "brand": "Publisher",
-            "condition_score": 7,
-            "suggested_price_cny": 99.0,
-            "defects": []
-        }"#;
-        let req: CreateListingRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(req.title, "Book");
-        assert_eq!(req.description, None);
-        assert!(req.defects.is_empty());
-    }
-
-    #[test]
-    fn test_create_listing_response_serialization() {
-        let resp = CreateListingResponse {
-            id: "listing-123".to_string(),
-            message: "商品发布成功".to_string(),
-            replayed: false,
-        };
-        let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains("listing-123"));
-        assert!(json.contains("商品发布成功"));
-        assert!(json.contains("\"replayed\":false"));
     }
 
     #[test]

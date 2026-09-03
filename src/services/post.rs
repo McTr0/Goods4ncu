@@ -11,12 +11,15 @@ use std::collections::HashSet;
 use std::sync::{OnceLock, RwLock};
 use uuid::Uuid;
 
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
 pub const MAX_POST_TITLE_CHARS: usize = 300;
 pub const MAX_POST_BODY_CHARS: usize = 50_000;
 pub const MAX_REPLY_BODY_CHARS: usize = 20_000;
 pub const MAX_TAG_CHARS: usize = 32;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreatePostMarketplaceInput {
     pub category: String,
     pub brand: String,
@@ -26,7 +29,7 @@ pub struct CreatePostMarketplaceInput {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreatePost {
     pub campus_id: Uuid,
     pub author_id: String,
@@ -40,6 +43,17 @@ pub struct CreatePost {
     pub space_id: Option<Uuid>,
     /// When set, atomically creates inventory listing in the same database transaction.
     pub marketplace: Option<CreatePostMarketplaceInput>,
+    pub idempotency_key: Option<String>,
+}
+
+pub fn create_post_request_hash(input: &CreatePost) -> Result<String, ApiError> {
+    let canonical = serde_json::to_vec(input).map_err(|error| {
+        ApiError::Internal(anyhow::anyhow!(
+            "Failed to serialize normalized post input: {}",
+            error
+        ))
+    })?;
+    Ok(hex::encode(Sha256::digest(canonical)))
 }
 
 #[derive(Debug, Clone, Default)]
@@ -286,6 +300,27 @@ impl<R: PostRepository> PostService<R> {
             self.ensure_can_announce(input.campus_id, input.author_id.as_str())
                 .await?;
         }
+
+        let is_goods = category == "offer" || category == "wanted";
+        if is_goods && input.marketplace.is_none() {
+            return Err(ApiError::BadRequest(format!(
+                "发布商品或求购 ({category}) 必须提供 marketplace 详细信息"
+            )));
+        }
+        if !is_goods && input.marketplace.is_some() {
+            return Err(ApiError::BadRequest(
+                "非商品类别不能包含 marketplace 详细信息".to_string(),
+            ));
+        }
+        if category == "offer" {
+            let mp = input.marketplace.as_ref().unwrap();
+            if mp.brand.trim().is_empty() {
+                return Err(ApiError::BadRequest(
+                    "发布闲置商品 (offer) 必须提供品牌或来源".to_string(),
+                ));
+            }
+        }
+
         let tags = self.normalize_tags(input.tags).await?;
         let cover_image_url = normalize_cover_image_url(input.cover_image_url)?;
         if let Some(space_id) = input.space_id {
@@ -293,11 +328,51 @@ impl<R: PostRepository> PostService<R> {
         }
         self.ensure_text_allowed(&format!("{title}\n{body}\n{}", tags.join(" ")))?;
 
+        let normalized_input = CreatePost {
+            campus_id: input.campus_id,
+            author_id: input.author_id.clone(),
+            category: category.clone(),
+            title: title.clone(),
+            body: body.clone(),
+            tags: tags.clone(),
+            cover_image_url: cover_image_url.clone(),
+            space_id: input.space_id,
+            marketplace: input.marketplace.clone(),
+            idempotency_key: input.idempotency_key.clone(),
+        };
+
         let mut tx = self
             .pool
             .begin()
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
+
+        let request_hash = if input.idempotency_key.is_some() {
+            let hash = create_post_request_hash(&normalized_input)?;
+            let existing: Option<(Uuid, Option<String>)> = sqlx::query_as(
+                "SELECT id, idempotency_hash FROM posts WHERE author_id = $1 AND idempotency_key = $2",
+            )
+            .bind(&input.author_id)
+            .bind(input.idempotency_key.as_deref())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
+
+            if let Some((existing_id, existing_hash)) = existing {
+                if existing_hash.as_deref() != Some(&hash) {
+                    return Err(ApiError::Conflict(
+                        "Idempotency-Key 重复且请求体不一致".to_string(),
+                    ));
+                }
+                tx.rollback()
+                    .await
+                    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
+                return self.get(input.campus_id, existing_id).await;
+            }
+            Some(hash)
+        } else {
+            None
+        };
 
         let listing_id = if let Some(mp) = input.marketplace {
             let listing_service = crate::services::listing_command::ListingCommandService::new(
@@ -320,7 +395,7 @@ impl<R: PostRepository> PostService<R> {
                         description: mp.description.or_else(|| Some(body.clone())),
                         image_url: cover_image_url.clone(),
                     },
-                    None,
+                    input.idempotency_key.as_deref(),
                 )
                 .await?;
             Some(listing_res.id)
@@ -342,6 +417,8 @@ impl<R: PostRepository> PostService<R> {
                     image_url: cover_image_url.clone(),
                     listing_id,
                     space_id: input.space_id,
+                    idempotency_key: input.idempotency_key.clone(),
+                    idempotency_hash: request_hash,
                 },
             )
             .await?;

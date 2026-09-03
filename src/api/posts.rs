@@ -3,6 +3,7 @@
 //! Listings appear here as `post_type=listing` topics but continue to be
 //! created and edited through the backwards-compatible listing API.
 
+use axum::http::HeaderMap;
 use axum::{
     extract::{Path, Query, State},
     response::Response,
@@ -25,7 +26,6 @@ pub const UNIFIED_POST_RANKING_VERSION: &str = "2026.08-post-v2";
 pub struct PostListQuery {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
-    /// offer | wanted | discussion (the post kind). Omit for all.
     pub category: Option<String>,
     pub space_id: Option<Uuid>,
     pub search: Option<String>,
@@ -40,11 +40,14 @@ pub struct ReplyListQuery {
     pub offset: Option<i64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreatePostMarketplacePayload {
     pub category: String,
     #[serde(default)]
-    pub brand: String,
+    pub brand: Option<String>,
+    #[serde(default)]
+    pub direction: Option<String>,
     pub condition_score: i32,
     pub suggested_price_cny: f64,
     #[serde(default)]
@@ -53,7 +56,8 @@ pub struct CreatePostMarketplacePayload {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreatePostRequest {
     pub title: String,
     pub body: String,
@@ -447,36 +451,61 @@ pub async fn get_post_by_listing(
     Ok(Json(detail_view(&state, post, viewer_id.as_deref())))
 }
 
-/// POST /api/posts — create a discussion topic.
+/// POST /api/posts — create a discussion topic or marketplace listing.
 pub async fn create_post(
     State(state): State<AppState>,
+    headers: HeaderMap,
     tenant: VerifiedTenant,
     Json(payload): Json<CreatePostRequest>,
 ) -> Result<Json<PostDetail>, ApiError> {
+    let idempotency_key = crate::api::request_context::idempotency_key_from_headers(&headers)?;
     let cover_image_url =
         normalize_platform_media_url(&state, payload.cover_image_url, "cover_image_url")?;
-    let marketplace =
-        payload
-            .marketplace
-            .map(|mp| crate::services::post::CreatePostMarketplaceInput {
-                category: mp.category,
-                brand: mp.brand,
-                condition_score: mp.condition_score,
-                suggested_price_cny: mp.suggested_price_cny,
-                defects: mp.defects,
-                description: mp.description,
-            });
+    let post_category = payload
+        .category
+        .clone()
+        .unwrap_or_else(|| "discussion".to_string());
+
+    if let Some(ref mp) = payload.marketplace {
+        if let Some(ref dir) = mp.direction {
+            if dir != &post_category {
+                return Err(ApiError::BadRequest(format!(
+                    "marketplace.direction ({dir}) 必须与 post category ({post_category}) 一致"
+                )));
+            }
+        }
+    }
+
+    let marketplace = payload.marketplace.map(|mp| {
+        let brand = if post_category == "wanted"
+            && mp.brand.as_deref().map(str::trim).unwrap_or("").is_empty()
+        {
+            "不限".to_string()
+        } else {
+            mp.brand.unwrap_or_default().trim().to_string()
+        };
+        crate::services::post::CreatePostMarketplaceInput {
+            category: mp.category,
+            brand,
+            condition_score: mp.condition_score,
+            suggested_price_cny: mp.suggested_price_cny,
+            defects: mp.defects,
+            description: mp.description,
+        }
+    });
+
     let post = post_service(&state)
         .create(CreatePost {
             campus_id: tenant.campus_id,
             author_id: tenant.session.user_id.clone(),
             title: payload.title,
             body: payload.body,
-            category: payload.category.unwrap_or_else(|| "discussion".to_string()),
+            category: post_category,
             tags: payload.tags,
             cover_image_url,
             space_id: payload.space_id,
             marketplace,
+            idempotency_key,
         })
         .await?;
     Ok(Json(detail_view(

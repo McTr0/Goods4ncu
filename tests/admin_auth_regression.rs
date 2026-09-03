@@ -2251,17 +2251,21 @@ async fn second_campus_onboarding_journey_end_to_end() {
         // 5. Pending member cannot publish yet.
         let listing_body = serde_json::json!({
             "title": "B Campus Bike",
-            "category": "other",
-            "brand": "Brand",
-            "condition_score": 8,
-            "suggested_price_cny": 100.0,
-            "defects": [],
+            "body": "B Campus Bike description",
+            "category": "offer",
+            "marketplace": {
+                "category": "other",
+                "brand": "Brand",
+                "condition_score": 8,
+                "suggested_price_cny": 100.0,
+                "defects": [],
+            }
         });
         let response = app
             .clone()
             .oneshot(json_req(
                 "POST",
-                "/api/listings".to_string(),
+                "/api/posts".to_string(),
                 &student_token,
                 listing_body.clone(),
             ))
@@ -2307,7 +2311,7 @@ async fn second_campus_onboarding_journey_end_to_end() {
             .clone()
             .oneshot(json_req(
                 "POST",
-                "/api/listings".to_string(),
+                "/api/posts".to_string(),
                 &student_token,
                 listing_body,
             ))
@@ -2355,15 +2359,19 @@ async fn second_campus_onboarding_journey_end_to_end() {
             .clone()
             .oneshot(json_req(
                 "POST",
-                "/api/listings".to_string(),
+                "/api/posts".to_string(),
                 &student_token,
                 serde_json::json!({
                     "title": "After deactivation",
-                    "category": "other",
-                    "brand": "Brand",
-                    "condition_score": 8,
-                    "suggested_price_cny": 100.0,
-                    "defects": [],
+                    "body": "After deactivation description",
+                    "category": "offer",
+                    "marketplace": {
+                        "category": "other",
+                        "brand": "Brand",
+                        "condition_score": 8,
+                        "suggested_price_cny": 100.0,
+                        "defects": [],
+                    }
                 }),
             ))
             .await

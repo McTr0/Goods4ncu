@@ -865,10 +865,7 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
         .route("/api/auth/refresh", post(auth::refresh_token))
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/user/active-campus", post(auth::switch_active_campus))
-        .route(
-            "/api/listings",
-            get(listings::get_listings).post(listings::create_listing),
-        )
+        .route("/api/listings", get(listings::get_listings))
         .route("/api/listings/recognize", post(listings::recognize_item))
         .route(
             "/api/listings/{id}",

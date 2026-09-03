@@ -205,6 +205,8 @@ pub(crate) async fn execute_create_listing_in_tx(
                 image_url: None,
                 listing_id: Some(result.id.clone()),
                 space_id: None,
+                idempotency_key: None,
+                idempotency_hash: None,
             },
         )
         .await

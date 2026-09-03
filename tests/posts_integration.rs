@@ -75,6 +75,7 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
                 cover_image_url: None,
                 space_id: None,
                 marketplace: None,
+                idempotency_key: None,
             })
             .await;
         assert!(matches!(unknown, Err(ApiError::BadRequest(_))));
@@ -84,13 +85,14 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
             .create(CreatePost {
                 campus_id,
                 author_id: author.clone(),
-                category: "wanted".to_string(),
+                category: "discussion".to_string(),
                 title: "地点标签只能选一个".to_string(),
                 body: "正文".to_string(),
                 tags: vec!["qianhuNorth".to_string(), "qianhuSouth".to_string()],
                 cover_image_url: None,
                 space_id: None,
                 marketplace: None,
+                idempotency_key: None,
             })
             .await;
         assert!(matches!(duplicate_group, Err(ApiError::BadRequest(_))));
@@ -107,6 +109,7 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
                 cover_image_url: None,
                 space_id: None,
                 marketplace: None,
+                idempotency_key: None,
             })
             .await
             .expect("catalog tags accepted");
@@ -139,6 +142,7 @@ async fn group_posts_are_hidden_from_non_members_and_feeds() {
                 cover_image_url: None,
                 space_id: Some(space_id),
                 marketplace: None,
+                idempotency_key: None,
             })
             .await
             .expect("create group post");
@@ -214,6 +218,7 @@ async fn discussion_policy_rejection_happens_before_persistence() {
                 cover_image_url: None,
                 space_id: None,
                 marketplace: None,
+                idempotency_key: None,
             })
             .await;
         assert!(matches!(result, Err(ApiError::ContentViolation(_))));
@@ -250,6 +255,7 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 cover_image_url: None,
                 space_id: None,
                 marketplace: None,
+                idempotency_key: None,
             })
             .await
             .expect("create discussion");
@@ -264,6 +270,7 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 cover_image_url: None,
                 space_id: None,
                 marketplace: None,
+                idempotency_key: None,
             })
             .await
             .expect("create second discussion");
@@ -401,6 +408,7 @@ async fn discussion_images_stay_private_until_moderation_approval() {
                 cover_image_url: Some(image_url.to_string()),
                 space_id: None,
                 marketplace: None,
+                idempotency_key: None,
             })
             .await
             .expect("create discussion with image");
@@ -461,6 +469,7 @@ async fn listings_are_references_and_marketplace_filters_follow_category() {
                     defects: vec![],
                     description: Some("九成新显示器".to_string()),
                 }),
+                idempotency_key: None,
             })
             .await
             .expect("create offer post with marketplace");
@@ -570,6 +579,7 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 cover_image_url: None,
                 space_id: None,
                 marketplace: None,
+                idempotency_key: None,
             })
             .await
             .expect("relevant post");
@@ -584,6 +594,7 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 cover_image_url: None,
                 space_id: None,
                 marketplace: None,
+                idempotency_key: None,
             })
             .await
             .expect("unrelated post");
@@ -598,6 +609,7 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 cover_image_url: None,
                 space_id: None,
                 marketplace: None,
+                idempotency_key: None,
             })
             .await
             .expect("same tag post");
@@ -612,6 +624,7 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 cover_image_url: None,
                 space_id: None,
                 marketplace: None,
+                idempotency_key: None,
             })
             .await
             .expect("viewer post");
@@ -726,6 +739,7 @@ async fn atomic_post_and_marketplace_creation_in_single_transaction() {
                     defects: vec![],
                     description: None,
                 }),
+                idempotency_key: None,
             })
             .await
             .expect("create post with marketplace");
@@ -918,6 +932,7 @@ async fn atomic_post_and_marketplace_creation_in_single_transaction() {
                     defects: vec![],
                     description: None,
                 }),
+                idempotency_key: None,
             })
             .await;
         assert!(matches!(failed, Err(ApiError::Internal(_))));
@@ -931,6 +946,157 @@ async fn atomic_post_and_marketplace_creation_in_single_transaction() {
         assert_eq!(
             post_inv_count, initial_inv_count,
             "transaction rollback must not leak orphan listing when post insertion fails"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn publish_contract_strictly_validates_categories_and_idempotency() {
+    with_test_pool(|pool| async move {
+        let campus_id = campus(&pool).await;
+        let author = user(&pool, "strict-author").await;
+        let service = service(&pool);
+
+        // 1. Offer without marketplace is rejected immediately.
+        let err_no_mp = service
+            .create(CreatePost {
+                campus_id,
+                author_id: author.clone(),
+                category: "offer".to_string(),
+                title: "没有商品详情的闲置".to_string(),
+                body: "应当被拒绝".to_string(),
+                tags: vec![],
+                cover_image_url: None,
+                space_id: None,
+                marketplace: None,
+                idempotency_key: None,
+            })
+            .await;
+        assert!(matches!(err_no_mp, Err(ApiError::BadRequest(_))));
+
+        // 2. Wanted without marketplace is rejected immediately.
+        let err_wanted_no_mp = service
+            .create(CreatePost {
+                campus_id,
+                author_id: author.clone(),
+                category: "wanted".to_string(),
+                title: "没有求购详情的求购".to_string(),
+                body: "应当被拒绝".to_string(),
+                tags: vec![],
+                cover_image_url: None,
+                space_id: None,
+                marketplace: None,
+                idempotency_key: None,
+            })
+            .await;
+        assert!(matches!(err_wanted_no_mp, Err(ApiError::BadRequest(_))));
+
+        // 3. Discussion with marketplace is rejected immediately.
+        let err_discussion_mp = service
+            .create(CreatePost {
+                campus_id,
+                author_id: author.clone(),
+                category: "discussion".to_string(),
+                title: "讨论帖带商品结构".to_string(),
+                body: "应当被拒绝".to_string(),
+                tags: vec![],
+                cover_image_url: None,
+                space_id: None,
+                marketplace: Some(CreatePostMarketplaceInput {
+                    category: "electronics".to_string(),
+                    brand: "Sony".to_string(),
+                    condition_score: 8,
+                    suggested_price_cny: 50.0,
+                    defects: vec![],
+                    description: None,
+                }),
+                idempotency_key: None,
+            })
+            .await;
+        assert!(matches!(err_discussion_mp, Err(ApiError::BadRequest(_))));
+
+        // 4. Offer with empty brand is rejected immediately.
+        let err_empty_brand = service
+            .create(CreatePost {
+                campus_id,
+                author_id: author.clone(),
+                category: "offer".to_string(),
+                title: "品牌为空的闲置".to_string(),
+                body: "应当被拒绝".to_string(),
+                tags: vec![],
+                cover_image_url: None,
+                space_id: None,
+                marketplace: Some(CreatePostMarketplaceInput {
+                    category: "electronics".to_string(),
+                    brand: "   ".to_string(),
+                    condition_score: 8,
+                    suggested_price_cny: 50.0,
+                    defects: vec![],
+                    description: None,
+                }),
+                idempotency_key: None,
+            })
+            .await;
+        assert!(matches!(err_empty_brand, Err(ApiError::BadRequest(_))));
+
+        // 5. Command-level idempotency: replay returns same post; altered payload returns 409 Conflict.
+        let ikey = Uuid::new_v4().to_string();
+        let first = service
+            .create(CreatePost {
+                campus_id,
+                author_id: author.clone(),
+                category: "discussion".to_string(),
+                title: "幂等性测试帖子".to_string(),
+                body: "首次发布内容".to_string(),
+                tags: vec![],
+                cover_image_url: None,
+                space_id: None,
+                marketplace: None,
+                idempotency_key: Some(ikey.clone()),
+            })
+            .await
+            .expect("first publish succeeds");
+
+        // Replay with exact same payload
+        let replayed = service
+            .create(CreatePost {
+                campus_id,
+                author_id: author.clone(),
+                category: "discussion".to_string(),
+                title: "幂等性测试帖子".to_string(),
+                body: "首次发布内容".to_string(),
+                tags: vec![],
+                cover_image_url: None,
+                space_id: None,
+                marketplace: None,
+                idempotency_key: Some(ikey.clone()),
+            })
+            .await
+            .expect("replay succeeds");
+        assert_eq!(
+            first.id, replayed.id,
+            "idempotent replay must return exact same post ID"
+        );
+
+        // Conflict: retry with same idempotency key but altered title
+        let conflict = service
+            .create(CreatePost {
+                campus_id,
+                author_id: author.clone(),
+                category: "discussion".to_string(),
+                title: "篡改标题的重试".to_string(),
+                body: "首次发布内容".to_string(),
+                tags: vec![],
+                cover_image_url: None,
+                space_id: None,
+                marketplace: None,
+                idempotency_key: Some(ikey.clone()),
+            })
+            .await;
+        assert!(
+            matches!(conflict, Err(ApiError::Conflict(_))),
+            "altered payload on same key must return 409 Conflict"
         );
     })
     .await;

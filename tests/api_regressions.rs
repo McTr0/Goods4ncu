@@ -122,15 +122,23 @@ async fn listing_create_commits_one_quarantined_image_job_and_replays_without_du
         let app = create_router(build_state_with_image_moderation(pool.clone(), true), &[]);
         let key = Uuid::new_v4().to_string();
         let body = json!({
-            "title": "Atomic image listing", "category": "other", "brand": "Test",
-            "condition_score": 8, "suggested_price_cny": 100.0, "defects": [],
-            "image_url": "https://cdn.example.com/atomic.jpg"
+            "title": "Atomic image listing",
+            "body": "Atomic image listing description",
+            "category": "offer",
+            "cover_image_url": "https://cdn.example.com/atomic.jpg",
+            "marketplace": {
+                "category": "other",
+                "brand": "Test",
+                "condition_score": 8,
+                "suggested_price_cny": 100.0,
+                "defects": [],
+            }
         });
         let mut listing_id = String::new();
-        for replayed in [false, true] {
+        for _ in [false, true] {
             let request = Request::builder()
                 .method("POST")
-                .uri("/api/listings")
+                .uri("/api/posts")
                 .header("Content-Type", "application/json")
                 .header("Authorization", bearer(&token))
                 .header("Idempotency-Key", &key)
@@ -139,8 +147,7 @@ async fn listing_create_commits_one_quarantined_image_job_and_replays_without_du
             let response = app.clone().oneshot(request).await.expect("response");
             assert_eq!(response.status(), StatusCode::OK);
             let json = response_json(response).await;
-            assert_eq!(json["replayed"], replayed);
-            listing_id = json["id"].as_str().unwrap().to_string();
+            listing_id = json["listing_id"].as_str().unwrap().to_string();
         }
         let status: String =
             sqlx::query_scalar("SELECT images_moderation_status FROM inventory WHERE id = $1")
@@ -823,15 +830,19 @@ async fn listing_creation_requires_verified_campus_membership() {
         let app = create_router(build_state(pool.clone()), &[]);
         let body = json!({
             "title": "Campus gated listing",
-            "category": "other",
-            "brand": "Test",
-            "condition_score": 8,
-            "suggested_price_cny": 100.0,
-            "defects": []
+            "body": "Campus gated listing description",
+            "category": "offer",
+            "marketplace": {
+                "category": "other",
+                "brand": "Test",
+                "condition_score": 8,
+                "suggested_price_cny": 100.0,
+                "defects": []
+            }
         });
         let request = Request::builder()
             .method("POST")
-            .uri("/api/listings")
+            .uri("/api/posts")
             .header("Content-Type", "application/json")
             .header("Authorization", bearer(&token))
             .header("Idempotency-Key", Uuid::new_v4().to_string())
@@ -853,7 +864,7 @@ async fn listing_creation_requires_verified_campus_membership() {
         .expect("verify membership");
         let request = Request::builder()
             .method("POST")
-            .uri("/api/listings")
+            .uri("/api/posts")
             .header("Content-Type", "application/json")
             .header("Authorization", bearer(&token))
             .header("Idempotency-Key", Uuid::new_v4().to_string())

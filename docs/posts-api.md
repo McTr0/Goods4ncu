@@ -158,9 +158,12 @@ clients and is applied to the linked listing post by the unified ranker.
 ### `POST /api/posts`
 
 Unified post creation endpoint. Creates discussion topics or marketplace listings
-within a single atomic database transaction.
+within a single atomic database transaction. Supports optional `Idempotency-Key` header
+for safe retry semantics (identical retries replay the created post; conflicting payloads return 409 Conflict).
+Both top-level and nested payloads reject unknown fields (`deny_unknown_fields`).
 
-For ordinary discussions:
+For ordinary discussions (`share`, `question`, `discussion`, `team_up`, `announcement`):
+The `marketplace` object is strictly forbidden (must be null or omitted).
 
 ```json
 {
@@ -173,6 +176,7 @@ For ordinary discussions:
 ```
 
 For goods / marketplace items (category `offer` or `wanted`):
+The `marketplace` object is strictly required. For `offer`, `brand` is required. If `direction` is provided, it must match the post `category`.
 
 ```json
 {
@@ -182,6 +186,7 @@ For goods / marketplace items (category `offer` or `wanted`):
   "tags": [],
   "marketplace": {
     "category": "electronics",
+    "brand": "Dell",
     "condition_score": 8,
     "suggested_price_cny": 100.0,
     "direction": "offer"
