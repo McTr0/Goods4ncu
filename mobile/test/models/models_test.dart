@@ -445,13 +445,13 @@ void main() {
       expect(message.sentAt, DateTime.parse('2024-01-15T10:30:00Z'));
     });
 
-    test('fromJson handles image_data as alternative to image_base64', () {
+    test('fromJson handles image_base64', () {
       final json = {
         'id': '123',
         'conversation_id': 'conv-456',
         'sender': 'user-789',
         'content': 'Image message',
-        'image_data': 'img-data-123',
+        'image_base64': 'img-data-123',
         'sent_at': '2024-01-15T10:30:00Z',
       };
 
@@ -460,13 +460,13 @@ void main() {
       expect(message.imageBase64, 'img-data-123');
     });
 
-    test('fromJson handles audio_data as alternative to audio_base64', () {
+    test('fromJson handles audio_base64', () {
       final json = {
         'id': '123',
         'conversation_id': 'conv-456',
         'sender': 'user-789',
         'content': 'Audio message',
-        'audio_data': 'audio-data-123',
+        'audio_base64': 'audio-data-123',
         'sent_at': '2024-01-15T10:30:00Z',
       };
 

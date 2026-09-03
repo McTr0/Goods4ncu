@@ -323,8 +323,6 @@ pub struct SendConversationMessageInput {
     pub content: String,
     pub reply_to_message_id: Option<i64>,
     pub quote: Option<StructuredQuoteInput>,
-    pub image_data: Option<String>,
-    pub audio_data: Option<String>,
     pub image_url: Option<String>,
     pub audio_url: Option<String>,
 }
@@ -730,8 +728,6 @@ pub struct ConversationMessageRecord {
     pub can_react: bool,
     pub can_report: bool,
     pub timestamp: String,
-    pub image_data: Option<String>,
-    pub audio_data: Option<String>,
     pub image_url: Option<String>,
     pub audio_url: Option<String>,
     pub status: String,
@@ -1082,8 +1078,6 @@ impl ChatConversationService {
                         None,
                         None,
                         None,
-                        None,
-                        None,
                     )
                     .await?;
                     let now = Utc::now();
@@ -1204,8 +1198,6 @@ impl ChatConversationService {
             &input.recipient_id,
             &input.content,
             "opening",
-            None,
-            None,
             None,
             None,
             None,
@@ -2627,8 +2619,6 @@ impl ChatConversationService {
             "message",
             input.reply_to_message_id,
             quote.as_ref(),
-            input.image_data.as_deref(),
-            input.audio_data.as_deref(),
             input.image_url.as_deref(),
             input.audio_url.as_deref(),
             None,
@@ -2891,8 +2881,6 @@ impl ChatConversationService {
             None,
             None,
             None,
-            None,
-            None,
             Some(&payload),
         )
         .await?;
@@ -2940,7 +2928,7 @@ impl ChatConversationService {
         .map_err(db_error)?;
         let rows = sqlx::query(
             "SELECT id, client_message_id, sender, content, reply_to_message_id, timestamp,
-                    image_data, audio_data, image_url, audio_url, status, kind,
+                    image_url, audio_url, status, kind,
                     interaction_payload, edited_at,
                     quote_kind, quote_ref_id, quote_snapshot
              FROM chat_messages
@@ -3017,7 +3005,7 @@ impl ChatConversationService {
             "UPDATE chat_messages SET content = $1, edited_at = NOW()
              WHERE id = $2
              RETURNING id, client_message_id, sender, content, reply_to_message_id, timestamp,
-                       image_data, audio_data, image_url, audio_url, status, kind,
+                       image_url, audio_url, status, kind,
                        interaction_payload, edited_at,
                        quote_kind, quote_ref_id, quote_snapshot",
         )
@@ -3903,7 +3891,7 @@ async fn load_message_by_id_for_user(
 ) -> Result<ConversationMessageRecord, ApiError> {
     let row = sqlx::query(
         "SELECT id, client_message_id, direct_conversation_id, sender, content,
-                reply_to_message_id, timestamp, image_data, audio_data,
+                reply_to_message_id, timestamp,
                 image_url, audio_url, status, kind, interaction_payload, edited_at,
                 quote_kind, quote_ref_id, quote_snapshot
          FROM chat_messages
@@ -4294,8 +4282,6 @@ async fn insert_message(
     kind: &str,
     reply_to_message_id: Option<i64>,
     quote: Option<&StructuredQuote>,
-    image_data: Option<&str>,
-    audio_data: Option<&str>,
     image_url: Option<&str>,
     audio_url: Option<&str>,
     interaction: Option<&AvatarInteractionPayload>,
@@ -4305,10 +4291,10 @@ async fn insert_message(
             conversation_id, direct_conversation_id, client_message_id, listing_id,
             sender, receiver, is_agent, content, kind, reply_to_message_id,
             quote_kind, quote_ref_id, quote_snapshot,
-            image_data, audio_data, image_url, audio_url, interaction_payload, status
-         ) VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8, $9, $10, $11, COALESCE($12, '{}'::jsonb), $13, $14, $15, $16, $17, 'sent')
+            image_url, audio_url, interaction_payload, status
+         ) VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7, $8, $9, $10, $11, COALESCE($12, '{}'::jsonb), $13, $14, $15, 'sent')
          RETURNING id, client_message_id, sender, content, reply_to_message_id, timestamp,
-                   image_data, audio_data, image_url, audio_url, status, kind,
+                   image_url, audio_url, status, kind,
                    interaction_payload, edited_at,
                    quote_kind, quote_ref_id, quote_snapshot",
     )
@@ -4324,8 +4310,6 @@ async fn insert_message(
     .bind(quote.map(|value| value.kind.as_str()))
     .bind(quote.map(|value| value.ref_id.as_str()))
     .bind(quote.map(|value| value.snapshot.clone()))
-    .bind(image_data)
-    .bind(audio_data)
     .bind(image_url)
     .bind(audio_url)
     .bind(interaction.map(|value| json!(value)))
@@ -4397,8 +4381,6 @@ fn row_to_message(row: sqlx::postgres::PgRow, conversation_id: Uuid) -> Conversa
         can_react: kind != "avatar_interaction",
         can_report: true,
         timestamp: timestamp.to_rfc3339(),
-        image_data: row.get("image_data"),
-        audio_data: row.get("audio_data"),
         image_url: row.get("image_url"),
         audio_url: row.get("audio_url"),
         status,

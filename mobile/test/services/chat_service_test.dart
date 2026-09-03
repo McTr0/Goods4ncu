@@ -86,7 +86,7 @@ void main() {
         expect(message.sentAt, DateTime.parse('2024-01-15T10:00:00Z'));
       });
 
-      test('handles both image_base64 and image_data', () {
+      test('handles image_base64', () {
         final jsonWithBase64 = {
           'id': 'msg-1',
           'conversation_id': 'conv-1',
@@ -100,23 +100,9 @@ void main() {
           ConversationMessage.fromJson(jsonWithBase64).imageBase64,
           'from_base64',
         );
-
-        final jsonWithData = {
-          'id': 'msg-2',
-          'conversation_id': 'conv-1',
-          'sender': 'user-1',
-          'content': 'Test',
-          'image_data': 'from_data',
-          'sent_at': '2024-01-15T10:00:00Z',
-        };
-
-        expect(
-          ConversationMessage.fromJson(jsonWithData).imageBase64,
-          'from_data',
-        );
       });
 
-      test('handles both audio_base64 and audio_data', () {
+      test('handles audio_base64', () {
         final jsonWithBase64 = {
           'id': 'msg-1',
           'conversation_id': 'conv-1',
@@ -129,20 +115,6 @@ void main() {
         expect(
           ConversationMessage.fromJson(jsonWithBase64).audioBase64,
           'from_base64',
-        );
-
-        final jsonWithData = {
-          'id': 'msg-2',
-          'conversation_id': 'conv-1',
-          'sender': 'user-1',
-          'content': 'Test',
-          'audio_data': 'from_data',
-          'sent_at': '2024-01-15T10:00:00Z',
-        };
-
-        expect(
-          ConversationMessage.fromJson(jsonWithData).audioBase64,
-          'from_data',
         );
       });
     });

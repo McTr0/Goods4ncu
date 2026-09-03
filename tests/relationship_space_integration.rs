@@ -268,8 +268,6 @@ async fn shared_file_and_link_objects_are_authoritative_and_revokeable() {
                     kind: StructuredQuoteKind::File,
                     ref_id: file.id.clone(),
                 }),
-                image_data: None,
-                audio_data: None,
                 image_url: None,
                 audio_url: None,
             })
@@ -337,8 +335,6 @@ async fn shared_file_and_link_objects_are_authoritative_and_revokeable() {
                     kind: StructuredQuoteKind::File,
                     ref_id: file.id.clone(),
                 }),
-                image_data: None,
-                audio_data: None,
                 image_url: None,
                 audio_url: None,
             })
@@ -372,8 +368,6 @@ async fn shared_file_and_link_objects_are_authoritative_and_revokeable() {
                     kind: StructuredQuoteKind::Link,
                     ref_id: link.id.clone(),
                 }),
-                image_data: None,
-                audio_data: None,
                 image_url: None,
                 audio_url: None,
             })

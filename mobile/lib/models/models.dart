@@ -2069,8 +2069,8 @@ class ConversationMessage {
       conversationId: json['conversation_id']?.toString() ?? '',
       senderId: json['sender']?.toString() ?? '',
       content: json['content'] ?? '',
-      imageBase64: json['image_base64'] ?? json['image_data'],
-      audioBase64: json['audio_base64'] ?? json['audio_data'],
+      imageBase64: json['image_base64'],
+      audioBase64: json['audio_base64'],
       imageUrl: json['image_url'],
       audioUrl: json['audio_url'],
       sentAt: json['sent_at'] != null

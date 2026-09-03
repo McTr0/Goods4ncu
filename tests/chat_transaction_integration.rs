@@ -90,8 +90,6 @@ fn send_input(
         content: content.to_string(),
         reply_to_message_id: None,
         quote: None,
-        image_data: None,
-        audio_data: None,
         image_url: None,
         audio_url: None,
     }

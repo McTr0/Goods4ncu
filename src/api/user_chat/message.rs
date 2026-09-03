@@ -80,8 +80,6 @@ pub async fn send_conversation_message(
             content: content.clone(),
             reply_to_message_id: body.reply_to_message_id,
             quote: body.quote,
-            image_data: None,
-            audio_data: None,
             image_url: image_url.clone(),
             audio_url: audio_url.clone(),
         })

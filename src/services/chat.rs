@@ -15,10 +15,6 @@ pub struct ChatHistoryEntry {
     pub content: String,
     pub is_agent: bool,
     #[allow(dead_code)]
-    pub image_data: Option<String>,
-    #[allow(dead_code)]
-    pub audio_data: Option<String>,
-    #[allow(dead_code)]
     pub image_url: Option<String>,
     #[allow(dead_code)]
     pub audio_url: Option<String>,
@@ -59,14 +55,12 @@ impl ChatService {
         receiver: Option<&str>,
         is_agent: bool,
         content: &str,
-        image_data: Option<&str>,
-        audio_data: Option<&str>,
         image_url: Option<&str>,
         audio_url: Option<&str>,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO chat_messages (conversation_id, listing_id, sender, receiver, is_agent, content, image_data, audio_data, image_url, audio_url) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+            "INSERT INTO chat_messages (conversation_id, listing_id, sender, receiver, is_agent, content, image_url, audio_url) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(conversation_id)
         .bind(listing_id)
@@ -74,8 +68,6 @@ impl ChatService {
         .bind(receiver)
         .bind(is_agent)
         .bind(content)
-        .bind(image_data)
-        .bind(audio_data)
         .bind(image_url)
         .bind(audio_url)
         .execute(&self.db)
@@ -95,8 +87,6 @@ impl ChatService {
         receiver: Option<&str>,
         is_agent: bool,
         content: &str,
-        image_data: Option<&str>,
-        audio_data: Option<&str>,
         image_url: Option<&str>,
         audio_url: Option<&str>,
         session_campus_id: Option<Uuid>,
@@ -147,8 +137,8 @@ impl ChatService {
         }
 
         sqlx::query(
-            "INSERT INTO chat_messages (conversation_id, listing_id, sender, receiver, is_agent, content, image_data, audio_data, image_url, audio_url)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+            "INSERT INTO chat_messages (conversation_id, listing_id, sender, receiver, is_agent, content, image_url, audio_url)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(conversation_id)
         .bind(listing_id)
@@ -156,8 +146,6 @@ impl ChatService {
         .bind(receiver)
         .bind(is_agent)
         .bind(content)
-        .bind(image_data)
-        .bind(audio_data)
         .bind(image_url)
         .bind(audio_url)
         .execute(&mut *tx)
@@ -173,9 +161,9 @@ impl ChatService {
         conversation_id: &str,
     ) -> Result<Vec<ChatHistoryEntry>> {
         let rows = sqlx::query(
-            "SELECT sender, content, is_agent, image_data, audio_data, image_url, audio_url \
+            "SELECT sender, content, is_agent, image_url, audio_url \
              FROM ( \
-                 SELECT id, sender, content, is_agent, image_data, audio_data, image_url, audio_url \
+                 SELECT id, sender, content, is_agent, image_url, audio_url \
                  FROM chat_messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT $2 \
              ) recent ORDER BY id ASC",
         )
@@ -187,16 +175,12 @@ impl ChatService {
         Ok(rows
             .into_iter()
             .map(|row| {
-                let image_data: Option<String> = row.try_get("image_data").ok().flatten();
-                let audio_data: Option<String> = row.try_get("audio_data").ok().flatten();
                 let image_url: Option<String> = row.try_get("image_url").ok().flatten();
                 let audio_url: Option<String> = row.try_get("audio_url").ok().flatten();
                 ChatHistoryEntry {
                     sender: Row::get(&row, "sender"),
                     content: Row::get(&row, "content"),
                     is_agent: Row::get(&row, "is_agent"),
-                    image_data,
-                    audio_data,
                     image_url,
                     audio_url,
                 }
@@ -398,8 +382,6 @@ mod unit_tests {
             sender: "user-1".to_string(),
             content: "Hello".to_string(),
             is_agent: false,
-            image_data: None,
-            audio_data: None,
             image_url: None,
             audio_url: None,
         };
@@ -414,13 +396,9 @@ mod unit_tests {
             sender: "user-1".to_string(),
             content: "Check this image".to_string(),
             is_agent: true,
-            image_data: Some("base64image".to_string()),
-            audio_data: Some("base64audio".to_string()),
             image_url: Some("https://example.com/image.jpg".to_string()),
             audio_url: Some("https://example.com/audio.m4a".to_string()),
         };
-        assert!(entry.image_data.is_some());
-        assert!(entry.audio_data.is_some());
         assert!(entry.image_url.is_some());
         assert!(entry.audio_url.is_some());
         assert_eq!(entry.sender, "user-1");
