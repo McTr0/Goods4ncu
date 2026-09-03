@@ -73,7 +73,6 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
                 body: "正文".to_string(),
                 tags: vec!["我的自制标签".to_string()],
                 cover_image_url: None,
-                listing_id: None,
                 space_id: None,
                 marketplace: None,
             })
@@ -90,7 +89,6 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
                 body: "正文".to_string(),
                 tags: vec!["qianhuNorth".to_string(), "qianhuSouth".to_string()],
                 cover_image_url: None,
-                listing_id: None,
                 space_id: None,
                 marketplace: None,
             })
@@ -107,7 +105,6 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
                 body: "欢迎分享经验。".to_string(),
                 tags: vec!["urgent".to_string(), "donghu".to_string()],
                 cover_image_url: None,
-                listing_id: None,
                 space_id: None,
                 marketplace: None,
             })
@@ -140,7 +137,6 @@ async fn group_posts_are_hidden_from_non_members_and_feeds() {
                 body: "只有群成员可以看到这条。".to_string(),
                 tags: vec!["donghu".to_string()],
                 cover_image_url: None,
-                listing_id: None,
                 space_id: Some(space_id),
                 marketplace: None,
             })
@@ -216,7 +212,6 @@ async fn discussion_policy_rejection_happens_before_persistence() {
                 body: "用于验证发布入口在写库前执行统一审查。".to_string(),
                 tags: vec![],
                 cover_image_url: None,
-                listing_id: None,
                 space_id: None,
                 marketplace: None,
             })
@@ -253,7 +248,6 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 body: "把同类物品放在一起，标题写清楚楼栋和取货时间。".to_string(),
                 tags: vec!["donghu".to_string()],
                 cover_image_url: None,
-                listing_id: None,
                 space_id: None,
                 marketplace: None,
             })
@@ -268,7 +262,6 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
                 body: "用于验证跨主题引用会被拒绝。".to_string(),
                 tags: vec![],
                 cover_image_url: None,
-                listing_id: None,
                 space_id: None,
                 marketplace: None,
             })
@@ -406,7 +399,6 @@ async fn discussion_images_stay_private_until_moderation_approval() {
                 body: "把今晚的摊位分布图放在封面，方便大家在首页先看到。".to_string(),
                 tags: vec![],
                 cover_image_url: Some(image_url.to_string()),
-                listing_id: None,
                 space_id: None,
                 marketplace: None,
             })
@@ -451,32 +443,6 @@ async fn listings_are_references_and_marketplace_filters_follow_category() {
         let campus_id = campus(&pool).await;
         let owner = user(&pool, "seller").await;
         let service = service(&pool);
-        let listing_id = format!("listing-ref-{}", Uuid::new_v4().simple());
-
-        sqlx::query(
-            "INSERT INTO inventory (
-                 id, campus_id, title, category, brand, direction,
-                 condition_score, suggested_price_cny, defects, description,
-                 image_url, images_moderation_status, owner_id, status
-             ) VALUES ($1, $2, '二手显示器', 'electronics', 'Brand', 'offer',
-                       8, 10000, '[]', '九成新显示器', NULL,
-                       'approved', $3, 'active')",
-        )
-        .bind(&listing_id)
-        .bind(campus_id)
-        .bind(&owner)
-        .execute(&pool)
-        .await
-        .expect("insert referenced listing");
-
-        // No mirrored post exists until someone writes one referencing it.
-        let pre_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE listing_id = $1")
-            .bind(&listing_id)
-            .fetch_one(&pool)
-            .await
-            .expect("count referencing posts");
-        assert_eq!(pre_count, 0, "listings are no longer auto-projected");
-
         let offer_post = service
             .create(CreatePost {
                 campus_id,
@@ -486,13 +452,20 @@ async fn listings_are_references_and_marketplace_filters_follow_category() {
                 body: "自提优先，宿舍楼下交易。".to_string(),
                 tags: vec!["qianhuNorth".to_string(), "urgent".to_string()],
                 cover_image_url: None,
-                listing_id: Some(listing_id.clone()),
                 space_id: None,
-                marketplace: None,
+                marketplace: Some(CreatePostMarketplaceInput {
+                    category: "electronics".to_string(),
+                    brand: "Brand".to_string(),
+                    condition_score: 8,
+                    suggested_price_cny: 100.0,
+                    defects: vec![],
+                    description: Some("九成新显示器".to_string()),
+                }),
             })
             .await
-            .expect("create offer post with reference");
-        assert_eq!(offer_post.listing_id.as_deref(), Some(listing_id.as_str()));
+            .expect("create offer post with marketplace");
+        assert!(offer_post.listing_id.is_some());
+        let listing_id = offer_post.listing_id.clone().unwrap();
         let preview = offer_post.listing.as_ref().expect("listing preview");
         assert_eq!(preview.suggested_price_cny, 10_000);
         assert_eq!(preview.direction, "offer");
@@ -595,7 +568,6 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 body: "本学期教材可以在校内交换。".to_string(),
                 tags: vec!["donghu".to_string()],
                 cover_image_url: None,
-                listing_id: None,
                 space_id: None,
                 marketplace: None,
             })
@@ -610,7 +582,6 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 body: "周末一起打球。".to_string(),
                 tags: vec!["donghu".to_string()],
                 cover_image_url: None,
-                listing_id: None,
                 space_id: None,
                 marketplace: None,
             })
@@ -625,7 +596,6 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 body: "分享一条适合夜跑的路线。".to_string(),
                 tags: vec!["donghu".to_string()],
                 cover_image_url: None,
-                listing_id: None,
                 space_id: None,
                 marketplace: None,
             })
@@ -640,7 +610,6 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
                 body: "这条不应出现在自己的 for_you 流。".to_string(),
                 tags: vec![],
                 cover_image_url: None,
-                listing_id: None,
                 space_id: None,
                 marketplace: None,
             })
@@ -748,7 +717,6 @@ async fn atomic_post_and_marketplace_creation_in_single_transaction() {
                 body: "红轴手感很好，箱说全。".to_string(),
                 tags: vec![],
                 cover_image_url: None,
-                listing_id: None,
                 space_id: None,
                 marketplace: Some(CreatePostMarketplaceInput {
                     category: "electronics".to_string(),
@@ -777,7 +745,8 @@ async fn atomic_post_and_marketplace_creation_in_single_transaction() {
         assert_eq!(inv_row.1, "electronics");
         assert_eq!(inv_row.2, 25000); // 250.0 CNY -> 25000 cents
 
-        // 2. Failure rollback case: text policy rejection does not leave orphan inventory.
+        // 2. Failure rollback case: post insertion failure inside transaction
+        // rolls back the listing row created in the first step of the transaction.
         let initial_inv_count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE owner_id = $1")
                 .bind(&author)
@@ -785,16 +754,161 @@ async fn atomic_post_and_marketplace_creation_in_single_transaction() {
                 .await
                 .expect("count inventory");
 
-        let failed = service
+        use goods4ncu::repositories::{
+            NewPost, Post, PostFilter as RepoPostFilter, PostReply, PostRepository,
+            PostgresPostRepository, UpdatePostInput,
+        };
+
+        struct FailingPostRepo(PostgresPostRepository);
+        impl PostRepository for FailingPostRepo {
+            async fn list(
+                &self,
+                campus_id: Uuid,
+                viewer_id: Option<&str>,
+                filter: &RepoPostFilter,
+                limit: i64,
+                offset: i64,
+            ) -> Result<(Vec<Post>, i64), ApiError> {
+                self.0
+                    .list(campus_id, viewer_id, filter, limit, offset)
+                    .await
+            }
+            async fn list_for_you(
+                &self,
+                campus_id: Uuid,
+                viewer_id: Option<&str>,
+                filter: &RepoPostFilter,
+                limit: i64,
+                offset: i64,
+            ) -> Result<(Vec<Post>, i64), ApiError> {
+                self.0
+                    .list_for_you(campus_id, viewer_id, filter, limit, offset)
+                    .await
+            }
+            async fn find_by_id(
+                &self,
+                campus_id: Uuid,
+                id: Uuid,
+            ) -> Result<Option<Post>, ApiError> {
+                self.0.find_by_id(campus_id, id).await
+            }
+            async fn list_by_author(
+                &self,
+                campus_id: Uuid,
+                author_id: &str,
+                status: Option<&str>,
+                limit: i64,
+                offset: i64,
+            ) -> Result<(Vec<Post>, i64), ApiError> {
+                self.0
+                    .list_by_author(campus_id, author_id, status, limit, offset)
+                    .await
+            }
+            async fn find_by_listing_id(
+                &self,
+                campus_id: Uuid,
+                listing_id: &str,
+            ) -> Result<Option<Post>, ApiError> {
+                self.0.find_by_listing_id(campus_id, listing_id).await
+            }
+            async fn create_post(&self, input: NewPost) -> Result<Post, ApiError> {
+                self.0.create_post(input).await
+            }
+            async fn create_post_in_tx(
+                &self,
+                _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+                _input: NewPost,
+            ) -> Result<Uuid, ApiError> {
+                Err(ApiError::Internal(anyhow::anyhow!(
+                    "simulated post creation failure inside transaction"
+                )))
+            }
+            async fn update_post(
+                &self,
+                campus_id: Uuid,
+                id: Uuid,
+                author_id: &str,
+                input: &UpdatePostInput,
+            ) -> Result<bool, ApiError> {
+                self.0.update_post(campus_id, id, author_id, input).await
+            }
+            async fn delete_post(
+                &self,
+                campus_id: Uuid,
+                id: Uuid,
+                author_id: &str,
+            ) -> Result<bool, ApiError> {
+                self.0.delete_post(campus_id, id, author_id).await
+            }
+            async fn list_replies(
+                &self,
+                campus_id: Uuid,
+                post_id: Uuid,
+                limit: i64,
+                offset: i64,
+            ) -> Result<(Vec<PostReply>, i64), ApiError> {
+                self.0.list_replies(campus_id, post_id, limit, offset).await
+            }
+            async fn find_reply(
+                &self,
+                campus_id: Uuid,
+                post_id: Uuid,
+                reply_id: Uuid,
+            ) -> Result<Option<PostReply>, ApiError> {
+                self.0.find_reply(campus_id, post_id, reply_id).await
+            }
+            async fn create_reply(
+                &self,
+                campus_id: Uuid,
+                post_id: Uuid,
+                author_id: &str,
+                body: &str,
+                reply_to_id: Option<Uuid>,
+            ) -> Result<Option<PostReply>, ApiError> {
+                self.0
+                    .create_reply(campus_id, post_id, author_id, body, reply_to_id)
+                    .await
+            }
+            async fn update_reply(
+                &self,
+                campus_id: Uuid,
+                post_id: Uuid,
+                reply_id: Uuid,
+                author_id: &str,
+                body: &str,
+            ) -> Result<bool, ApiError> {
+                self.0
+                    .update_reply(campus_id, post_id, reply_id, author_id, body)
+                    .await
+            }
+            async fn delete_reply(
+                &self,
+                campus_id: Uuid,
+                post_id: Uuid,
+                reply_id: Uuid,
+                author_id: &str,
+            ) -> Result<bool, ApiError> {
+                self.0
+                    .delete_reply(campus_id, post_id, reply_id, author_id)
+                    .await
+            }
+        }
+
+        let failing_service = PostService::new_with_repo(
+            pool.clone(),
+            FailingPostRepo(PostgresPostRepository::new(pool.clone())),
+            ModerationService::new_for_test(false),
+        );
+
+        let failed = failing_service
             .create(CreatePost {
                 campus_id,
                 author_id: author.clone(),
                 category: "offer".to_string(),
-                title: "campusp0licytoken".to_string(),
-                body: "正文包含违禁词".to_string(),
+                title: "回滚测试键盘".to_string(),
+                body: "测试在第一笔写入后的回滚".to_string(),
                 tags: vec![],
                 cover_image_url: None,
-                listing_id: None,
                 space_id: None,
                 marketplace: Some(CreatePostMarketplaceInput {
                     category: "electronics".to_string(),
@@ -806,7 +920,7 @@ async fn atomic_post_and_marketplace_creation_in_single_transaction() {
                 }),
             })
             .await;
-        assert!(matches!(failed, Err(ApiError::ContentViolation(_))));
+        assert!(matches!(failed, Err(ApiError::Internal(_))));
 
         let post_inv_count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM inventory WHERE owner_id = $1")
@@ -816,7 +930,7 @@ async fn atomic_post_and_marketplace_creation_in_single_transaction() {
                 .expect("count inventory after failed post");
         assert_eq!(
             post_inv_count, initial_inv_count,
-            "transaction rollback must not leak orphan listing"
+            "transaction rollback must not leak orphan listing when post insertion fails"
         );
     })
     .await;

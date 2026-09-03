@@ -36,8 +36,6 @@ pub struct CreatePost {
     pub body: String,
     pub tags: Vec<String>,
     pub cover_image_url: Option<String>,
-    /// Optional reference to an existing inventory row.
-    pub listing_id: Option<String>,
     /// Group scope; when set the post is visible to space members only.
     pub space_id: Option<Uuid>,
     /// When set, atomically creates inventory listing in the same database transaction.
@@ -87,17 +85,28 @@ pub async fn allowed_post_categories(pool: &PgPool) -> Vec<String> {
 }
 
 #[derive(Clone)]
-pub struct PostService {
+pub struct PostService<R: PostRepository = PostgresPostRepository> {
     pool: PgPool,
-    repository: PostgresPostRepository,
+    repository: R,
     moderation: ModerationService,
 }
 
-impl PostService {
+impl PostService<PostgresPostRepository> {
     pub fn new(pool: PgPool, moderation: ModerationService) -> Self {
         Self {
             repository: PostgresPostRepository::new(pool.clone()),
             pool,
+            moderation,
+        }
+    }
+}
+
+impl<R: PostRepository> PostService<R> {
+    #[allow(dead_code)]
+    pub fn new_with_repo(pool: PgPool, repository: R, moderation: ModerationService) -> Self {
+        Self {
+            pool,
+            repository,
             moderation,
         }
     }
@@ -284,12 +293,13 @@ impl PostService {
         }
         self.ensure_text_allowed(&format!("{title}\n{body}\n{}", tags.join(" ")))?;
 
-        let created_id = if let Some(mp) = input.marketplace {
-            let mut tx = self
-                .pool
-                .begin()
-                .await
-                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
+
+        let listing_id = if let Some(mp) = input.marketplace {
             let listing_service = crate::services::listing_command::ListingCommandService::new(
                 self.pool.clone(),
                 self.moderation.clone(),
@@ -313,73 +323,47 @@ impl PostService {
                     None,
                 )
                 .await?;
-
-            let post_id = self
-                .repository
-                .create_post_in_tx(
-                    &mut tx,
-                    NewPost {
-                        campus_id: input.campus_id,
-                        author_id: input.author_id.clone(),
-                        category,
-                        title,
-                        body,
-                        tags,
-                        image_url: cover_image_url.clone(),
-                        listing_id: Some(listing_res.id),
-                        space_id: input.space_id,
-                    },
-                )
-                .await?;
-
-            if let Some(ref image_url) = cover_image_url {
-                self.moderation
-                    .submit_image_job_in_tx(
-                        &mut tx,
-                        input.campus_id,
-                        &post_id.to_string(),
-                        image_url,
-                        "post_image",
-                    )
-                    .await
-                    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
-            }
-
-            tx.commit()
-                .await
-                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
-            post_id
+            Some(listing_res.id)
         } else {
-            let created = self
-                .repository
-                .create_post(NewPost {
+            None
+        };
+
+        let post_id = self
+            .repository
+            .create_post_in_tx(
+                &mut tx,
+                NewPost {
                     campus_id: input.campus_id,
-                    author_id: input.author_id,
+                    author_id: input.author_id.clone(),
                     category,
                     title,
                     body,
                     tags,
                     image_url: cover_image_url.clone(),
-                    listing_id: input.listing_id,
+                    listing_id,
                     space_id: input.space_id,
-                })
-                .await?;
-            if let Some(image_url) = cover_image_url {
-                self.moderation
-                    .submit_image_job(
-                        &self.pool,
-                        input.campus_id,
-                        &created.id.to_string(),
-                        &image_url,
-                        "post_image",
-                    )
-                    .await
-                    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
-            }
-            created.id
-        };
+                },
+            )
+            .await?;
 
-        self.get(input.campus_id, created_id).await
+        if let Some(ref image_url) = cover_image_url {
+            self.moderation
+                .submit_image_job_in_tx(
+                    &mut tx,
+                    input.campus_id,
+                    &post_id.to_string(),
+                    image_url,
+                    "post_image",
+                )
+                .await
+                .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
+
+        self.get(input.campus_id, post_id).await
     }
 
     pub async fn update(

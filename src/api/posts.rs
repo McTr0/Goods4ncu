@@ -62,7 +62,6 @@ pub struct CreatePostRequest {
     #[serde(default)]
     pub tags: Vec<String>,
     pub cover_image_url: Option<String>,
-    pub listing_id: Option<String>,
     pub space_id: Option<Uuid>,
     pub marketplace: Option<CreatePostMarketplacePayload>,
 }
@@ -476,7 +475,6 @@ pub async fn create_post(
             category: payload.category.unwrap_or_else(|| "discussion".to_string()),
             tags: payload.tags,
             cover_image_url,
-            listing_id: payload.listing_id,
             space_id: payload.space_id,
             marketplace,
         })

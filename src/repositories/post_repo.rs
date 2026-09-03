@@ -139,6 +139,7 @@ pub trait PostRepository: Send + Sync {
         listing_id: &str,
     ) -> Result<Option<Post>, ApiError>;
 
+    #[allow(dead_code)]
     async fn create_post(&self, input: NewPost) -> Result<Post, ApiError>;
 
     async fn create_post_in_tx(

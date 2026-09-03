@@ -178,13 +178,37 @@ pub(crate) async fn execute_create_listing_in_tx(
                 condition_score: args.condition_score as i32,
                 suggested_price_cny: price_cents as f64 / 100.0,
                 defects: args.defects,
-                description: Some(args.original_description),
+                description: Some(args.original_description.clone()),
                 image_url: None,
             },
             None,
         )
         .await
         .map_err(|error| ToolError(format!("发布校验失败: {}", error)))?;
+
+    use crate::repositories::PostRepository;
+    let post_repo = crate::repositories::PostgresPostRepository::new(ctx.db_pool.clone());
+    let _post_id = post_repo
+        .create_post_in_tx(
+            tx,
+            crate::repositories::NewPost {
+                campus_id,
+                author_id: owner.to_string(),
+                category: "offer".to_string(),
+                title: title.clone(),
+                body: if args.original_description.trim().is_empty() {
+                    title.clone()
+                } else {
+                    args.original_description
+                },
+                tags: vec![],
+                image_url: None,
+                listing_id: Some(result.id.clone()),
+                space_id: None,
+            },
+        )
+        .await
+        .map_err(|error| ToolError(format!("创建帖子失败: {}", error)))?;
 
     Ok(CreatedListing {
         message: format!(

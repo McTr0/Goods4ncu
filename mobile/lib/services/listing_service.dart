@@ -69,37 +69,6 @@ class ListingService extends BaseService {
     );
   }
 
-  /// Create new listing.
-  /// POST /api/listings
-  Future<String> createListing({
-    required String title,
-    required String category,
-    required String brand,
-    required int conditionScore,
-    required double suggestedPriceCny,
-    required List<String> defects,
-    String? description,
-    String direction = 'offer',
-    String? idempotencyKey,
-  }) async {
-    final headers = await authHeaders();
-    headers['Idempotency-Key'] = idempotencyKey ?? const Uuid().v4();
-    final response = await post(
-      Uri.parse('$baseUrl/api/listings'),
-      headers,
-      jsonEncode({
-        'title': title,
-        'category': category,
-        'brand': direction == 'wanted' && brand.trim().isEmpty ? '不限' : brand,
-        'direction': direction,
-        'condition_score': conditionScore,
-        'suggested_price_cny': suggestedPriceCny,
-        'defects': defects,
-        'description': description,
-      }),
-    );
-    return handleResponse(response, (data) => data['id'] ?? '');
-  }
 
   /// Get active offers matching a wanted listing.
   Future<ListingsResponse> getWantedMatches(String wantedId) async {

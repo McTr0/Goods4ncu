@@ -205,27 +205,6 @@ class ApiService extends BaseService {
   Future<Listing> getListingDetail(String id) =>
       _listingService.getListingDetail(id);
 
-  Future<String> createListing({
-    required String title,
-    required String category,
-    required String brand,
-    required int conditionScore,
-    required double suggestedPriceCny,
-    required List<String> defects,
-    String? description,
-    String direction = 'offer',
-    String? idempotencyKey,
-  }) => _listingService.createListing(
-    title: title,
-    category: category,
-    brand: brand,
-    conditionScore: conditionScore,
-    suggestedPriceCny: suggestedPriceCny,
-    defects: defects,
-    description: description,
-    direction: direction,
-    idempotencyKey: idempotencyKey,
-  );
 
   Future<void> updateListing(
     String id,

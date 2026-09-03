@@ -17,7 +17,7 @@ abstract final class PublishNavigation {
 
     final requestedDirection =
         uri.queryParameters['direction'] ?? uri.queryParameters['kind'];
-    if (uri.path == '/create/listing') {
+    if (uri.path == '/create/listing' || uri.path == '/my-listings/new') {
       return listing(direction: requestedDirection ?? 'offer');
     }
     if (requestedDirection == 'offer' || requestedDirection == 'wanted') {
