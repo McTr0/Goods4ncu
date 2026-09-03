@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:uuid/uuid.dart';
 import '../l10n/app_localizations.dart';
 import '../services/api_service.dart';
 import '../services/post_service.dart';
@@ -83,6 +84,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
   DateTime? _eventStartsAt;
   final _eventPlaceController = TextEditingController();
   bool _canAnnounce = false;
+  String? _activeSubmissionKey;
 
   @override
   void initState() {
@@ -192,6 +194,14 @@ class _CreatePostPageState extends State<CreatePostPage> {
 
   Future<void> _submit() async {
     if (_submitting || _formKey.currentState?.validate() != true) return;
+    if (_needsGoods && _goodsCategory == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先选择商品分区')),
+      );
+      return;
+    }
+
+    _activeSubmissionKey ??= const Uuid().v4();
     setState(() => _submitting = true);
     try {
       final selectedImage = _coverImage;
@@ -205,24 +215,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
 
       final tags = _selectedTags.toList(growable: false);
 
-      if (_needsGoods) {
-        if (_goodsCategory == null) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('请先选择商品分区')));
-          setState(() => _submitting = false);
-          return;
-        }
-        if (_category == 'offer' && _goodsBrandController.text.trim().isEmpty) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('请填写品牌或来源')));
-          setState(() => _submitting = false);
-          return;
-        }
-      }
       final marketplace = _needsGoods
           ? {
               'category': _goodsCategory!,
@@ -243,7 +235,9 @@ class _CreatePostPageState extends State<CreatePostPage> {
         coverImageUrl: coverImageUrl,
         spaceId: widget.spaceId,
         marketplace: marketplace,
+        idempotencyKey: _activeSubmissionKey,
       );
+      _activeSubmissionKey = null;
       if (!mounted) return;
       context.go('/posts/${post.id}');
     } catch (error) {
@@ -569,30 +563,48 @@ class _CreatePostPageState extends State<CreatePostPage> {
             style: const TextStyle(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: AppTheme.sp12),
-          InkWell(
-            key: const ValueKey('publish-goods-category-picker'),
-            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-            onTap: _submitting ? null : _pickGoodsCategory,
-            child: InputDecorator(
-              decoration: InputDecoration(
-                labelText: '${l.category} *',
-                helperText: '必填：选择商品分区',
-                suffixIcon: const Icon(Icons.expand_more_rounded),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+          FormField<String>(
+            key: const ValueKey('publish-goods-category-field'),
+            initialValue: _goodsCategory,
+            validator: (_) {
+              if (_needsGoods && _goodsCategory == null) {
+                return '请先选择商品分区';
+              }
+              return null;
+            },
+            builder: (field) {
+              return InkWell(
+                key: const ValueKey('publish-goods-category-picker'),
+                borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                onTap: _submitting
+                    ? null
+                    : () async {
+                        await _pickGoodsCategory();
+                        field.didChange(_goodsCategory);
+                      },
+                child: InputDecorator(
+                  decoration: InputDecoration(
+                    labelText: '${l.category} *',
+                    helperText: '必填：选择商品分区',
+                    errorText: field.errorText,
+                    suffixIcon: const Icon(Icons.expand_more_rounded),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                    ),
+                  ),
+                  child: Text(
+                    _goodsCategory == null
+                        ? '请选择分区'
+                        : localizedCategoryLabel(context, _goodsCategory!),
+                    style: TextStyle(
+                      color: _goodsCategory == null
+                          ? Theme.of(context).hintColor
+                          : null,
+                    ),
+                  ),
                 ),
-              ),
-              child: Text(
-                _goodsCategory == null
-                    ? '请选择分区'
-                    : localizedCategoryLabel(context, _goodsCategory!),
-                style: TextStyle(
-                  color: _goodsCategory == null
-                      ? Theme.of(context).hintColor
-                      : null,
-                ),
-              ),
-            ),
+              );
+            },
           ),
           const SizedBox(height: AppTheme.sp12),
           TextFormField(

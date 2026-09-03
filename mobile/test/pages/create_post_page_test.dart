@@ -28,6 +28,9 @@ class _FakeUploadService extends UploadService {
 
 class _FakePostService extends PostService {
   String? coverImageUrl;
+  String? lastIdempotencyKey;
+  int createCalls = 0;
+  bool shouldFail = false;
 
   @override
   Future<CampusPost> createPost({
@@ -40,7 +43,12 @@ class _FakePostService extends PostService {
     Map<String, dynamic>? marketplace,
     String? idempotencyKey,
   }) async {
+    createCalls++;
     this.coverImageUrl = coverImageUrl;
+    lastIdempotencyKey = idempotencyKey;
+    if (shouldFail) {
+      throw Exception('Simulated network timeout');
+    }
     return CampusPost.fromJson({
       'id': 'post-created',
       'post_type': 'discussion',
@@ -194,6 +202,92 @@ void main() {
     expect(uploadService.uploadedExtension, 'png');
     expect(uploadService.uploadedContentType, 'image/png');
     expect(postService.coverImageUrl, 'https://cdn.test/post-cover.jpg');
+    expect(postService.lastIdempotencyKey, isNotNull);
+    expect(find.text('created'), findsOneWidget);
+  });
+
+  testWidgets('does not upload image when form validation fails', (tester) async {
+    final postService = _FakePostService();
+    final uploadService = _FakeUploadService();
+    final image = PickedPostImage(
+      bytes: Uint8List.fromList(const [
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1,
+        0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84,
+        120, 156, 99, 248, 207, 192, 240, 31, 0, 5, 0, 1, 255, 137, 153, 61, 29, 0,
+        0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+      ]),
+      extension: 'png',
+      contentType: 'image/png',
+    );
+
+    await tester.pumpWidget(
+      _app(
+        postService: postService,
+        uploadService: uploadService,
+        imagePicker: () async => image,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Pick image but leave title and body empty
+    await tester.tap(find.byKey(const ValueKey('post-pick-cover-action')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('post-cover-preview')), findsOneWidget);
+
+    // Tap publish without valid fields
+    await tester.ensureVisible(find.byKey(const ValueKey('post-publish-action')));
+    await tester.tap(find.byKey(const ValueKey('post-publish-action')));
+    await tester.pumpAndSettle();
+
+    // Pure validation must prevent upload from ever running!
+    expect(uploadService.uploadedContentType, isNull);
+    expect(postService.createCalls, 0);
+  });
+
+  testWidgets('reuses same idempotency key across retry attempts until success', (tester) async {
+    final postService = _FakePostService();
+    final uploadService = _FakeUploadService();
+
+    await tester.pumpWidget(
+      _app(
+        postService: postService,
+        uploadService: uploadService,
+        imagePicker: () async => null,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('post-title-field')),
+      'Retryable post',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('post-body-field')),
+      'Post body text.',
+    );
+
+    // First attempt fails
+    postService.shouldFail = true;
+    await tester.ensureVisible(find.byKey(const ValueKey('post-publish-action')));
+    await tester.tap(find.byKey(const ValueKey('post-publish-action')));
+    await tester.pumpAndSettle();
+
+    expect(postService.createCalls, 1);
+    final firstKey = postService.lastIdempotencyKey;
+    expect(firstKey, isNotNull);
+    expect(find.text('created'), findsNothing);
+
+    // Dismiss the error snackbar so button is un-obscured
+    ScaffoldMessenger.of(tester.element(find.byType(CreatePostPage))).hideCurrentSnackBar();
+    await tester.pumpAndSettle();
+
+    // Retry without modifying form -> must reuse same idempotency key
+    postService.shouldFail = false;
+    await tester.tap(find.byKey(const ValueKey('post-publish-action')));
+    await tester.pumpAndSettle();
+
+    expect(postService.createCalls, 2);
+    expect(postService.lastIdempotencyKey, firstKey);
     expect(find.text('created'), findsOneWidget);
   });
 
