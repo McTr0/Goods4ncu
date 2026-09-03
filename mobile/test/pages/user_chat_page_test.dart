@@ -589,7 +589,7 @@ void main() {
         conversationId: 'conv-1',
         senderId: 'user-other',
         content: '[语音消息]',
-        audioBase64: 'audio-data',
+        audioUrl: 'https://example.com/audio.mp3',
         sentAt: DateTime.now(),
         status: 'sent',
       );

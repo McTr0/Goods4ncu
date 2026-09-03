@@ -74,8 +74,6 @@ class FakeChatService extends ChatService {
           conversationId: conversationId,
           senderId: 'user-me',
           content: content,
-          imageBase64: imageBase64,
-          audioBase64: audioBase64,
           imageUrl: imageUrl,
           audioUrl: audioUrl,
           sentAt: DateTime.now(),
@@ -178,7 +176,6 @@ void main() {
     expect(chatService.sentImageUrl, 'https://cdn.example/image.jpg');
     expect(state.messages.single.id, 'server-2');
     expect(state.messages.single.imageUrl, 'https://cdn.example/image.jpg');
-    expect(state.messages.single.imageBase64, isNull);
     notifier.dispose();
   });
 

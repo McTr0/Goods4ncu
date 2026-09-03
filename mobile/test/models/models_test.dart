@@ -362,8 +362,6 @@ void main() {
       expect(message.conversationId, 'conv-456');
       expect(message.senderId, 'user-789');
       expect(message.content, 'Hello, World!');
-      expect(message.imageBase64, 'abc123');
-      expect(message.audioBase64, 'def456');
       expect(message.sentAt, DateTime.parse('2024-01-15T10:30:00Z'));
       expect(message.status, 'sent');
       expect(message.editedAt, DateTime.parse('2024-01-15T10:40:00Z'));
@@ -412,8 +410,6 @@ void main() {
       expect(message.conversationId, 'conv-456');
       expect(message.senderId, 'user-789');
       expect(message.content, 'Hello!');
-      expect(message.imageBase64, isNull);
-      expect(message.audioBase64, isNull);
       expect(message.status, 'sent'); // default
       expect(message.editedAt, isNull);
     });
@@ -451,28 +447,28 @@ void main() {
         'conversation_id': 'conv-456',
         'sender': 'user-789',
         'content': 'Image message',
-        'image_base64': 'img-data-123',
+        'image_url': 'https://example.com/img-data-123.jpg',
         'sent_at': '2024-01-15T10:30:00Z',
       };
 
       final message = ConversationMessage.fromJson(json);
 
-      expect(message.imageBase64, 'img-data-123');
+      expect(message.imageUrl, 'https://example.com/img-data-123.jpg');
     });
 
-    test('fromJson handles audio_base64', () {
+    test('fromJson handles audio_url', () {
       final json = {
         'id': '123',
         'conversation_id': 'conv-456',
         'sender': 'user-789',
         'content': 'Audio message',
-        'audio_base64': 'audio-data-123',
+        'audio_url': 'https://example.com/audio-data-123.mp3',
         'sent_at': '2024-01-15T10:30:00Z',
       };
 
       final message = ConversationMessage.fromJson(json);
 
-      expect(message.audioBase64, 'audio-data-123');
+      expect(message.audioUrl, 'https://example.com/audio-data-123.mp3');
     });
 
     test('fromJson parses structured quote snapshots', () {
@@ -510,8 +506,8 @@ void main() {
         conversationId: 'conv-456',
         senderId: 'user-789',
         content: 'Original content',
-        imageBase64: 'img',
-        audioBase64: 'aud',
+        imageUrl: 'https://example.com/img.jpg',
+        audioUrl: 'https://example.com/aud.mp3',
         sentAt: DateTime.parse('2024-01-15T10:30:00Z'),
         status: 'sent',
         editedAt: DateTime.parse('2024-01-15T10:40:00Z'),
@@ -523,8 +519,8 @@ void main() {
       expect(modified.conversationId, 'conv-456');
       expect(modified.senderId, 'user-789');
       expect(modified.content, 'Modified content');
-      expect(modified.imageBase64, 'img');
-      expect(modified.audioBase64, 'aud');
+      expect(modified.imageUrl, 'https://example.com/img.jpg');
+      expect(modified.audioUrl, 'https://example.com/aud.mp3');
       expect(modified.sentAt, DateTime.parse('2024-01-15T10:30:00Z'));
       expect(modified.status, 'sent');
       expect(modified.editedAt, DateTime.parse('2024-01-15T10:40:00Z'));
@@ -536,8 +532,8 @@ void main() {
         conversationId: 'conv-456',
         senderId: 'user-789',
         content: 'Original content',
-        imageBase64: 'img',
-        audioBase64: 'aud',
+        imageUrl: 'https://example.com/img.jpg',
+        audioUrl: 'https://example.com/aud.mp3',
         sentAt: DateTime.parse('2024-01-15T10:30:00Z'),
       );
 
@@ -545,8 +541,8 @@ void main() {
       // This is expected behavior for immutable patterns
       final modified = original.copyWith(content: 'Modified');
 
-      expect(modified.imageBase64, 'img');
-      expect(modified.audioBase64, 'aud');
+      expect(modified.imageUrl, 'https://example.com/img.jpg');
+      expect(modified.audioUrl, 'https://example.com/aud.mp3');
     });
 
     test('canEdit returns true within 15 minutes', () {
@@ -1089,8 +1085,8 @@ void main() {
       final original = ChatMessage(
         sender: 'user-1',
         content: 'Hello',
-        imageBase64: 'img',
-        audioBase64: 'aud',
+        imageUrl: 'https://example.com/img.jpg',
+        audioUrl: 'https://example.com/aud.mp3',
         timestamp: DateTime.parse('2024-01-15T10:00:00Z'),
         isPartial: false,
       );
@@ -1099,8 +1095,8 @@ void main() {
 
       expect(modified.sender, 'user-1');
       expect(modified.content, 'Hi there');
-      expect(modified.imageBase64, 'img');
-      expect(modified.audioBase64, 'aud');
+      expect(modified.imageUrl, 'https://example.com/img.jpg');
+      expect(modified.audioUrl, 'https://example.com/aud.mp3');
       expect(modified.timestamp, DateTime.parse('2024-01-15T10:00:00Z'));
       expect(modified.isPartial, false);
     });
@@ -1109,16 +1105,16 @@ void main() {
       final message = ChatMessage(
         sender: 'user-1',
         content: 'Test message',
-        imageBase64: 'abc',
-        audioBase64: 'def',
+        imageUrl: 'https://example.com/img.jpg',
+        audioUrl: 'https://example.com/aud.mp3',
         timestamp: DateTime.now(),
       );
 
       final json = message.toJson();
 
       expect(json['message'], 'Test message');
-      expect(json['image'], 'abc');
-      expect(json['audio'], 'def');
+      expect(json['image_url'], 'https://example.com/img.jpg');
+      expect(json['audio_url'], 'https://example.com/aud.mp3');
     });
 
     test('toJson handles null optional fields', () {
@@ -1131,8 +1127,8 @@ void main() {
       final json = message.toJson();
 
       expect(json['message'], 'Test message');
-      expect(json['image'], isNull);
-      expect(json['audio'], isNull);
+      expect(json['image_url'], isNull);
+      expect(json['audio_url'], isNull);
     });
   });
 

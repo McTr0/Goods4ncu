@@ -730,8 +730,6 @@ class NotificationsResponse {
 class ChatMessage {
   final String sender;
   final String content;
-  final String? imageBase64;
-  final String? audioBase64;
   final String? imageUrl;
   final String? audioUrl;
   final DateTime timestamp;
@@ -742,8 +740,6 @@ class ChatMessage {
   ChatMessage({
     required this.sender,
     required this.content,
-    this.imageBase64,
-    this.audioBase64,
     this.imageUrl,
     this.audioUrl,
     required this.timestamp,
@@ -753,8 +749,6 @@ class ChatMessage {
   ChatMessage copyWith({
     String? sender,
     String? content,
-    String? imageBase64,
-    String? audioBase64,
     String? imageUrl,
     String? audioUrl,
     DateTime? timestamp,
@@ -763,8 +757,6 @@ class ChatMessage {
     return ChatMessage(
       sender: sender ?? this.sender,
       content: content ?? this.content,
-      imageBase64: imageBase64 ?? this.imageBase64,
-      audioBase64: audioBase64 ?? this.audioBase64,
       imageUrl: imageUrl ?? this.imageUrl,
       audioUrl: audioUrl ?? this.audioUrl,
       timestamp: timestamp ?? this.timestamp,
@@ -774,8 +766,6 @@ class ChatMessage {
 
   Map<String, dynamic> toJson() => {
     'message': content,
-    'image': imageBase64,
-    'audio': audioBase64,
     'image_url': imageUrl,
     'audio_url': audioUrl,
   };
@@ -2012,8 +2002,6 @@ class ConversationMessage {
   final String conversationId;
   final String senderId;
   final String content;
-  final String? imageBase64;
-  final String? audioBase64;
   final String? imageUrl;
   final String? audioUrl;
   final DateTime sentAt;
@@ -2042,8 +2030,6 @@ class ConversationMessage {
     required this.conversationId,
     required this.senderId,
     required this.content,
-    this.imageBase64,
-    this.audioBase64,
     this.imageUrl,
     this.audioUrl,
     required this.sentAt,
@@ -2069,8 +2055,6 @@ class ConversationMessage {
       conversationId: json['conversation_id']?.toString() ?? '',
       senderId: json['sender']?.toString() ?? '',
       content: json['content'] ?? '',
-      imageBase64: json['image_base64'],
-      audioBase64: json['audio_base64'],
       imageUrl: json['image_url'],
       audioUrl: json['audio_url'],
       sentAt: json['sent_at'] != null
@@ -2141,8 +2125,6 @@ class ConversationMessage {
     String? conversationId,
     String? senderId,
     String? content,
-    String? imageBase64,
-    String? audioBase64,
     String? imageUrl,
     String? audioUrl,
     DateTime? sentAt,
@@ -2166,8 +2148,6 @@ class ConversationMessage {
       conversationId: conversationId ?? this.conversationId,
       senderId: senderId ?? this.senderId,
       content: content ?? this.content,
-      imageBase64: imageBase64 ?? this.imageBase64,
-      audioBase64: audioBase64 ?? this.audioBase64,
       imageUrl: imageUrl ?? this.imageUrl,
       audioUrl: audioUrl ?? this.audioUrl,
       sentAt: sentAt ?? this.sentAt,

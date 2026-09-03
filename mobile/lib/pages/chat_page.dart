@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -2174,30 +2173,17 @@ class _ChatBubble extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if ((message.imageUrl != null &&
-                        message.imageUrl!.isNotEmpty) ||
-                    (message.imageBase64 != null &&
-                        message.imageBase64!.isNotEmpty))
+                if (message.imageUrl != null &&
+                    message.imageUrl!.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8.0),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child:
-                          message.imageUrl != null &&
-                              message.imageUrl!.isNotEmpty
-                          ? Image.network(
-                              message.imageUrl!,
-                              errorBuilder: (context, error, stackTrace) {
-                                if (message.imageBase64 != null &&
-                                    message.imageBase64!.isNotEmpty) {
-                                  return Image.memory(
-                                    base64Decode(message.imageBase64!),
-                                  );
-                                }
-                                return const SizedBox.shrink();
-                              },
-                            )
-                          : Image.memory(base64Decode(message.imageBase64!)),
+                      child: Image.network(
+                        message.imageUrl!,
+                        errorBuilder: (context, error, stackTrace) =>
+                            const SizedBox.shrink(),
+                      ),
                     ),
                   ),
                 if (!isUser && !message.isPartial)

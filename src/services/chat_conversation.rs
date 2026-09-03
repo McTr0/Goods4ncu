@@ -4327,7 +4327,7 @@ async fn find_message_by_client_id(
     let row = sqlx::query(
         "SELECT id, client_message_id, direct_conversation_id, sender, content,
                 reply_to_message_id, timestamp,
-                image_data, audio_data, image_url, audio_url, status, kind,
+                image_url, audio_url, status, kind,
                 interaction_payload, edited_at,
                 quote_kind, quote_ref_id, quote_snapshot
          FROM chat_messages WHERE sender = $1 AND client_message_id = $2",

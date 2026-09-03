@@ -1,21 +1,14 @@
-import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 
 class AudioMessagePlayer extends StatefulWidget {
   const AudioMessagePlayer({
     super.key,
     this.audioUrl,
-    this.audioBase64,
     required this.isMe,
   });
 
   final String? audioUrl;
-  final String? audioBase64;
   final bool isMe;
 
   @override
@@ -28,7 +21,6 @@ class _AudioMessagePlayerState extends State<AudioMessagePlayer> {
   Duration _position = Duration.zero;
   bool _isPlaying = false;
   bool _isLoading = false;
-  String? _localAudioPath;
 
   @override
   void initState() {
@@ -50,10 +42,6 @@ class _AudioMessagePlayerState extends State<AudioMessagePlayer> {
   @override
   void dispose() {
     _player.dispose();
-    final localPath = _localAudioPath;
-    if (localPath != null && localPath.isNotEmpty) {
-      unawaited(File(localPath).delete());
-    }
     super.dispose();
   }
 
@@ -68,14 +56,6 @@ class _AudioMessagePlayerState extends State<AudioMessagePlayer> {
       Source? source;
       if (widget.audioUrl != null && widget.audioUrl!.isNotEmpty) {
         source = UrlSource(widget.audioUrl!);
-      } else if (widget.audioBase64 != null && widget.audioBase64!.isNotEmpty) {
-        final tempDir = await getTemporaryDirectory();
-        final filePath =
-            '${tempDir.path}/chat_audio_${DateTime.now().millisecondsSinceEpoch}.ogg';
-        final file = File(filePath);
-        await file.writeAsBytes(base64Decode(widget.audioBase64!));
-        _localAudioPath = filePath;
-        source = DeviceFileSource(filePath);
       }
 
       if (source != null) {
