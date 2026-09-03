@@ -1102,28 +1102,6 @@ async fn insert_refresh_token(pool: &sqlx::PgPool, user_id: &str, token: &str) {
         .expect("insert refresh token");
 }
 
-async fn insert_chat_message(
-    pool: &sqlx::PgPool,
-    conversation_id: &str,
-    listing_id: &str,
-    sender: &str,
-    receiver: &str,
-    content: &str,
-) {
-    sqlx::query(
-        "INSERT INTO chat_messages (conversation_id, listing_id, sender, receiver, is_agent, content) \
-         VALUES ($1, $2, $3, $4, false, $5)",
-    )
-    .bind(conversation_id)
-    .bind(listing_id)
-    .bind(sender)
-    .bind(receiver)
-    .bind(content)
-    .execute(pool)
-    .await
-    .expect("insert chat message");
-}
-
 #[tokio::test]
 async fn logout_revokes_access_token_and_blocks_reuse() {
     with_test_pool(|pool| async move {
@@ -1569,7 +1547,7 @@ async fn assistant_chat_rejects_restricted_listing_context_before_persisting_a_t
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/api/chat")
+                    .uri("/api/chat/stream")
                     .header("Authorization", bearer(&token))
                     .header("Content-Type", "application/json")
                     .body(Body::from(
@@ -2328,54 +2306,6 @@ async fn shared_object_media_endpoint_invalidates_after_revoke() {
             StatusCode::NOT_FOUND,
             "revoked shared objects must invalidate the private media endpoint"
         );
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn conversation_messages_offset_is_applied_in_sql() {
-    with_test_pool(|pool| async move {
-        insert_user(&pool, "conv-user-a", "conv_a", "hash", "user", "active").await;
-        insert_user(&pool, "conv-user-b", "conv_b", "hash", "user", "active").await;
-        insert_listing(&pool, "conv-listing-1", "conv-user-a", "active").await;
-
-        for content in ["msg-1", "msg-2", "msg-3", "msg-4", "msg-5"] {
-            insert_chat_message(
-                &pool,
-                "legacy-conv-1",
-                "conv-listing-1",
-                "conv-user-a",
-                "conv-user-b",
-                content,
-            )
-            .await;
-        }
-
-        let state = build_state(pool.clone());
-        let app = create_router(state, &[]);
-        let (token, _jti, _exp) = generate_access_token(
-            "conv-user-a",
-            "user",
-            "test_jwt_secret_at_least_32_characters_long",
-            3600,
-        )
-        .expect("generate access token");
-
-        let req = Request::builder()
-            .method("GET")
-            .uri("/api/conversations/legacy-conv-1/messages?limit=2&offset=2")
-            .header("Authorization", bearer(&token))
-            .body(Body::empty())
-            .unwrap();
-
-        let resp = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let body = response_json(resp).await;
-        assert_eq!(body["total"], 5);
-        assert_eq!(body["messages"].as_array().map(Vec::len), Some(2));
-        assert_eq!(body["messages"][0]["content"], "msg-3");
-        assert_eq!(body["messages"][1]["content"], "msg-2");
     })
     .await;
 }

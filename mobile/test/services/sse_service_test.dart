@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:goods4ncu_mobile/services/agent_stream_event.dart';
 import 'package:goods4ncu_mobile/services/sse_service.dart';
 import 'package:http/http.dart' as http;
 
@@ -31,10 +32,14 @@ http.StreamedResponse _response(int statusCode, {String body = ''}) {
 void main() {
   group('SseService', () {
     test('parses server error events', () {
-      final token = SseToken.fromJson({'error': 'provider unavailable'});
+      final event = AgentStreamEvent.fromJson({
+        'type': 'turn_failed',
+        'seq': 1,
+        'error': {'code': 'provider_error', 'message': 'provider unavailable'},
+      });
 
-      expect(token.error, 'provider unavailable');
-      expect(token.token, isEmpty);
+      expect(event.errorMessage, 'provider unavailable');
+      expect(event.errorCode, 'provider_error');
     });
 
     test(
@@ -44,7 +49,8 @@ void main() {
           _response(401),
           _response(
             200,
-            body: 'data: {"token":"ok","conversation_id":"conv-1"}\\n\\n',
+            body:
+                'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"conv-1","seq":1,"type":"text_delta","text":"ok"}\n\n',
           ),
         ]);
 
@@ -267,10 +273,11 @@ void main() {
       final events = await service.stream.toList();
 
       expect(events, hasLength(4));
-      expect(events[0].token, '你好');
-      expect(events[1].toolActivity, 'search_inventory');
-      expect(events[2].uiAction?['type'], 'SHOW_POSTS');
-      expect(events[3].isComplete, isTrue);
+      expect(events[0].text, '你好');
+      expect(events[1].toolName, 'search_inventory');
+      expect(events[2].actionType, 'SHOW_POSTS');
+      expect(events[3].type, 'turn_completed');
+      expect(events[3].usage?.modelSteps, 1);
     });
 
     test(

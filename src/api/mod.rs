@@ -70,10 +70,6 @@ static MONGO_ID_PATH_RE: LazyLock<Regex> =
 static NUMERIC_PATH_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\d+").expect("valid numeric regex"));
 
-fn fallback_peer_addr() -> SocketAddr {
-    SocketAddr::from(([0, 0, 0, 0], 0))
-}
-
 fn peer_addr_from_extensions(extensions: &axum::http::Extensions) -> Option<SocketAddr> {
     extensions
         .get::<axum::extract::connect_info::ConnectInfo<SocketAddr>>()
@@ -273,28 +269,6 @@ pub async fn http_metrics_middleware(
     );
 
     response
-}
-
-/// Extractor that provides the direct TCP peer address of the connected client.
-/// The server is started with `into_make_service_with_connect_info`, so this value comes from the
-/// TCP connection rather than a spoofable request header.
-#[derive(Clone, Debug)]
-pub struct PeerAddr(pub SocketAddr);
-
-impl<S> axum::extract::FromRequestParts<S> for PeerAddr
-where
-    S: Send + Sync,
-{
-    type Rejection = std::convert::Infallible;
-
-    async fn from_request_parts(
-        parts: &mut axum::http::request::Parts,
-        _state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        // Prefer Axum's ConnectInfo; the raw SocketAddr branch keeps tests and custom services safe.
-        let addr = peer_addr_from_extensions(&parts.extensions).unwrap_or_else(fallback_peer_addr);
-        Ok(PeerAddr(addr))
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -776,11 +750,7 @@ pub fn create_router(state: AppState, cors_origins: &[String]) -> Router {
             put(posts::update_reply).delete(posts::delete_reply),
         )
         .route("/api/campuses", get(campuses::list_campuses))
-        .route("/api/chat", post(chat::handle_chat))
-        .route(
-            "/api/chat/stream",
-            get(chat::handle_chat_stream_get).post(chat::handle_chat_stream_post),
-        )
+        .route("/api/chat/stream", post(chat::handle_chat_stream_post))
         .route(
             "/api/chat/assistant",
             get(chat::get_assistant_history).delete(chat::clear_assistant_history),
@@ -1272,24 +1242,6 @@ async fn health_check(State(state): State<AppState>) -> Result<&'static str, Api
 mod tests {
     use super::*;
     use axum::http::{HeaderMap, HeaderValue};
-
-    #[test]
-    fn test_peer_addr_clone() {
-        use std::net::SocketAddr;
-        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        let peer = PeerAddr(addr);
-        let _cloned = peer.clone();
-    }
-
-    #[test]
-    fn test_peer_addr_debug() {
-        use std::net::SocketAddr;
-        let addr: SocketAddr = "192.168.1.1:3000".parse().unwrap();
-        let peer = PeerAddr(addr);
-        let debug_str = format!("{:?}", peer);
-        assert!(debug_str.contains("PeerAddr"));
-        assert!(debug_str.contains("192.168.1.1"));
-    }
 
     #[test]
     fn rate_limit_key_prefers_authenticated_user_id() {

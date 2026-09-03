@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../utils/platform_utils.dart';
+import 'agent_stream_event.dart';
 import 'base_service.dart';
 import 'token_storage.dart';
 
@@ -10,94 +11,7 @@ typedef AccessTokenProvider = Future<String?> Function();
 typedef RefreshAccessToken = Future<bool> Function();
 typedef HttpClientFactory = http.Client Function();
 
-/// Decode a v2 protocol event into an [SseToken] for the legacy pipeline.
-SseToken? _decodeV2Event(Map<String, dynamic> json) {
-  final type = json['type'] as String? ?? '';
-  final convId = json['conversation_id'] as String? ?? '';
-
-  switch (type) {
-    case 'text_delta':
-      final text = json['text'] as String?;
-      if (text == null || text.isEmpty) return null;
-      return SseToken(token: text, conversationId: convId);
-    case 'turn_completed':
-      return SseToken(token: '', conversationId: convId, isComplete: true);
-    case 'turn_failed':
-      final err = json['error'] as Map<String, dynamic>?;
-      return SseToken(
-        token: '',
-        conversationId: convId,
-        isComplete: true,
-        error: err?['message'] ?? 'turn failed',
-      );
-    case 'turn_cancelled':
-      return SseToken(
-        token: '',
-        conversationId: convId,
-        isComplete: true,
-        error: 'cancelled',
-      );
-    case 'tool_started':
-    case 'tool_finished':
-      final call = json['call'] as Map<String, dynamic>?;
-      if (call == null) return null;
-      return SseToken(
-        token: '',
-        conversationId: convId,
-        toolActivity: call['name'] as String?,
-      );
-    case 'ui_action':
-      final action = json['action'] as Map<String, dynamic>?;
-      if (action == null) return null;
-      return SseToken(
-        token: '',
-        conversationId: convId,
-        uiAction: {'type': action['action_type'], 'payload': action['payload']},
-      );
-    default:
-      return null; // heartbeat and unknown types are silently skipped
-  }
-}
-
-/// SSE token event parsed from `data: {...}\n\n` format.
-class SseToken {
-  final String token;
-  final String conversationId;
-
-  /// Tool name while the backend is performing real platform work.
-  final String? toolActivity;
-
-  /// Optional UI action from the agent (e.g. SHOW_POSTS, SCROLL_TO_POST).
-  final Map<String, dynamic>? uiAction;
-
-  /// True when this is a complete message (e.g. greeting) rather than a streaming token.
-  /// Complete messages should be finalized immediately without waiting for [DONE].
-  final bool isComplete;
-  final String? error;
-
-  SseToken({
-    required this.token,
-    required this.conversationId,
-    this.isComplete = false,
-    this.error,
-    this.uiAction,
-    this.toolActivity,
-  });
-
-  factory SseToken.fromJson(Map<String, dynamic> json) {
-    return SseToken(
-      token: json['token'] ?? '',
-      conversationId: json['conversation_id'] ?? '',
-      isComplete: json['is_complete'] as bool? ?? false,
-      error: json['error']?.toString(),
-      uiAction: json['ui_action'] as Map<String, dynamic>?,
-      toolActivity: (json['tool_activity'] as Map<String, dynamic>?)?['tool']
-          ?.toString(),
-    );
-  }
-}
-
-/// Server-Sent Events stream consumer.
+/// Server-Sent Events stream consumer for Agent Runtime v2.
 ///
 /// Connects to `POST /api/chat/stream` with JWT auth.
 /// Each SSE `data:` line is parsed as JSON and emitted via StreamController.
@@ -110,7 +24,7 @@ class SseService {
   final HttpClientFactory _clientFactory;
 
   http.Client? _client;
-  StreamController<SseToken>? _controller;
+  StreamController<AgentStreamEvent>? _controller;
   StreamSubscription<String>? _streamSubscription;
   bool _isConnected = false;
   int _activeConnectionId = 0;
@@ -142,8 +56,9 @@ class SseService {
     }
   }
 
-  /// Stream of parsed SSE token events.
-  Stream<SseToken> get stream => _controller?.stream ?? const Stream.empty();
+  /// Stream of parsed Agent Runtime v2 events.
+  Stream<AgentStreamEvent> get stream =>
+      _controller?.stream ?? const Stream.empty();
 
   bool get isConnected => _isConnected;
 
@@ -175,7 +90,7 @@ class SseService {
     final client = _clientFactory();
     _client = client;
     // Single-subscription stream preserves events that arrive before UI listener attaches.
-    _controller = StreamController<SseToken>();
+    _controller = StreamController<AgentStreamEvent>();
 
     final uri = Uri.parse('$_baseUrl/api/chat/stream');
     final body = <String, dynamic>{'message': message};
@@ -293,7 +208,7 @@ class SseService {
     return client.send(request);
   }
 
-  void _emitToken(int connectionId, SseToken token) {
+  void _emitEvent(int connectionId, AgentStreamEvent event) {
     if (connectionId != _activeConnectionId) {
       return;
     }
@@ -302,7 +217,7 @@ class SseService {
       return;
     }
     try {
-      controller.add(token);
+      controller.add(event);
     } catch (_) {
       // Ignore stale emissions racing with disconnect.
     }
@@ -404,59 +319,32 @@ class SseService {
 
     final decoded = _decodeSseData(payload);
     if (decoded != null) {
-      _emitToken(connectionId, decoded);
+      _emitEvent(connectionId, decoded);
     }
   }
 
-  /// Decode a single SSE data field using proper JSON parsing.
-  /// Handles:
-  /// - Streaming tokens: `{"token": "...", "conversation_id": "..."}`
-  /// - Complete messages (greeting): `{"content": "...", "is_complete": true}`
-  /// - Error events: `{"error": "..."}`
-  SseToken? _decodeSseData(String jsonStr) {
+  /// Decode a single SSE data field into a typed [AgentStreamEvent].
+  AgentStreamEvent? _decodeSseData(String jsonStr) {
     if (jsonStr.isEmpty) return null;
     try {
       final decoded = jsonDecode(jsonStr) as Map<String, dynamic>;
 
-      // Agent Runtime v2 protocol events.
-      if (decoded['protocol_version'] == '2.0') {
-        return _decodeV2Event(decoded);
-      }
-
-      // Handle error events from backend.
-      final error = decoded['error']?.toString();
-      if (error != null) {
-        return SseToken(
-          token: '',
-          conversationId: decoded['conversation_id'] as String? ?? '',
-          isComplete: true,
-          error: error,
+      // Raw gateway error envelope (e.g. proxy timeout).
+      final error = decoded['error'];
+      if (error is String && error.isNotEmpty) {
+        return AgentStreamEvent(
+          type: 'turn_failed',
+          seq: 0,
+          errorMessage: error,
         );
       }
 
-      // Complete message — greeting or direct response sent as a single event.
-      // Backend sends `content` field (not `token`) for these.
-      final content = decoded['content'] as String?;
-      if (content != null && content.isNotEmpty) {
-        return SseToken(
-          token: content,
-          conversationId: decoded['conversation_id'] as String? ?? '',
-          isComplete: true, // Finalize immediately — no [DONE] will follow.
-        );
+      // Heartbeat frames are keep-alive signals; no state action needed.
+      if (decoded['type'] == 'heartbeat') {
+        return null;
       }
 
-      if (decoded['ui_action'] is Map<String, dynamic> ||
-          decoded['tool_activity'] is Map<String, dynamic>) {
-        return SseToken.fromJson(decoded);
-      }
-
-      // Streaming token.
-      final token = decoded['token'] as String?;
-      if (token != null && token.isNotEmpty) {
-        return SseToken.fromJson(decoded);
-      }
-
-      return null;
+      return AgentStreamEvent.fromJson(decoded);
     } catch (e) {
       debugPrint('SSE JSON parse error: $e — raw: $jsonStr');
       return null;

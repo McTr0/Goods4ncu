@@ -10,7 +10,7 @@
 
 use crate::api::error::ApiError;
 use crate::api::session::Session;
-use crate::api::{normalize_platform_media_url, AppState, PeerAddr};
+use crate::api::{normalize_platform_media_url, AppState};
 use crate::llm::MarketplaceAgent;
 use crate::services::agent_chat;
 use crate::services::chat::{ChatService, AGENT_CONVERSATION_SENTINEL};
@@ -25,27 +25,6 @@ use serde::{Deserialize, Serialize};
 /// client disconnects and drops the generator, a bounded grace period later
 /// the reconciliation task closes a still-started run as cancelled.  Normal
 /// completion explicitly signals the task and avoids an unnecessary wake-up.
-
-#[derive(Deserialize)]
-pub(crate) struct ChatRequest {
-    pub message: String,
-    pub image: Option<String>,
-    pub audio: Option<String>,
-    pub image_url: Option<String>,
-    pub audio_url: Option<String>,
-    pub conversation_id: Option<String>,
-    /// When provided, anchors the conversation to a specific listing. The
-    /// listing owner is stored as receiver so they see the inquiry immediately.
-    pub listing_id: Option<String>,
-    /// Current page context (e.g. {"page": "post_detail", "postId": "..."}).
-    pub page_context: Option<serde_json::Value>,
-}
-
-#[derive(Serialize)]
-pub(crate) struct ChatResponse {
-    pub reply: String,
-    pub conversation_id: String,
-}
 
 #[derive(Clone, Deserialize)]
 pub(crate) struct ChatStreamRequest {
@@ -106,330 +85,6 @@ pub(crate) async fn clear_assistant_history(
         .await
         .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
     Ok(Json(serde_json::json!({ "cleared": removed })))
-}
-
-/// Resolve listing context for a chat request.
-///
-/// Returns `(resolved_listing_id, receiver)`. When `listing_id` points to an
-/// active listing owned by someone other than the caller, both values are
-/// returned verbatim. Otherwise both fall back to `"global"` / `None`.
-pub(crate) async fn handle_chat(
-    State(state): State<AppState>,
-    PeerAddr(addr): PeerAddr,
-    headers: HeaderMap,
-    Session(session): Session,
-    Json(payload): Json<ChatRequest>,
-) -> Result<Json<ChatResponse>, ApiError> {
-    if !state.agents.agent_enabled {
-        return Err(ApiError::ServiceUnavailable(
-            "AI assistant is disabled on this server.",
-        ));
-    }
-    let ChatRequest {
-        message,
-        image,
-        audio,
-        image_url,
-        audio_url,
-        conversation_id,
-        listing_id,
-        page_context,
-    } = payload;
-
-    // 10 MB network limit enforced by RequestBodyLimitLayer; text beyond 2000
-    // chars is almost certainly abuse.
-    if message.len() > 2000 {
-        return Err(ApiError::BadRequest(
-            "Text message exceeds maximum length of 2000 characters.".to_string(),
-        ));
-    }
-    let moderation = state.infra.moderation.check_text(&message);
-    if !moderation.passed {
-        return Err(ApiError::ContentViolation(
-            moderation.reason.unwrap_or_default(),
-        ));
-    }
-
-    let normalized_image_url = normalize_platform_media_url(&state, image_url, "image_url")?;
-    let normalized_audio_url = normalize_platform_media_url(&state, audio_url, "audio_url")?;
-    let proposal_idempotency_key =
-        crate::api::request_context::idempotency_key_from_headers(&headers)?;
-
-    // Direct TCP peer address as rate-limit key — cannot be spoofed.
-    // X-Forwarded-For is read for logging only, never as a rate-limit token.
-    if let Some(proxy_ip) = headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim())
-    {
-        tracing::debug!(client_ip = %proxy_ip, peer = %addr, "Chat request");
-    }
-
-    let session_campus_id = session.campus_id;
-    let current_user_id = session.user_id;
-    let (conversation_id, response_conversation_id, is_assistant_conversation) =
-        agent_chat::resolve_conversation_id(conversation_id, &current_user_id);
-    let chat_svc = ChatService::new(state.infra.db.clone());
-    // Validate an explicit listing before greeting/blocked-intent shortcuts so
-    // those fast paths cannot turn an ineligible id into a successful request.
-    let (resolved_listing_id, receiver) = agent_chat::resolve_listing_context(
-        &state.infra.db,
-        listing_id.as_deref(),
-        &current_user_id,
-        session_campus_id,
-    )
-    .await?;
-
-    // Tri-tier intent classification — blocked content and greetings short-circuit here.
-    let intent_result = state
-        .agents
-        .tri_tier_router
-        .classify(&message, session_campus_id)
-        .await;
-    tracing::debug!(
-        intent = ?intent_result.intent.as_str(),
-        confidence = %intent_result.confidence,
-        tier = %intent_result.matched_tier,
-        "Router classification"
-    );
-
-    if let Some(reply) = intent_result.direct_response(&message) {
-        let run = agent_chat::begin_agent_run(
-            &state.infra.db,
-            crate::api::request_context::current_or_new_request_id(),
-            session_campus_id,
-            &current_user_id,
-            &conversation_id,
-            intent_result.intent.as_str(),
-            intent_result.confidence,
-            None,
-            None,
-        )
-        .await;
-        if is_assistant_conversation {
-            chat_svc
-                .log_message(
-                    &conversation_id,
-                    "global",
-                    &current_user_id,
-                    None,
-                    false,
-                    &message,
-                    image.as_deref(),
-                    audio.as_deref(),
-                    normalized_image_url.as_deref(),
-                    normalized_audio_url.as_deref(),
-                )
-                .await
-                .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
-            chat_svc
-                .log_message(
-                    &conversation_id,
-                    "global",
-                    &current_user_id,
-                    None,
-                    true,
-                    &reply,
-                    None,
-                    None,
-                    None,
-                    None,
-                )
-                .await
-                .map_err(|error| ApiError::Internal(anyhow::anyhow!(error)))?;
-        }
-        if let Some(run) = run {
-            agent_chat::finish_agent_run(&run, "completed", "direct_response", None).await;
-        }
-        return Ok(Json(ChatResponse {
-            reply,
-            conversation_id: response_conversation_id,
-        }));
-    }
-
-    let history = chat_svc
-        .get_conversation_history(&conversation_id)
-        .await
-        .unwrap_or_default();
-    let chat_history = agent_chat::history_to_rig_messages(&history);
-
-    // Persist before LLM execution to avoid message loss on timeout or abort.
-    let persisted = agent_chat::persist_context_message(
-        &chat_svc,
-        &conversation_id,
-        &resolved_listing_id,
-        &current_user_id,
-        receiver.as_deref(),
-        false,
-        &message,
-        image.as_deref(),
-        audio.as_deref(),
-        normalized_image_url.as_deref(),
-        normalized_audio_url.as_deref(),
-        session_campus_id,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!(%e, "Failed to persist user message");
-        ApiError::Internal(anyhow::anyhow!("Failed to persist user message"))
-    })?;
-    if !persisted {
-        return Err(ApiError::NotFound);
-    }
-
-    state.infra.metrics.record_chat_message();
-
-    let run = agent_chat::begin_agent_run(
-        &state.infra.db,
-        crate::api::request_context::current_or_new_request_id(),
-        session_campus_id,
-        &current_user_id,
-        &conversation_id,
-        intent_result.intent.as_str(),
-        intent_result.confidence,
-        Some(state.agents.llm_provider.name()),
-        Some(state.agents.llm_provider.model()),
-    )
-    .await;
-
-    let agent: Box<dyn MarketplaceAgent> = match state
-        .agents
-        .llm_provider
-        .clone()
-        .create_marketplace_agent(
-            &state.infra.db,
-            Some(current_user_id.clone()),
-            session.campus_id,
-            proposal_idempotency_key.clone(),
-            state.infra.moderation.clone(),
-        )
-        .await
-    {
-        Ok(agent) => agent,
-        Err(error) => {
-            if let Some(run) = &run {
-                agent_chat::finish_agent_run(
-                    run,
-                    "failed",
-                    "provider_unavailable",
-                    Some("provider_unavailable"),
-                )
-                .await;
-            }
-            return Err(ApiError::Internal(anyhow::anyhow!(error)));
-        }
-    };
-
-    let memory_context = if let Some(campus_id) = session_campus_id {
-        let memory_svc =
-            crate::services::agent_memory::AgentMemoryService::new(state.infra.db.clone());
-        let embedder = state.agents.llm_provider.clone().embedding_generator();
-        memory_svc
-            .format_memory_context(
-                &current_user_id,
-                campus_id,
-                &message,
-                page_context.as_ref(),
-                Some(&embedder),
-            )
-            .await
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-
-    let prompt_msg = if memory_context.is_empty() {
-        message.clone()
-    } else {
-        format!("{}\n\n{}", message, memory_context)
-    };
-
-    let (reply, usage) = match agent
-        .prompt_with_history_with_usage(prompt_msg, chat_history)
-        .await
-    {
-        Ok(reply) => reply,
-        Err(error) => {
-            tracing::error!(err = %error, "LLM prompt failed");
-            state.infra.metrics.record_llm_error();
-            if let Some(run) = &run {
-                agent_chat::finish_agent_run(run, "failed", "llm_failed", Some("provider_error"))
-                    .await;
-            }
-            return Err(ApiError::Internal(anyhow::anyhow!(error)));
-        }
-    };
-
-    // Auto-record preference memory in background for future turns
-    if let Some(campus_id) = session_campus_id {
-        if matches!(
-            intent_result.intent,
-            crate::agents::router::Intent::Search
-                | crate::agents::router::Intent::Wanted
-                | crate::agents::router::Intent::Offer
-        ) {
-            let bg_db = state.infra.db.clone();
-            let bg_user_id = current_user_id.clone();
-            let bg_msg = message.clone();
-            let bg_embedder = state.agents.llm_provider.clone().embedding_generator();
-            tokio::spawn(async move {
-                let memory_svc = crate::services::agent_memory::AgentMemoryService::new(bg_db);
-                let note = format!("用户曾表达需求：{}", bg_msg);
-                let _ = memory_svc
-                    .add_memory(
-                        crate::services::agent_memory::CreateMemoryInput {
-                            user_id: &bg_user_id,
-                            campus_id,
-                            memory_type: "preference",
-                            content: &note,
-                            source_ref: Some("chat_turn"),
-                            confidence: 0.9,
-                        },
-                        Some(&bg_embedder),
-                    )
-                    .await;
-            });
-        }
-    }
-
-    state.infra.metrics.record_llm_call();
-    if let Some(run) = &run {
-        agent_chat::finish_agent_run_with_usage(
-            run,
-            "completed",
-            "llm_completed",
-            None,
-            usage.as_ref().map(|u| u.input_tokens),
-            usage.as_ref().map(|u| u.output_tokens),
-        )
-        .await;
-    }
-
-    // Fire-and-forget: agent reply persistence — errors are non-fatal.
-    if let Err(e) = agent_chat::persist_context_message(
-        &chat_svc,
-        &conversation_id,
-        &resolved_listing_id,
-        &current_user_id,
-        None,
-        true,
-        &reply,
-        None,
-        None,
-        None,
-        None,
-        session_campus_id,
-    )
-    .await
-    {
-        tracing::warn!(%e, "Failed to log agent reply");
-    }
-
-    Ok(Json(ChatResponse {
-        reply,
-        conversation_id: response_conversation_id,
-    }))
 }
 
 /// SSE streaming chat — shared logic for GET and POST paths.
@@ -566,12 +221,46 @@ async fn handle_chat_stream_request(
         if let Some(run) = &run {
             agent_chat::finish_agent_run(run, "completed", "direct_response", None).await;
         }
-        let sse_payload = serde_json::json!({
-            "token": reply,
-            "conversation_id": response_conversation_id,
-            "is_complete": true
-        });
-        let body = axum::body::Body::from(encode_sse_data(&sse_payload));
+        let turn_id = crate::agents::runtime::event::TurnId::generate();
+        let ev_start = crate::agents::runtime::event::AgentEvent::new(
+            turn_id,
+            &response_conversation_id,
+            1,
+            crate::agents::runtime::event::EventData::TurnStarted {
+                category: "direct".to_string(),
+                route: "direct_reply".to_string(),
+            },
+        );
+        let ev_text = crate::agents::runtime::event::AgentEvent::new(
+            turn_id,
+            &response_conversation_id,
+            2,
+            crate::agents::runtime::event::EventData::TextDelta { text: reply },
+        );
+        let ev_end = crate::agents::runtime::event::AgentEvent::new(
+            turn_id,
+            &response_conversation_id,
+            3,
+            crate::agents::runtime::event::EventData::TurnCompleted {
+                usage: crate::agents::runtime::event::UsageSummary {
+                    model_steps: 0,
+                    tool_calls: 0,
+                    prompt_tokens: None,
+                    completion_tokens: None,
+                },
+            },
+        );
+        let mut sse_frames = Vec::new();
+        sse_frames.extend_from_slice(&encode_sse_data(
+            &serde_json::to_value(&ev_start).unwrap_or_default(),
+        ));
+        sse_frames.extend_from_slice(&encode_sse_data(
+            &serde_json::to_value(&ev_text).unwrap_or_default(),
+        ));
+        sse_frames.extend_from_slice(&encode_sse_data(
+            &serde_json::to_value(&ev_end).unwrap_or_default(),
+        ));
+        let body = axum::body::Body::from(sse_frames);
         return build_sse_response(&response_conversation_id, body);
     }
 
@@ -724,6 +413,8 @@ async fn handle_chat_stream_request(
         route: intent_result.intent.as_str().to_string(),
         user_id: current_user_id.clone(),
     };
+    state.infra.metrics.record_chat_message();
+    state.infra.metrics.record_llm_call();
     let request = ModelRequest::user(prompt_msg, chat_history);
     let turn_id = TurnId::generate();
     let runtime_conversation_id = response_conversation_id.clone();
@@ -760,6 +451,7 @@ async fn handle_chat_stream_request(
     let persisted_user_id = current_user_id.clone();
     let persisted_campus_id = session_campus_id;
     let persist_service = chat_svc.clone();
+    let metrics_for_stream = std::sync::Arc::clone(&state.infra.metrics);
 
     const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
     let sse_stream = async_stream::stream! {
@@ -901,6 +593,7 @@ async fn handle_chat_stream_request(
             } else if cancelled {
                 agent_chat::finish_agent_run(run, "cancelled", "user_cancelled", Some("cancelled")).await
             } else {
+                metrics_for_stream.record_llm_error();
                 agent_chat::finish_agent_run(run, "failed", "runtime_failed", Some("runtime_error")).await
             }
         } else {
@@ -932,16 +625,6 @@ async fn handle_chat_stream_request(
     build_sse_response(&response_conversation_id, body)
 }
 
-/// GET /api/chat/stream — text-only SSE compat path (query string params).
-pub(crate) async fn handle_chat_stream_get(
-    state: State<AppState>,
-    session: Session,
-    headers: HeaderMap,
-    axum::extract::Query(payload): axum::extract::Query<ChatStreamRequest>,
-) -> Result<impl axum::response::IntoResponse, ApiError> {
-    handle_chat_stream_request(state, session, headers, payload).await
-}
-
 /// POST /api/agent/turns/:conversation_id/cancel — cancel an in-flight turn.
 pub(crate) async fn cancel_turn(
     Session(session): Session,
@@ -968,67 +651,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_chat_request_with_message() {
-        let json = r#"{"message": "Hello!", "conversation_id": "conv-1"}"#;
-        let req: ChatRequest = serde_json::from_str(json).unwrap();
+    fn test_chat_stream_request_deserialization() {
+        let json = r#"{"message": "Hello!", "conversation_id": "conv-1", "listing_id": "listing-123", "image_url": "https://oss.example.com/img.jpg"}"#;
+        let req: ChatStreamRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.message, "Hello!");
         assert_eq!(req.conversation_id, Some("conv-1".to_string()));
-        assert_eq!(req.image, None);
-        assert_eq!(req.audio, None);
-        assert_eq!(req.listing_id, None);
-    }
-
-    #[test]
-    fn test_chat_request_with_media() {
-        let json = r#"{"message": "Check this", "image": "base64data", "audio": "base64audio", "image_url": "https://cdn.example.com/a.jpg", "audio_url": "https://cdn.example.com/a.ogg"}"#;
-        let req: ChatRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(req.message, "Check this");
-        assert_eq!(req.image, Some("base64data".to_string()));
-        assert_eq!(req.audio, Some("base64audio".to_string()));
+        assert_eq!(req.listing_id, Some("listing-123".to_string()));
         assert_eq!(
             req.image_url,
-            Some("https://cdn.example.com/a.jpg".to_string())
+            Some("https://oss.example.com/img.jpg".to_string())
         );
-        assert_eq!(
-            req.audio_url,
-            Some("https://cdn.example.com/a.ogg".to_string())
-        );
-        assert_eq!(req.listing_id, None);
+        assert_eq!(req.audio_url, None);
     }
 
     #[test]
-    fn test_chat_request_with_listing_context() {
-        let json = r#"{"message": "Is this available?", "listing_id": "listing-123"}"#;
-        let req: ChatRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(req.message, "Is this available?");
-        assert_eq!(req.listing_id, Some("listing-123".to_string()));
-    }
-
-    #[test]
-    fn test_chat_request_without_conversation_id() {
+    fn test_chat_stream_request_minimal() {
         let json = r#"{"message": "Hello!"}"#;
-        let req: ChatRequest = serde_json::from_str(json).unwrap();
+        let req: ChatStreamRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.message, "Hello!");
         assert_eq!(req.conversation_id, None);
-    }
-
-    #[test]
-    fn test_chat_request_empty_conversation_id() {
-        let json = r#"{"message": "Hi", "conversation_id": ""}"#;
-        let req: ChatRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(req.message, "Hi");
-        assert_eq!(req.conversation_id, Some("".to_string()));
-    }
-
-    #[test]
-    fn test_chat_response_serialization() {
-        let resp = ChatResponse {
-            reply: "Hello back!".to_string(),
-            conversation_id: "conv-123".to_string(),
-        };
-        let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains("Hello back!"));
-        assert!(json.contains("conv-123"));
+        assert_eq!(req.listing_id, None);
+        assert_eq!(req.image_url, None);
+        assert_eq!(req.audio_url, None);
     }
 
     #[test]

@@ -1,8 +1,35 @@
+/// Token usage summary sent at turn completion.
+class AgentUsageSummary {
+  final int modelSteps;
+  final int toolCalls;
+  final int? promptTokens;
+  final int? completionTokens;
+
+  const AgentUsageSummary({
+    required this.modelSteps,
+    required this.toolCalls,
+    this.promptTokens,
+    this.completionTokens,
+  });
+
+  factory AgentUsageSummary.fromJson(Map<String, dynamic> json) {
+    return AgentUsageSummary(
+      modelSteps: (json['model_steps'] as num?)?.toInt() ?? 0,
+      toolCalls: (json['tool_calls'] as num?)?.toInt() ?? 0,
+      promptTokens: (json['prompt_tokens'] as num?)?.toInt(),
+      completionTokens: (json['completion_tokens'] as num?)?.toInt(),
+    );
+  }
+}
+
 /// Structured agent event from the v2 protocol.
 class AgentStreamEvent {
-  AgentStreamEvent._({
+  const AgentStreamEvent({
     required this.type,
     required this.seq,
+    this.protocolVersion = '2.0',
+    this.turnId,
+    this.conversationId,
     this.text,
     this.toolName,
     this.toolStatus,
@@ -12,11 +39,15 @@ class AgentStreamEvent {
     this.errorCode,
     this.errorMessage,
     this.cancelReason,
+    this.usage,
   });
 
   factory AgentStreamEvent.fromJson(Map<String, dynamic> json) {
     final type = json['type'] as String? ?? '';
     final seq = (json['seq'] as num?)?.toInt() ?? 0;
+    final protocolVersion = json['protocol_version'] as String? ?? '2.0';
+    final turnId = json['turn_id'] as String?;
+    final conversationId = json['conversation_id'] as String?;
     String? text;
     String? toolName;
     String? toolStatus;
@@ -26,6 +57,7 @@ class AgentStreamEvent {
     String? errorCode;
     String? errorMessage;
     String? cancelReason;
+    AgentUsageSummary? usage;
 
     switch (type) {
       case 'text_delta':
@@ -44,6 +76,12 @@ class AgentStreamEvent {
         status = json['status'] as String?;
       case 'turn_started':
         status = 'started';
+      case 'turn_completed':
+        if (json['usage'] is Map<String, dynamic>) {
+          usage = AgentUsageSummary.fromJson(
+            json['usage'] as Map<String, dynamic>,
+          );
+        }
       case 'turn_failed':
         final error = json['error'] as Map<String, dynamic>?;
         errorCode = error?['code'] as String?;
@@ -52,9 +90,12 @@ class AgentStreamEvent {
         cancelReason = json['reason'] as String?;
     }
 
-    return AgentStreamEvent._(
+    return AgentStreamEvent(
       type: type,
       seq: seq,
+      protocolVersion: protocolVersion,
+      turnId: turnId,
+      conversationId: conversationId,
       text: text,
       toolName: toolName,
       toolStatus: toolStatus,
@@ -64,23 +105,15 @@ class AgentStreamEvent {
       errorCode: errorCode,
       errorMessage: errorMessage,
       cancelReason: cancelReason,
+      usage: usage,
     );
-  }
-
-  /// Parse a legacy v1 SSE chunk into a compatible event (or null).
-  static AgentStreamEvent? fromLegacyChunk(Map<String, dynamic> chunk) {
-    if (chunk.containsKey('token')) {
-      return AgentStreamEvent._(
-        type: 'text_delta',
-        seq: 0,
-        text: chunk['token'] as String?,
-      );
-    }
-    return null;
   }
 
   final String type;
   final int seq;
+  final String protocolVersion;
+  final String? turnId;
+  final String? conversationId;
   final String? text;
   final String? toolName;
   final String? toolStatus;
@@ -90,6 +123,7 @@ class AgentStreamEvent {
   final String? errorCode;
   final String? errorMessage;
   final String? cancelReason;
+  final AgentUsageSummary? usage;
 
   bool get isTerminal =>
       type == 'turn_completed' ||
@@ -148,12 +182,6 @@ class AgentTurnTracker {
         return _transition(AgentTurnState.cancelled);
       default:
         return false;
-    }
-  }
-
-  void onLegacyToken() {
-    if (isActive && _state != AgentTurnState.answering) {
-      _transition(AgentTurnState.answering);
     }
   }
 

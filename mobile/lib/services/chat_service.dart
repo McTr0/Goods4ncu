@@ -159,19 +159,6 @@ class ChatService extends BaseService {
     );
   }
 
-  Future<String> sendChatMessage(ChatMessage message) async {
-    final headers = await authHeaders();
-    final response = await post(
-      Uri.parse('$baseUrl/api/chat'),
-      headers,
-      jsonEncode(message.toJson()),
-    );
-    return handleResponse(
-      response,
-      (data) => data['reply'] ?? 'Empty response',
-    );
-  }
-
   Future<Conversation> createConversation({
     required String recipientId,
     required ConversationMode mode,

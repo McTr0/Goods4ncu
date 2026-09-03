@@ -1164,18 +1164,24 @@ class _ChatPageState extends State<ChatPage> {
       );
       String fullReply = '';
       var companionSawFirstToken = false;
-      await for (final token in _sseService.stream) {
+      await for (final event in _sseService.stream) {
         if (!mounted) break;
-        if (token.error != null) {
-          throw Exception(token.error);
+        if (event.type == 'turn_failed') {
+          throw Exception(event.errorMessage ?? 'Turn failed');
+        }
+        if (event.type == 'turn_cancelled') {
+          throw Exception(event.cancelReason ?? 'Turn cancelled');
         }
         // Dispatch agent UI actions (e.g. SHOW_POSTS, SCROLL_TO_POST).
-        if (token.uiAction != null) {
-          _handleUiAction(token.uiAction!);
-          _companionOnUiAction(token.uiAction!['type']?.toString() ?? '');
+        if (event.actionType != null) {
+          _handleUiAction({
+            'type': event.actionType,
+            'payload': event.actionPayload,
+          });
+          _companionOnUiAction(event.actionType!);
         }
-        if (token.toolActivity != null) {
-          final activity = token.toolActivity!;
+        if (event.toolName != null && event.toolStatus == 'started') {
+          final activity = event.toolName!;
           if (_useLegacyBrain) {
             _live2DController.brain.onToolStarted(activity);
           }
@@ -1193,24 +1199,27 @@ class _ChatPageState extends State<ChatPage> {
             _live2DController.showSpeechBubble(label);
           }
         }
-        if (!companionSawFirstToken && token.token.isNotEmpty) {
+        final delta = event.text ?? '';
+        if (!companionSawFirstToken && delta.isNotEmpty) {
           companionSawFirstToken = true;
           _companionOnFirstToken();
         }
-        _lipSyncDriver.feedStreamingChunk(token.token);
-        if (_useLegacyBrain) {
-          _live2DController.brain.onResponseToken(token.token);
-        }
-        fullReply += token.token;
-        _live2DController.showSpeechBubble(fullReply);
-        setState(() {
-          if (botMsgIndex < _messages.length) {
-            _messages[botMsgIndex] = _messages[botMsgIndex].copyWith(
-              content: fullReply,
-              isPartial: true,
-            );
+        if (delta.isNotEmpty) {
+          _lipSyncDriver.feedStreamingChunk(delta);
+          if (_useLegacyBrain) {
+            _live2DController.brain.onResponseToken(delta);
           }
-        });
+          fullReply += delta;
+          _live2DController.showSpeechBubble(fullReply);
+          setState(() {
+            if (botMsgIndex < _messages.length) {
+              _messages[botMsgIndex] = _messages[botMsgIndex].copyWith(
+                content: fullReply,
+                isPartial: true,
+              );
+            }
+          });
+        }
       }
       _lipSyncDriver.onStreamComplete();
       _companionOnStreamEnd(failed: false);
