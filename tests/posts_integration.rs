@@ -832,7 +832,7 @@ async fn atomic_post_and_marketplace_creation_in_single_transaction() {
                 &self,
                 _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
                 _input: NewPost,
-            ) -> Result<Uuid, ApiError> {
+            ) -> Result<goods4ncu::repositories::IdempotentPostCreateResult, ApiError> {
                 Err(ApiError::Internal(anyhow::anyhow!(
                     "simulated post creation failure inside transaction"
                 )))
@@ -1092,6 +1092,114 @@ async fn publish_contract_strictly_validates_categories_and_idempotency() {
                 space_id: None,
                 marketplace: None,
                 idempotency_key: Some(ikey.clone()),
+            })
+            .await;
+        assert!(
+            matches!(conflict, Err(ApiError::Conflict(_))),
+            "altered payload on same key must return 409 Conflict"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn concurrent_idempotent_creates_converge_atomically_without_conflict() {
+    with_test_pool(|pool| async move {
+        let campus_id = campus(&pool).await;
+        let author = user(&pool, "concurrent-author").await;
+        let service = std::sync::Arc::new(service(&pool));
+
+        let ikey = Uuid::new_v4().to_string();
+
+        let mut handles = Vec::new();
+        for _ in 0..5 {
+            let svc = service.clone();
+            let auth = author.clone();
+            let k = ikey.clone();
+            handles.push(tokio::spawn(async move {
+                svc.create(CreatePost {
+                    campus_id,
+                    author_id: auth,
+                    category: "offer".to_string(),
+                    title: "并发幂等发布测试商品".to_string(),
+                    body: "并发请求描述文本".to_string(),
+                    tags: vec![],
+                    cover_image_url: None,
+                    space_id: None,
+                    marketplace: Some(CreatePostMarketplaceInput {
+                        category: "electronics".to_string(),
+                        brand: "Apple".to_string(),
+                        condition_score: 9,
+                        suggested_price_cny: 199.0,
+                        defects: vec![],
+                        description: None,
+                    }),
+                    idempotency_key: Some(k),
+                })
+                .await
+            }));
+        }
+
+        let mut post_ids = Vec::new();
+        for h in handles {
+            let res = h
+                .await
+                .expect("task join succeeded")
+                .expect("create succeeded");
+            post_ids.push(res.id);
+        }
+
+        for id in &post_ids {
+            assert_eq!(
+                *id, post_ids[0],
+                "all concurrent creations must resolve to same post ID"
+            );
+        }
+
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM posts WHERE author_id = $1 AND idempotency_key = $2",
+        )
+        .bind(&author)
+        .bind(&ikey)
+        .fetch_one(&pool)
+        .await
+        .expect("count posts");
+
+        assert_eq!(count, 1, "exactly one post must exist in database");
+
+        let listing_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM inventory WHERE owner_id = $1 AND idempotency_key = $2",
+        )
+        .bind(&author)
+        .bind(&ikey)
+        .fetch_one(&pool)
+        .await
+        .expect("count inventory");
+
+        assert_eq!(
+            listing_count, 1,
+            "exactly one listing must exist in database"
+        );
+
+        let conflict = service
+            .create(CreatePost {
+                campus_id,
+                author_id: author.clone(),
+                category: "offer".to_string(),
+                title: "篡改参数的并发幂等测试".to_string(),
+                body: "并发请求描述文本".to_string(),
+                tags: vec![],
+                cover_image_url: None,
+                space_id: None,
+                marketplace: Some(CreatePostMarketplaceInput {
+                    category: "electronics".to_string(),
+                    brand: "Apple".to_string(),
+                    condition_score: 9,
+                    suggested_price_cny: 199.0,
+                    defects: vec![],
+                    description: None,
+                }),
+                idempotency_key: Some(ikey),
             })
             .await;
         assert!(

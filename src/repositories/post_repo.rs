@@ -75,6 +75,12 @@ pub struct NewPost {
     pub idempotency_hash: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct IdempotentPostCreateResult {
+    pub id: Uuid,
+    pub replayed: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct UpdatePostInput {
     pub title: Option<String>,
@@ -148,7 +154,7 @@ pub trait PostRepository: Send + Sync {
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         input: NewPost,
-    ) -> Result<Uuid, ApiError>;
+    ) -> Result<IdempotentPostCreateResult, ApiError>;
 
     async fn update_post(
         &self,
@@ -653,8 +659,8 @@ impl PostRepository for PostgresPostRepository {
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         input: NewPost,
-    ) -> Result<Uuid, ApiError> {
-        let id: Uuid = sqlx::query_scalar(
+    ) -> Result<IdempotentPostCreateResult, ApiError> {
+        let inserted_id: Option<Uuid> = sqlx::query_scalar(
             "INSERT INTO posts (
                  campus_id, author_id, category, title, body, tags,
                  image_url, images_moderation_status,
@@ -664,6 +670,9 @@ impl PostRepository for PostgresPostRepository {
                  CASE WHEN $7::text IS NULL THEN 'approved' ELSE 'pending' END,
                  $8, $9, $10, $11
              )
+             ON CONFLICT (author_id, idempotency_key)
+                 WHERE idempotency_key IS NOT NULL
+                 DO NOTHING
              RETURNING id",
         )
         .bind(input.campus_id)
@@ -677,10 +686,42 @@ impl PostRepository for PostgresPostRepository {
         .bind(input.space_id)
         .bind(input.idempotency_key.as_deref())
         .bind(input.idempotency_hash.as_deref())
-        .fetch_one(&mut **tx)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(db_error)?;
-        Ok(id)
+
+        if let Some(id) = inserted_id {
+            return Ok(IdempotentPostCreateResult {
+                id,
+                replayed: false,
+            });
+        }
+
+        let existing: Option<(Uuid, Option<String>)> = sqlx::query_as(
+            "SELECT id, idempotency_hash FROM posts WHERE author_id = $1 AND idempotency_key = $2",
+        )
+        .bind(&input.author_id)
+        .bind(input.idempotency_key.as_deref())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(db_error)?;
+
+        let (existing_id, existing_hash) = existing.ok_or_else(|| {
+            ApiError::Internal(anyhow::anyhow!(
+                "Post record conflict detected but existing row not found"
+            ))
+        })?;
+
+        if existing_hash.as_deref() != input.idempotency_hash.as_deref() {
+            return Err(ApiError::Conflict(
+                "Idempotency-Key 重复且请求体不一致".to_string(),
+            ));
+        }
+
+        Ok(IdempotentPostCreateResult {
+            id: existing_id,
+            replayed: true,
+        })
     }
 
     async fn update_post(

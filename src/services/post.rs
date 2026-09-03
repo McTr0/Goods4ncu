@@ -403,7 +403,7 @@ impl<R: PostRepository> PostService<R> {
             None
         };
 
-        let post_id = self
+        let post_res = self
             .repository
             .create_post_in_tx(
                 &mut tx,
@@ -422,6 +422,15 @@ impl<R: PostRepository> PostService<R> {
                 },
             )
             .await?;
+
+        if post_res.replayed {
+            tx.rollback()
+                .await
+                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {e}")))?;
+            return self.get(input.campus_id, post_res.id).await;
+        }
+
+        let post_id = post_res.id;
 
         if let Some(ref image_url) = cover_image_url {
             self.moderation

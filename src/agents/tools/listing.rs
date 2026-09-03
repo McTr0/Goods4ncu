@@ -188,7 +188,7 @@ pub(crate) async fn execute_create_listing_in_tx(
 
     use crate::repositories::PostRepository;
     let post_repo = crate::repositories::PostgresPostRepository::new(ctx.db_pool.clone());
-    let _post_id = post_repo
+    let _post_res = post_repo
         .create_post_in_tx(
             tx,
             crate::repositories::NewPost {
