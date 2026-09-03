@@ -211,17 +211,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
             );
 
       final tags = _selectedTags.toList(growable: false);
-      final attributes = <String, dynamic>{
-        if (categoryHasAttributes(_category)) ...{
-          'starts_at':
-              _eventStartsAt?.toUtc().toIso8601String() ??
-              (() {
-                throw Exception('请选择活动开始时间');
-              })(),
-          if (_eventPlaceController.text.trim().isNotEmpty)
-            'place': _eventPlaceController.text.trim(),
-        },
-      };
 
       String? listingId;
       if (_needsGoods && _goodsCategory == null) {
@@ -255,7 +244,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
         coverImageUrl: coverImageUrl,
         listingId: listingId,
         spaceId: widget.spaceId,
-        attributes: attributes,
       );
       if (!mounted) return;
       context.go('/posts/${post.id}');

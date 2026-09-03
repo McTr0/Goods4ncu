@@ -263,8 +263,6 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
   Future<void> sendMessage({
     required String content,
     Map<String, String>? quote,
-    String? imageBase64,
-    String? audioBase64,
     String? imageUrl,
     String? audioUrl,
   }) async {
@@ -283,8 +281,6 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
       conversationId: conversationId,
       senderId: currentState.currentUserId ?? '',
       content: content,
-      imageBase64: imageBase64,
-      audioBase64: audioBase64,
       imageUrl: imageUrl,
       audioUrl: audioUrl,
       replyToMessageId: currentState.replyingToMessage?.id,
@@ -296,8 +292,6 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
     final pending = _PendingChatMessage(
       content: content,
       quote: quote,
-      imageBase64: imageBase64,
-      audioBase64: audioBase64,
       imageUrl: imageUrl,
       audioUrl: audioUrl,
       replyToMessageId: currentState.replyingToMessage?.id,
@@ -342,8 +336,6 @@ class ChatNotifier extends StateNotifier<ChatViewState> {
         content: pending.content,
         clientMessageId: pending.clientMessageId,
         quote: pending.quote,
-        imageBase64: pending.imageBase64,
-        audioBase64: pending.audioBase64,
         imageUrl: pending.imageUrl,
         audioUrl: pending.audioUrl,
         replyToMessageId: pending.replyToMessageId,
@@ -512,8 +504,6 @@ class _PendingChatMessage {
     required this.content,
     required this.clientMessageId,
     this.quote,
-    this.imageBase64,
-    this.audioBase64,
     this.imageUrl,
     this.audioUrl,
     this.replyToMessageId,
@@ -521,8 +511,6 @@ class _PendingChatMessage {
 
   final String content;
   final Map<String, String>? quote;
-  final String? imageBase64;
-  final String? audioBase64;
   final String? imageUrl;
   final String? audioUrl;
   final String? replyToMessageId;

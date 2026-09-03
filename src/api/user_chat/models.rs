@@ -127,8 +127,6 @@ pub struct SendMessageBody {
     pub content: String,
     pub reply_to_message_id: Option<i64>,
     pub quote: Option<StructuredQuoteInput>,
-    pub image_base64: Option<String>,
-    pub audio_base64: Option<String>,
     pub image_url: Option<String>,
     pub audio_url: Option<String>,
 }

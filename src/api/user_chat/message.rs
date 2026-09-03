@@ -70,15 +70,6 @@ pub async fn send_conversation_message(
     moderate_text(&state, &content)?;
     let image_url = normalize_platform_media_url(&state, body.image_url, "image_url")?;
     let audio_url = normalize_platform_media_url(&state, body.audio_url, "audio_url")?;
-    let has_url_media = image_url.is_some() || audio_url.is_some();
-    let has_base64_media = body
-        .image_base64
-        .as_deref()
-        .is_some_and(|value| !value.trim().is_empty())
-        || body
-            .audio_base64
-            .as_deref()
-            .is_some_and(|value| !value.trim().is_empty());
 
     let service = ChatConversationService::new(state.infra.db.clone());
     let message = service
@@ -89,8 +80,8 @@ pub async fn send_conversation_message(
             content: content.clone(),
             reply_to_message_id: body.reply_to_message_id,
             quote: body.quote,
-            image_data: body.image_base64,
-            audio_data: body.audio_base64,
+            image_data: None,
+            audio_data: None,
             image_url: image_url.clone(),
             audio_url: audio_url.clone(),
         })
@@ -139,11 +130,8 @@ pub async fn send_conversation_message(
     .to_string();
     ws::broadcast_to_user_in_campus(other_user_id, conversation.campus_id, &payload);
     state.infra.metrics.record_chat_message();
-    if has_url_media {
+    if image_url.is_some() || audio_url.is_some() {
         state.infra.metrics.record_chat_media_url_message();
-    }
-    if has_base64_media {
-        state.infra.metrics.record_chat_media_base64_message();
     }
     Ok(Json(presented_message))
 }

@@ -5,8 +5,6 @@ import '../services/upload_service.dart';
 typedef UserChatSendMessage =
     Future<void> Function({
       required String content,
-      String? imageBase64,
-      String? audioBase64,
       String? imageUrl,
       String? audioUrl,
     });

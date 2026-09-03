@@ -136,7 +136,6 @@ class PostService extends BaseService {
     String? coverImageUrl,
     String? listingId,
     String? spaceId,
-    Map<String, dynamic> attributes = const {},
   }) async {
     final headers = await authHeaders();
     final response = await post(
@@ -150,8 +149,6 @@ class PostService extends BaseService {
           'cover_image_url': coverImageUrl.trim(),
         'listing_id': ?listingId,
         'space_id': ?spaceId,
-        if (tags.isNotEmpty) 'tags': tags.join(','),
-        'attributes': attributes,
         'tags': tags
             .map((tag) => tag.trim())
             .where((tag) => tag.isNotEmpty)
@@ -160,9 +157,7 @@ class PostService extends BaseService {
     );
     return handleResponse(
       response,
-      (data) => CampusPost.fromJson(
-        Map<String, dynamic>.from((data as Map)['post'] ?? data),
-      ),
+      (data) => CampusPost.fromJson(Map<String, dynamic>.from(data as Map)),
     );
   }
 
@@ -183,9 +178,7 @@ class PostService extends BaseService {
     );
     return handleResponse(
       response,
-      (data) => PostReply.fromJson(
-        Map<String, dynamic>.from((data as Map)['reply'] ?? data),
-      ),
+      (data) => PostReply.fromJson(Map<String, dynamic>.from(data as Map)),
     );
   }
 
@@ -193,9 +186,7 @@ class PostService extends BaseService {
     String id, {
     String? title,
     String? body,
-    String? category,
     List<String>? tags,
-    bool? locked,
   }) async {
     final headers = await authHeaders();
     final response = await put(
@@ -204,15 +195,12 @@ class PostService extends BaseService {
       jsonEncode({
         if (title != null) 'title': title.trim(),
         if (body != null) 'body': body.trim(),
-        if (category != null) 'category': category.trim(),
         'tags': ?tags,
       }),
     );
     return handleResponse(
       response,
-      (data) => CampusPost.fromJson(
-        Map<String, dynamic>.from((data as Map)['post'] ?? data),
-      ),
+      (data) => CampusPost.fromJson(Map<String, dynamic>.from(data as Map)),
     );
   }
 

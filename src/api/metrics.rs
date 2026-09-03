@@ -39,7 +39,6 @@ pub struct MetricsService {
     pub ws_messages_dropped_total: Counter,
     pub ws_stale_connections_pruned_total: Counter,
     pub chat_media_url_messages_total: Counter,
-    pub chat_media_base64_messages_total: Counter,
     // Image moderation worker. Labels are deliberately fixed, low-cardinality
     // vocabulary; never put provider URLs, job IDs, campuses, or error text in
     // a metric label.
@@ -117,11 +116,6 @@ impl MetricsService {
         let chat_media_url_messages_total = Counter::new(
             "chat_media_url_messages_total",
             "Total chat messages carrying media URL fields",
-        )
-        .expect("metric definition is valid");
-        let chat_media_base64_messages_total = Counter::new(
-            "chat_media_base64_messages_total",
-            "Total chat messages carrying base64 media fields",
         )
         .expect("metric definition is valid");
         let moderation_jobs_processed_total = CounterVec::new(
@@ -221,9 +215,6 @@ impl MetricsService {
             .register(Box::new(chat_media_url_messages_total.clone()))
             .expect("metric is unique");
         registry
-            .register(Box::new(chat_media_base64_messages_total.clone()))
-            .expect("metric is unique");
-        registry
             .register(Box::new(moderation_jobs_processed_total.clone()))
             .expect("metric is unique");
         registry
@@ -262,7 +253,6 @@ impl MetricsService {
             ws_messages_dropped_total,
             ws_stale_connections_pruned_total,
             chat_media_url_messages_total,
-            chat_media_base64_messages_total,
             moderation_jobs_processed_total,
             moderation_api_calls_total,
             moderation_api_duration_seconds,
@@ -330,10 +320,6 @@ impl MetricsService {
 
     pub fn record_chat_media_url_message(&self) {
         self.chat_media_url_messages_total.inc();
-    }
-
-    pub fn record_chat_media_base64_message(&self) {
-        self.chat_media_base64_messages_total.inc();
     }
 
     /// Record one moderation job outcome. Keep `outcome` to the fixed values

@@ -540,8 +540,6 @@ class ChatService extends BaseService {
     String? clientMessageId,
     String? replyToMessageId,
     Map<String, String>? quote,
-    String? imageBase64,
-    String? audioBase64,
     String? imageUrl,
     String? audioUrl,
   }) async {
@@ -551,8 +549,6 @@ class ChatService extends BaseService {
       'content': content,
       'reply_to_message_id': ?int.tryParse(replyToMessageId ?? ''),
       'quote': ?quote,
-      'image_base64': ?imageBase64,
-      'audio_base64': ?audioBase64,
       'image_url': ?imageUrl,
       'audio_url': ?audioUrl,
     };

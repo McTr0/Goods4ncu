@@ -519,14 +519,10 @@ class _UserChatPageState extends State<UserChatPage> {
         sendMessage:
             ({
               required String content,
-              String? imageBase64,
-              String? audioBase64,
               String? imageUrl,
               String? audioUrl,
             }) => _chatNotifier.sendMessage(
               content: content,
-              imageBase64: imageBase64,
-              audioBase64: audioBase64,
               imageUrl: imageUrl,
               audioUrl: audioUrl,
             ),
