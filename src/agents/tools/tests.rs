@@ -579,7 +579,7 @@ async fn draft_message_tool_rejects_missing_listing_or_receiver() {
 }
 
 #[tokio::test]
-async fn create_listing_tool_dual_writes_shadow_uuid_columns() {
+async fn create_listing_tool_persists_standard_columns() {
     with_test_pool(|pool| async move {
         let owner_id = Uuid::new_v4().to_string();
 
@@ -591,15 +591,13 @@ async fn create_listing_tool_dual_writes_shadow_uuid_columns() {
             current_campus_id: None,
             proposal_idempotency_key: None,
             moderation: ModerationService::new_for_test(false),
-            notification: crate::services::notification::NotificationService::new(
-                pool.clone(),
-            ),
+            notification: crate::services::notification::NotificationService::new(pool.clone()),
         };
 
         let result = execute_create_listing(
             &ctx,
             CreateListingArgs {
-                title: "Shadow Tool Listing".to_string(),
+                title: "Tool Listing".to_string(),
                 category: "electronics".to_string(),
                 brand: "Acme".to_string(),
                 condition_score: 8,
@@ -610,26 +608,20 @@ async fn create_listing_tool_dual_writes_shadow_uuid_columns() {
         )
         .await
         .expect("create listing");
-        assert!(result.message.contains("Shadow Tool Listing"));
+        assert!(result.message.contains("Tool Listing"));
         assert!(!result.listing_id.is_empty());
+        assert!(Uuid::parse_str(&result.listing_id).is_ok());
 
-        let row = sqlx::query(
-            "SELECT id, new_id, owner_id, new_owner_id, suggested_price_cny FROM inventory WHERE title = $1",
-        )
-        .bind("Shadow Tool Listing")
-        .fetch_one(&pool)
-        .await
-        .expect("select listing");
-        let owner_uuid: Uuid = sqlx::query_scalar("SELECT new_id FROM users WHERE id = $1")
-            .bind(&owner_id)
-            .fetch_one(&pool)
-            .await
-            .expect("select owner uuid");
+        let row =
+            sqlx::query("SELECT id, owner_id, suggested_price_cny FROM inventory WHERE title = $1")
+                .bind("Tool Listing")
+                .fetch_one(&pool)
+                .await
+                .expect("select listing");
 
         let listing_id: String = row.get("id");
-        assert_eq!(row.get::<Uuid, _>("new_id"), Uuid::parse_str(&listing_id).unwrap());
+        assert_eq!(listing_id, result.listing_id);
         assert_eq!(row.get::<String, _>("owner_id"), owner_id);
-        assert_eq!(row.get::<Uuid, _>("new_owner_id"), owner_uuid);
         assert_eq!(row.get::<i64, _>("suggested_price_cny"), 12_345);
     })
     .await;

@@ -6,7 +6,9 @@ use goods4ncu::config::AppConfig;
 use goods4ncu::repositories::{PostFilter, PostSort};
 use goods4ncu::services::feed::{FeedFeedbackAction, FeedResourceType, FeedService};
 use goods4ncu::services::moderation::ModerationService;
-use goods4ncu::services::post::{CreatePost, CreatePostMarketplaceInput, EditPost, PostService};
+use goods4ncu::services::post::{
+    CreatePost, EditPost, MarketplaceCategory, MarketplaceDetails, PostContent, PostService,
+};
 use goods4ncu::test_infra::with_test_pool;
 use uuid::Uuid;
 
@@ -68,13 +70,12 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
             .create(CreatePost {
                 campus_id,
                 author_id: author.clone(),
-                category: "discussion".to_string(),
+                content: PostContent::Discussion,
                 title: "自造标签不允许".to_string(),
                 body: "正文".to_string(),
                 tags: vec!["我的自制标签".to_string()],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: None,
                 idempotency_key: None,
             })
             .await;
@@ -85,13 +86,12 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
             .create(CreatePost {
                 campus_id,
                 author_id: author.clone(),
-                category: "discussion".to_string(),
+                content: PostContent::Discussion,
                 title: "地点标签只能选一个".to_string(),
                 body: "正文".to_string(),
                 tags: vec!["qianhuNorth".to_string(), "qianhuSouth".to_string()],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: None,
                 idempotency_key: None,
             })
             .await;
@@ -102,13 +102,12 @@ async fn tags_must_come_from_the_catalog_and_respect_groups() {
             .create(CreatePost {
                 campus_id,
                 author_id: author,
-                category: "discussion".to_string(),
+                content: PostContent::Discussion,
                 title: "提问：期末复习资料哪里找".to_string(),
                 body: "欢迎分享经验。".to_string(),
                 tags: vec!["urgent".to_string(), "donghu".to_string()],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: None,
                 idempotency_key: None,
             })
             .await
@@ -135,13 +134,12 @@ async fn group_posts_are_hidden_from_non_members_and_feeds() {
             .create(CreatePost {
                 campus_id,
                 author_id: owner.clone(),
-                category: "discussion".to_string(),
+                content: PostContent::Discussion,
                 title: "本群内部公告".to_string(),
                 body: "只有群成员可以看到这条。".to_string(),
                 tags: vec!["donghu".to_string()],
                 cover_image_url: None,
                 space_id: Some(space_id),
-                marketplace: None,
                 idempotency_key: None,
             })
             .await
@@ -211,13 +209,12 @@ async fn discussion_policy_rejection_happens_before_persistence() {
             .create(CreatePost {
                 campus_id,
                 author_id: owner.clone(),
-                category: "discussion".to_string(),
+                content: PostContent::Discussion,
                 title: "campusp0licytoken".to_string(),
                 body: "用于验证发布入口在写库前执行统一审查。".to_string(),
                 tags: vec![],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: None,
                 idempotency_key: None,
             })
             .await;
@@ -248,13 +245,12 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
             .create(CreatePost {
                 campus_id,
                 author_id: owner.clone(),
-                category: "discussion".to_string(),
+                content: PostContent::Discussion,
                 title: "毕业季宿舍整理经验".to_string(),
                 body: "把同类物品放在一起，标题写清楚楼栋和取货时间。".to_string(),
                 tags: vec!["donghu".to_string()],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: None,
                 idempotency_key: None,
             })
             .await
@@ -263,13 +259,12 @@ async fn discussions_support_threaded_replies_locking_and_author_boundaries() {
             .create(CreatePost {
                 campus_id,
                 author_id: owner.clone(),
-                category: "discussion".to_string(),
+                content: PostContent::Discussion,
                 title: "另一个主题".to_string(),
                 body: "用于验证跨主题引用会被拒绝。".to_string(),
                 tags: vec![],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: None,
                 idempotency_key: None,
             })
             .await
@@ -401,13 +396,12 @@ async fn discussion_images_stay_private_until_moderation_approval() {
             .create(CreatePost {
                 campus_id,
                 author_id: owner,
-                category: "discussion".to_string(),
+                content: PostContent::Discussion,
                 title: "夜市摊位位置分享".to_string(),
                 body: "把今晚的摊位分布图放在封面，方便大家在首页先看到。".to_string(),
                 tags: vec![],
                 cover_image_url: Some(image_url.to_string()),
                 space_id: None,
-                marketplace: None,
                 idempotency_key: None,
             })
             .await
@@ -455,20 +449,22 @@ async fn listings_are_references_and_marketplace_filters_follow_category() {
             .create(CreatePost {
                 campus_id,
                 author_id: owner.clone(),
-                category: "offer".to_string(),
+                content: PostContent::Offer(
+                    MarketplaceDetails::new(
+                        MarketplaceCategory::Electronics,
+                        "Brand".to_string(),
+                        8,
+                        100.0,
+                        vec![],
+                        Some("九成新显示器".to_string()),
+                    )
+                    .unwrap(),
+                ),
                 title: "出二手显示器，可小刀".to_string(),
                 body: "自提优先，宿舍楼下交易。".to_string(),
                 tags: vec!["qianhuNorth".to_string(), "urgent".to_string()],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: Some(CreatePostMarketplaceInput {
-                    category: "electronics".to_string(),
-                    brand: "Brand".to_string(),
-                    condition_score: 8,
-                    suggested_price_cny: 100.0,
-                    defects: vec![],
-                    description: Some("九成新显示器".to_string()),
-                }),
                 idempotency_key: None,
             })
             .await
@@ -572,13 +568,12 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
             .create(CreatePost {
                 campus_id,
                 author_id: author.clone(),
-                category: "discussion".to_string(),
+                content: PostContent::Discussion,
                 title: "二手教材交换".to_string(),
                 body: "本学期教材可以在校内交换。".to_string(),
                 tags: vec!["donghu".to_string()],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: None,
                 idempotency_key: None,
             })
             .await
@@ -587,13 +582,12 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
             .create(CreatePost {
                 campus_id,
                 author_id: author.clone(),
-                category: "discussion".to_string(),
+                content: PostContent::Discussion,
                 title: "周末球局".to_string(),
                 body: "周末一起打球。".to_string(),
                 tags: vec!["donghu".to_string()],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: None,
                 idempotency_key: None,
             })
             .await
@@ -602,13 +596,12 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
             .create(CreatePost {
                 campus_id,
                 author_id: author.clone(),
-                category: "discussion".to_string(),
+                content: PostContent::Discussion,
                 title: "校园跑步路线".to_string(),
                 body: "分享一条适合夜跑的路线。".to_string(),
                 tags: vec!["donghu".to_string()],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: None,
                 idempotency_key: None,
             })
             .await
@@ -617,13 +610,12 @@ async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
             .create(CreatePost {
                 campus_id,
                 author_id: viewer.clone(),
-                category: "discussion".to_string(),
+                content: PostContent::Discussion,
                 title: "我的校园日记".to_string(),
                 body: "这条不应出现在自己的 for_you 流。".to_string(),
                 tags: vec![],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: None,
                 idempotency_key: None,
             })
             .await
@@ -725,20 +717,22 @@ async fn atomic_post_and_marketplace_creation_in_single_transaction() {
             .create(CreatePost {
                 campus_id,
                 author_id: author.clone(),
-                category: "offer".to_string(),
+                content: PostContent::Offer(
+                    MarketplaceDetails::new(
+                        MarketplaceCategory::Electronics,
+                        "Keychron".to_string(),
+                        9,
+                        250.0,
+                        vec![],
+                        None,
+                    )
+                    .unwrap(),
+                ),
                 title: "九成新机械键盘".to_string(),
                 body: "红轴手感很好，箱说全。".to_string(),
                 tags: vec![],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: Some(CreatePostMarketplaceInput {
-                    category: "electronics".to_string(),
-                    brand: "Keychron".to_string(),
-                    condition_score: 9,
-                    suggested_price_cny: 250.0,
-                    defects: vec![],
-                    description: None,
-                }),
                 idempotency_key: None,
             })
             .await
@@ -926,20 +920,22 @@ async fn atomic_post_and_marketplace_creation_in_single_transaction() {
             .create(CreatePost {
                 campus_id,
                 author_id: author.clone(),
-                category: "offer".to_string(),
+                content: PostContent::Offer(
+                    MarketplaceDetails::new(
+                        MarketplaceCategory::Electronics,
+                        "Keychron".to_string(),
+                        9,
+                        250.0,
+                        vec![],
+                        None,
+                    )
+                    .unwrap(),
+                ),
                 title: "回滚测试键盘".to_string(),
                 body: "测试在第一笔写入后的回滚".to_string(),
                 tags: vec![],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: Some(CreatePostMarketplaceInput {
-                    category: "electronics".to_string(),
-                    brand: "Keychron".to_string(),
-                    condition_score: 9,
-                    suggested_price_cny: 250.0,
-                    defects: vec![],
-                    description: None,
-                }),
                 idempotency_key: None,
             })
             .await;
@@ -966,101 +962,68 @@ async fn publish_contract_strictly_validates_categories_and_idempotency() {
         let author = user(&pool, "strict-author").await;
         let service = service(&pool);
 
-        // 1. Offer without marketplace is rejected immediately.
-        let err_no_mp = service
-            .create(CreatePost {
-                campus_id,
-                author_id: author.clone(),
-                category: "offer".to_string(),
-                title: "没有商品详情的闲置".to_string(),
-                body: "应当被拒绝".to_string(),
-                tags: vec![],
-                cover_image_url: None,
-                space_id: None,
-                marketplace: None,
-                idempotency_key: None,
-            })
-            .await;
-        assert!(matches!(err_no_mp, Err(ApiError::BadRequest(_))));
+        // 1. Type-level taxonomy makes invalid category/marketplace pairs unrepresentable.
+        assert!(PostContent::Discussion.marketplace().is_none());
+        assert_eq!(PostContent::Discussion.category().as_str(), "discussion");
 
-        // 2. Wanted without marketplace is rejected immediately.
-        let err_wanted_no_mp = service
-            .create(CreatePost {
-                campus_id,
-                author_id: author.clone(),
-                category: "wanted".to_string(),
-                title: "没有求购详情的求购".to_string(),
-                body: "应当被拒绝".to_string(),
-                tags: vec![],
-                cover_image_url: None,
-                space_id: None,
-                marketplace: None,
-                idempotency_key: None,
-            })
-            .await;
-        assert!(matches!(err_wanted_no_mp, Err(ApiError::BadRequest(_))));
+        // 2. MarketplaceDetails constructor strictly validates condition score and pricing.
+        let invalid_condition = MarketplaceDetails::new(
+            MarketplaceCategory::Electronics,
+            "Sony".to_string(),
+            15,
+            50.0,
+            vec![],
+            None,
+        );
+        assert!(matches!(invalid_condition, Err(ApiError::BadRequest(_))));
 
-        // 3. Discussion with marketplace is rejected immediately.
-        let err_discussion_mp = service
-            .create(CreatePost {
-                campus_id,
-                author_id: author.clone(),
-                category: "discussion".to_string(),
-                title: "讨论帖带商品结构".to_string(),
-                body: "应当被拒绝".to_string(),
-                tags: vec![],
-                cover_image_url: None,
-                space_id: None,
-                marketplace: Some(CreatePostMarketplaceInput {
-                    category: "electronics".to_string(),
-                    brand: "Sony".to_string(),
-                    condition_score: 8,
-                    suggested_price_cny: 50.0,
-                    defects: vec![],
-                    description: None,
-                }),
-                idempotency_key: None,
-            })
-            .await;
-        assert!(matches!(err_discussion_mp, Err(ApiError::BadRequest(_))));
+        let invalid_price = MarketplaceDetails::new(
+            MarketplaceCategory::Electronics,
+            "Sony".to_string(),
+            8,
+            -10.0,
+            vec![],
+            None,
+        );
+        assert!(matches!(invalid_price, Err(ApiError::BadRequest(_))));
 
-        // 4. Offer with empty brand is rejected immediately.
+        // 3. Offer with empty brand is rejected immediately at command validation.
+        let empty_brand_details = MarketplaceDetails::new(
+            MarketplaceCategory::Electronics,
+            "   ".to_string(),
+            8,
+            50.0,
+            vec![],
+            None,
+        )
+        .unwrap();
         let err_empty_brand = service
             .create(CreatePost {
                 campus_id,
                 author_id: author.clone(),
-                category: "offer".to_string(),
+                content: PostContent::Offer(empty_brand_details),
                 title: "品牌为空的闲置".to_string(),
                 body: "应当被拒绝".to_string(),
                 tags: vec![],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: Some(CreatePostMarketplaceInput {
-                    category: "electronics".to_string(),
-                    brand: "   ".to_string(),
-                    condition_score: 8,
-                    suggested_price_cny: 50.0,
-                    defects: vec![],
-                    description: None,
-                }),
                 idempotency_key: None,
             })
             .await;
         assert!(matches!(err_empty_brand, Err(ApiError::BadRequest(_))));
 
-        // 5. Command-level idempotency: replay returns same post; altered payload returns 409 Conflict.
+        // 4. Command-level idempotency: replay returns same post; altered payload returns 409 Conflict.
         let ikey = Uuid::new_v4().to_string();
         let first = service
             .create(CreatePost {
                 campus_id,
                 author_id: author.clone(),
-                category: "discussion".to_string(),
+                content: PostContent::Discussion,
                 title: "幂等性测试帖子".to_string(),
                 body: "首次发布内容".to_string(),
                 tags: vec![],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: None,
                 idempotency_key: Some(ikey.clone()),
             })
             .await
@@ -1071,13 +1034,12 @@ async fn publish_contract_strictly_validates_categories_and_idempotency() {
             .create(CreatePost {
                 campus_id,
                 author_id: author.clone(),
-                category: "discussion".to_string(),
+                content: PostContent::Discussion,
                 title: "幂等性测试帖子".to_string(),
                 body: "首次发布内容".to_string(),
                 tags: vec![],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: None,
                 idempotency_key: Some(ikey.clone()),
             })
             .await
@@ -1092,13 +1054,12 @@ async fn publish_contract_strictly_validates_categories_and_idempotency() {
             .create(CreatePost {
                 campus_id,
                 author_id: author.clone(),
-                category: "discussion".to_string(),
+                content: PostContent::Discussion,
                 title: "篡改标题的重试".to_string(),
                 body: "首次发布内容".to_string(),
                 tags: vec![],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: None,
                 idempotency_key: Some(ikey.clone()),
             })
             .await;
@@ -1128,20 +1089,22 @@ async fn concurrent_idempotent_creates_converge_atomically_without_conflict() {
                 svc.create(CreatePost {
                     campus_id,
                     author_id: auth,
-                    category: "offer".to_string(),
+                    content: PostContent::Offer(
+                        MarketplaceDetails::new(
+                            MarketplaceCategory::Electronics,
+                            "Apple".to_string(),
+                            9,
+                            199.0,
+                            vec![],
+                            None,
+                        )
+                        .unwrap(),
+                    ),
                     title: "并发幂等发布测试商品".to_string(),
                     body: "并发请求描述文本".to_string(),
                     tags: vec![],
                     cover_image_url: None,
                     space_id: None,
-                    marketplace: Some(CreatePostMarketplaceInput {
-                        category: "electronics".to_string(),
-                        brand: "Apple".to_string(),
-                        condition_score: 9,
-                        suggested_price_cny: 199.0,
-                        defects: vec![],
-                        description: None,
-                    }),
                     idempotency_key: Some(k),
                 })
                 .await
@@ -1193,20 +1156,22 @@ async fn concurrent_idempotent_creates_converge_atomically_without_conflict() {
             .create(CreatePost {
                 campus_id,
                 author_id: author.clone(),
-                category: "offer".to_string(),
+                content: PostContent::Offer(
+                    MarketplaceDetails::new(
+                        MarketplaceCategory::Electronics,
+                        "Apple".to_string(),
+                        9,
+                        199.0,
+                        vec![],
+                        None,
+                    )
+                    .unwrap(),
+                ),
                 title: "篡改参数的并发幂等测试".to_string(),
                 body: "并发请求描述文本".to_string(),
                 tags: vec![],
                 cover_image_url: None,
                 space_id: None,
-                marketplace: Some(CreatePostMarketplaceInput {
-                    category: "electronics".to_string(),
-                    brand: "Apple".to_string(),
-                    condition_score: 9,
-                    suggested_price_cny: 199.0,
-                    defects: vec![],
-                    description: None,
-                }),
                 idempotency_key: Some(ikey),
             })
             .await;

@@ -9,6 +9,7 @@ use sqlx::{PgPool, Postgres, Transaction};
 use std::collections::HashSet;
 use uuid::Uuid;
 
+pub use crate::categories::MarketplaceCategory;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -17,9 +18,9 @@ pub const MAX_POST_BODY_CHARS: usize = 50_000;
 pub const MAX_REPLY_BODY_CHARS: usize = 20_000;
 pub const MAX_TAG_CHARS: usize = 32;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreatePostMarketplaceInput {
-    pub category: String,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MarketplaceDetails {
+    pub category: MarketplaceCategory,
     pub brand: String,
     pub condition_score: i32,
     pub suggested_price_cny: f64,
@@ -27,21 +28,172 @@ pub struct CreatePostMarketplaceInput {
     pub description: Option<String>,
 }
 
+impl MarketplaceDetails {
+    pub fn new(
+        category: MarketplaceCategory,
+        brand: impl Into<String>,
+        condition_score: i32,
+        suggested_price_cny: f64,
+        defects: Vec<String>,
+        description: Option<String>,
+    ) -> Result<Self, ApiError> {
+        if !(1..=10).contains(&condition_score) {
+            return Err(ApiError::BadRequest(
+                "成色评分 (condition_score) 必须在 1 到 10 之间".to_string(),
+            ));
+        }
+        if suggested_price_cny < 0.0
+            || suggested_price_cny.is_nan()
+            || suggested_price_cny.is_infinite()
+        {
+            return Err(ApiError::BadRequest(
+                "商品价格 (suggested_price_cny) 必须为非负有效数值".to_string(),
+            ));
+        }
+        Ok(Self {
+            category,
+            brand: brand.into(),
+            condition_score,
+            suggested_price_cny,
+            defects,
+            description,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", content = "details")]
+pub enum PostContent {
+    Announcement,
+    Share,
+    Question,
+    Discussion,
+    Recruit,
+    TeamUp,
+    Offer(MarketplaceDetails),
+    Wanted(MarketplaceDetails),
+}
+
+pub type PostKind = PostContent;
+
+impl PostContent {
+    pub fn category(&self) -> PostCategory {
+        match self {
+            Self::Announcement => PostCategory::Announcement,
+            Self::Share => PostCategory::Share,
+            Self::Question => PostCategory::Question,
+            Self::Discussion => PostCategory::Discussion,
+            Self::Recruit => PostCategory::Recruit,
+            Self::TeamUp => PostCategory::TeamUp,
+            Self::Offer(_) => PostCategory::Offer,
+            Self::Wanted(_) => PostCategory::Wanted,
+        }
+    }
+
+    pub fn category_str(&self) -> &'static str {
+        self.category().as_str()
+    }
+
+    pub fn marketplace(&self) -> Option<&MarketplaceDetails> {
+        match self {
+            Self::Offer(mp) | Self::Wanted(mp) => Some(mp),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn is_marketplace(&self) -> bool {
+        self.marketplace().is_some()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreatePost {
     pub campus_id: Uuid,
     pub author_id: String,
-    /// One of offer | wanted | discussion. This IS the post kind.
-    pub category: String,
     pub title: String,
     pub body: String,
+    pub content: PostContent,
     pub tags: Vec<String>,
     pub cover_image_url: Option<String>,
-    /// Group scope; when set the post is visible to space members only.
     pub space_id: Option<Uuid>,
-    /// When set, atomically creates inventory listing in the same database transaction.
-    pub marketplace: Option<CreatePostMarketplaceInput>,
     pub idempotency_key: Option<String>,
+}
+
+#[allow(dead_code)]
+impl CreatePost {
+    pub fn new(
+        campus_id: Uuid,
+        author_id: impl Into<String>,
+        title: impl Into<String>,
+        body: impl Into<String>,
+        content: PostContent,
+    ) -> Self {
+        Self {
+            campus_id,
+            author_id: author_id.into(),
+            title: title.into(),
+            body: body.into(),
+            content,
+            tags: Vec::new(),
+            cover_image_url: None,
+            space_id: None,
+            idempotency_key: None,
+        }
+    }
+
+    pub fn new_discussion(
+        campus_id: Uuid,
+        author_id: impl Into<String>,
+        title: impl Into<String>,
+        body: impl Into<String>,
+    ) -> Self {
+        Self::new(campus_id, author_id, title, body, PostContent::Discussion)
+    }
+
+    pub fn new_offer(
+        campus_id: Uuid,
+        author_id: impl Into<String>,
+        title: impl Into<String>,
+        body: impl Into<String>,
+        marketplace: MarketplaceDetails,
+    ) -> Self {
+        Self::new(
+            campus_id,
+            author_id,
+            title,
+            body,
+            PostContent::Offer(marketplace),
+        )
+    }
+
+    pub fn new_wanted(
+        campus_id: Uuid,
+        author_id: impl Into<String>,
+        title: impl Into<String>,
+        body: impl Into<String>,
+        marketplace: MarketplaceDetails,
+    ) -> Self {
+        Self::new(
+            campus_id,
+            author_id,
+            title,
+            body,
+            PostContent::Wanted(marketplace),
+        )
+    }
+
+    pub fn category(&self) -> PostCategory {
+        self.content.category()
+    }
+
+    pub fn category_str(&self) -> &'static str {
+        self.content.category_str()
+    }
+
+    pub fn marketplace(&self) -> Option<&MarketplaceDetails> {
+        self.content.marketplace()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -142,50 +294,12 @@ impl std::fmt::Display for PostCategory {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum PostKind {
-    Announcement,
-    Share,
-    Question,
-    Discussion,
-    Recruit,
-    TeamUp,
-    Offer(CreatePostMarketplaceInput),
-    Wanted(CreatePostMarketplaceInput),
-}
-
-impl PostKind {
-    pub fn category(&self) -> PostCategory {
-        match self {
-            Self::Announcement => PostCategory::Announcement,
-            Self::Share => PostCategory::Share,
-            Self::Question => PostCategory::Question,
-            Self::Discussion => PostCategory::Discussion,
-            Self::Recruit => PostCategory::Recruit,
-            Self::TeamUp => PostCategory::TeamUp,
-            Self::Offer(_) => PostCategory::Offer,
-            Self::Wanted(_) => PostCategory::Wanted,
-        }
-    }
-
-    pub fn category_str(&self) -> &'static str {
-        self.category().as_str()
-    }
-
-    pub fn marketplace(&self) -> Option<&CreatePostMarketplaceInput> {
-        match self {
-            Self::Offer(mp) | Self::Wanted(mp) => Some(mp),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublishPostCommand {
     pub campus_id: Uuid,
     pub author_id: String,
     pub title: String,
     pub body: String,
-    pub kind: PostKind,
+    pub kind: PostContent,
     pub tags: Vec<String>,
     pub cover_image_url: Option<String>,
     pub space_id: Option<Uuid>,
@@ -193,53 +307,50 @@ pub struct PublishPostCommand {
 }
 
 impl PublishPostCommand {
-    pub fn from_input(input: CreatePost, category: PostCategory) -> Result<Self, ApiError> {
-        let kind = match category {
-            PostCategory::Offer => {
-                let mp = input.marketplace.ok_or_else(|| {
-                    ApiError::BadRequest(
-                        "发布商品或求购 (offer) 必须提供 marketplace 详细信息".to_string(),
-                    )
-                })?;
-                PostKind::Offer(mp)
+    pub fn new(
+        campus_id: Uuid,
+        author_id: impl Into<String>,
+        title: impl Into<String>,
+        body: impl Into<String>,
+        kind: PostContent,
+    ) -> Result<Self, ApiError> {
+        let title = required_text(title.into(), "title", MAX_POST_TITLE_CHARS)?;
+        let body = required_text(body.into(), "body", MAX_POST_BODY_CHARS)?;
+
+        if let PostContent::Offer(ref mp) = kind {
+            if mp.brand.trim().is_empty() {
+                return Err(ApiError::BadRequest(
+                    "发布闲置商品 (offer) 必须提供品牌或来源".to_string(),
+                ));
             }
-            PostCategory::Wanted => {
-                let mp = input.marketplace.ok_or_else(|| {
-                    ApiError::BadRequest(
-                        "发布商品或求购 (wanted) 必须提供 marketplace 详细信息".to_string(),
-                    )
-                })?;
-                PostKind::Wanted(mp)
-            }
-            general_cat => {
-                if input.marketplace.is_some() {
-                    return Err(ApiError::BadRequest(
-                        "非商品类别不能包含 marketplace 详细信息".to_string(),
-                    ));
-                }
-                match general_cat {
-                    PostCategory::Announcement => PostKind::Announcement,
-                    PostCategory::Share => PostKind::Share,
-                    PostCategory::Question => PostKind::Question,
-                    PostCategory::Discussion => PostKind::Discussion,
-                    PostCategory::Recruit => PostKind::Recruit,
-                    PostCategory::TeamUp => PostKind::TeamUp,
-                    PostCategory::Offer | PostCategory::Wanted => unreachable!(),
-                }
-            }
-        };
+        }
 
         Ok(Self {
-            campus_id: input.campus_id,
-            author_id: input.author_id,
-            title: input.title,
-            body: input.body,
+            campus_id,
+            author_id: author_id.into(),
+            title,
+            body,
             kind,
-            tags: input.tags,
-            cover_image_url: input.cover_image_url,
-            space_id: input.space_id,
-            idempotency_key: input.idempotency_key,
+            tags: Vec::new(),
+            cover_image_url: None,
+            space_id: None,
+            idempotency_key: None,
         })
+    }
+
+    pub fn from_input(input: CreatePost) -> Result<Self, ApiError> {
+        let mut cmd = Self::new(
+            input.campus_id,
+            input.author_id,
+            input.title,
+            input.body,
+            input.content,
+        )?;
+        cmd.tags = input.tags;
+        cmd.cover_image_url = input.cover_image_url;
+        cmd.space_id = input.space_id;
+        cmd.idempotency_key = input.idempotency_key;
+        Ok(cmd)
     }
 }
 
@@ -247,8 +358,7 @@ impl TryFrom<CreatePost> for PublishPostCommand {
     type Error = ApiError;
 
     fn try_from(input: CreatePost) -> Result<Self, Self::Error> {
-        let category = normalize_post_category(Some(&input.category))?;
-        Self::from_input(input, category)
+        Self::from_input(input)
     }
 }
 
@@ -577,7 +687,7 @@ impl<R: PostRepository> PostService<R> {
                         campus_id: cmd.campus_id,
                         owner_id: cmd.author_id.clone(),
                         title: title.clone(),
-                        category: mp.category.clone(),
+                        category: mp.category.as_str().to_string(),
                         brand: mp.brand.clone(),
                         direction: Some(category.clone()),
                         condition_score: mp.condition_score,
@@ -941,91 +1051,169 @@ mod tests {
     }
 
     #[test]
-    fn non_marketplace_categories_support_general_posts_and_reject_marketplace() {
-        for cat_str in [
-            "share",
-            "question",
-            "recruit",
-            "team_up",
-            "discussion",
-            "announcement",
-        ] {
-            let input = CreatePost {
-                campus_id: Uuid::new_v4(),
-                author_id: "user-1".to_string(),
-                category: cat_str.to_string(),
-                title: "Test Title".to_string(),
-                body: "Test Body".to_string(),
-                tags: vec![],
-                cover_image_url: None,
-                space_id: None,
-                marketplace: None,
-                idempotency_key: None,
-            };
-            let category = PostCategory::parse(cat_str).unwrap();
-            let cmd = PublishPostCommand::from_input(input.clone(), category);
-            assert!(cmd.is_ok(), "Failed for valid category {cat_str}");
-            let cmd = cmd.unwrap();
-            assert_eq!(cmd.kind.category_str(), cat_str);
-            assert!(cmd.kind.marketplace().is_none());
+    fn type_level_domain_invariants_make_invalid_states_unrepresentable() {
+        let campus_id = Uuid::new_v4();
 
-            // With marketplace input, it must fail:
-            let mut input_with_mp = input;
-            input_with_mp.marketplace = Some(CreatePostMarketplaceInput {
-                category: "electronics".to_string(),
-                brand: "Apple".to_string(),
-                condition_score: 9,
-                suggested_price_cny: 100.0,
-                defects: vec![],
-                description: None,
-            });
-            let cmd_err = PublishPostCommand::from_input(input_with_mp, category);
-            assert!(cmd_err.is_err(), "Must reject marketplace for {cat_str}");
+        // 1. General posts (discussion, announcement, share, question, recruit, team_up)
+        // structurally cannot hold marketplace data:
+        let general_contents = [
+            PostContent::Discussion,
+            PostContent::Announcement,
+            PostContent::Share,
+            PostContent::Question,
+            PostContent::Recruit,
+            PostContent::TeamUp,
+        ];
+
+        for content in general_contents {
+            assert!(!content.is_marketplace());
+            assert!(content.marketplace().is_none());
+            let post = CreatePost::new(campus_id, "user-1", "General Post", "Body text", content);
+            assert!(post.marketplace().is_none());
+            let cmd = PublishPostCommand::from_input(post);
+            assert!(cmd.is_ok());
+            let cmd = cmd.unwrap();
+            assert!(cmd.kind.marketplace().is_none());
+            assert!(!cmd.kind.is_marketplace());
         }
+
+        // 2. Marketplace post must hold valid MarketplaceDetails with MarketplaceCategory enum
+        let valid_mp = MarketplaceDetails::new(
+            MarketplaceCategory::Electronics,
+            "Apple",
+            9,
+            1299.99,
+            vec!["scratch".to_string()],
+            Some("Used iPad".to_string()),
+        )
+        .expect("valid marketplace details");
+
+        let offer_post = CreatePost::new_offer(
+            campus_id,
+            "user-1",
+            "Selling iPad",
+            "iPad in good condition",
+            valid_mp.clone(),
+        );
+        assert!(offer_post.marketplace().is_some());
+        assert_eq!(
+            offer_post.marketplace().unwrap().category,
+            MarketplaceCategory::Electronics
+        );
+
+        let cmd = PublishPostCommand::from_input(offer_post).expect("valid offer command");
+        assert_eq!(cmd.kind.category(), PostCategory::Offer);
+        assert!(cmd.kind.is_marketplace());
+        assert_eq!(cmd.kind.marketplace().unwrap().brand, "Apple");
+
+        let wanted_post = CreatePost::new_wanted(
+            campus_id,
+            "user-2",
+            "Looking for textbook",
+            "Need calculus book",
+            valid_mp,
+        );
+        assert!(wanted_post.marketplace().is_some());
+        assert_eq!(wanted_post.category(), PostCategory::Wanted);
     }
 
     #[test]
-    fn marketplace_categories_require_marketplace_details() {
-        for cat_str in ["offer", "wanted"] {
-            let category = PostCategory::parse(cat_str).unwrap();
-            let input = CreatePost {
-                campus_id: Uuid::new_v4(),
-                author_id: "user-1".to_string(),
-                category: cat_str.to_string(),
-                title: "Test Title".to_string(),
-                body: "Test Body".to_string(),
-                tags: vec![],
-                cover_image_url: None,
-                space_id: None,
-                marketplace: None,
-                idempotency_key: None,
-            };
-            assert!(PublishPostCommand::from_input(input, category).is_err());
+    fn marketplace_details_enforces_range_and_pricing_invariants() {
+        // Invalid condition score (< 1 or > 10)
+        let err_score_low = MarketplaceDetails::new(
+            MarketplaceCategory::Books,
+            "Publisher",
+            0,
+            50.0,
+            vec![],
+            None,
+        );
+        assert!(err_score_low.is_err());
 
-            let input_with_mp = CreatePost {
-                campus_id: Uuid::new_v4(),
-                author_id: "user-1".to_string(),
-                category: cat_str.to_string(),
-                title: "Test Title".to_string(),
-                body: "Test Body".to_string(),
-                tags: vec![],
-                cover_image_url: None,
-                space_id: None,
-                marketplace: Some(CreatePostMarketplaceInput {
-                    category: "electronics".to_string(),
-                    brand: "Apple".to_string(),
-                    condition_score: 9,
-                    suggested_price_cny: 100.0,
-                    defects: vec![],
-                    description: None,
-                }),
-                idempotency_key: None,
-            };
-            let cmd = PublishPostCommand::from_input(input_with_mp, category);
-            assert!(cmd.is_ok());
-            let cmd = cmd.unwrap();
-            assert_eq!(cmd.kind.category_str(), cat_str);
-            assert!(cmd.kind.marketplace().is_some());
-        }
+        let err_score_high = MarketplaceDetails::new(
+            MarketplaceCategory::Books,
+            "Publisher",
+            11,
+            50.0,
+            vec![],
+            None,
+        );
+        assert!(err_score_high.is_err());
+
+        // Negative or invalid price
+        let err_price_neg = MarketplaceDetails::new(
+            MarketplaceCategory::Books,
+            "Publisher",
+            8,
+            -1.0,
+            vec![],
+            None,
+        );
+        assert!(err_price_neg.is_err());
+
+        let err_price_nan = MarketplaceDetails::new(
+            MarketplaceCategory::Books,
+            "Publisher",
+            8,
+            f64::NAN,
+            vec![],
+            None,
+        );
+        assert!(err_price_nan.is_err());
+
+        // Valid details
+        let ok_details = MarketplaceDetails::new(
+            MarketplaceCategory::Books,
+            "Publisher",
+            10,
+            0.0, // Free items allowed (0.0 CNY)
+            vec![],
+            None,
+        );
+        assert!(ok_details.is_ok());
+    }
+
+    #[test]
+    fn publish_post_command_enforces_offer_brand_and_text_invariants() {
+        let campus_id = Uuid::new_v4();
+
+        // Offer requires non-empty brand
+        let empty_brand_mp = MarketplaceDetails::new(
+            MarketplaceCategory::Electronics,
+            "   ",
+            8,
+            100.0,
+            vec![],
+            None,
+        )
+        .expect("constructed details");
+
+        let offer_err = PublishPostCommand::new(
+            campus_id,
+            "user-1",
+            "Valid Title",
+            "Valid Body",
+            PostContent::Offer(empty_brand_mp),
+        );
+        assert!(offer_err.is_err());
+
+        // Empty title or body rejected
+        let title_err = PublishPostCommand::new(
+            campus_id,
+            "user-1",
+            "   ",
+            "Valid Body",
+            PostContent::Discussion,
+        );
+        assert!(title_err.is_err());
+
+        let body_err = PublishPostCommand::new(
+            campus_id,
+            "user-1",
+            "Valid Title",
+            "   ",
+            PostContent::Discussion,
+        );
+        assert!(body_err.is_err());
     }
 }

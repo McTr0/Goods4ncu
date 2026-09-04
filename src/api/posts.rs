@@ -16,9 +16,13 @@ use crate::api::agent_plans::no_store_json;
 use crate::api::error::ApiError;
 use crate::api::session::{OptionalSession, VerifiedTenant};
 use crate::api::{normalize_platform_media_url, AppState};
+use crate::categories::MarketplaceCategory;
 use crate::repositories::{ListingPostPreview, Post, PostFilter, PostReply, PostSort};
 use crate::services::campus::CampusService;
-use crate::services::post::{CreatePost, EditPost, PostService};
+use crate::services::post::{
+    normalize_post_category, CreatePost, EditPost, MarketplaceDetails, PostCategory, PostContent,
+    PostService,
+};
 
 pub const UNIFIED_POST_RANKING_VERSION: &str = "2026.08-post-v2";
 
@@ -454,38 +458,80 @@ pub async fn create_post(
     let idempotency_key = crate::api::request_context::idempotency_key_from_headers(&headers)?;
     let cover_image_url =
         normalize_platform_media_url(&state, payload.cover_image_url, "cover_image_url")?;
-    let post_category = payload
-        .category
-        .clone()
-        .unwrap_or_else(|| "discussion".to_string());
+    let post_category = normalize_post_category(payload.category.as_deref())?;
 
-    if let Some(ref mp) = payload.marketplace {
-        if let Some(ref dir) = mp.direction {
-            if dir != &post_category {
-                return Err(ApiError::BadRequest(format!(
-                    "marketplace.direction ({dir}) 必须与 post category ({post_category}) 一致"
-                )));
+    let content = match post_category {
+        PostCategory::Offer => {
+            let mp = payload.marketplace.ok_or_else(|| {
+                ApiError::BadRequest(
+                    "发布闲置商品 (offer) 必须提供 marketplace 详细信息".to_string(),
+                )
+            })?;
+            if let Some(ref dir) = mp.direction {
+                if dir != "offer" {
+                    return Err(ApiError::BadRequest(
+                        "marketplace.direction 必须与 post category (offer) 一致".to_string(),
+                    ));
+                }
+            }
+            let cat = MarketplaceCategory::parse(&mp.category)
+                .ok_or_else(|| ApiError::BadRequest(crate::categories::valid_category_message()))?;
+            let brand = mp.brand.unwrap_or_default().trim().to_string();
+            let details = MarketplaceDetails::new(
+                cat,
+                brand,
+                mp.condition_score,
+                mp.suggested_price_cny,
+                mp.defects,
+                mp.description,
+            )?;
+            PostContent::Offer(details)
+        }
+        PostCategory::Wanted => {
+            let mp = payload.marketplace.ok_or_else(|| {
+                ApiError::BadRequest("发布求购 (wanted) 必须提供 marketplace 详细信息".to_string())
+            })?;
+            if let Some(ref dir) = mp.direction {
+                if dir != "wanted" {
+                    return Err(ApiError::BadRequest(
+                        "marketplace.direction 必须与 post category (wanted) 一致".to_string(),
+                    ));
+                }
+            }
+            let cat = MarketplaceCategory::parse(&mp.category)
+                .ok_or_else(|| ApiError::BadRequest(crate::categories::valid_category_message()))?;
+            let brand = if mp.brand.as_deref().map(str::trim).unwrap_or("").is_empty() {
+                "不限".to_string()
+            } else {
+                mp.brand.unwrap_or_default().trim().to_string()
+            };
+            let details = MarketplaceDetails::new(
+                cat,
+                brand,
+                mp.condition_score,
+                mp.suggested_price_cny,
+                mp.defects,
+                mp.description,
+            )?;
+            PostContent::Wanted(details)
+        }
+        general_cat => {
+            if payload.marketplace.is_some() {
+                return Err(ApiError::BadRequest(
+                    "非商品类别不能包含 marketplace 详细信息".to_string(),
+                ));
+            }
+            match general_cat {
+                PostCategory::Announcement => PostContent::Announcement,
+                PostCategory::Share => PostContent::Share,
+                PostCategory::Question => PostContent::Question,
+                PostCategory::Discussion => PostContent::Discussion,
+                PostCategory::Recruit => PostContent::Recruit,
+                PostCategory::TeamUp => PostContent::TeamUp,
+                PostCategory::Offer | PostCategory::Wanted => unreachable!(),
             }
         }
-    }
-
-    let marketplace = payload.marketplace.map(|mp| {
-        let brand = if post_category == "wanted"
-            && mp.brand.as_deref().map(str::trim).unwrap_or("").is_empty()
-        {
-            "不限".to_string()
-        } else {
-            mp.brand.unwrap_or_default().trim().to_string()
-        };
-        crate::services::post::CreatePostMarketplaceInput {
-            category: mp.category,
-            brand,
-            condition_score: mp.condition_score,
-            suggested_price_cny: mp.suggested_price_cny,
-            defects: mp.defects,
-            description: mp.description,
-        }
-    });
+    };
 
     let post = post_service(&state)
         .create(CreatePost {
@@ -493,11 +539,10 @@ pub async fn create_post(
             author_id: tenant.session.user_id.clone(),
             title: payload.title,
             body: payload.body,
-            category: post_category,
+            content,
             tags: payload.tags,
             cover_image_url,
             space_id: payload.space_id,
-            marketplace,
             idempotency_key,
         })
         .await?;

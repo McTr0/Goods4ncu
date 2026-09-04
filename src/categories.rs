@@ -1,5 +1,7 @@
 //! Canonical marketplace category keys and legacy alias normalization.
 
+use serde::{Deserialize, Serialize};
+
 pub const MARKETPLACE_CATEGORIES: &[&str] = &[
     "electronics",
     "books",
@@ -8,6 +10,90 @@ pub const MARKETPLACE_CATEGORIES: &[&str] = &[
     "clothingShoes",
     "other",
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MarketplaceCategory {
+    Electronics,
+    Books,
+    DigitalAccessories,
+    DailyGoods,
+    ClothingShoes,
+    Other,
+}
+
+impl MarketplaceCategory {
+    #[allow(dead_code)]
+    pub const ALL: [MarketplaceCategory; 6] = [
+        Self::Electronics,
+        Self::Books,
+        Self::DigitalAccessories,
+        Self::DailyGoods,
+        Self::ClothingShoes,
+        Self::Other,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Electronics => "electronics",
+            Self::Books => "books",
+            Self::DigitalAccessories => "digitalAccessories",
+            Self::DailyGoods => "dailyGoods",
+            Self::ClothingShoes => "clothingShoes",
+            Self::Other => "other",
+        }
+    }
+
+    pub fn parse(input: &str) -> Option<Self> {
+        match normalize_category(input) {
+            Some("electronics") => Some(Self::Electronics),
+            Some("books") => Some(Self::Books),
+            Some("digitalAccessories") => Some(Self::DigitalAccessories),
+            Some("dailyGoods") => Some(Self::DailyGoods),
+            Some("clothingShoes") => Some(Self::ClothingShoes),
+            Some("other") => Some(Self::Other),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for MarketplaceCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for MarketplaceCategory {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(valid_category_message)
+    }
+}
+
+impl<'de> Deserialize<'de> for MarketplaceCategory {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        MarketplaceCategory::parse(&s).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "invalid marketplace category '{}', expected one of: {}",
+                s,
+                MARKETPLACE_CATEGORIES.join(", ")
+            ))
+        })
+    }
+}
+
+impl Serialize for MarketplaceCategory {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
 
 pub fn normalize_category(input: &str) -> Option<&'static str> {
     let trimmed = input.trim();

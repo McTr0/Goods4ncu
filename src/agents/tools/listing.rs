@@ -170,30 +170,33 @@ pub(crate) async fn execute_create_listing_in_tx(
     let post_service =
         crate::services::post::PostService::new(ctx.db_pool.clone(), ctx.moderation.clone());
 
-    let cmd = crate::services::post::PublishPostCommand {
-        campus_id,
-        author_id: owner.to_string(),
-        title: title.clone(),
-        body: if args.original_description.trim().is_empty() {
-            title.clone()
-        } else {
-            args.original_description.clone()
-        },
-        kind: crate::services::post::PostKind::Offer(
-            crate::services::post::CreatePostMarketplaceInput {
-                category: args.category,
-                brand: args.brand,
-                condition_score: args.condition_score as i32,
-                suggested_price_cny: price_cents as f64 / 100.0,
-                defects: args.defects,
-                description: Some(args.original_description),
-            },
-        ),
-        tags: vec![],
-        cover_image_url: None,
-        space_id: None,
-        idempotency_key: None,
+    let category = crate::categories::MarketplaceCategory::parse(&args.category)
+        .ok_or_else(|| ToolError(format!("无效的商品类别: {}", args.category)))?;
+
+    let details = crate::services::post::MarketplaceDetails::new(
+        category,
+        args.brand,
+        args.condition_score as i32,
+        price_cents as f64 / 100.0,
+        args.defects,
+        Some(args.original_description.clone()),
+    )
+    .map_err(|e| ToolError(format!("商品参数错误: {:?}", e)))?;
+
+    let body = if args.original_description.trim().is_empty() {
+        title.clone()
+    } else {
+        args.original_description.clone()
     };
+
+    let cmd = crate::services::post::PublishPostCommand::new(
+        campus_id,
+        owner.to_string(),
+        title.clone(),
+        body,
+        crate::services::post::PostContent::Offer(details),
+    )
+    .map_err(|error| ToolError(format!("创建发帖指令失败: {:?}", error)))?;
 
     let post = post_service
         .publish_in_tx(tx, cmd)
