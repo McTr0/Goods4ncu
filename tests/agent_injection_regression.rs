@@ -361,11 +361,17 @@ async fn injected_listing_instructions_stay_inert_data() {
             })
             .await
             .expect("details read");
-        assert!(details.contains(injection), "payload stays verbatim");
-        assert!(details.contains("Description:"), "framed as a field value");
+        assert!(
+            details.model_data.contains(injection),
+            "payload stays verbatim"
+        );
+        assert!(
+            details.model_data.contains("Description:"),
+            "framed as a field value"
+        );
 
         // The provider layer fences it before it reaches the model.
-        let fenced = wrap_untrusted_platform_data("get_listing_details", &details);
+        let fenced = wrap_untrusted_platform_data("get_listing_details", &details.model_data);
         assert!(fenced.starts_with(UNTRUSTED_DATA_BEGIN));
         assert!(fenced.ends_with(UNTRUSTED_DATA_END));
 

@@ -321,9 +321,9 @@ async fn handle_socket(
     // Socket closed. Clean up: remove this specific tx from the user's connection list.
     if let Some(mut connections) = ws_hub.connections.get_mut(&user_id) {
         let before = connections.value().len();
-        connections
-            .value_mut()
-            .retain(|connection| !connection.sender.is_closed());
+        connections.value_mut().retain(|connection| {
+            !connection.sender.same_channel(&tx) && !connection.sender.is_closed()
+        });
         let pruned = before.saturating_sub(connections.value().len());
         if pruned > 0 {
             if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {

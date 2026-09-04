@@ -185,7 +185,11 @@ async fn l2_write_executes_immediately_and_creates_no_plan() {
         assert_eq!(plans, 0, "an L2 write must not queue a confirmation");
 
         // The user is told the action is recoverable.
-        assert!(reply.contains("撤销"), "reply: {reply}");
+        assert!(
+            reply.model_data.contains("撤销"),
+            "reply: {}",
+            reply.model_data
+        );
     })
     .await;
 }
@@ -210,7 +214,11 @@ async fn l3_tool_call_proposes_a_plan_instead_of_executing() {
             .await
             .expect("tool call");
 
-        assert!(reply.contains("待确认操作"), "reply: {reply}");
+        assert!(
+            reply.model_data.contains("待确认操作"),
+            "reply: {}",
+            reply.model_data
+        );
         let token: String = sqlx::query_scalar(
             "SELECT confirmation_token FROM agent_action_plans WHERE user_id = $1",
         )
@@ -219,7 +227,7 @@ async fn l3_tool_call_proposes_a_plan_instead_of_executing() {
         .await
         .expect("plan row exists");
         assert!(
-            !reply.contains(&token),
+            !reply.model_data.contains(&token),
             "confirmation token must not appear in model-visible text"
         );
         let plan = AgentPlanService::new(pool.clone())
@@ -285,8 +293,8 @@ async fn proposal_idempotency_reuses_same_plan_and_rejects_changed_args() {
                 .fetch_one(&pool)
                 .await
                 .expect("read original plan");
-        assert!(first.contains(&plan_id.to_string()));
-        assert!(second.contains(&plan_id.to_string()));
+        assert!(first.model_data.contains(&plan_id.to_string()));
+        assert!(second.model_data.contains(&plan_id.to_string()));
 
         let mut changed = purchase_args(&listing_id);
         changed.offered_price += 100;

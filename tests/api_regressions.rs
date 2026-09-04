@@ -354,7 +354,6 @@ fn build_state_with_image_moderation(pool: sqlx::PgPool, image_enabled: bool) ->
                     )
                 },
                 notification: NotificationService::new(pool.clone()),
-                ws_connections: ws_hub.connections.clone(),
                 ws_hub,
                 metrics: Arc::new(goods4ncu::api::metrics::MetricsService::new()),
                 order_service: services::order::OrderService::new(pool.clone()),

@@ -376,7 +376,6 @@ async fn main() -> Result<(), anyhow::Error> {
             db: db_pool.clone(),
             rate_limit: rate_limit_handle,
             notification,
-            ws_connections: ws_hub.connections.clone(),
             ws_hub: ws_hub.clone(),
             metrics: Arc::clone(&metrics),
             order_service: services::order::OrderService::new(db_pool.clone()),

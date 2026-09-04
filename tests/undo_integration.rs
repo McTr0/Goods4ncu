@@ -344,8 +344,9 @@ async fn model_visible_reply_carries_no_undo_handle() {
 
         for rendering in [action_id.to_string(), action_id.simple().to_string()] {
             assert!(
-                !reply.contains(&rendering),
-                "undo action id must not appear in model-visible text: {reply}"
+                !reply.model_data.contains(&rendering),
+                "undo action id must not appear in model-visible text: {}",
+                reply.model_data
             );
         }
     })

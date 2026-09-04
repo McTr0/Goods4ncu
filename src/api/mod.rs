@@ -288,8 +288,6 @@ pub struct ApiInfrastructure {
     pub db: PgPool,
     pub rate_limit: RateLimitStateHandle,
     pub notification: NotificationService,
-    #[allow(dead_code)]
-    pub ws_connections: Arc<ws::WsConnections>,
     pub ws_hub: Arc<ws::WsHub>,
     pub metrics: Arc<MetricsService>,
     pub order_service: order::OrderService,

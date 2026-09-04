@@ -45,7 +45,6 @@ fn build_state(pool: sqlx::PgPool, shutdown: ShutdownSignal) -> AppState {
                     )
                 },
                 notification: NotificationService::new(pool.clone()),
-                ws_connections: ws_hub.connections.clone(),
                 ws_hub,
                 metrics: Arc::new(goods4ncu::api::metrics::MetricsService::new()),
                 order_service: services::order::OrderService::new(pool.clone()),

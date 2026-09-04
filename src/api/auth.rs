@@ -1079,7 +1079,6 @@ pub(crate) mod tests {
                         )
                     },
                     notification: NotificationService::new(pool.clone()),
-                    ws_connections: ws_hub.connections.clone(),
                     ws_hub,
                     metrics: Arc::new(crate::api::metrics::MetricsService::new()),
                     order_service: services::order::OrderService::new(pool.clone()),
