@@ -509,10 +509,13 @@ async fn draft_comment_tool_rejects_missing_or_closed_post() {
             })
             .await
             .expect("valid draft");
-        let parsed: serde_json::Value = serde_json::from_str(&valid).expect("json");
-        assert_eq!(parsed["action"], "open_comment_draft");
-        assert_eq!(parsed["post_id"], post_id);
-        assert_eq!(parsed["draft_text"], "请问周末可以自提吗？");
+        let envelope: crate::agents::runtime::envelope::ToolResultEnvelope =
+            serde_json::from_str(&valid).expect("envelope json");
+        assert_eq!(envelope.resource_ids, vec![post_id.clone()]);
+        assert_eq!(envelope.ui_actions.len(), 1);
+        assert_eq!(envelope.ui_actions[0].kind, "OPEN_COMMENT_DRAFT");
+        assert_eq!(envelope.ui_actions[0].payload["postId"], post_id);
+        assert_eq!(envelope.ui_actions[0].payload["draftText"], "请问周末可以自提吗？");
 
         let missing = tool
             .call(DraftCommentArgs {
@@ -543,11 +546,17 @@ async fn draft_message_tool_rejects_missing_listing_or_receiver() {
             })
             .await
             .expect("valid draft");
-        let parsed: serde_json::Value = serde_json::from_str(&valid).expect("json");
-        assert_eq!(parsed["action"], "open_message_draft");
-        assert_eq!(parsed["listing_id"], listing_id);
-        assert_eq!(parsed["receiver_id"], seller_id);
-        assert_eq!(parsed["draft_text"], "周末方便面交吗？");
+        let envelope: crate::agents::runtime::envelope::ToolResultEnvelope =
+            serde_json::from_str(&valid).expect("envelope json");
+        assert_eq!(envelope.resource_ids, vec![listing_id.clone()]);
+        assert_eq!(envelope.ui_actions.len(), 1);
+        assert_eq!(envelope.ui_actions[0].kind, "OPEN_MESSAGE_DRAFT");
+        assert_eq!(envelope.ui_actions[0].payload["receiverId"], seller_id);
+        assert_eq!(envelope.ui_actions[0].payload["listingId"], listing_id);
+        assert_eq!(
+            envelope.ui_actions[0].payload["draftText"],
+            "周末方便面交吗？"
+        );
 
         let missing_listing = tool
             .call(DraftMessageArgs {

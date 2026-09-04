@@ -315,13 +315,17 @@ impl Tool for DraftMessageTool {
             ));
         }
 
-        Ok(serde_json::json!({
-            "action": "open_message_draft",
-            "listing_id": args.listing_id,
-            "receiver_id": args.receiver_id,
-            "draft_text": args.draft_text,
-        })
-        .to_string())
+        let envelope = crate::agents::runtime::envelope::ToolResultEnvelope::success(
+            "已为你生成一条私信草稿，请确认后发送。",
+        )
+        .with_action(crate::llm::UiAction::open_message_draft(
+            &args.receiver_id,
+            &args.listing_id,
+            &args.draft_text,
+        ))
+        .with_resource(args.listing_id);
+
+        Ok(envelope.to_json())
     }
 }
 
@@ -378,11 +382,15 @@ impl Tool for DraftCommentTool {
             ));
         }
 
-        Ok(serde_json::json!({
-            "action": "open_comment_draft",
-            "post_id": args.post_id,
-            "draft_text": args.draft_text,
-        })
-        .to_string())
+        let envelope = crate::agents::runtime::envelope::ToolResultEnvelope::success(
+            "已为你生成一条回复草稿，请确认后发布。",
+        )
+        .with_action(crate::llm::UiAction::open_comment_draft(
+            &args.post_id,
+            &args.draft_text,
+        ))
+        .with_resource(args.post_id);
+
+        Ok(envelope.to_json())
     }
 }

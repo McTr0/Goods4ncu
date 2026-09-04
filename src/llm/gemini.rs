@@ -298,76 +298,31 @@ impl MarketplaceAgent for GeminiMarketplaceAgent {
                             };
                             // Emit UI actions for search and details tools so the
                             // frontend can highlight results and scroll to them.
-                            match tool_call.function.name.as_str() {
-                                "search_inventory" => {
-                                    if let Ok(ids) = crate::llm::extract_listing_ids(&result) {
-                                        if !ids.is_empty() {
-                                            yield AgentStreamChunk::UiAction(
-                                                crate::llm::UiAction::show_posts(ids),
-                                            );
-                                        }
-                                    }
+                            let mut envelope = crate::agents::runtime::envelope::ToolResultEnvelope::from_tool_result(
+                                &tool_call.function.name,
+                                &result,
+                            );
+                            if tool_call.function.name == "get_listing_details" {
+                                if let Some(id) = tool_call
+                                    .function
+                                    .arguments
+                                    .get("listing_id")
+                                    .and_then(|v| v.as_str())
+                                {
+                                    envelope
+                                        .ui_actions
+                                        .push(crate::llm::UiAction::scroll_to_post(id));
                                 }
-                                "get_listing_details" => {
-                                    if let Some(id) = tool_call
-                                        .function
-                                        .arguments
-                                        .get("listing_id")
-                                        .and_then(|v| v.as_str())
-                                    {
-                                        yield AgentStreamChunk::UiAction(
-                                            crate::llm::UiAction::scroll_to_post(id),
-                                        );
-                                    }
-                                }
-                                "find_related_posts" | "get_user_posts" => {
-                                    if let Ok(ids) = crate::llm::extract_listing_ids(&result) {
-                                        if !ids.is_empty() {
-                                            yield AgentStreamChunk::UiAction(
-                                                crate::llm::UiAction::show_posts(ids),
-                                            );
-                                        }
-                                    }
-                                }
-                                "draft_comment" => {
-                                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&result) {
-                                        if let (Some(post_id), Some(draft_text)) = (
-                                            v.get("post_id").and_then(|s| s.as_str()),
-                                            v.get("draft_text").and_then(|s| s.as_str()),
-                                        ) {
-                                            yield AgentStreamChunk::UiAction(
-                                                crate::llm::UiAction::open_comment_draft(
-                                                    post_id, draft_text,
-                                                ),
-                                            );
-                                        }
-                                    }
-                                }
-                                "draft_message" => {
-                                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&result) {
-                                        if let (Some(listing_id), Some(receiver_id), Some(draft_text)) = (
-                                            v.get("listing_id").and_then(|s| s.as_str()),
-                                            v.get("receiver_id").and_then(|s| s.as_str()),
-                                            v.get("draft_text").and_then(|s| s.as_str()),
-                                        ) {
-                                            yield AgentStreamChunk::UiAction(
-                                                crate::llm::UiAction::open_message_draft(
-                                                    receiver_id,
-                                                    listing_id,
-                                                    draft_text,
-                                                ),
-                                            );
-                                        }
-                                    }
-                                }
-                                _ => {}
+                            }
+                            for action in envelope.ui_actions {
+                                yield AgentStreamChunk::UiAction(action);
                             }
                             // Goal §40: user-generated platform content is
                             // untrusted data; fence it before it reaches the
                             // model so embedded instructions stay inert.
                             let result = crate::llm::wrap_untrusted_platform_data(
                                 &tool_call.function.name,
-                                &result,
+                                &envelope.model_data,
                             );
                             tool_calls.push((tool_call.clone(), result));
                             call_succeeded = true;

@@ -6,8 +6,9 @@
 //! - `resource_ids`: referenced entity IDs for audit
 
 use crate::llm::UiAction;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolResultEnvelope {
     /// Human/model-readable summary.
     pub model_data: String,
@@ -26,6 +27,10 @@ impl ToolResultEnvelope {
         }
     }
 
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| self.model_data.clone())
+    }
+
     pub fn with_action(mut self, action: UiAction) -> Self {
         self.ui_actions.push(action);
         self
@@ -35,8 +40,13 @@ impl ToolResultEnvelope {
         self.resource_ids.push(id.into());
         self
     }
+
     /// Convert a tool result into the structured channels used by Runtime v2.
     pub fn from_tool_result(tool_name: &str, result: &str) -> Self {
+        if let Ok(envelope) = serde_json::from_str::<ToolResultEnvelope>(result) {
+            return envelope;
+        }
+
         match tool_name {
             "draft_message" => Self::parse_draft_message(result),
             "draft_comment" => Self::parse_draft_comment(result),
