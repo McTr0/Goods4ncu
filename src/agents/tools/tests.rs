@@ -515,7 +515,10 @@ async fn draft_comment_tool_rejects_missing_or_closed_post() {
         assert_eq!(envelope.ui_actions.len(), 1);
         assert_eq!(envelope.ui_actions[0].kind, "OPEN_COMMENT_DRAFT");
         assert_eq!(envelope.ui_actions[0].payload["postId"], post_id);
-        assert_eq!(envelope.ui_actions[0].payload["draftText"], "请问周末可以自提吗？");
+        assert_eq!(
+            envelope.ui_actions[0].payload["draftText"],
+            "请问周末可以自提吗？"
+        );
 
         let missing = tool
             .call(DraftCommentArgs {
