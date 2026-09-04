@@ -1,11 +1,14 @@
 use sqlx::PgPool;
 use std::time::Duration;
 
-use crate::api::ws;
 use crate::lifecycle::{tick_or_shutdown, ShutdownSignal};
 use crate::services::chat_conversation::ChatConversationService;
 
-pub async fn run_chat_expiry_worker(pool: PgPool, shutdown: ShutdownSignal) {
+pub async fn run_chat_expiry_worker(
+    pool: PgPool,
+    ws_hub: std::sync::Arc<crate::api::ws::WsHub>,
+    shutdown: ShutdownSignal,
+) {
     let service = ChatConversationService::new(pool);
     let mut interval = tokio::time::interval(Duration::from_secs(30));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -22,10 +25,11 @@ pub async fn run_chat_expiry_worker(pool: PgPool, shutdown: ShutdownSignal) {
                         "state": "expired",
                     })
                     .to_string();
-                    ws::broadcast_to_user_in_campus(&initiator_id, campus_id, &payload);
-                    ws::broadcast_to_user_in_campus(&recipient_id, campus_id, &payload);
+                    ws_hub.broadcast_to_user_in_campus(&initiator_id, campus_id, &payload);
+                    ws_hub.broadcast_to_user_in_campus(&recipient_id, campus_id, &payload);
                 }
             }
+
             Err(error) => tracing::error!(%error, "chat expiry worker failed"),
         }
     }

@@ -8,7 +8,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
-use crate::api::{ws, AppState};
+use crate::api::AppState;
 
 use super::{authenticated_session, authenticated_user, moderate_text};
 
@@ -388,7 +388,7 @@ pub async fn create_call(
     .await
     .map_err(db_error)?;
     let view = row_to_call(row);
-    ws::broadcast_to_user(
+    state.infra.ws_hub.broadcast_to_user(
         &callee_id,
         &serde_json::json!({
             "event": "call_invite",
@@ -422,7 +422,7 @@ pub async fn answer_call(
     .map_err(db_error)?
     .ok_or(ApiError::NotFound)?;
     let view = row_to_call(row);
-    ws::broadcast_to_user(
+    state.infra.ws_hub.broadcast_to_user(
         &view.caller_id,
         &serde_json::json!({
             "event": "call_answer",
@@ -460,7 +460,7 @@ pub async fn end_call(
     } else {
         &view.caller_id
     };
-    ws::broadcast_to_user(
+    state.infra.ws_hub.broadcast_to_user(
         other,
         &serde_json::json!({
             "event": "call_ended",
@@ -663,8 +663,12 @@ async fn broadcast_space_event(
     })
     .to_string();
     for row in rows {
-        ws::broadcast_to_user(row.get::<String, _>("user_id").as_str(), &payload);
+        state
+            .infra
+            .ws_hub
+            .broadcast_to_user(row.get::<String, _>("user_id").as_str(), &payload);
     }
+
     Ok(())
 }
 

@@ -12,7 +12,6 @@
 //! (e.g., iPhone + iPad simultaneously). Each connection is independently
 //! heartbeated via ping/pong. Dead connections are cleaned up automatically.
 
-use axum::extract::ws::Message as WsMsg;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use dashmap::DashMap;
@@ -68,12 +67,16 @@ impl WsHub {
     }
 
     #[cfg(feature = "redis")]
-    pub fn set_fanout_publisher(
-        &self,
-        tx: tokio::sync::mpsc::Sender<(String, Option<uuid::Uuid>, String)>,
-    ) {
+    pub fn set_fanout_publisher(&self, tx: FanoutSender) {
         if let Ok(mut lock) = self.fanout_tx.write() {
             *lock = Some(tx);
+        }
+    }
+
+    #[cfg(feature = "redis")]
+    pub fn clear_fanout_publisher(&self) {
+        if let Ok(mut lock) = self.fanout_tx.write() {
+            *lock = None;
         }
     }
 
@@ -122,78 +125,28 @@ impl WsHub {
     ) {
         deliver_local_scoped_internal(&self.connections, user_id, campus_id, payload);
     }
-}
 
-/// Global WebSocket hub instance.
-static GLOBAL_WS_HUB: std::sync::LazyLock<Arc<WsHub>> =
-    std::sync::LazyLock::new(|| Arc::new(WsHub::new()));
+    #[allow(dead_code)]
+    pub fn register_test_connection(&self, user_id: &str) -> mpsc::Receiver<Message> {
+        self.register_test_connection_for_campus(user_id, None)
+    }
 
-#[allow(dead_code)]
-pub fn global_ws_hub() -> Arc<WsHub> {
-    Arc::clone(&GLOBAL_WS_HUB)
-}
-
-pub fn new_ws_state() -> Arc<WsConnections> {
-    Arc::clone(&GLOBAL_WS_HUB.connections)
-}
-
-/// Install the Redis-backed fanout publisher sender into the global hub.
-#[cfg(feature = "redis")]
-pub fn install_fanout_publisher(
-    tx: tokio::sync::mpsc::Sender<(String, Option<uuid::Uuid>, String)>,
-) {
-    GLOBAL_WS_HUB.set_fanout_publisher(tx);
-}
-
-/// Broadcast a payload to a user. With the fanout installed this publishes to
-/// Redis and delivery happens on every replica (including this one) through
-/// the subscription; without it, it delivers to local sockets directly.
-pub fn broadcast_to_user(user_id: &str, payload: &str) {
-    GLOBAL_WS_HUB.broadcast_to_user(user_id, payload);
-}
-
-/// Broadcast a chat event only to sockets authenticated for the conversation's
-/// active campus.
-pub fn broadcast_to_user_in_campus(user_id: &str, campus_id: uuid::Uuid, payload: &str) {
-    GLOBAL_WS_HUB.broadcast_to_user_in_campus(user_id, campus_id, payload);
-}
-
-/// Register a bare connection sender for a user — the same registration the
-/// upgrade handler performs. Exposed so integration tests can observe local
-/// delivery without a real socket.
-#[doc(hidden)]
-#[allow(dead_code)] // used from the lib crate by integration tests
-pub fn register_test_connection(user_id: &str) -> mpsc::Receiver<Message> {
-    register_test_connection_for_campus(user_id, None)
-}
-
-#[doc(hidden)]
-pub fn register_test_connection_for_campus(
-    user_id: &str,
-    campus_id: Option<uuid::Uuid>,
-) -> mpsc::Receiver<Message> {
-    let (tx, rx) = mpsc::channel(16);
-    GLOBAL_WS_HUB
-        .connections
-        .entry(user_id.to_string())
-        .or_default()
-        .push(WsConnection {
-            sender: tx,
-            campus_id,
-        });
-    rx
-}
-
-/// Deliver a payload to this instance's active connections for a user.
-/// Automatically removes dead senders (channel closed).
-#[allow(dead_code)]
-pub fn deliver_local(user_id: &str, payload: &str) {
-    deliver_local_scoped(user_id, None, payload);
-}
-
-#[allow(dead_code)]
-pub fn deliver_local_for_campus(user_id: &str, campus_id: uuid::Uuid, payload: &str) {
-    deliver_local_scoped(user_id, Some(campus_id), payload);
+    #[allow(dead_code)]
+    pub fn register_test_connection_for_campus(
+        &self,
+        user_id: &str,
+        campus_id: Option<uuid::Uuid>,
+    ) -> mpsc::Receiver<Message> {
+        let (tx, rx) = mpsc::channel(16);
+        self.connections
+            .entry(user_id.to_string())
+            .or_default()
+            .push(WsConnection {
+                sender: tx,
+                campus_id,
+            });
+        rx
+    }
 }
 
 fn deliver_local_scoped_internal(
@@ -250,10 +203,6 @@ fn deliver_local_scoped_internal(
     }
 }
 
-pub(crate) fn deliver_local_scoped(user_id: &str, campus_id: Option<uuid::Uuid>, payload: &str) {
-    deliver_local_scoped_internal(&GLOBAL_WS_HUB.connections, user_id, campus_id, payload);
-}
-
 // ---------------------------------------------------------------------------
 // Axum handler
 // ---------------------------------------------------------------------------
@@ -272,23 +221,19 @@ pub async fn ws_handler(
             .await?;
     }
 
+    let ws_hub = state.infra.ws_hub.clone();
     Ok(ws.on_upgrade(move |socket| async move {
-        handle_socket(socket, session.user_id, session.campus_id).await;
+        handle_socket(socket, ws_hub, session.user_id, session.campus_id).await;
     }))
 }
 
 /// Handle a single WebSocket connection for its lifetime.
-///
-/// Uses `futures_util::StreamExt::split` to divide the WebSocket into independent
-/// send and receive halves that run concurrently in separate spawned tasks:
-///
-/// - Send task: pulls from `rx` mpsc channel and sends over the wire.
-///   Also drives heartbeat pings every 30s. Handles pong relay from recv task.
-/// - Recv task: receives from the wire, forwards ping data to sender task via mpsc.
-///   Detects connection death and signals sender to exit.
-/// - A oneshot channel signals the sender when the receiver closes.
-/// - On close, this specific connection tx is removed from WS_CONNECTIONS.
-async fn handle_socket(socket: WebSocket, user_id: String, campus_id: Option<uuid::Uuid>) {
+async fn handle_socket(
+    socket: WebSocket,
+    ws_hub: Arc<WsHub>,
+    user_id: String,
+    campus_id: Option<uuid::Uuid>,
+) {
     let (ws_sender, mut ws_receiver) = socket.split();
 
     // Channel for relaying ping data from recv task to sender task.
@@ -298,7 +243,7 @@ async fn handle_socket(socket: WebSocket, user_id: String, campus_id: Option<uui
     let (tx, rx) = mpsc::channel::<Message>(64);
 
     // Register this connection.
-    GLOBAL_WS_HUB
+    ws_hub
         .connections
         .entry(user_id.clone())
         .or_default()
@@ -309,7 +254,7 @@ async fn handle_socket(socket: WebSocket, user_id: String, campus_id: Option<uui
 
     tracing::debug!(
         user_id = %user_id,
-        total_connections = GLOBAL_WS_HUB.connections.get(&user_id).map(|c| c.value().len()).unwrap_or(0),
+        total_connections = ws_hub.connections.get(&user_id).map(|c| c.value().len()).unwrap_or(0),
         "WS connection registered"
     );
 
@@ -328,8 +273,8 @@ async fn handle_socket(socket: WebSocket, user_id: String, campus_id: Option<uui
             tokio::select! {
                 msg = rx.recv() => {
                     match msg {
-                        Some(msg) => {
-                            if ws_sender.send(msg).await.is_err() {
+                        Some(message) => {
+                            if ws_sender.send(message).await.is_err() {
                                 break;
                             }
                         }
@@ -337,49 +282,44 @@ async fn handle_socket(socket: WebSocket, user_id: String, campus_id: Option<uui
                     }
                 }
                 ping_data = ping_rx.recv() => {
-                    // Forward a pong response from the recv task.
-                    if let Some(data) = ping_data {
-                        let _ = ws_sender.send(Message::Pong(data.into())).await;
+                    match ping_data {
+                        Some(data) => {
+                            if ws_sender.send(Message::Pong(data.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        None => break,
                     }
                 }
                 _ = heartbeat.tick() => {
-                    // Send heartbeat ping. If the connection is dead, the send will fail.
                     if ws_sender.send(Message::Ping(vec![].into())).await.is_err() {
                         break;
                     }
                 }
                 _ = &mut close_rx => {
-                    // Receiver closed — graceful shutdown.
-                    let _ = ws_sender.close().await;
                     break;
                 }
             }
         }
     });
 
-    // Recv task (main): drives ws_receiver, forwards ping data.
-    loop {
-        match ws_receiver.next().await {
-            Some(Ok(WsMsg::Close(_))) | None => break,
-            Some(Ok(WsMsg::Ping(data))) => {
-                // Relay ping data to sender task for pong response.
-                // If the channel is full (sender stalled), just drop and continue.
-                if ping_tx.try_send(data.to_vec()).is_err() {
-                    if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {
-                        metrics.record_ws_message_dropped();
-                    }
-                }
+    // Recv task: read messages from client until close or error.
+    while let Some(msg_res) = ws_receiver.next().await {
+        match msg_res {
+            Ok(Message::Ping(data)) => {
+                let _ = ping_tx.send(data.to_vec()).await;
             }
-            Some(Ok(_)) => {} // Ignore other client→server messages.
-            Some(Err(e)) => {
-                tracing::warn!(%e, "WS receive error");
+            Ok(Message::Close(_)) | Err(_) => {
                 break;
+            }
+            Ok(_) => {
+                // Ignore text/binary/pong from client.
             }
         }
     }
 
     // Socket closed. Clean up: remove this specific tx from the user's connection list.
-    if let Some(mut connections) = GLOBAL_WS_HUB.connections.get_mut(&user_id) {
+    if let Some(mut connections) = ws_hub.connections.get_mut(&user_id) {
         let before = connections.value().len();
         connections
             .value_mut()
@@ -392,7 +332,7 @@ async fn handle_socket(socket: WebSocket, user_id: String, campus_id: Option<uui
         }
         if connections.value().is_empty() {
             drop(connections);
-            GLOBAL_WS_HUB.connections.remove(&user_id);
+            ws_hub.connections.remove(&user_id);
             tracing::debug!(%user_id, "WS: last connection closed, user removed");
         } else {
             tracing::debug!(%user_id, remaining = connections.value().len(), "WS: connection cleaned up");
@@ -414,21 +354,18 @@ mod tests {
 
     #[tokio::test]
     async fn campus_scoped_broadcast_does_not_cross_device_tenants() {
+        let hub = WsHub::new();
         let user_id = format!("ws-scope-{}", uuid::Uuid::new_v4().simple());
         let campus_a = uuid::Uuid::new_v4();
         let campus_b = uuid::Uuid::new_v4();
-        let mut campus_a_rx = register_test_connection_for_campus(&user_id, Some(campus_a));
-        let mut campus_b_rx = register_test_connection_for_campus(&user_id, Some(campus_b));
+        let mut campus_a_rx = hub.register_test_connection_for_campus(&user_id, Some(campus_a));
+        let mut campus_b_rx = hub.register_test_connection_for_campus(&user_id, Some(campus_b));
         let payload = "{\"event\":\"message_acknowledgement_changed\"}";
 
-        broadcast_to_user_in_campus(&user_id, campus_a, payload);
+        hub.broadcast_to_user_in_campus(&user_id, campus_a, payload);
 
         let received = campus_a_rx.recv().await.expect("campus A receives event");
         assert!(matches!(received, Message::Text(text) if text.as_str() == payload));
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(50), campus_b_rx.recv())
-                .await
-                .is_err()
-        );
+        assert!(campus_b_rx.try_recv().is_err());
     }
 }

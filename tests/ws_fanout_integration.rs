@@ -9,8 +9,8 @@
 
 #![cfg(feature = "redis")]
 
-use goods4ncu::api::ws;
 use goods4ncu::lifecycle::ShutdownController;
+use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -29,8 +29,10 @@ async fn broadcast_round_trips_through_redis_to_local_sockets() {
     let Some(url) = redis_url() else { return };
 
     let controller = ShutdownController::new();
+    let ws_hub = Arc::new(goods4ncu::api::ws::WsHub::new());
     let runtime = goods4ncu::services::replicated_runtime::ReplicatedRuntime::start(
         &url,
+        ws_hub.clone(),
         100,
         60,
         &controller.signal(),
@@ -40,12 +42,12 @@ async fn broadcast_round_trips_through_redis_to_local_sockets() {
     .expect("replicated runtime starts");
 
     let user_id = format!("fanout-user-{}", Uuid::new_v4().simple());
-    let mut rx = ws::register_test_connection(&user_id);
+    let mut rx = ws_hub.register_test_connection(&user_id);
 
     // The broadcast goes out via the installed Redis publisher, comes back
     // through the subscription, and lands on the locally registered socket.
     let payload = format!("{{\"event\":\"fanout-test\",\"n\":\"{}\"}}", Uuid::new_v4());
-    ws::broadcast_to_user(&user_id, &payload);
+    ws_hub.broadcast_to_user(&user_id, &payload);
 
     let received = tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
@@ -57,7 +59,7 @@ async fn broadcast_round_trips_through_redis_to_local_sockets() {
     }
 
     // A message published for another user must not reach this socket.
-    ws::broadcast_to_user(&format!("other-{}", Uuid::new_v4().simple()), "{}");
+    ws_hub.broadcast_to_user(&format!("other-{}", Uuid::new_v4().simple()), "{}");
     assert!(
         tokio::time::timeout(Duration::from_millis(500), rx.recv())
             .await
@@ -74,8 +76,10 @@ async fn subscriber_shuts_down_cleanly() {
     let Some(url) = redis_url() else { return };
 
     let controller = ShutdownController::new();
+    let ws_hub = Arc::new(goods4ncu::api::ws::WsHub::new());
     let runtime = goods4ncu::services::replicated_runtime::ReplicatedRuntime::start(
         &url,
+        ws_hub.clone(),
         100,
         60,
         &controller.signal(),
@@ -92,14 +96,17 @@ async fn subscriber_shuts_down_cleanly() {
 async fn fanout_fails_fast_in_replicated_mode_when_redis_unreachable() {
     let controller = ShutdownController::new();
     let start_time = std::time::Instant::now();
+    let ws_hub = Arc::new(goods4ncu::api::ws::WsHub::new());
     let res = goods4ncu::services::replicated_runtime::ReplicatedRuntime::start(
         "redis://127.0.0.1:1/0",
+        ws_hub.clone(),
         100,
         60,
         &controller.signal(),
         Duration::from_secs(3),
     )
     .await;
+
     assert!(
         res.is_err(),
         "replicated runtime must fail fast when redis is unreachable"
@@ -213,7 +220,7 @@ async fn two_instances_deliver_across_processes() {
     }
 
     let switch_a: serde_json::Value = client
-        .post("http://127.0.0.1:4101/api/auth/campus/switch")
+        .post("http://127.0.0.1:4101/api/user/active-campus")
         .header("Authorization", format!("Bearer {token}"))
         .json(&serde_json::json!({
             "campus_id": campus_id,
@@ -228,7 +235,7 @@ async fn two_instances_deliver_across_processes() {
     let active_token_a = switch_a["token"].as_str().expect("token A");
 
     let switch_b: serde_json::Value = client
-        .post("http://127.0.0.1:4102/api/auth/campus/switch")
+        .post("http://127.0.0.1:4102/api/user/active-campus")
         .header("Authorization", format!("Bearer {token_b}"))
         .json(&serde_json::json!({
             "campus_id": campus_id,

@@ -6,7 +6,7 @@ use axum::{
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
-use crate::api::{normalize_platform_media_url, ws, AppState};
+use crate::api::{normalize_platform_media_url, AppState};
 use crate::services::chat_conversation::{
     ChatConversationService, ConversationMessageRecord, RelationshipSpacePinView,
     SendConversationMessageInput,
@@ -126,7 +126,10 @@ pub async fn send_conversation_message(
         "reactions": message.reactions,
     })
     .to_string();
-    ws::broadcast_to_user_in_campus(other_user_id, conversation.campus_id, &payload);
+    state
+        .infra
+        .ws_hub
+        .broadcast_to_user_in_campus(other_user_id, conversation.campus_id, &payload);
     state.infra.metrics.record_chat_message();
     if image_url.is_some() || audio_url.is_some() {
         state.infra.metrics.record_chat_media_url_message();
@@ -147,7 +150,7 @@ pub async fn set_message_acknowledgement(
     let message = service
         .set_message_acknowledgement(message_id, &user_id, body.kind)
         .await?;
-    broadcast_acknowledgement(&service, &user_id, &message).await?;
+    broadcast_acknowledgement(&state.infra.ws_hub, &service, &user_id, &message).await?;
     Ok(Json(present_message(&state, message)))
 }
 
@@ -163,7 +166,7 @@ pub async fn delete_message_acknowledgement(
     let message = service
         .delete_message_acknowledgement(message_id, &user_id)
         .await?;
-    broadcast_acknowledgement(&service, &user_id, &message).await?;
+    broadcast_acknowledgement(&state.infra.ws_hub, &service, &user_id, &message).await?;
     Ok(Json(present_message(&state, message)))
 }
 
@@ -196,7 +199,14 @@ pub async fn set_message_reaction(
     let message = service
         .set_reaction(message_id, &user_id, &body.emoji)
         .await?;
-    broadcast_message_update(&service, &user_id, &message, "message_reaction_changed").await?;
+    broadcast_message_update(
+        &state.infra.ws_hub,
+        &service,
+        &user_id,
+        &message,
+        "message_reaction_changed",
+    )
+    .await?;
     Ok(Json(present_message(&state, message)))
 }
 
@@ -210,7 +220,14 @@ pub async fn delete_message_reaction(
     let user_id = session.user_id;
     let service = ChatConversationService::new(state.infra.db.clone());
     let message = service.delete_reaction(message_id, &user_id).await?;
-    broadcast_message_update(&service, &user_id, &message, "message_reaction_changed").await?;
+    broadcast_message_update(
+        &state.infra.ws_hub,
+        &service,
+        &user_id,
+        &message,
+        "message_reaction_changed",
+    )
+    .await?;
     Ok(Json(present_message(&state, message)))
 }
 
@@ -230,8 +247,11 @@ pub async fn hide_message(
     })
     .to_string();
     match campus_id {
-        Some(campus_id) => ws::broadcast_to_user_in_campus(&user_id, campus_id, &payload),
-        None => ws::broadcast_to_user(&user_id, &payload),
+        Some(campus_id) => state
+            .infra
+            .ws_hub
+            .broadcast_to_user_in_campus(&user_id, campus_id, &payload),
+        None => state.infra.ws_hub.broadcast_to_user(&user_id, &payload),
     }
     Ok(Json(HideMessageResponse {
         message_id,
@@ -249,7 +269,7 @@ pub async fn pin_message(
     let user_id = session.user_id;
     let service = ChatConversationService::new(state.infra.db.clone());
     let pin = service.pin_message(message_id, &user_id).await?;
-    broadcast_relationship_pin(&service, &pin, true).await?;
+    broadcast_relationship_pin(&state.infra.ws_hub, &service, &pin, true).await?;
     Ok(Json(pin))
 }
 
@@ -264,7 +284,7 @@ pub async fn unpin_message(
     let service = ChatConversationService::new(state.infra.db.clone());
     let removed = service.unpin_message(message_id, &user_id).await?;
     if let Some(pin) = removed.as_ref() {
-        broadcast_relationship_pin(&service, pin, false).await?;
+        broadcast_relationship_pin(&state.infra.ws_hub, &service, pin, false).await?;
     }
     Ok(Json(RelationshipPinResponse {
         message_id,
@@ -292,8 +312,11 @@ pub async fn report_message(
     })
     .to_string();
     match campus_id {
-        Some(campus_id) => ws::broadcast_to_user_in_campus(&user_id, campus_id, &payload),
-        None => ws::broadcast_to_user(&user_id, &payload),
+        Some(campus_id) => state
+            .infra
+            .ws_hub
+            .broadcast_to_user_in_campus(&user_id, campus_id, &payload),
+        None => state.infra.ws_hub.broadcast_to_user(&user_id, &payload),
     }
     Ok(Json(ReportMessageResponse {
         report_id: report_id.to_string(),
@@ -301,6 +324,7 @@ pub async fn report_message(
 }
 
 async fn broadcast_acknowledgement(
+    ws_hub: &crate::api::ws::WsHub,
     service: &ChatConversationService,
     actor_id: &str,
     message: &ConversationMessageRecord,
@@ -315,9 +339,13 @@ async fn broadcast_acknowledgement(
         "acknowledgements": message.acknowledgements,
     })
     .to_string();
-    ws::broadcast_to_user_in_campus(&conversation.initiator_id, conversation.campus_id, &payload);
+    ws_hub.broadcast_to_user_in_campus(
+        &conversation.initiator_id,
+        conversation.campus_id,
+        &payload,
+    );
     if conversation.recipient_id != conversation.initiator_id {
-        ws::broadcast_to_user_in_campus(
+        ws_hub.broadcast_to_user_in_campus(
             &conversation.recipient_id,
             conversation.campus_id,
             &payload,
@@ -327,6 +355,7 @@ async fn broadcast_acknowledgement(
 }
 
 async fn broadcast_message_update(
+    ws_hub: &crate::api::ws::WsHub,
     service: &ChatConversationService,
     actor_id: &str,
     message: &ConversationMessageRecord,
@@ -342,12 +371,21 @@ async fn broadcast_message_update(
         "reactions": message.reactions,
     })
     .to_string();
-    ws::broadcast_to_user_in_campus(&conversation.initiator_id, conversation.campus_id, &payload);
-    ws::broadcast_to_user_in_campus(&conversation.recipient_id, conversation.campus_id, &payload);
+    ws_hub.broadcast_to_user_in_campus(
+        &conversation.initiator_id,
+        conversation.campus_id,
+        &payload,
+    );
+    ws_hub.broadcast_to_user_in_campus(
+        &conversation.recipient_id,
+        conversation.campus_id,
+        &payload,
+    );
     Ok(())
 }
 
 async fn broadcast_relationship_pin(
+    ws_hub: &crate::api::ws::WsHub,
     service: &ChatConversationService,
     pin: &RelationshipSpacePinView,
     pinned: bool,
@@ -367,8 +405,16 @@ async fn broadcast_relationship_pin(
         "created_at": pin.created_at,
     })
     .to_string();
-    ws::broadcast_to_user_in_campus(&conversation.initiator_id, conversation.campus_id, &payload);
-    ws::broadcast_to_user_in_campus(&conversation.recipient_id, conversation.campus_id, &payload);
+    ws_hub.broadcast_to_user_in_campus(
+        &conversation.initiator_id,
+        conversation.campus_id,
+        &payload,
+    );
+    ws_hub.broadcast_to_user_in_campus(
+        &conversation.recipient_id,
+        conversation.campus_id,
+        &payload,
+    );
     Ok(())
 }
 

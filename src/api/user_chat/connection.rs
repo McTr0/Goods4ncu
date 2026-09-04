@@ -10,7 +10,7 @@ use crate::api::auth::{
     extract_auth_session_from_token, extract_user_id_from_token, AuthSessionContext,
 };
 use crate::api::error::ApiError;
-use crate::api::{ws, AppState};
+use crate::api::AppState;
 use crate::services::campus::CampusService;
 use crate::services::chat_conversation::{
     ChatConversationService, ConversationMode, ConversationView, CreateConversationInput,
@@ -98,23 +98,34 @@ pub async fn create_conversation(
 
     if result.created {
         if result.notify_recipient {
-            broadcast_conversation("conversation_created", &result.conversation);
+            broadcast_conversation(
+                &state.infra.ws_hub,
+                "conversation_created",
+                &result.conversation,
+            );
         } else {
             broadcast_conversation_to_user(
+                &state.infra.ws_hub,
                 "conversation_created",
                 &result.conversation,
                 &result.conversation.initiator_id,
             );
         }
     } else if result.mutual_open && result.notify_recipient {
-        broadcast_conversation("conversation_state_changed", &result.conversation);
+        broadcast_conversation(
+            &state.infra.ws_hub,
+            "conversation_state_changed",
+            &result.conversation,
+        );
     } else {
         broadcast_conversation_to_user(
+            &state.infra.ws_hub,
             "conversation_state_changed",
             &result.conversation,
             &result.conversation.initiator_id,
         );
     }
+
     Ok(Json(result))
 }
 
@@ -186,14 +197,20 @@ pub async fn open_conversation_for_intent(
     }
 
     if result.created && result.notify_recipient {
-        broadcast_conversation("conversation_created", &result.conversation);
+        broadcast_conversation(
+            &state.infra.ws_hub,
+            "conversation_created",
+            &result.conversation,
+        );
     } else if result.created {
         broadcast_conversation_to_user(
+            &state.infra.ws_hub,
             "conversation_created",
             &result.conversation,
             &result.conversation.initiator_id,
         );
     }
+
     Ok(result.conversation.id.clone())
 }
 
@@ -351,7 +368,11 @@ pub async fn respond_conversation(
     let conversation = service
         .respond(conversation_id, &session.user_id, body.decision)
         .await?;
-    broadcast_conversation("conversation_state_changed", &conversation);
+    broadcast_conversation(
+        &state.infra.ws_hub,
+        "conversation_state_changed",
+        &conversation,
+    );
     Ok(Json(conversation))
 }
 
@@ -366,7 +387,11 @@ pub async fn acknowledge_conversation(
     let conversation = service
         .acknowledge(conversation_id, &session.user_id)
         .await?;
-    broadcast_conversation("conversation_state_changed", &conversation);
+    broadcast_conversation(
+        &state.infra.ws_hub,
+        "conversation_state_changed",
+        &conversation,
+    );
     Ok(Json(conversation))
 }
 
@@ -379,7 +404,11 @@ pub async fn close_conversation(
     ensure_conversation_campus(&state, conversation_id, &session).await?;
     let service = ChatConversationService::new(state.infra.db.clone());
     let conversation = service.close(conversation_id, &session.user_id).await?;
-    broadcast_conversation("conversation_state_changed", &conversation);
+    broadcast_conversation(
+        &state.infra.ws_hub,
+        "conversation_state_changed",
+        &conversation,
+    );
     Ok(Json(conversation))
 }
 
@@ -620,12 +649,21 @@ pub(crate) fn moderate_text(state: &AppState, content: &str) -> Result<(), ApiEr
     }
 }
 
-pub(super) fn broadcast_conversation(event: &str, conversation: &ConversationView) {
-    broadcast_conversation_to_user(event, conversation, &conversation.initiator_id);
-    broadcast_conversation_to_user(event, conversation, &conversation.recipient_id);
+pub(super) fn broadcast_conversation(
+    ws_hub: &crate::api::ws::WsHub,
+    event: &str,
+    conversation: &ConversationView,
+) {
+    broadcast_conversation_to_user(ws_hub, event, conversation, &conversation.initiator_id);
+    broadcast_conversation_to_user(ws_hub, event, conversation, &conversation.recipient_id);
 }
 
-fn broadcast_conversation_to_user(event: &str, conversation: &ConversationView, user_id: &str) {
+pub(super) fn broadcast_conversation_to_user(
+    ws_hub: &crate::api::ws::WsHub,
+    event: &str,
+    conversation: &ConversationView,
+    user_id: &str,
+) {
     let payload = serde_json::json!({
         "event": event,
         "conversation_id": conversation.id,
@@ -635,5 +673,5 @@ fn broadcast_conversation_to_user(event: &str, conversation: &ConversationView, 
         "version": conversation.version,
     })
     .to_string();
-    ws::broadcast_to_user_in_campus(user_id, conversation.campus_id, &payload);
+    ws_hub.broadcast_to_user_in_campus(user_id, conversation.campus_id, &payload);
 }

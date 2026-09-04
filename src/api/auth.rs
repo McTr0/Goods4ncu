@@ -1067,27 +1067,35 @@ pub(crate) mod tests {
                 oss_access_key_id: None,
                 oss_access_key_secret: None,
             },
-            infra: ApiInfrastructure {
-                db: pool.clone(),
-                rate_limit: {
-                    let factory = crate::middleware::rate_limit::RateLimiterFactory::new(100, 60);
-                    crate::middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
-                },
-                notification: NotificationService::new(pool.clone()),
-                ws_connections: crate::api::ws::new_ws_state(),
-                metrics: Arc::new(crate::api::metrics::MetricsService::new()),
-                order_service: services::order::OrderService::new(pool.clone()),
-                admin_service,
-                moderation: services::moderation::ModerationService::new(
-                    &crate::config::AppConfig::test_defaults(),
-                ),
-                token_denylist: services::token_denylist::TokenDenylist::new(),
-                media_signer: None,
-                shutdown: crate::lifecycle::ShutdownSignal::never(),
-                deployment_profile: crate::config::DeploymentProfile::Local,
-                #[cfg(feature = "redis")]
-                replicated_runtime: None,
+            infra: {
+                let ws_hub = Arc::new(crate::api::ws::WsHub::new());
+                ApiInfrastructure {
+                    db: pool.clone(),
+                    rate_limit: {
+                        let factory =
+                            crate::middleware::rate_limit::RateLimiterFactory::new(100, 60);
+                        crate::middleware::rate_limit::RateLimitStateHandle::new(
+                            factory.build_local(),
+                        )
+                    },
+                    notification: NotificationService::new(pool.clone()),
+                    ws_connections: ws_hub.connections.clone(),
+                    ws_hub,
+                    metrics: Arc::new(crate::api::metrics::MetricsService::new()),
+                    order_service: services::order::OrderService::new(pool.clone()),
+                    admin_service,
+                    moderation: services::moderation::ModerationService::new(
+                        &crate::config::AppConfig::test_defaults(),
+                    ),
+                    token_denylist: services::token_denylist::TokenDenylist::new(),
+                    media_signer: None,
+                    shutdown: crate::lifecycle::ShutdownSignal::never(),
+                    deployment_profile: crate::config::DeploymentProfile::Local,
+                    #[cfg(feature = "redis")]
+                    replicated_runtime: None,
+                }
             },
+
             agents: ApiAgents {
                 llm_provider: Arc::new(
                     crate::llm::gemini::GeminiProvider::new("test-key", 768)

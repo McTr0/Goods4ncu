@@ -5,7 +5,7 @@ use axum::{
 };
 
 use crate::api::error::ApiError;
-use crate::api::{ws, AppState};
+use crate::api::AppState;
 use crate::services::campus::CampusService;
 use crate::services::chat_conversation::{
     AvatarInteractionContactPreferencesView, AvatarInteractionPreferencesView,
@@ -150,8 +150,17 @@ pub async fn send_interaction(
         "interaction": message.interaction,
     })
     .to_string();
-    ws::broadcast_to_user_in_campus(&conversation.initiator_id, conversation.campus_id, &payload);
-    ws::broadcast_to_user_in_campus(&conversation.recipient_id, conversation.campus_id, &payload);
+    state.infra.ws_hub.broadcast_to_user_in_campus(
+        &conversation.initiator_id,
+        conversation.campus_id,
+        &payload,
+    );
+    state.infra.ws_hub.broadcast_to_user_in_campus(
+        &conversation.recipient_id,
+        conversation.campus_id,
+        &payload,
+    );
+
     state.infra.metrics.record_chat_message();
     Ok(Json(message))
 }

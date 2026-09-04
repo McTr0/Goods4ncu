@@ -90,7 +90,6 @@ async fn main() -> Result<(), anyhow::Error> {
     // Single PgPool for relational + vector data (pgvector lives in the same Postgres instance)
     let db_pool = db::init_db(&config.database_url).await?;
     db::assert_documents_embedding_dim(&db_pool, config.vector_dim).await?;
-    db::assert_uuid_shadow_drift_zero(&db_pool).await?;
     // Database environment sanity check (insecure demo seeds are purged by migration 0113).
     db::assert_environment_sanity(&db_pool, config::running_in_production()).await?;
 
@@ -144,13 +143,14 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let admin_service = services::admin::AdminService::new(db_pool.clone());
 
-    // WebSocket global state — shared across all connections.
-    let ws_state = api::ws::new_ws_state();
+    // WebSocket hub — shared across all connections.
+    let ws_hub = Arc::new(api::ws::WsHub::new());
 
     // Shared broadcast callback for WS push — passed to both NotificationService and hitl_expire.
+    let ws_hub_broadcast = ws_hub.clone();
     let broadcast: crate::services::notification::NotificationBroadcast =
-        Arc::new(|user_id: String, payload: String| {
-            api::ws::broadcast_to_user(&user_id, &payload);
+        Arc::new(move |user_id: String, payload: String| {
+            ws_hub_broadcast.broadcast_to_user(&user_id, &payload);
         });
 
     // Notification pushes are delivered via the transactional outbox; the
@@ -159,7 +159,9 @@ async fn main() -> Result<(), anyhow::Error> {
 
     // Outbox worker: dispatches durable events (currently notification pushes)
     // enqueued in the same transaction as the business write.
-    struct WsPushDispatcher;
+    struct WsPushDispatcher {
+        ws_hub: Arc<api::ws::WsHub>,
+    }
     #[async_trait::async_trait]
     impl services::outbox::OutboxDispatcher for WsPushDispatcher {
         async fn dispatch(&self, topic: &str, payload: &serde_json::Value) -> anyhow::Result<()> {
@@ -175,9 +177,10 @@ async fn main() -> Result<(), anyhow::Error> {
                     // Idempotent for our purposes: re-delivery re-sends the
                     // same notification id, which clients key on.
                     if let Some(campus_id) = campus_id {
-                        api::ws::broadcast_to_user_in_campus(user_id, campus_id, &message);
+                        self.ws_hub
+                            .broadcast_to_user_in_campus(user_id, campus_id, &message);
                     } else {
-                        api::ws::broadcast_to_user(user_id, &message);
+                        self.ws_hub.broadcast_to_user(user_id, &message);
                     }
                     Ok(())
                 }
@@ -191,7 +194,9 @@ async fn main() -> Result<(), anyhow::Error> {
     }
     let outbox_worker_handle = tokio::spawn(services::outbox::run_outbox_worker(
         db_pool.clone(),
-        Arc::new(WsPushDispatcher),
+        Arc::new(WsPushDispatcher {
+            ws_hub: ws_hub.clone(),
+        }),
         shutdown.clone(),
     ));
 
@@ -235,6 +240,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let chat_expiry_handle = tokio::spawn(services::chat_expire::run_chat_expiry_worker(
         db_pool.clone(),
+        ws_hub.clone(),
         shutdown.clone(),
     ));
 
@@ -330,6 +336,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 .expect("config validation requires redis_url");
             let runtime = services::replicated_runtime::ReplicatedRuntime::start(
                 redis_url,
+                ws_hub.clone(),
                 config.rate_limit_max_requests,
                 config.rate_limit_window_secs,
                 &shutdown,
@@ -369,7 +376,8 @@ async fn main() -> Result<(), anyhow::Error> {
             db: db_pool.clone(),
             rate_limit: rate_limit_handle,
             notification,
-            ws_connections: ws_state,
+            ws_connections: ws_hub.connections.clone(),
+            ws_hub: ws_hub.clone(),
             metrics: Arc::clone(&metrics),
             order_service: services::order::OrderService::new(db_pool.clone()),
             admin_service,

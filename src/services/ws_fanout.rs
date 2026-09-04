@@ -58,18 +58,10 @@ pub async fn publish_scoped(
     Ok(())
 }
 
-pub fn handle_fanout_payload(raw: &str) {
+pub fn handle_fanout_payload(ws_hub: &crate::api::ws::WsHub, raw: &str) {
     match serde_json::from_str::<FanoutMessage>(raw) {
         Ok(fanout) => {
-            if let Some(campus_id) = fanout.campus_id {
-                crate::api::ws::deliver_local_for_campus(
-                    &fanout.user_id,
-                    campus_id,
-                    &fanout.payload,
-                );
-            } else {
-                crate::api::ws::deliver_local(&fanout.user_id, &fanout.payload);
-            }
+            ws_hub.deliver_local_scoped(&fanout.user_id, fanout.campus_id, &fanout.payload);
         }
         Err(error) => {
             tracing::warn!(%error, "WS fanout: malformed message");

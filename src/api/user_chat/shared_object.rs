@@ -6,7 +6,7 @@ use axum::{
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
-use crate::api::{ws, AppState};
+use crate::api::AppState;
 use crate::services::chat_conversation::{
     ChatConversationService, CompleteSharedObjectInput, CreateSharedObjectInput, SharedObjectKind,
 };
@@ -205,8 +205,14 @@ async fn broadcast_shared_object(
     .to_string();
     let campus_id = Uuid::parse_str(&object.campus_id)
         .map_err(|error| ApiError::Internal(anyhow::anyhow!("invalid campus id: {error}")))?;
-    ws::broadcast_to_user_in_campus(&initiator_id, campus_id, &payload);
-    ws::broadcast_to_user_in_campus(&recipient_id, campus_id, &payload);
+    state
+        .infra
+        .ws_hub
+        .broadcast_to_user_in_campus(&initiator_id, campus_id, &payload);
+    state
+        .infra
+        .ws_hub
+        .broadcast_to_user_in_campus(&recipient_id, campus_id, &payload);
     Ok(())
 }
 

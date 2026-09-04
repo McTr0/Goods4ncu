@@ -33,27 +33,35 @@ fn build_state(pool: sqlx::PgPool, shutdown: ShutdownSignal) -> AppState {
             oss_access_key_id: None,
             oss_access_key_secret: None,
         },
-        infra: ApiInfrastructure {
-            db: pool.clone(),
-            rate_limit: {
-                let factory = goods4ncu::middleware::rate_limit::RateLimiterFactory::new(100, 60);
-                goods4ncu::middleware::rate_limit::RateLimitStateHandle::new(factory.build_local())
-            },
-            notification: NotificationService::new(pool.clone()),
-            ws_connections: goods4ncu::api::ws::new_ws_state(),
-            metrics: Arc::new(goods4ncu::api::metrics::MetricsService::new()),
-            order_service: services::order::OrderService::new(pool.clone()),
-            admin_service,
-            moderation: services::moderation::ModerationService::new(
-                &goods4ncu::config::AppConfig::test_defaults(),
-            ),
-            token_denylist: services::token_denylist::TokenDenylist::new(),
-            media_signer: None,
-            shutdown,
-            deployment_profile: goods4ncu::config::DeploymentProfile::Local,
-            #[cfg(feature = "redis")]
-            replicated_runtime: None,
+        infra: {
+            let ws_hub = Arc::new(goods4ncu::api::ws::WsHub::new());
+            ApiInfrastructure {
+                db: pool.clone(),
+                rate_limit: {
+                    let factory =
+                        goods4ncu::middleware::rate_limit::RateLimiterFactory::new(100, 60);
+                    goods4ncu::middleware::rate_limit::RateLimitStateHandle::new(
+                        factory.build_local(),
+                    )
+                },
+                notification: NotificationService::new(pool.clone()),
+                ws_connections: ws_hub.connections.clone(),
+                ws_hub,
+                metrics: Arc::new(goods4ncu::api::metrics::MetricsService::new()),
+                order_service: services::order::OrderService::new(pool.clone()),
+                admin_service,
+                moderation: services::moderation::ModerationService::new(
+                    &goods4ncu::config::AppConfig::test_defaults(),
+                ),
+                token_denylist: services::token_denylist::TokenDenylist::new(),
+                media_signer: None,
+                shutdown,
+                deployment_profile: goods4ncu::config::DeploymentProfile::Local,
+                #[cfg(feature = "redis")]
+                replicated_runtime: None,
+            }
         },
+
         agents: ApiAgents {
             llm_provider: Arc::new(
                 goods4ncu::llm::gemini::GeminiProvider::new("test-key", 768)

@@ -33,6 +33,7 @@ pub struct ReplicatedRuntime {
     rate_limiter: RateLimitStateHandle,
     publisher: redis::aio::ConnectionManager,
     is_healthy: Arc<AtomicBool>,
+    ws_hub: Arc<crate::api::ws::WsHub>,
     subscriber_handle: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     publisher_handle: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -42,6 +43,7 @@ impl ReplicatedRuntime {
     /// Bounded by `startup_timeout`: if any handshake hangs or fails, returns Err immediately.
     pub async fn start(
         redis_url: &str,
+        ws_hub: Arc<crate::api::ws::WsHub>,
         rate_limit_max: u64,
         rate_limit_window_secs: u64,
         shutdown: &ShutdownSignal,
@@ -49,7 +51,13 @@ impl ReplicatedRuntime {
     ) -> Result<Arc<Self>, ReplicatedRuntimeError> {
         tokio::time::timeout(
             startup_timeout,
-            Self::start_inner(redis_url, rate_limit_max, rate_limit_window_secs, shutdown),
+            Self::start_inner(
+                redis_url,
+                ws_hub,
+                rate_limit_max,
+                rate_limit_window_secs,
+                shutdown,
+            ),
         )
         .await
         .map_err(|_| ReplicatedRuntimeError::Timeout(startup_timeout))?
@@ -57,6 +65,7 @@ impl ReplicatedRuntime {
 
     async fn start_inner(
         redis_url: &str,
+        ws_hub: Arc<crate::api::ws::WsHub>,
         rate_limit_max: u64,
         rate_limit_window_secs: u64,
         shutdown: &ShutdownSignal,
@@ -89,13 +98,14 @@ impl ReplicatedRuntime {
             )));
         }
 
-        // Install bounded fanout publisher into api::ws
+        // Install bounded fanout publisher into ws_hub
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(String, Option<uuid::Uuid>, String)>(4096);
-        crate::api::ws::install_fanout_publisher(tx);
+        ws_hub.set_fanout_publisher(tx);
         tracing::info!("WS fanout publisher installed (Redis)");
 
         let mut p_worker_conn = publisher.clone();
         let pub_shutdown = shutdown.clone();
+        let pub_ws_hub = ws_hub.clone();
         let publisher_handle = tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -126,14 +136,14 @@ impl ReplicatedRuntime {
                                     user_id = %user_id,
                                     "WS fanout publish failed; falling back to local delivery"
                                 );
-                                crate::api::ws::deliver_local_scoped(&user_id, campus_id, &payload);
+                                pub_ws_hub.deliver_local_scoped(&user_id, campus_id, &payload);
                             }
                             Err(_) => {
                                 tracing::error!(
                                     user_id = %user_id,
                                     "WS fanout publish timed out after 500ms; falling back to local delivery"
                                 );
-                                crate::api::ws::deliver_local_scoped(&user_id, campus_id, &payload);
+                                pub_ws_hub.deliver_local_scoped(&user_id, campus_id, &payload);
                             }
                         }
                     }
@@ -149,9 +159,10 @@ impl ReplicatedRuntime {
                 let pub_result =
                     tokio::time::timeout(std::time::Duration::from_millis(500), pub_future).await;
                 if !matches!(pub_result, Ok(Ok(()))) {
-                    crate::api::ws::deliver_local_scoped(&user_id, campus_id, &payload);
+                    pub_ws_hub.deliver_local_scoped(&user_id, campus_id, &payload);
                 }
             }
+            pub_ws_hub.clear_fanout_publisher();
             tracing::info!("WS fanout publisher stopped");
         });
 
@@ -173,6 +184,7 @@ impl ReplicatedRuntime {
         let task_healthy = is_healthy.clone();
         let task_shutdown = shutdown.clone();
 
+        let sub_ws_hub = ws_hub.clone();
         let subscriber_handle = tokio::spawn(async move {
             let mut stream = pubsub.on_message();
             loop {
@@ -194,7 +206,7 @@ impl ReplicatedRuntime {
                                 continue;
                             }
                         };
-                        crate::services::ws_fanout::handle_fanout_payload(&raw);
+                        crate::services::ws_fanout::handle_fanout_payload(&sub_ws_hub, &raw);
                     }
                 }
             }
@@ -206,6 +218,7 @@ impl ReplicatedRuntime {
             rate_limiter,
             publisher,
             is_healthy,
+            ws_hub,
             subscriber_handle: tokio::sync::Mutex::new(Some(subscriber_handle)),
             publisher_handle: tokio::sync::Mutex::new(Some(publisher_handle)),
         }))
@@ -213,6 +226,7 @@ impl ReplicatedRuntime {
 
     /// Gracefully wait for subscriber and publisher tasks to shut down.
     pub async fn shutdown(&self) {
+        self.ws_hub.clear_fanout_publisher();
         let sub = self.subscriber_handle.lock().await.take();
         if let Some(handle) = sub {
             let _ = handle.await;
@@ -259,5 +273,11 @@ impl ReplicatedRuntime {
                 Err(ApiError::ServiceUnavailable("redis_unreachable"))
             }
         }
+    }
+}
+
+impl Drop for ReplicatedRuntime {
+    fn drop(&mut self) {
+        self.ws_hub.clear_fanout_publisher();
     }
 }
