@@ -82,6 +82,40 @@ impl PostCategory {
         }
     }
 
+    pub fn label_zh(&self) -> &'static str {
+        match self {
+            Self::Announcement => "公告",
+            Self::Offer => "出",
+            Self::Wanted => "收",
+            Self::Share => "分享",
+            Self::Question => "提问",
+            Self::Discussion => "讨论",
+            Self::Recruit => "召集",
+            Self::TeamUp => "组队",
+        }
+    }
+
+    pub fn label_en(&self) -> &'static str {
+        match self {
+            Self::Announcement => "Announcement",
+            Self::Offer => "Offer",
+            Self::Wanted => "Wanted",
+            Self::Share => "Share",
+            Self::Question => "Question",
+            Self::Discussion => "Discussion",
+            Self::Recruit => "Recruit",
+            Self::TeamUp => "Team Up",
+        }
+    }
+
+    pub fn kind(&self) -> &'static str {
+        if self.is_marketplace() {
+            "goods"
+        } else {
+            "discussion"
+        }
+    }
+
     pub fn is_marketplace(&self) -> bool {
         matches!(self, Self::Offer | Self::Wanted)
     }
@@ -108,16 +142,39 @@ impl std::fmt::Display for PostCategory {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum PublishPostPayload {
-    General,
-    Marketplace(CreatePostMarketplaceInput),
+pub enum PostKind {
+    Announcement,
+    Share,
+    Question,
+    Discussion,
+    Recruit,
+    TeamUp,
+    Offer(CreatePostMarketplaceInput),
+    Wanted(CreatePostMarketplaceInput),
 }
 
-impl PublishPostPayload {
+impl PostKind {
+    pub fn category(&self) -> PostCategory {
+        match self {
+            Self::Announcement => PostCategory::Announcement,
+            Self::Share => PostCategory::Share,
+            Self::Question => PostCategory::Question,
+            Self::Discussion => PostCategory::Discussion,
+            Self::Recruit => PostCategory::Recruit,
+            Self::TeamUp => PostCategory::TeamUp,
+            Self::Offer(_) => PostCategory::Offer,
+            Self::Wanted(_) => PostCategory::Wanted,
+        }
+    }
+
+    pub fn category_str(&self) -> &'static str {
+        self.category().as_str()
+    }
+
     pub fn marketplace(&self) -> Option<&CreatePostMarketplaceInput> {
         match self {
-            Self::Marketplace(mp) => Some(mp),
-            Self::General => None,
+            Self::Offer(mp) | Self::Wanted(mp) => Some(mp),
+            _ => None,
         }
     }
 }
@@ -126,10 +183,9 @@ impl PublishPostPayload {
 pub struct PublishPostCommand {
     pub campus_id: Uuid,
     pub author_id: String,
-    pub category: PostCategory,
     pub title: String,
     pub body: String,
-    pub payload: PublishPostPayload,
+    pub kind: PostKind,
     pub tags: Vec<String>,
     pub cover_image_url: Option<String>,
     pub space_id: Option<Uuid>,
@@ -141,30 +197,47 @@ impl PublishPostCommand {
         let category = PostCategory::parse(category_str)
             .ok_or_else(|| ApiError::BadRequest(format!("未知分类: {category_str}")))?;
 
-        let payload = if category.is_marketplace() {
-            let mp = input.marketplace.ok_or_else(|| {
-                ApiError::BadRequest(format!(
-                    "发布商品或求购 ({}) 必须提供 marketplace 详细信息",
-                    category.as_str()
-                ))
-            })?;
-            PublishPostPayload::Marketplace(mp)
-        } else {
-            if input.marketplace.is_some() {
-                return Err(ApiError::BadRequest(
-                    "非商品类别不能包含 marketplace 详细信息".to_string(),
-                ));
+        let kind = match category {
+            PostCategory::Offer => {
+                let mp = input.marketplace.ok_or_else(|| {
+                    ApiError::BadRequest(
+                        "发布商品或求购 (offer) 必须提供 marketplace 详细信息".to_string(),
+                    )
+                })?;
+                PostKind::Offer(mp)
             }
-            PublishPostPayload::General
+            PostCategory::Wanted => {
+                let mp = input.marketplace.ok_or_else(|| {
+                    ApiError::BadRequest(
+                        "发布商品或求购 (wanted) 必须提供 marketplace 详细信息".to_string(),
+                    )
+                })?;
+                PostKind::Wanted(mp)
+            }
+            general_cat => {
+                if input.marketplace.is_some() {
+                    return Err(ApiError::BadRequest(
+                        "非商品类别不能包含 marketplace 详细信息".to_string(),
+                    ));
+                }
+                match general_cat {
+                    PostCategory::Announcement => PostKind::Announcement,
+                    PostCategory::Share => PostKind::Share,
+                    PostCategory::Question => PostKind::Question,
+                    PostCategory::Discussion => PostKind::Discussion,
+                    PostCategory::Recruit => PostKind::Recruit,
+                    PostCategory::TeamUp => PostKind::TeamUp,
+                    PostCategory::Offer | PostCategory::Wanted => unreachable!(),
+                }
+            }
         };
 
         Ok(Self {
             campus_id: input.campus_id,
             author_id: input.author_id,
-            category,
             title: input.title,
             body: input.body,
-            payload,
+            kind,
             tags: input.tags,
             cover_image_url: input.cover_image_url,
             space_id: input.space_id,
@@ -206,7 +279,7 @@ pub struct EditPost {
     pub locked: Option<bool>,
 }
 
-pub async fn allowed_post_categories(_pool: &PgPool) -> Vec<String> {
+pub fn allowed_post_categories() -> Vec<String> {
     PostCategory::ALL
         .iter()
         .map(|c| c.as_str().to_string())
@@ -408,13 +481,13 @@ impl<R: PostRepository> PostService<R> {
     }
 
     pub async fn create(&self, input: CreatePost) -> Result<Post, ApiError> {
-        let category = normalize_post_category(&self.pool, Some(input.category.clone())).await?;
+        let category = normalize_post_category(Some(input.category.clone()))?;
         let cmd = PublishPostCommand::from_input(input, &category)?;
         self.publish(cmd).await
     }
 
     pub async fn publish(&self, mut cmd: PublishPostCommand) -> Result<Post, ApiError> {
-        if cmd.category == PostCategory::Announcement {
+        if cmd.kind.category() == PostCategory::Announcement {
             self.ensure_can_announce(cmd.campus_id, cmd.author_id.as_str())
                 .await?;
         }
@@ -442,15 +515,13 @@ impl<R: PostRepository> PostService<R> {
     ) -> Result<Post, ApiError> {
         let title = required_text(cmd.title, "title", MAX_POST_TITLE_CHARS)?;
         let body = required_text(cmd.body, "body", MAX_POST_BODY_CHARS)?;
-        let category = cmd.category.as_str().to_string();
+        let category = cmd.kind.category_str().to_string();
 
-        if cmd.category == PostCategory::Offer {
-            if let PublishPostPayload::Marketplace(ref mp) = cmd.payload {
-                if mp.brand.trim().is_empty() {
-                    return Err(ApiError::BadRequest(
-                        "发布闲置商品 (offer) 必须提供品牌或来源".to_string(),
-                    ));
-                }
+        if let PostKind::Offer(ref mp) = cmd.kind {
+            if mp.brand.trim().is_empty() {
+                return Err(ApiError::BadRequest(
+                    "发布闲置商品 (offer) 必须提供品牌或来源".to_string(),
+                ));
             }
         }
 
@@ -460,10 +531,9 @@ impl<R: PostRepository> PostService<R> {
         let normalized_cmd = PublishPostCommand {
             campus_id: cmd.campus_id,
             author_id: cmd.author_id.clone(),
-            category: cmd.category,
             title: title.clone(),
             body: body.clone(),
-            payload: cmd.payload.clone(),
+            kind: cmd.kind.clone(),
             tags: cmd.tags.clone(),
             cover_image_url: cover_image_url.clone(),
             space_id: cmd.space_id,
@@ -499,7 +569,7 @@ impl<R: PostRepository> PostService<R> {
             None
         };
 
-        let listing_id = if let Some(mp) = cmd.payload.marketplace() {
+        let listing_id = if let Some(mp) = cmd.kind.marketplace() {
             let listing_service = crate::services::listing_command::ListingCommandService::new(
                 self.pool.clone(),
                 self.moderation.clone(),
@@ -795,10 +865,7 @@ fn required_text(value: String, field: &str, max_chars: usize) -> Result<String,
     Ok(value)
 }
 
-async fn normalize_post_category(
-    _pool: &PgPool,
-    value: Option<String>,
-) -> Result<String, ApiError> {
+fn normalize_post_category(value: Option<String>) -> Result<String, ApiError> {
     let value = value.unwrap_or_else(|| "discussion".to_string());
     let trimmed = value.trim();
     let cat = PostCategory::parse(trimmed).ok_or_else(|| {
@@ -903,8 +970,8 @@ mod tests {
             let cmd = PublishPostCommand::from_input(input.clone(), cat_str);
             assert!(cmd.is_ok(), "Failed for valid category {cat_str}");
             let cmd = cmd.unwrap();
-            assert_eq!(cmd.category.as_str(), cat_str);
-            assert!(matches!(cmd.payload, PublishPostPayload::General));
+            assert_eq!(cmd.kind.category_str(), cat_str);
+            assert!(cmd.kind.marketplace().is_none());
 
             // With marketplace input, it must fail:
             let mut input_with_mp = input;
@@ -959,10 +1026,9 @@ mod tests {
             };
             let cmd = PublishPostCommand::from_input(input_with_mp, cat_str);
             assert!(cmd.is_ok());
-            assert!(matches!(
-                cmd.unwrap().payload,
-                PublishPostPayload::Marketplace(_)
-            ));
+            let cmd = cmd.unwrap();
+            assert_eq!(cmd.kind.category_str(), cat_str);
+            assert!(cmd.kind.marketplace().is_some());
         }
     }
 }

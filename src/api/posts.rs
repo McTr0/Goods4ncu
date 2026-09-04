@@ -374,22 +374,15 @@ fn excerpt(body: &str, max_chars: usize) -> String {
 
 /// GET /api/posts — public campus topic feed.
 /// GET /api/posts/categories — enabled taxonomy for pickers (extensible).
-pub async fn list_categories(State(state): State<AppState>) -> Result<Response, ApiError> {
-    let rows: Vec<(String, String, String, String, i32)> = sqlx::query_as(
-        "SELECT key, label_zh, label_en, kind, sort_order
-         FROM post_categories WHERE enabled ORDER BY sort_order ASC",
-    )
-    .fetch_all(&state.infra.db)
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
-    let categories: Vec<serde_json::Value> = rows
-        .into_iter()
-        .map(|(key, label_zh, label_en, kind, _sort)| {
+pub async fn list_categories() -> Result<Response, ApiError> {
+    let categories: Vec<serde_json::Value> = crate::services::post::PostCategory::ALL
+        .iter()
+        .map(|cat| {
             serde_json::json!({
-                "key": key,
-                "label_zh": label_zh,
-                "label_en": label_en,
-                "kind": kind,
+                "key": cat.as_str(),
+                "label_zh": cat.label_zh(),
+                "label_en": cat.label_en(),
+                "kind": cat.kind(),
             })
         })
         .collect();
@@ -405,7 +398,7 @@ pub async fn list_posts(
 ) -> Result<Json<PostListResponse>, ApiError> {
     let viewer_id = session.0.as_ref().map(|session| session.user_id.clone());
     let campus_id = resolve_read_campus(&state, session).await?;
-    let allowed_categories = crate::services::post::allowed_post_categories(&state.infra.db).await;
+    let allowed_categories = crate::services::post::allowed_post_categories();
     let filter = normalize_filter(&query, &allowed_categories)?;
     let (limit, offset) = clamp_page(query.limit, query.offset);
     let (posts, total) = post_service(&state)
