@@ -18,11 +18,20 @@ use axum::response::Response;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
-/// A dropped SSE body cannot await a database write from its `Drop` path.  The
-/// sender below therefore stays alive for the generator's lifetime; if the
-/// client disconnects and drops the generator, a bounded grace period later
-/// the reconciliation task closes a still-started run as cancelled.  Normal
-/// completion explicitly signals the task and avoids an unnecessary wake-up.
+// A dropped SSE body cannot await a database write from its `Drop` path. The
+// sender below therefore stays alive for the generator's lifetime; if the
+// client disconnects and drops the generator, a bounded grace period later
+// the reconciliation task closes a still-started run as cancelled. Normal
+// completion explicitly signals the task and avoids an unnecessary wake-up.
+
+/// RAII guard ensuring the spawned agent runtime task is aborted if the SSE stream drops.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
 
 #[derive(Clone, Deserialize)]
 pub(crate) struct ChatStreamRequest {
@@ -393,7 +402,7 @@ async fn handle_chat_stream_request(
         .unwrap_or_else(|| intent_result.intent.as_str())
         .to_string();
     let runtime_context = RuntimeContext {
-        cancellation,
+        cancellation: cancellation.clone(),
         registry: std::sync::Arc::new(crate::agents::tools::registry::ToolRegistry::marketplace()),
         hooks: std::sync::Arc::new(
             HookChain::builder()
@@ -410,8 +419,9 @@ async fn handle_chat_stream_request(
     let request = ModelRequest::user(prompt_msg, chat_history);
     let turn_id = TurnId::generate();
     let runtime_conversation_id = response_conversation_id.clone();
-    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(128);
+    let run_cancellation = cancellation.clone();
+    let runtime_handle = tokio::spawn(async move {
         AgentRuntime::new(crate::agents::runtime::budget::ExecutionBudget::default())
             .run_turn(
                 driver.as_ref(),
@@ -420,8 +430,17 @@ async fn handle_chat_stream_request(
                 turn_id,
                 &runtime_conversation_id,
                 runtime_context,
-                &mut |event| {
-                    let _ = event_tx.send(event);
+                &mut |event| match event_tx.try_send(event) {
+                    Ok(_) => {}
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        tracing::warn!(
+                            %turn_id,
+                            "SSE event buffer full (128); dropping event to preserve bounded memory"
+                        );
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                        run_cancellation.cancel();
+                    }
                 },
             )
             .await;
@@ -448,6 +467,7 @@ async fn handle_chat_stream_request(
     const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
     let sse_stream = async_stream::stream! {
         let _registration = registration;
+        let _runtime_guard = AbortOnDrop(runtime_handle);
         let mut full_reply = String::new();
         let mut completed = false;
         let mut cancelled = false;
@@ -483,8 +503,36 @@ async fn handle_chat_stream_request(
             };
 
             let TurnEvent::Emit(mut event) = turn_event else {
-                if let TurnEvent::ToolResult { tool_name, .. } = turn_event {
+                if let TurnEvent::ToolResult {
+                    tool_name,
+                    resource_ids,
+                    ..
+                } = turn_event
+                {
                     if let Some(run) = &run_for_stream {
+                        if !resource_ids.is_empty() {
+                            let count = resource_ids.len() as i32;
+                            if let Err(error) = run
+                                .service
+                                .record_retrieval(
+                                    &run.trace_id,
+                                    run.campus_id,
+                                    &run.user_id,
+                                    &tool_name,
+                                    count,
+                                    None,
+                                    resource_ids,
+                                )
+                                .await
+                            {
+                                tracing::warn!(
+                                    %error,
+                                    trace_id = %run.trace_id,
+                                    tool = %tool_name,
+                                    "failed to record retrieval resource ids"
+                                );
+                            }
+                        }
                         if let Err(error) = run
                             .service
                             .record_tool(

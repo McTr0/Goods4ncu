@@ -167,14 +167,19 @@ impl ReplicatedRuntime {
         });
 
         // 3. Connect subscriber pubsub & subscribe to channel
-        let mut pubsub = client
-            .get_async_pubsub()
-            .await
-            .map_err(|e| ReplicatedRuntimeError::SubscriberFailed(e.to_string()))?;
-        pubsub
-            .subscribe(crate::services::ws_fanout::CHANNEL)
-            .await
-            .map_err(|e| ReplicatedRuntimeError::SubscriberFailed(e.to_string()))?;
+        let mut pubsub = match client.get_async_pubsub().await {
+            Ok(ps) => ps,
+            Err(e) => {
+                publisher_handle.abort();
+                ws_hub.clear_fanout_publisher();
+                return Err(ReplicatedRuntimeError::SubscriberFailed(e.to_string()));
+            }
+        };
+        if let Err(e) = pubsub.subscribe(crate::services::ws_fanout::CHANNEL).await {
+            publisher_handle.abort();
+            ws_hub.clear_fanout_publisher();
+            return Err(ReplicatedRuntimeError::SubscriberFailed(e.to_string()));
+        }
         tracing::info!(
             channel = crate::services::ws_fanout::CHANNEL,
             "WS fanout subscribed"
@@ -279,5 +284,33 @@ impl ReplicatedRuntime {
 impl Drop for ReplicatedRuntime {
     fn drop(&mut self) {
         self.ws_hub.clear_fanout_publisher();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lifecycle::ShutdownController;
+
+    #[tokio::test]
+    async fn start_failure_clears_fanout_publisher() {
+        let ws_hub = Arc::new(crate::api::ws::WsHub::new());
+        let controller = ShutdownController::new();
+        // Pointing to unreachable redis
+        let res = ReplicatedRuntime::start(
+            "redis://127.0.0.1:1/0",
+            ws_hub.clone(),
+            10,
+            60,
+            &controller.signal(),
+            Duration::from_millis(500),
+        )
+        .await;
+
+        assert!(res.is_err());
+        assert!(
+            !ws_hub.has_fanout_publisher(),
+            "WsHub must not retain publisher after startup failure"
+        );
     }
 }

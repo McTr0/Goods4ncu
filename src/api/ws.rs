@@ -33,8 +33,9 @@ pub type WsConnections = DashMap<String, Vec<WsConnection>>;
 
 #[derive(Clone)]
 pub struct WsConnection {
-    sender: mpsc::Sender<Message>,
-    campus_id: Option<uuid::Uuid>,
+    pub connection_id: uuid::Uuid,
+    pub sender: mpsc::Sender<Message>,
+    pub campus_id: Option<uuid::Uuid>,
 }
 
 #[cfg(feature = "redis")]
@@ -77,6 +78,16 @@ impl WsHub {
     pub fn clear_fanout_publisher(&self) {
         if let Ok(mut lock) = self.fanout_tx.write() {
             *lock = None;
+        }
+    }
+
+    #[cfg(feature = "redis")]
+    #[allow(dead_code)]
+    pub fn has_fanout_publisher(&self) -> bool {
+        if let Ok(lock) = self.fanout_tx.read() {
+            lock.is_some()
+        } else {
+            false
         }
     }
 
@@ -126,6 +137,48 @@ impl WsHub {
         deliver_local_scoped_internal(&self.connections, user_id, campus_id, payload);
     }
 
+    pub fn register_connection(
+        &self,
+        user_id: &str,
+        connection_id: uuid::Uuid,
+        campus_id: Option<uuid::Uuid>,
+        sender: mpsc::Sender<Message>,
+    ) {
+        self.connections
+            .entry(user_id.to_string())
+            .or_default()
+            .push(WsConnection {
+                connection_id,
+                sender,
+                campus_id,
+            });
+    }
+
+    pub fn remove_connection(&self, user_id: &str, connection_id: uuid::Uuid) -> bool {
+        if let Some(mut connections) = self.connections.get_mut(user_id) {
+            let before = connections.value().len();
+            connections
+                .value_mut()
+                .retain(|c| c.connection_id != connection_id);
+            let pruned = before.saturating_sub(connections.value().len());
+            if pruned > 0 {
+                if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {
+                    metrics.record_ws_stale_pruned(pruned);
+                }
+            }
+            if connections.value().is_empty() {
+                drop(connections);
+                self.connections.remove(user_id);
+                tracing::debug!(%user_id, %connection_id, "WS: last connection closed, user removed");
+            } else {
+                tracing::debug!(%user_id, %connection_id, remaining = connections.value().len(), "WS: connection cleaned up");
+            }
+            pruned > 0
+        } else {
+            false
+        }
+    }
+
     #[allow(dead_code)]
     pub fn register_test_connection(&self, user_id: &str) -> mpsc::Receiver<Message> {
         self.register_test_connection_for_campus(user_id, None)
@@ -137,14 +190,18 @@ impl WsHub {
         user_id: &str,
         campus_id: Option<uuid::Uuid>,
     ) -> mpsc::Receiver<Message> {
+        self.register_test_connection_with_id(user_id, uuid::Uuid::new_v4(), campus_id)
+    }
+
+    #[allow(dead_code)]
+    pub fn register_test_connection_with_id(
+        &self,
+        user_id: &str,
+        connection_id: uuid::Uuid,
+        campus_id: Option<uuid::Uuid>,
+    ) -> mpsc::Receiver<Message> {
         let (tx, rx) = mpsc::channel(16);
-        self.connections
-            .entry(user_id.to_string())
-            .or_default()
-            .push(WsConnection {
-                sender: tx,
-                campus_id,
-            });
+        self.register_connection(user_id, connection_id, campus_id, tx);
         rx
     }
 }
@@ -158,15 +215,15 @@ fn deliver_local_scoped_internal(
     let metrics = crate::api::metrics::GLOBAL_METRICS.get().cloned();
 
     if let Some(connections) = connections_map.get(user_id) {
-        let mut dead_indices = vec![];
-        for (i, connection) in connections.value().iter().enumerate() {
+        let mut dead_ids = Vec::new();
+        for connection in connections.value().iter() {
             if campus_id.is_some() && connection.campus_id != campus_id {
                 continue;
             }
             match connection.sender.try_send(Message::Text(payload.into())) {
                 Ok(_) => {}
                 Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                    dead_indices.push(i);
+                    dead_ids.push(connection.connection_id);
                     if let Some(metrics) = metrics.as_ref() {
                         metrics.record_ws_message_dropped();
                     }
@@ -177,22 +234,27 @@ fn deliver_local_scoped_internal(
                     }
                     tracing::warn!(
                         user_id = %user_id,
-                        connection_index = i,
+                        connection_id = %connection.connection_id,
                         "WS outbound buffer full; dropping message"
                     );
                 }
             }
         }
         drop(connections);
-        // Remove dead connections (reverse order to preserve indices).
-        if !dead_indices.is_empty() {
-            let pruned = dead_indices.len();
+
+        // Remove dead connections by stable connection_id.
+        // This eliminates the DashMap index-shifting race when concurrent removals occur.
+        if !dead_ids.is_empty() {
             if let Some(mut connections) = connections_map.get_mut(user_id) {
-                for i in dead_indices.into_iter().rev() {
-                    connections.value_mut().remove(i);
-                }
-                if let Some(metrics) = metrics.as_ref() {
-                    metrics.record_ws_stale_pruned(pruned);
+                let before = connections.value().len();
+                connections
+                    .value_mut()
+                    .retain(|c| !dead_ids.contains(&c.connection_id));
+                let pruned = before.saturating_sub(connections.value().len());
+                if pruned > 0 {
+                    if let Some(metrics) = metrics.as_ref() {
+                        metrics.record_ws_stale_pruned(pruned);
+                    }
                 }
                 if connections.value().is_empty() {
                     drop(connections);
@@ -227,6 +289,20 @@ pub async fn ws_handler(
     }))
 }
 
+/// RAII guard ensuring the exact connection is removed from `WsHub` on disconnect or drop.
+struct WsConnectionGuard {
+    ws_hub: Arc<WsHub>,
+    user_id: String,
+    connection_id: uuid::Uuid,
+}
+
+impl Drop for WsConnectionGuard {
+    fn drop(&mut self) {
+        self.ws_hub
+            .remove_connection(&self.user_id, self.connection_id);
+    }
+}
+
 /// Handle a single WebSocket connection for its lifetime.
 async fn handle_socket(
     socket: WebSocket,
@@ -234,6 +310,7 @@ async fn handle_socket(
     user_id: String,
     campus_id: Option<uuid::Uuid>,
 ) {
+    let connection_id = uuid::Uuid::new_v4();
     let (ws_sender, mut ws_receiver) = socket.split();
 
     // Channel for relaying ping data from recv task to sender task.
@@ -242,27 +319,31 @@ async fn handle_socket(
     // Create a channel for this connection — buffer up to 64 pending messages.
     let (tx, rx) = mpsc::channel::<Message>(64);
 
-    // Register this connection.
-    ws_hub
-        .connections
-        .entry(user_id.clone())
-        .or_default()
-        .push(WsConnection {
-            sender: tx.clone(),
-            campus_id,
-        });
+    // Register this connection with its stable connection_id.
+    ws_hub.register_connection(&user_id, connection_id, campus_id, tx);
 
     tracing::debug!(
         user_id = %user_id,
+        %connection_id,
         total_connections = ws_hub.connections.get(&user_id).map(|c| c.value().len()).unwrap_or(0),
         "WS connection registered"
     );
 
+    // RAII cleanup guard ensures exact teardown even on panic, cancellation, or error.
+    let _guard = WsConnectionGuard {
+        ws_hub: ws_hub.clone(),
+        user_id: user_id.clone(),
+        connection_id,
+    };
+
     // Signal sender when recv task exits.
     let (close_tx, close_rx) = oneshot::channel::<()>();
+    // Signal recv task when sender task exits (bidirectional cancellation).
+    let (sender_done_tx, mut sender_done_rx) = oneshot::channel::<()>();
 
     // Spawn sender task: drives ws_sender, sends pings, handles rx and ping_rx.
-    tokio::spawn(async move {
+    let sender_handle = tokio::spawn(async move {
+        let _sender_done = sender_done_tx;
         let mut ws_sender = ws_sender;
         let mut rx = rx;
         let mut close_rx = close_rx;
@@ -303,42 +384,35 @@ async fn handle_socket(
         }
     });
 
-    // Recv task: read messages from client until close or error.
-    while let Some(msg_res) = ws_receiver.next().await {
-        match msg_res {
-            Ok(Message::Ping(data)) => {
-                let _ = ping_tx.send(data.to_vec()).await;
-            }
-            Ok(Message::Close(_)) | Err(_) => {
+    // Recv task: read messages from client until close or error, or until sender task finishes.
+    loop {
+        tokio::select! {
+            _ = &mut sender_done_rx => {
+                tracing::debug!(user_id = %user_id, %connection_id, "WS sender task finished; exiting recv loop");
                 break;
             }
-            Ok(_) => {
-                // Ignore text/binary/pong from client.
+            msg_res = ws_receiver.next() => {
+                match msg_res {
+                    Some(Ok(Message::Ping(data))) => {
+                        if ping_tx.send(data.to_vec()).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => {
+                        break;
+                    }
+                    Some(Ok(_)) => {
+                        // Ignore text/binary/pong from client.
+                    }
+                }
             }
         }
     }
 
-    // Socket closed. Clean up: remove this specific tx from the user's connection list.
-    if let Some(mut connections) = ws_hub.connections.get_mut(&user_id) {
-        let before = connections.value().len();
-        connections.value_mut().retain(|connection| {
-            !connection.sender.same_channel(&tx) && !connection.sender.is_closed()
-        });
-        let pruned = before.saturating_sub(connections.value().len());
-        if pruned > 0 {
-            if let Some(metrics) = crate::api::metrics::GLOBAL_METRICS.get() {
-                metrics.record_ws_stale_pruned(pruned);
-            }
-        }
-        if connections.value().is_empty() {
-            drop(connections);
-            ws_hub.connections.remove(&user_id);
-            tracing::debug!(%user_id, "WS: last connection closed, user removed");
-        } else {
-            tracing::debug!(%user_id, remaining = connections.value().len(), "WS: connection cleaned up");
-        }
-    }
+    // Recv loop finished: signal and abort sender task if still active.
     let _ = close_tx.send(());
+    sender_handle.abort();
+    // _guard will drop here and safely remove this connection_id from ws_hub.
 }
 
 #[cfg(test)]
@@ -367,5 +441,84 @@ mod tests {
         let received = campus_a_rx.recv().await.expect("campus A receives event");
         assert!(matches!(received, Message::Text(text) if text.as_str() == payload));
         assert!(campus_b_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn exact_disconnect_cleanup_preserves_sibling_connections() {
+        let hub = WsHub::new();
+        let user_id = format!("ws-exact-{}", uuid::Uuid::new_v4().simple());
+        let id_1 = uuid::Uuid::new_v4();
+        let id_2 = uuid::Uuid::new_v4();
+
+        let _rx_1 = hub.register_test_connection_with_id(&user_id, id_1, None);
+        let mut rx_2 = hub.register_test_connection_with_id(&user_id, id_2, None);
+
+        assert_eq!(
+            hub.connections.get(&user_id).map(|c| c.value().len()),
+            Some(2)
+        );
+
+        // Remove only connection 1
+        assert!(hub.remove_connection(&user_id, id_1));
+
+        // User still has connection 2
+        assert_eq!(
+            hub.connections.get(&user_id).map(|c| c.value().len()),
+            Some(1)
+        );
+
+        // Connection 2 can still receive broadcasts
+        hub.broadcast_to_user(&user_id, "test-msg");
+        assert!(rx_2.try_recv().is_ok());
+
+        // Nonexistent connection removal returns false
+        assert!(!hub.remove_connection(&user_id, uuid::Uuid::new_v4()));
+
+        // Remove connection 2 -> user entry removed
+        assert!(hub.remove_connection(&user_id, id_2));
+        assert!(hub.connections.get(&user_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn dead_senders_pruned_by_id_without_index_corruption() {
+        let hub = WsHub::new();
+        let user_id = format!("ws-race-{}", uuid::Uuid::new_v4().simple());
+        let id_1 = uuid::Uuid::new_v4();
+        let id_2 = uuid::Uuid::new_v4();
+        let id_3 = uuid::Uuid::new_v4();
+
+        let rx_1 = hub.register_test_connection_with_id(&user_id, id_1, None);
+        let mut rx_2 = hub.register_test_connection_with_id(&user_id, id_2, None);
+        let rx_3 = hub.register_test_connection_with_id(&user_id, id_3, None);
+
+        // Drop receivers 1 and 3 to make senders dead
+        drop(rx_1);
+        drop(rx_3);
+
+        // Deliver message: should prune 1 and 3 safely by ID
+        hub.broadcast_to_user(&user_id, "hello active");
+
+        // Connection 2 received the message
+        let msg = rx_2.recv().await.expect("connection 2 receives message");
+        assert!(matches!(msg, Message::Text(t) if t == "hello active"));
+
+        // Only connection 2 remains
+        let remaining = hub.connections.get(&user_id).expect("user still exists");
+        assert_eq!(remaining.value().len(), 1);
+        assert_eq!(remaining.value()[0].connection_id, id_2);
+    }
+
+    #[cfg(feature = "redis")]
+    #[test]
+    fn has_fanout_publisher_reflects_installation() {
+        let hub = WsHub::new();
+        assert!(!hub.has_fanout_publisher());
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        hub.set_fanout_publisher(tx);
+        assert!(hub.has_fanout_publisher());
+
+        hub.clear_fanout_publisher();
+        assert!(!hub.has_fanout_publisher());
     }
 }

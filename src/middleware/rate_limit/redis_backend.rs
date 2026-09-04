@@ -147,4 +147,173 @@ mod tests {
             "working redis limiter saying no must be obeyed"
         );
     }
+
+    #[tokio::test]
+    async fn redis_rate_limiter_burst_in_same_second() {
+        let Some(url) = redis_test_url() else {
+            return;
+        };
+
+        let max_requests = 5;
+        let limiter = std::sync::Arc::new(
+            RedisRateLimiter::new(&url, max_requests, 60)
+                .await
+                .expect("connect to test redis"),
+        );
+        let ip = format!("burst-ip-{}", Uuid::new_v4().simple());
+
+        // Spawn 10 concurrent requests simultaneously in the same second
+        let mut handles = Vec::new();
+        for _ in 0..10 {
+            let lim = limiter.clone();
+            let test_ip = ip.clone();
+            handles.push(tokio::spawn(async move {
+                lim.check_rate_limit(&test_ip).await.unwrap()
+            }));
+        }
+
+        let mut allowed = 0;
+        let mut rejected = 0;
+        for handle in handles {
+            if handle.await.expect("task join") {
+                allowed += 1;
+            } else {
+                rejected += 1;
+            }
+        }
+
+        assert_eq!(allowed, 5, "exactly max_requests should succeed in burst");
+        assert_eq!(
+            rejected, 5,
+            "requests beyond max_requests should be rejected"
+        );
+
+        // Clean up
+        limiter.reset(&ip).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn redis_rate_limiter_window_expiry_resets_quota() {
+        let Some(url) = redis_test_url() else {
+            return;
+        };
+
+        // 1-second window, limit 2
+        let limiter = RedisRateLimiter::new(&url, 2, 1)
+            .await
+            .expect("connect to test redis");
+        let ip = format!("expiry-ip-{}", Uuid::new_v4().simple());
+
+        // Fill window
+        assert!(limiter.check_rate_limit(&ip).await.unwrap());
+        assert!(limiter.check_rate_limit(&ip).await.unwrap());
+        assert!(
+            !limiter.check_rate_limit(&ip).await.unwrap(),
+            "3rd request exceeds limit"
+        );
+
+        // Wait for 1-second TTL window to expire
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+
+        // In new window, requests succeed again
+        assert!(
+            limiter.check_rate_limit(&ip).await.unwrap(),
+            "request in new window must succeed"
+        );
+        assert!(limiter.check_rate_limit(&ip).await.unwrap());
+        assert!(
+            !limiter.check_rate_limit(&ip).await.unwrap(),
+            "quota enforced in new window"
+        );
+
+        // Clean up
+        limiter.reset(&ip).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn redis_rate_limiter_independent_keys_isolation() {
+        let Some(url) = redis_test_url() else {
+            return;
+        };
+
+        // Limit 1 per key
+        let limiter = RedisRateLimiter::new(&url, 1, 60)
+            .await
+            .expect("connect to test redis");
+        let ip_a = format!("ip-a-{}", Uuid::new_v4().simple());
+        let ip_b = format!("ip-b-{}", Uuid::new_v4().simple());
+        let ip_c = format!("ip-c-{}", Uuid::new_v4().simple());
+
+        // IP A exhausts quota
+        assert!(limiter.check_rate_limit(&ip_a).await.unwrap());
+        assert!(!limiter.check_rate_limit(&ip_a).await.unwrap());
+
+        // IP B and C are completely unaffected
+        assert!(limiter.check_rate_limit(&ip_b).await.unwrap());
+        assert!(!limiter.check_rate_limit(&ip_b).await.unwrap());
+
+        assert!(limiter.check_rate_limit(&ip_c).await.unwrap());
+        assert!(!limiter.check_rate_limit(&ip_c).await.unwrap());
+
+        // Clean up
+        limiter.reset(&ip_a).await.unwrap();
+        limiter.reset(&ip_b).await.unwrap();
+        limiter.reset(&ip_c).await.unwrap();
+    }
+
+    struct HangingRateLimiter;
+    #[async_trait]
+    impl RateLimiter for HangingRateLimiter {
+        async fn check_rate_limit(&self, _ip: &str) -> RateLimitResult<bool> {
+            // Sleep longer than RateLimitStateHandle's 250ms timeout
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            Ok(false)
+        }
+        async fn reset(&self, _ip: &str) -> RateLimitResult<()> {
+            Ok(())
+        }
+    }
+
+    struct FailingRateLimiter;
+    #[async_trait]
+    impl RateLimiter for FailingRateLimiter {
+        async fn check_rate_limit(&self, _ip: &str) -> RateLimitResult<bool> {
+            Err(RateLimitError::Redis(redis::RedisError::from((
+                redis::ErrorKind::IoError,
+                "simulated redis error",
+            ))))
+        }
+        async fn reset(&self, _ip: &str) -> RateLimitResult<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn rate_limit_timeout_and_error_fails_open() {
+        // Test timeout fail-open
+        let hanging_handle = RateLimitStateHandle::new(HangingRateLimiter);
+        let ip = "test-failopen-ip";
+        let start = std::time::Instant::now();
+        let allowed_on_timeout = hanging_handle.check_rate_limit(ip).await;
+        assert!(
+            allowed_on_timeout,
+            "timeout must fail open to prevent total outage"
+        );
+        assert!(
+            start.elapsed() >= std::time::Duration::from_millis(240),
+            "should have waited ~250ms before timing out"
+        );
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(450),
+            "should not wait full 500ms of the hanging future"
+        );
+
+        // Test error fail-open
+        let failing_handle = RateLimitStateHandle::new(FailingRateLimiter);
+        let allowed_on_error = failing_handle.check_rate_limit(ip).await;
+        assert!(
+            allowed_on_error,
+            "error must fail open to prevent total outage"
+        );
+    }
 }
