@@ -5,8 +5,9 @@ import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
 import '../models/post.dart';
-import '../services/api_service.dart';
 import '../services/base_service.dart';
+import '../services/listing_service.dart';
+import '../services/user_service.dart';
 import '../services/recommendation_service.dart';
 import '../services/order_service.dart';
 import '../services/chat_service.dart';
@@ -28,7 +29,8 @@ import '../services/post_service.dart';
 
 class ListingDetailPage extends StatefulWidget {
   final String listingId;
-  final ApiService? apiService;
+  final ListingService? listingService;
+  final UserService? userService;
   final RecommendationService? recommendationService;
   final OrderService? orderService;
   final ChatService? chatService;
@@ -39,7 +41,8 @@ class ListingDetailPage extends StatefulWidget {
   const ListingDetailPage({
     super.key,
     required this.listingId,
-    this.apiService,
+    this.listingService,
+    this.userService,
     this.recommendationService,
     this.orderService,
     this.chatService,
@@ -53,7 +56,8 @@ class ListingDetailPage extends StatefulWidget {
 }
 
 class _ListingDetailPageState extends State<ListingDetailPage> {
-  late final ApiService _apiService;
+  late final ListingService _listingService;
+  late final UserService _userService;
   late final RecommendationService _recommendationService;
   late final OrderService _orderService;
   late final ChatService _chatService;
@@ -87,7 +91,8 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
   @override
   void initState() {
     super.initState();
-    _apiService = widget.apiService ?? context.read<ApiService>();
+    _listingService = widget.listingService ?? context.read<ListingService>();
+    _userService = widget.userService ?? context.read<UserService>();
     _recommendationService =
         widget.recommendationService ?? context.read<RecommendationService>();
     _orderService = widget.orderService ?? context.read<OrderService>();
@@ -111,7 +116,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
 
   Future<void> _loadCurrentUserId() async {
     try {
-      final token = await _apiService.getToken();
+      final token = await _userService.getToken();
       if (token == null || token.isEmpty) {
         if (!mounted) return;
         setState(() {
@@ -121,7 +126,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         await _loadWantedResponsesIfReady();
         return;
       }
-      final profile = await _apiService.getUserProfile();
+      final profile = await _userService.getUserProfile();
       if (!mounted) return;
       setState(() {
         _currentUserId = profile['user_id']?.toString();
@@ -162,7 +167,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
       _isReporting = false;
     });
     try {
-      final listing = await _apiService.getListingDetail(listingId);
+      final listing = await _listingService.getListingDetail(listingId);
       if (mounted &&
           generation == _loadGeneration &&
           listingId == widget.listingId) {
@@ -227,7 +232,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     });
 
     try {
-      final response = await _apiService.getWantedResponses(
+      final response = await _listingService.getWantedResponses(
         role: role,
         wantedListingId: listingId,
         limit: 100,
@@ -285,7 +290,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
   Future<void> _loadWantedMatches(String listingId, int generation) async {
     setState(() => _wantedMatchesLoading = true);
     try {
-      final response = await _apiService.getWantedMatches(listingId);
+      final response = await _listingService.getWantedMatches(listingId);
       if (mounted &&
           generation == _loadGeneration &&
           listingId == widget.listingId) {
@@ -366,7 +371,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     setState(() => _isOperating = true);
 
     try {
-      final profile = await _apiService.getUserProfile();
+      final profile = await _userService.getUserProfile();
       if (!mounted || !context.mounted) return;
       final currentUserId = profile['user_id']?.toString();
       if (currentUserId == listing.ownerId) {
@@ -462,7 +467,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     try {
       Map<String, dynamic> userProfile;
       try {
-        userProfile = await _apiService.getUserProfile();
+        userProfile = await _userService.getUserProfile();
       } on AuthException {
         if (!mounted) return;
         messenger.showSnackBar(SnackBar(content: Text(l.sessionExpired)));
@@ -555,14 +560,14 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
 
     setState(() => _isOperating = true);
     try {
-      final profile = await _apiService.getUserProfile();
+      final profile = await _userService.getUserProfile();
       if (!mounted) return;
       if (profile['user_id']?.toString() == listing.ownerId) {
         messenger.showSnackBar(SnackBar(content: Text(l.wantedOwnerHint)));
         return;
       }
 
-      final myListings = await _apiService.getUserListings(limit: 50);
+      final myListings = await _userService.getUserListings(limit: 50);
       final rawItems = myListings['items'] as List<dynamic>? ?? [];
       final myOffers = rawItems
           .map((item) => Listing.fromJson(item as Map<String, dynamic>))
@@ -612,7 +617,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
         _wantedRecommendationFingerprint = fingerprint;
         _wantedRecommendationIdempotencyKey = const Uuid().v4();
       }
-      final message = await _apiService.recommendOfferForWanted(
+      final message = await _listingService.recommendOfferForWanted(
         wantedId: listing.id,
         offerListingId: selected.id,
         idempotencyKey: _wantedRecommendationIdempotencyKey,
@@ -1165,15 +1170,15 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
       late final String successMessage;
       switch (action) {
         case 'accept':
-          result = await _apiService.acceptWantedResponse(response.id);
+          result = await _listingService.acceptWantedResponse(response.id);
           successMessage = l.wantedResponseAcceptedToast;
           break;
         case 'dismiss':
-          result = await _apiService.dismissWantedResponse(response.id);
+          result = await _listingService.dismissWantedResponse(response.id);
           successMessage = l.wantedResponseDismissedToast;
           break;
         case 'withdraw':
-          result = await _apiService.withdrawWantedResponse(response.id);
+          result = await _listingService.withdrawWantedResponse(response.id);
           successMessage = l.wantedResponseWithdrawnToast;
           break;
         default:
@@ -1269,7 +1274,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     markResponseReadOnly();
 
     try {
-      final refreshedListing = await _apiService.getListingDetail(listingId);
+      final refreshedListing = await _listingService.getListingDetail(listingId);
       if (mounted &&
           generation == _loadGeneration &&
           listingId == widget.listingId) {
@@ -1349,7 +1354,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     if (confirmed != true || !mounted || listingId != widget.listingId) return;
     setState(() => _isOperating = true);
     try {
-      await _apiService.fulfillWanted(listingId);
+      await _listingService.fulfillWanted(listingId);
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -1366,7 +1371,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     final l = AppLocalizations.of(context)!;
     setState(() => _isOperating = true);
     try {
-      await _apiService.relistListing(_listing!.id);
+      await _listingService.relistListing(_listing!.id);
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -1384,7 +1389,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     if (_isOperating || _listing == null) return;
     setState(() => _isOperating = true);
     try {
-      await _apiService.relistListing(_listing!.id);
+      await _listingService.relistListing(_listing!.id);
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -1423,7 +1428,7 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     if (confirmed != true || !mounted) return;
     setState(() => _isOperating = true);
     try {
-      await _apiService.deleteListing(
+      await _listingService.deleteListing(
         listing.id,
         expectedContentRevision: listing.contentRevision,
       );

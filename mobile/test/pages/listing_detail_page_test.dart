@@ -6,17 +6,51 @@ import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/models/post.dart';
 import 'package:goods4ncu_mobile/pages/listing_detail_page.dart';
-import 'package:goods4ncu_mobile/services/api_service.dart';
 import 'package:goods4ncu_mobile/services/base_service.dart';
 import 'package:goods4ncu_mobile/services/chat_service.dart';
 import 'package:goods4ncu_mobile/services/content_report_service.dart';
 import 'package:goods4ncu_mobile/services/feed_feedback_service.dart';
+import 'package:goods4ncu_mobile/services/listing_service.dart';
 import 'package:goods4ncu_mobile/services/order_service.dart';
 import 'package:goods4ncu_mobile/services/post_service.dart';
 import 'package:goods4ncu_mobile/services/recommendation_service.dart';
+import 'package:goods4ncu_mobile/services/user_service.dart';
 import 'package:goods4ncu_mobile/theme/app_theme.dart';
 
-class _ListingApiService extends ApiService {
+class _FakeUserService extends UserService {
+  _FakeUserService({
+    required this.currentUserId,
+    this.userListingItems = const [],
+  });
+
+  final String? currentUserId;
+  final List<Map<String, dynamic>> userListingItems;
+
+  @override
+  Future<String?> getToken() async => currentUserId == null ? null : 'token';
+
+  @override
+  Future<Map<String, dynamic>> getUserProfile() async {
+    if (currentUserId == null) throw StateError('guest has no profile');
+    return {'user_id': currentUserId, 'username': 'owner'};
+  }
+
+  @override
+  Future<Map<String, dynamic>> getUserListings({
+    int limit = 20,
+    int offset = 0,
+    String? status,
+  }) async {
+    return {
+      'items': userListingItems,
+      'total': userListingItems.length,
+      'limit': limit,
+      'offset': offset,
+    };
+  }
+}
+
+class _ListingApiService extends ListingService {
   _ListingApiService({
     required this.listing,
     required this.currentUserId,
@@ -28,6 +62,11 @@ class _ListingApiService extends ApiService {
     this.userListingItems = const [],
     this.wantedRecommendationFailuresRemaining = 0,
   }) : wantedResponses = List.of(wantedResponses);
+
+  late final _FakeUserService userService = _FakeUserService(
+    currentUserId: currentUserId,
+    userListingItems: userListingItems,
+  );
 
   Listing listing;
   final String? currentUserId;
@@ -144,26 +183,6 @@ class _ListingApiService extends ApiService {
   }
 
   @override
-  Future<Map<String, dynamic>> getUserProfile() async {
-    if (currentUserId == null) throw StateError('guest has no profile');
-    return {'user_id': currentUserId, 'username': 'owner'};
-  }
-
-  @override
-  Future<Map<String, dynamic>> getUserListings({
-    int limit = 20,
-    int offset = 0,
-    String? status,
-  }) async {
-    return {
-      'items': userListingItems,
-      'total': userListingItems.length,
-      'limit': limit,
-      'offset': offset,
-    };
-  }
-
-  @override
   Future<String> recommendOfferForWanted({
     required String wantedId,
     required String offerListingId,
@@ -179,10 +198,12 @@ class _ListingApiService extends ApiService {
   }
 }
 
-class _SwitchingListingApiService extends ApiService {
+class _SwitchingListingApiService extends ListingService {
   _SwitchingListingApiService(this.listings);
 
   final Map<String, Listing> listings;
+
+  late final UserService userService = _FakeUserService(currentUserId: null);
 
   @override
   Future<String?> getToken() async => null;
@@ -318,7 +339,8 @@ Widget _buildDetail({
     supportedLocales: AppLocalizations.supportedLocales,
     home: ListingDetailPage(
       listingId: listing.id,
-      apiService: resolvedApiService,
+      listingService: resolvedApiService,
+      userService: resolvedApiService.userService,
       recommendationService: _RecommendationService(similarListings),
       orderService: OrderService(),
       chatService: ChatService(),
@@ -1274,7 +1296,8 @@ void main() {
           valueListenable: listingId,
           builder: (context, id, _) => ListingDetailPage(
             listingId: id,
-            apiService: api,
+            listingService: api,
+            userService: api.userService,
             recommendationService: _RecommendationService(),
             orderService: OrderService(),
             chatService: ChatService(),
