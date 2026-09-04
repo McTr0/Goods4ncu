@@ -69,6 +69,7 @@ sensitive_data_archive/
 .claude/
 .gemini/
 .antigravity/
+.agents/
 
 # === Local Model & Raw Asset Scratchpads ===
 /Doro/
