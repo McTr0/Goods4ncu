@@ -1,4 +1,4 @@
-import 'api_service.dart';
+import 'admin_service.dart';
 import 'admin_role_cache.dart';
 import 'token_storage.dart';
 import 'ws_service.dart';
@@ -8,13 +8,13 @@ abstract class AdminImpersonationGateway {
 }
 
 class ApiAdminImpersonationGateway implements AdminImpersonationGateway {
-  ApiAdminImpersonationGateway(this._apiService);
+  ApiAdminImpersonationGateway(this._adminService);
 
-  final ApiService _apiService;
+  final AdminService _adminService;
 
   @override
   Future<String> fetchImpersonationToken(String userId) {
-    return _apiService.impersonateUserToken(userId);
+    return _adminService.impersonateUserToken(userId);
   }
 }
 
@@ -84,19 +84,19 @@ class SecureAuthTokenStore implements AuthTokenStore {
 
 class AdminImpersonationService {
   AdminImpersonationService({
-    ApiService? apiService,
+    AdminService? adminService,
     AdminImpersonationGateway? gateway,
     RealtimeConnectionController? realtime,
     AuthTokenStore? tokenStore,
   }) : assert(
-         apiService == null || gateway == null,
-         'Provide apiService or gateway, not both.',
+         adminService == null || gateway == null,
+         'Provide adminService or gateway, not both.',
        ),
        assert(
-         apiService != null || gateway != null,
-         'Provide apiService or gateway.',
+         adminService != null || gateway != null,
+         'Provide adminService or gateway.',
        ),
-       _gateway = gateway ?? ApiAdminImpersonationGateway(apiService!),
+       _gateway = gateway ?? ApiAdminImpersonationGateway(adminService!),
        _realtime = realtime ?? WsRealtimeConnectionController(),
        _tokenStore = tokenStore ?? SecureAuthTokenStore();
 

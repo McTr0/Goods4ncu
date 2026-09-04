@@ -52,6 +52,6 @@ List<SingleChildWidget> get serviceProviders => [
   Provider<PostService>(create: (_) => PostService()),
   Provider<AdminImpersonationService>(
     create: (context) =>
-        AdminImpersonationService(apiService: context.read<ApiService>()),
+        AdminImpersonationService(adminService: context.read<AdminService>()),
   ),
 ];

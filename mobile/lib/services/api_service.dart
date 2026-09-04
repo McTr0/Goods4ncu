@@ -70,28 +70,8 @@ class ApiService extends BaseService {
 
   Future<SocialPersona?> getSocialPersona() => _userService.getSocialPersona();
 
-  Future<SocialPersonaCatalog> getSocialPersonaCatalog() =>
-      _userService.getSocialPersonaCatalog();
-
-  Future<SocialPersona?> getPublicSocialPersona(String userId) =>
-      _userService.getPublicSocialPersona(userId);
-
-  Future<List<CampusMembership>> getCampusMemberships() =>
-      _userService.getCampusMemberships();
-
   Future<CampusMembershipState> getCampusMembershipState() =>
       _userService.getCampusMembershipState();
-
-  Future<String> switchActiveCampus(String campusId) =>
-      _authService.switchActiveCampus(campusId);
-
-  Future<void> requestCampusVerification(String membershipId) =>
-      _userService.requestCampusVerification(membershipId);
-
-  Future<CampusMembership> confirmCampusVerification(
-    String membershipId,
-    String code,
-  ) => _userService.confirmCampusVerification(membershipId, code);
 
   Future<Map<String, dynamic>> getUserListings({
     int limit = 20,
@@ -107,41 +87,8 @@ class ApiService extends BaseService {
   // Backward-compatibility wrappers (delegate to ListingService)
   // -----------------------------------------------------------------
 
-  Future<ListingsResponse> getListings({
-    int limit = 20,
-    int offset = 0,
-    String? category,
-    String? search,
-    List<String>? categories,
-    double? minPriceCny,
-    double? maxPriceCny,
-    String sort = 'newest',
-    String direction = 'offer',
-  }) => _listingService.getListings(
-    limit: limit,
-    offset: offset,
-    category: category,
-    search: search,
-    categories: categories,
-    minPriceCny: minPriceCny,
-    maxPriceCny: maxPriceCny,
-    sort: sort,
-    direction: direction,
-  );
-
   Future<Listing> getListingDetail(String id) =>
       _listingService.getListingDetail(id);
-
-
-  Future<void> updateListing(
-    String id,
-    Map<String, dynamic> updates, {
-    int? expectedContentRevision,
-  }) => _listingService.updateListing(
-    id,
-    updates,
-    expectedContentRevision: expectedContentRevision,
-  );
 
   Future<void> fulfillWanted(String id) => _listingService.fulfillWanted(id);
 
@@ -191,9 +138,6 @@ class ApiService extends BaseService {
   Future<WantedResponseActionResult> withdrawWantedResponse(String id) =>
       _listingService.withdrawWantedResponse(id);
 
-  Future<RecognizedItem> recognizeItem(String imageBase64) =>
-      _listingService.recognizeItem(imageBase64);
-
   // -----------------------------------------------------------------
   // Backward-compatibility wrappers (delegate to NegotiateService)
   // -----------------------------------------------------------------
@@ -203,22 +147,12 @@ class ApiService extends BaseService {
 
   Future<List<AgentPlan>> getAgentPlans() => _chatService.getAgentPlans();
 
-  Future<List<AgentRun>> getAgentRuns({int limit = 20}) =>
-      _chatService.getAgentRuns(limit: limit);
-
   Future<AgentPlanConfirmResult> confirmAgentPlan(
     String id,
     String confirmationToken,
   ) => _chatService.confirmAgentPlan(id, confirmationToken);
 
   Future<void> cancelAgentPlan(String id) => _chatService.cancelAgentPlan(id);
-
-  Future<Map<String, dynamic>> getCompanionRelationship() =>
-      _chatService.getCompanionRelationship();
-
-  /// Fire-and-forget friendly: errors are the caller's concern.
-  Future<Map<String, dynamic>> recordCompanionRelationshipEvent(String event) =>
-      _chatService.recordCompanionRelationshipEvent(event);
 
   Future<List<UndoableAction>> getUndoableActions() =>
       _chatService.getUndoableActions();
@@ -297,9 +231,6 @@ class ApiService extends BaseService {
   Future<void> banUser(String userId) => _adminService.banUser(userId);
 
   Future<void> unbanUser(String userId) => _adminService.unbanUser(userId);
-
-  Future<String> impersonateUserToken(String userId) =>
-      _adminService.impersonateUserToken(userId);
 
   Future<Map<String, dynamic>> getAdminModerationCases({
     String? status,

@@ -6,7 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import '../l10n/app_localizations.dart';
-import '../services/api_service.dart';
+import '../services/admin_service.dart';
 import '../services/post_service.dart';
 import '../services/upload_service.dart';
 import '../theme/app_theme.dart';
@@ -102,6 +102,7 @@ class CreatePostPage extends StatefulWidget {
     super.key,
     this.postService,
     this.uploadService,
+    this.adminService,
     this.imagePicker,
     this.initialCategory = 'discussion',
     this.spaceId,
@@ -109,6 +110,7 @@ class CreatePostPage extends StatefulWidget {
 
   final PostService? postService;
   final UploadService? uploadService;
+  final AdminService? adminService;
   final PostImagePicker? imagePicker;
 
   /// offer | wanted | discussion — preselected kind for the unified form.
@@ -156,7 +158,8 @@ class _CreatePostPageState extends State<CreatePostPage> {
   Future<void> _probeAnnouncePermission() async {
     try {
       // can_read on admin capabilities == operator+ on the active campus.
-      final caps = await context.read<ApiService>().getAdminCapabilities();
+      final adminService = widget.adminService ?? context.read<AdminService>();
+      final caps = await adminService.getCapabilities();
       if (!mounted) return;
       setState(() => _canAnnounce = caps['can_read'] == true);
     } catch (_) {

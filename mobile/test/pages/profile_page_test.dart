@@ -30,70 +30,8 @@ class _FakeApiService extends ApiService {
   Future<SocialPersona?> getSocialPersona() async => persona;
 
   @override
-  Future<SocialPersonaCatalog> getSocialPersonaCatalog() async =>
-      const SocialPersonaCatalog(
-        styleVersion: 'v1',
-        representationModes: ['trait_mapped', 'role_character'],
-        appearance: {
-          'palette': ['teal', 'plum', 'sun', 'slate'],
-          'silhouette': ['soft', 'round', 'sharp'],
-          'accessory': ['none', 'glasses', 'headphones', 'leaf'],
-          'outfit': ['campus', 'workwear', 'casual', 'lab'],
-        },
-        selfDescriptions: [
-          'slow_to_warm',
-          'business_only',
-          'meetup_friendly',
-          'casual_chat',
-          'reply_later',
-          'tech_enthusiast',
-        ],
-        contactPostures: [
-          'leave_message',
-          'connection_allowed',
-          'busy',
-          'later',
-        ],
-      );
-
-  @override
-  Future<List<CampusMembership>> getCampusMemberships() async => memberships;
-
-  @override
   Future<CampusMembershipState> getCampusMembershipState() async =>
       CampusMembershipState(items: memberships, activeCampusId: activeCampusId);
-
-  @override
-  Future<String> switchActiveCampus(String campusId) async {
-    switchedCampusId = campusId;
-    activeCampusId = campusId;
-    return 'new-access-token';
-  }
-
-  @override
-  Future<void> requestCampusVerification(String membershipId) async {
-    verificationRequests += 1;
-  }
-
-  @override
-  Future<CampusMembership> confirmCampusVerification(
-    String membershipId,
-    String code,
-  ) async {
-    confirmedCode = code;
-    final current = memberships.first;
-    final verified = CampusMembership(
-      id: current.id,
-      campusId: current.campusId,
-      campusSlug: current.campusSlug,
-      campusNameZh: current.campusNameZh,
-      campusNameEn: current.campusNameEn,
-      status: 'verified',
-      role: current.role,
-    );
-    memberships = [verified];
-    return verified;
-  }
 }
 
 Widget _buildTestApp(Widget child) {

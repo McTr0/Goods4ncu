@@ -193,7 +193,7 @@ class _ChatPageState extends State<ChatPage> {
       );
       _syncEnvironmentTracker();
       // §14: returning to the companion counts once per session.
-      _apiService
+      _chatService
           .recordCompanionRelationshipEvent('user_returns')
           .catchError((_) => <String, dynamic>{});
     }
@@ -256,7 +256,7 @@ class _ChatPageState extends State<ChatPage> {
   );
 
   void _recordRelationshipEvent(String event) {
-    _apiService
+    _chatService
         .recordCompanionRelationshipEvent(event)
         .then(
           (_) => _companionHost?.bus.emit(
