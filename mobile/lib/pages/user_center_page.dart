@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../services/api_service.dart';
+import '../services/user_service.dart';
 import '../components/user_avatar.dart';
 import '../models/models.dart';
 import '../services/admin_role_cache.dart';
@@ -10,16 +10,16 @@ import '../utils/category_utils.dart';
 import 'login_page.dart';
 
 class UserCenterPage extends StatefulWidget {
-  final ApiService? apiService;
+  final UserService? userService;
 
-  const UserCenterPage({super.key, this.apiService});
+  const UserCenterPage({super.key, this.userService});
 
   @override
   State<UserCenterPage> createState() => _UserCenterPageState();
 }
 
 class _UserCenterPageState extends State<UserCenterPage> {
-  late final ApiService _apiService;
+  late final UserService _userService;
   String _username = '';
   String _createdAt = '';
   SocialPersona? _persona;
@@ -29,17 +29,17 @@ class _UserCenterPageState extends State<UserCenterPage> {
   @override
   void initState() {
     super.initState();
-    _apiService = widget.apiService ?? context.read<ApiService>();
+    _userService = widget.userService ?? context.read<UserService>();
     _loadData();
   }
 
   Future<void> _loadData() async {
     try {
-      final profile = await _apiService.getUserProfile();
-      final listings = await _apiService.getUserListings();
+      final profile = await _userService.getUserProfile();
+      final listings = await _userService.getUserListings();
       SocialPersona? persona;
       try {
-        persona = await _apiService.getSocialPersona();
+        persona = await _userService.getSocialPersona();
       } catch (_) {
         // The default system Avatar remains available if persona loading fails.
       }
@@ -55,7 +55,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
       }
     } catch (e) {
       if (mounted) {
-        // If 401, the ApiService interceptor handles redirect
+        // If 401, the BaseService interceptor handles redirect
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(
           context,

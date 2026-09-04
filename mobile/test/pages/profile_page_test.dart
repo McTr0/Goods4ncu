@@ -3,11 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/pages/profile_page.dart';
-import 'package:goods4ncu_mobile/services/api_service.dart';
 import 'package:goods4ncu_mobile/services/user_service.dart';
 
-class _FakeApiService extends ApiService {
-  _FakeApiService(
+class _FakeUserService extends UserService {
+  _FakeUserService(
     this.profile, {
     this.memberships = const [],
     String? activeCampusId,
@@ -49,7 +48,7 @@ void main() {
       await tester.pumpWidget(
         _buildTestApp(
           ProfilePage(
-            apiService: _FakeApiService({
+            userService: _FakeUserService({
               'username': 'buyer1',
               'role': 'user',
               'created_at': '2026-03-01T08:00:00Z',
@@ -69,7 +68,7 @@ void main() {
       await tester.pumpWidget(
         _buildTestApp(
           ProfilePage(
-            apiService: _FakeApiService({
+            userService: _FakeUserService({
               'username': 'admin',
               'role': 'admin',
               'created_at': '2026-03-01T08:00:00Z',

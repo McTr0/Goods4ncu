@@ -4,7 +4,6 @@ import '../l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 import '../components/user_avatar.dart';
 import '../models/models.dart';
-import '../services/api_service.dart';
 import '../services/admin_role_cache.dart';
 import '../services/ws_service.dart';
 import '../services/token_storage.dart';
@@ -13,16 +12,16 @@ import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
 
 class ProfilePage extends StatefulWidget {
-  final ApiService? apiService;
+  final UserService? userService;
 
-  const ProfilePage({super.key, this.apiService});
+  const ProfilePage({super.key, this.userService});
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  late final ApiService _apiService;
+  late final UserService _userService;
   Map<String, dynamic>? _profile;
   SocialPersona? _persona;
   List<CampusMembership> _campusMemberships = const [];
@@ -33,7 +32,7 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   void initState() {
     super.initState();
-    _apiService = widget.apiService ?? context.read<ApiService>();
+    _userService = widget.userService ?? context.read<UserService>();
     _loadProfile();
   }
 
@@ -45,8 +44,8 @@ class _ProfilePageState extends State<ProfilePage> {
     });
     try {
       final results = await Future.wait<dynamic>([
-        _apiService.getUserProfile(),
-        _apiService.getCampusMembershipState(),
+        _userService.getUserProfile(),
+        _userService.getCampusMembershipState(),
       ]);
       if (mounted) {
         setState(() {
@@ -60,7 +59,7 @@ class _ProfilePageState extends State<ProfilePage> {
       // The role layer is optional: a transient persona failure must not hide
       // the ordinary profile, campus membership, or contact controls.
       try {
-        final persona = await _apiService.getSocialPersona();
+        final persona = await _userService.getSocialPersona();
         if (mounted) {
           setState(() {
             _persona = persona;

@@ -4,12 +4,12 @@ import '../brand/app_brand.dart';
 import '../l10n/app_localizations.dart';
 import '../theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
-import '../services/api_service.dart';
+import '../services/auth_service.dart';
 
 class LoginPage extends StatefulWidget {
-  final ApiService? apiService;
+  final AuthService? authService;
 
-  const LoginPage({super.key, this.apiService});
+  const LoginPage({super.key, this.authService});
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -20,14 +20,14 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  late final ApiService _apiService;
+  late final AuthService _authService;
   bool _isLogin = true;
   bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _apiService = widget.apiService ?? context.read<ApiService>();
+    _authService = widget.authService ?? context.read<AuthService>();
   }
 
   Future<void> _submit() async {
@@ -51,9 +51,9 @@ class _LoginPageState extends State<LoginPage> {
 
       String token;
       if (_isLogin) {
-        token = await _apiService.login(username, password);
+        token = await _authService.login(username, password);
       } else {
-        token = await _apiService.register(username, password, email: email);
+        token = await _authService.register(username, password, email: email);
       }
 
       if (token.isNotEmpty) {

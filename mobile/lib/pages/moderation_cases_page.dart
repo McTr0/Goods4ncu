@@ -2,21 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../l10n/app_localizations.dart';
-import '../services/api_service.dart';
+import '../services/user_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/responsive.dart';
 
 class ModerationCasesPage extends StatefulWidget {
-  const ModerationCasesPage({super.key, this.apiService});
+  const ModerationCasesPage({super.key, this.userService});
 
-  final ApiService? apiService;
+  final UserService? userService;
 
   @override
   State<ModerationCasesPage> createState() => _ModerationCasesPageState();
 }
 
 class _ModerationCasesPageState extends State<ModerationCasesPage> {
-  late final ApiService _apiService;
+  late final UserService _userService;
   List<Map<String, dynamic>> _cases = const [];
   bool _loading = true;
   String? _error;
@@ -24,7 +24,7 @@ class _ModerationCasesPageState extends State<ModerationCasesPage> {
   @override
   void initState() {
     super.initState();
-    _apiService = widget.apiService ?? context.read<ApiService>();
+    _userService = widget.userService ?? context.read<UserService>();
     _load();
   }
 
@@ -34,7 +34,7 @@ class _ModerationCasesPageState extends State<ModerationCasesPage> {
       _error = null;
     });
     try {
-      final response = await _apiService.getModerationCases(limit: 50);
+      final response = await _userService.getModerationCases(limit: 50);
       if (!mounted) return;
       setState(() {
         _cases = (response['items'] as List<dynamic>? ?? const [])
@@ -243,7 +243,7 @@ class _ModerationCasesPageState extends State<ModerationCasesPage> {
     if (reason == null || !mounted) return;
 
     try {
-      await _apiService.submitModerationAppeal(
+      await _userService.submitModerationAppeal(
         moderationCase['id'].toString(),
         reason,
       );
