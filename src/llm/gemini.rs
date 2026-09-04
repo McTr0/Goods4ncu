@@ -289,7 +289,8 @@ impl MarketplaceAgent for GeminiMarketplaceAgent {
                                 .call_tool(&tool_call.function.name, &args_str)
                                 .await
                                 .map_err(|e| anyhow::anyhow!("tool error: {}", e))?;
-                            let envelope = crate::agents::runtime::envelope::ToolResultEnvelope::parse(&result);
+                            let envelope = crate::agents::runtime::envelope::ToolResultEnvelope::parse(&result)
+                                .map_err(|e| anyhow::anyhow!("invalid tool envelope: {e}"))?;
                             for action in envelope.ui_actions {
                                 yield AgentStreamChunk::UiAction(action);
                             }
@@ -426,9 +427,8 @@ impl MarketplaceAgent for GeminiMarketplaceAgent {
             .call_tool(name, arguments)
             .await
             .map_err(|error| anyhow::anyhow!("tool error: {error}"))?;
-        Ok(crate::agents::runtime::envelope::ToolResultEnvelope::parse(
-            &result,
-        ))
+        crate::agents::runtime::envelope::ToolResultEnvelope::parse(&result)
+            .map_err(|error| anyhow::anyhow!("invalid tool envelope: {error}"))
     }
 }
 

@@ -31,9 +31,9 @@ impl ToolResultEnvelope {
         serde_json::to_string(self).unwrap_or_else(|_| self.model_data.clone())
     }
 
-    /// Parse from JSON envelope string if valid; otherwise gracefully wrap raw text.
-    pub fn parse(raw: &str) -> Self {
-        serde_json::from_str::<Self>(raw).unwrap_or_else(|_| Self::success(raw))
+    /// Parse strictly from JSON envelope string. Returns error on invalid JSON.
+    pub fn parse(raw: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str::<Self>(raw)
     }
 
     pub fn with_action(mut self, action: UiAction) -> Self {
@@ -74,11 +74,27 @@ mod tests {
         let decoded: ToolResultEnvelope = serde_json::from_str(&json).expect("decode");
         assert_eq!(decoded, envelope);
 
-        // Test resilient parsing
-        assert_eq!(ToolResultEnvelope::parse(&json), envelope);
+        // Test strict parsing without fallback
         assert_eq!(
-            ToolResultEnvelope::parse("plain raw string"),
-            ToolResultEnvelope::success("plain raw string")
+            ToolResultEnvelope::parse(&json).expect("parse envelope"),
+            envelope
         );
+        assert!(ToolResultEnvelope::parse("plain raw string").is_err());
+    }
+
+    #[test]
+    fn ui_actions_and_resources_do_not_leak_into_model_data() {
+        let envelope = ToolResultEnvelope::success("Safe summary for model")
+            .with_action(UiAction::open_post("post-999"))
+            .with_resource("entity-secret-12345");
+
+        // Model data must only contain the explicit model summary
+        assert_eq!(envelope.model_data, "Safe summary for model");
+        assert!(!envelope.model_data.contains("post-999"));
+        assert!(!envelope.model_data.contains("entity-secret-12345"));
+
+        // Corrupted JSON envelopes must error on parse, never silently return fallback success
+        let corrupted_json = r#"{"model_data": "test", "ui_actions": [invalid]}"#;
+        assert!(ToolResultEnvelope::parse(corrupted_json).is_err());
     }
 }

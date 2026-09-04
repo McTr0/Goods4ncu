@@ -36,6 +36,7 @@ pub enum TurnEvent {
         call_id: String,
         tool_name: String,
         result_text: String,
+        resource_ids: Vec<String>,
     },
 }
 
@@ -385,6 +386,7 @@ impl AgentRuntime {
                     call_id: correlation_id,
                     tool_name: call.name.clone(),
                     result_text: model_result.clone(),
+                    resource_ids: envelope.resource_ids.clone(),
                 });
                 tool_messages.push(Message::tool_result_with_call_id(
                     call.id.clone(),

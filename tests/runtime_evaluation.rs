@@ -188,6 +188,7 @@ async fn tool_result_keeps_provider_ids_and_is_fenced_before_feedback() {
                     call_id,
                     tool_name,
                     result_text,
+                    ..
                 } => tool_results.push((call_id, tool_name, result_text)),
             },
         )
