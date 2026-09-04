@@ -13,6 +13,7 @@ import 'package:goods4ncu_mobile/theme/app_theme.dart';
 class _FakeUploadService extends UploadService {
   String? uploadedExtension;
   String? uploadedContentType;
+  int uploadCalls = 0;
 
   @override
   Future<String> uploadPostImageBytes(
@@ -20,6 +21,7 @@ class _FakeUploadService extends UploadService {
     String extension = 'jpg',
     String contentType = 'image/jpeg',
   }) async {
+    uploadCalls++;
     uploadedExtension = extension;
     uploadedContentType = contentType;
     return 'https://cdn.test/post-cover.jpg';
@@ -91,83 +93,19 @@ Widget _app({
   );
 }
 
+final _k1x1Png = Uint8List.fromList(const [
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0,
+  0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120,
+  156, 99, 248, 207, 192, 240, 31, 0, 5, 0, 1, 255, 137, 153, 61, 29, 0, 0, 0,
+  0, 73, 69, 78, 68, 174, 66, 96, 130,
+]);
+
 void main() {
   testWidgets('selects and uploads a discussion cover image', (tester) async {
     final postService = _FakePostService();
     final uploadService = _FakeUploadService();
     final image = PickedPostImage(
-      bytes: Uint8List.fromList(const [
-        137,
-        80,
-        78,
-        71,
-        13,
-        10,
-        26,
-        10,
-        0,
-        0,
-        0,
-        13,
-        73,
-        72,
-        68,
-        82,
-        0,
-        0,
-        0,
-        1,
-        0,
-        0,
-        0,
-        1,
-        8,
-        6,
-        0,
-        0,
-        0,
-        31,
-        21,
-        196,
-        137,
-        0,
-        0,
-        0,
-        13,
-        73,
-        68,
-        65,
-        84,
-        120,
-        156,
-        99,
-        248,
-        207,
-        192,
-        240,
-        31,
-        0,
-        5,
-        0,
-        1,
-        255,
-        137,
-        153,
-        61,
-        29,
-        0,
-        0,
-        0,
-        0,
-        73,
-        69,
-        78,
-        68,
-        174,
-        66,
-        96,
-        130,
-      ]),
+      bytes: _k1x1Png,
       extension: 'png',
       contentType: 'image/png',
     );
@@ -348,4 +286,66 @@ void main() {
     expect(find.text('请填写品牌或来源'), findsOneWidget);
     expect(find.text('created'), findsNothing);
   });
+
+  testWidgets('does not re-upload image on retry with unchanged form', (tester) async {
+    final postService = _FakePostService();
+    final uploadService = _FakeUploadService();
+    final image = PickedPostImage(
+      bytes: _k1x1Png,
+      extension: 'png',
+      contentType: 'image/png',
+    );
+
+    await tester.pumpWidget(
+      _app(
+        postService: postService,
+        uploadService: uploadService,
+        imagePicker: () async => image,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('post-title-field')),
+      'Post with image',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('post-body-field')),
+      'Body text',
+    );
+
+    // Pick image
+    await tester.tap(find.byKey(const ValueKey('post-pick-cover-action')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('post-cover-preview')), findsOneWidget);
+
+    // First submit attempt fails at post creation
+    postService.shouldFail = true;
+    await tester.ensureVisible(find.byKey(const ValueKey('post-publish-action')));
+    await tester.tap(find.byKey(const ValueKey('post-publish-action')));
+    await tester.pumpAndSettle();
+
+    expect(uploadService.uploadCalls, 1);
+    expect(postService.createCalls, 1);
+    final firstKey = postService.lastIdempotencyKey;
+    final firstCoverUrl = postService.coverImageUrl;
+    expect(firstKey, isNotNull);
+    expect(firstCoverUrl, 'https://cdn.test/post-cover.jpg');
+
+    // Dismiss error snackbar
+    ScaffoldMessenger.of(tester.element(find.byType(CreatePostPage))).hideCurrentSnackBar();
+    await tester.pumpAndSettle();
+
+    // Retry without modifying form -> upload service must NOT be called again
+    postService.shouldFail = false;
+    await tester.tap(find.byKey(const ValueKey('post-publish-action')));
+    await tester.pumpAndSettle();
+
+    expect(uploadService.uploadCalls, 1, reason: 'Image should not be re-uploaded on retry');
+    expect(postService.createCalls, 2);
+    expect(postService.lastIdempotencyKey, firstKey);
+    expect(postService.coverImageUrl, firstCoverUrl);
+    expect(find.text('created'), findsOneWidget);
+  });
 }
+

@@ -38,6 +38,65 @@ const _listingCategoryKeys = [
   'other',
 ];
 
+class _SubmissionAttempt {
+  _SubmissionAttempt({
+    required this.key,
+    required this.title,
+    required this.body,
+    required this.category,
+    required this.tags,
+    required this.goodsCategory,
+    required this.goodsBrand,
+    required this.conditionScore,
+    required this.goodsPrice,
+    required this.spaceId,
+    required this.coverImageBytes,
+  });
+
+  final String key;
+  final String title;
+  final String body;
+  final String category;
+  final List<String> tags;
+  final String? goodsCategory;
+  final String goodsBrand;
+  final int conditionScore;
+  final double goodsPrice;
+  final String? spaceId;
+  final Uint8List? coverImageBytes;
+  String? uploadedCoverImageUrl;
+
+  bool matches({
+    required String title,
+    required String body,
+    required String category,
+    required List<String> tags,
+    required String? goodsCategory,
+    required String goodsBrand,
+    required int conditionScore,
+    required double goodsPrice,
+    required String? spaceId,
+    required Uint8List? coverImageBytes,
+  }) {
+    if (this.title != title ||
+        this.body != body ||
+        this.category != category ||
+        this.goodsCategory != goodsCategory ||
+        this.goodsBrand != goodsBrand ||
+        this.conditionScore != conditionScore ||
+        this.goodsPrice != goodsPrice ||
+        this.spaceId != spaceId) {
+      return false;
+    }
+    if (this.tags.length != tags.length) return false;
+    for (var i = 0; i < tags.length; i++) {
+      if (this.tags[i] != tags[i]) return false;
+    }
+    if (this.coverImageBytes != coverImageBytes) return false;
+    return true;
+  }
+}
+
 class CreatePostPage extends StatefulWidget {
   const CreatePostPage({
     super.key,
@@ -84,7 +143,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
   DateTime? _eventStartsAt;
   final _eventPlaceController = TextEditingController();
   bool _canAnnounce = false;
-  String? _activeSubmissionKey;
+  _SubmissionAttempt? _activeAttempt;
 
   @override
   void initState() {
@@ -201,43 +260,81 @@ class _CreatePostPageState extends State<CreatePostPage> {
       return;
     }
 
-    _activeSubmissionKey ??= const Uuid().v4();
+    final title = _titleController.text;
+    final body = _bodyController.text;
+    final category = _category;
+    final tags = _selectedTags.toList(growable: false);
+    final goodsCategory = _needsGoods ? _goodsCategory : null;
+    final goodsBrand = _goodsBrandController.text.trim();
+    final conditionScore = _conditionScore.round();
+    final goodsPrice = double.tryParse(_goodsPriceController.text.trim()) ?? 0.0;
+    final spaceId = widget.spaceId;
+    final coverBytes = _coverImage?.bytes;
+
+    final attempt = _activeAttempt;
+    final currentAttempt = (attempt != null &&
+            attempt.matches(
+              title: title,
+              body: body,
+              category: category,
+              tags: tags,
+              goodsCategory: goodsCategory,
+              goodsBrand: goodsBrand,
+              conditionScore: conditionScore,
+              goodsPrice: goodsPrice,
+              spaceId: spaceId,
+              coverImageBytes: coverBytes,
+            ))
+        ? attempt
+        : _SubmissionAttempt(
+            key: const Uuid().v4(),
+            title: title,
+            body: body,
+            category: category,
+            tags: tags,
+            goodsCategory: goodsCategory,
+            goodsBrand: goodsBrand,
+            conditionScore: conditionScore,
+            goodsPrice: goodsPrice,
+            spaceId: spaceId,
+            coverImageBytes: coverBytes,
+          );
+    _activeAttempt = currentAttempt;
+
     setState(() => _submitting = true);
     try {
       final selectedImage = _coverImage;
-      final coverImageUrl = selectedImage == null
-          ? null
-          : await _uploadService.uploadPostImageBytes(
-              selectedImage.bytes,
-              extension: selectedImage.extension,
-              contentType: selectedImage.contentType,
-            );
-
-      final tags = _selectedTags.toList(growable: false);
+      if (currentAttempt.uploadedCoverImageUrl == null && selectedImage != null) {
+        currentAttempt.uploadedCoverImageUrl = await _uploadService.uploadPostImageBytes(
+          selectedImage.bytes,
+          extension: selectedImage.extension,
+          contentType: selectedImage.contentType,
+        );
+      }
+      final coverImageUrl = currentAttempt.uploadedCoverImageUrl;
 
       final marketplace = _needsGoods
           ? {
               'category': _goodsCategory!,
-              'brand': _goodsBrandController.text.trim(),
-              'condition_score': _conditionScore.round(),
-              'suggested_price_cny':
-                  double.tryParse(_goodsPriceController.text.trim()) ?? 0.0,
+              'brand': goodsBrand,
+              'condition_score': conditionScore,
+              'suggested_price_cny': goodsPrice,
               'defects': const <String>[],
-              'description': _bodyController.text.trim(),
+              'description': body.trim(),
             }
           : null;
 
       final post = await _postService.createPost(
-        title: _titleController.text,
-        body: _bodyController.text,
-        category: _category,
+        title: title,
+        body: body,
+        category: category,
         tags: tags,
         coverImageUrl: coverImageUrl,
-        spaceId: widget.spaceId,
+        spaceId: spaceId,
         marketplace: marketplace,
-        idempotencyKey: _activeSubmissionKey,
+        idempotencyKey: currentAttempt.key,
       );
-      _activeSubmissionKey = null;
+      _activeAttempt = null;
       if (!mounted) return;
       context.go('/posts/${post.id}');
     } catch (error) {
