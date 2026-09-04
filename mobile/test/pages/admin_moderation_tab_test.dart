@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/pages/admin/admin_moderation_tab.dart';
-import 'package:goods4ncu_mobile/services/api_service.dart';
+import 'package:goods4ncu_mobile/services/admin_service.dart';
 
-class _ModerationApiService extends ApiService {
-  _ModerationApiService(this.moderationCase);
+class _ModerationAdminService extends AdminService {
+  _ModerationAdminService(this.moderationCase);
 
   final Map<String, dynamic> moderationCase;
 
   @override
-  Future<Map<String, dynamic>> getAdminModerationCases({
+  Future<Map<String, dynamic>> getModerationCases({
     String? status,
     int limit = 50,
     int offset = 0,
@@ -41,7 +41,7 @@ Widget _app(Map<String, dynamic> moderationCase, {Locale? locale}) =>
       supportedLocales: AppLocalizations.supportedLocales,
       home: Scaffold(
         body: AdminModerationTab(
-          apiService: _ModerationApiService(moderationCase),
+          adminService: _ModerationAdminService(moderationCase),
           canReview: true,
         ),
       ),

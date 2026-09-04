@@ -3,18 +3,18 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../services/api_service.dart';
+import '../../services/admin_service.dart';
 import '../../theme/app_theme.dart';
 
 class AdminModerationTab extends StatefulWidget {
   const AdminModerationTab({
     super.key,
-    required this.apiService,
+    required this.adminService,
     required this.canReview,
     this.readOnlyMessage,
   });
 
-  final ApiService apiService;
+  final AdminService adminService;
   final bool canReview;
   final String? readOnlyMessage;
 
@@ -39,7 +39,7 @@ class _AdminModerationTabState extends State<AdminModerationTab> {
       _error = null;
     });
     try {
-      final response = await widget.apiService.getAdminModerationCases(
+      final response = await widget.adminService.getModerationCases(
         limit: 100,
       );
       if (!mounted) return;
@@ -298,7 +298,7 @@ class _AdminModerationTabState extends State<AdminModerationTab> {
         if (note == null || !mounted || !sheetContext.mounted) return;
         Navigator.pop(sheetContext);
         try {
-          await widget.apiService.reviewModerationAppeal(
+          await widget.adminService.reviewModerationAppeal(
             appealId,
             decision: decision,
             note: note,
@@ -362,7 +362,7 @@ class _AdminModerationTabState extends State<AdminModerationTab> {
 
   Future<void> _reviewCase(String id, String action, String note) async {
     try {
-      await widget.apiService.reviewModerationCase(
+      await widget.adminService.reviewModerationCase(
         id,
         action: action,
         note: note,

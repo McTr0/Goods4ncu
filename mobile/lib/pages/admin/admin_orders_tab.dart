@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../services/api_service.dart';
+import '../../services/admin_service.dart';
 import '../../theme/app_theme.dart';
 
 class AdminOrdersTab extends StatefulWidget {
-  final ApiService apiService;
+  final AdminService adminService;
   final bool canManage;
 
   const AdminOrdersTab({
     super.key,
-    required this.apiService,
+    required this.adminService,
     this.canManage = true,
   });
 
@@ -35,7 +35,7 @@ class _AdminOrdersTabState extends State<AdminOrdersTab> {
       _error = null;
     });
     try {
-      final data = await widget.apiService.getAdminOrders(limit: 50);
+      final data = await widget.adminService.getAdminOrders(limit: 50);
       if (!mounted) return;
       setState(() {
         _orders = data;
@@ -180,7 +180,7 @@ class _AdminOrdersTabState extends State<AdminOrdersTab> {
                       child: OutlinedButton(
                         onPressed: () async {
                           try {
-                            await widget.apiService.updateAdminOrderStatus(
+                            await widget.adminService.updateAdminOrderStatus(
                               item['id'],
                               'cancelled',
                               reason: 'admin_cancelled',
@@ -207,7 +207,7 @@ class _AdminOrdersTabState extends State<AdminOrdersTab> {
                       child: FilledButton(
                         onPressed: () async {
                           try {
-                            await widget.apiService.updateAdminOrderStatus(
+                            await widget.adminService.updateAdminOrderStatus(
                               item['id'],
                               'confirmed',
                               autoDelist: autoDelist,

@@ -6,17 +6,17 @@ import 'package:go_router/go_router.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/pages/admin_page.dart';
 import 'package:goods4ncu_mobile/services/admin_impersonation_service.dart';
-import 'package:goods4ncu_mobile/services/api_service.dart';
+import 'package:goods4ncu_mobile/services/admin_service.dart';
 
-class _FakeApiService extends ApiService {
-  _FakeApiService({required this.users});
+class _FakeAdminService extends AdminService {
+  _FakeAdminService({required this.users});
 
   final List<Map<String, dynamic>> users;
   final List<String> banCalls = <String>[];
   final List<String> unbanCalls = <String>[];
 
   @override
-  Future<Map<String, dynamic>> getAdminUsers({
+  Future<Map<String, dynamic>> getAllUsers({
     String? q,
     int limit = 20,
     int offset = 0,
@@ -43,11 +43,12 @@ class _FakeAdminImpersonationService extends AdminImpersonationService {
   final List<String> calls = <String>[];
 
   @override
-  Future<void> impersonate(String userId) async {
+  Future<String> impersonate(String userId) async {
     calls.add(userId);
     if (shouldThrow) {
-      throw Exception('impersonate failed');
+      throw Exception('Impersonation failed');
     }
+    return 'impersonated-token';
   }
 }
 
@@ -58,12 +59,12 @@ class _UnusedAdminImpersonationGateway implements AdminImpersonationGateway {
   }
 }
 
-class _DelayedApiService extends ApiService {
+class _DelayedAdminService extends AdminService {
   final Completer<Map<String, dynamic>> completer =
       Completer<Map<String, dynamic>>();
 
   @override
-  Future<Map<String, dynamic>> getAdminUsers({
+  Future<Map<String, dynamic>> getAllUsers({
     String? q,
     int limit = 20,
     int offset = 0,
@@ -107,7 +108,7 @@ void main() {
     testWidgets('missing user id shows error and skips impersonation', (
       tester,
     ) async {
-      final apiService = _FakeApiService(
+      final adminService = _FakeAdminService(
         users: <Map<String, dynamic>>[
           <String, dynamic>{
             'username': 'Alice',
@@ -123,7 +124,7 @@ void main() {
       await tester.pumpWidget(
         _buildRouterApp(
           AdminUsersTab(
-            apiService: apiService,
+            adminService: adminService,
             impersonationService: impersonationService,
           ),
         ),
@@ -147,7 +148,7 @@ void main() {
     testWidgets('canceling impersonation dialog does not call service', (
       tester,
     ) async {
-      final apiService = _FakeApiService(
+      final adminService = _FakeAdminService(
         users: <Map<String, dynamic>>[
           <String, dynamic>{
             'id': 'user-1',
@@ -164,7 +165,7 @@ void main() {
       await tester.pumpWidget(
         _buildRouterApp(
           AdminUsersTab(
-            apiService: apiService,
+            adminService: adminService,
             impersonationService: impersonationService,
           ),
         ),
@@ -189,7 +190,7 @@ void main() {
     testWidgets('confirmed impersonation calls service and navigates home', (
       tester,
     ) async {
-      final apiService = _FakeApiService(
+      final adminService = _FakeAdminService(
         users: <Map<String, dynamic>>[
           <String, dynamic>{
             'id': 'user-1',
@@ -206,7 +207,7 @@ void main() {
       await tester.pumpWidget(
         _buildRouterApp(
           AdminUsersTab(
-            apiService: apiService,
+            adminService: adminService,
             impersonationService: impersonationService,
           ),
         ),
@@ -235,7 +236,7 @@ void main() {
     });
 
     testWidgets('impersonation failure shows error snackbar', (tester) async {
-      final apiService = _FakeApiService(
+      final adminService = _FakeAdminService(
         users: <Map<String, dynamic>>[
           <String, dynamic>{
             'id': 'user-2',
@@ -254,7 +255,7 @@ void main() {
       await tester.pumpWidget(
         _buildRouterApp(
           AdminUsersTab(
-            apiService: apiService,
+            adminService: adminService,
             impersonationService: impersonationService,
           ),
         ),
@@ -286,12 +287,12 @@ void main() {
     testWidgets('disposing tab during pending search does not throw', (
       tester,
     ) async {
-      final apiService = _DelayedApiService();
+      final adminService = _DelayedAdminService();
 
       await tester.pumpWidget(
         _buildRouterApp(
           AdminUsersTab(
-            apiService: apiService,
+            adminService: adminService,
             impersonationService: _FakeAdminImpersonationService(),
           ),
         ),
@@ -305,7 +306,7 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
 
-      apiService.completer.complete(<String, dynamic>{'users': <dynamic>[]});
+      adminService.completer.complete(<String, dynamic>{'users': <dynamic>[]});
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);

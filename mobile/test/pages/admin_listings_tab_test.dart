@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/pages/admin/admin_listings_tab.dart';
-import 'package:goods4ncu_mobile/services/api_service.dart';
+import 'package:goods4ncu_mobile/services/admin_service.dart';
 
-class _AdminListingsApi extends ApiService {
+class _AdminListingsApi extends AdminService {
   _AdminListingsApi(this.items, {this.failAction = false});
 
   final List<Map<String, dynamic>> items;
@@ -66,7 +66,7 @@ Widget _app(_AdminListingsApi api, {bool canManage = true}) => MaterialApp(
   localizationsDelegates: AppLocalizations.localizationsDelegates,
   supportedLocales: AppLocalizations.supportedLocales,
   home: Scaffold(
-    body: AdminListingsTab(apiService: api, canManage: canManage),
+    body: AdminListingsTab(adminService: api, canManage: canManage),
   ),
 );
 

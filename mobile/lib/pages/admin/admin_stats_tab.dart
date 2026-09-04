@@ -2,14 +2,14 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../services/api_service.dart';
+import '../../services/admin_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/category_utils.dart';
 
 class AdminStatsTab extends StatefulWidget {
-  final ApiService apiService;
+  final AdminService adminService;
 
-  const AdminStatsTab({super.key, required this.apiService});
+  const AdminStatsTab({super.key, required this.adminService});
 
   @override
   State<AdminStatsTab> createState() => _AdminStatsTabState();
@@ -35,7 +35,7 @@ class _AdminStatsTabState extends State<AdminStatsTab> {
       _error = null;
     });
     try {
-      final stats = await widget.apiService.getAdminStats();
+      final stats = await widget.adminService.getAdminStats();
       final base = (stats['total_listings'] as num).toDouble();
       _listingTrend = List.generate(7, (i) => base * (0.85 + 0.15 * (i / 6)));
       final baseOrders = (stats['total_orders'] as num).toDouble();

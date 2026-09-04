@@ -3,14 +3,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/pages/admin_page.dart';
 import 'package:goods4ncu_mobile/services/admin_impersonation_service.dart';
-import 'package:goods4ncu_mobile/services/api_service.dart';
+import 'package:goods4ncu_mobile/services/admin_service.dart';
+import 'package:goods4ncu_mobile/services/auth_service.dart';
 
-class _FakeApiService extends ApiService {
+class _FakeAdminService extends AdminService {
   bool unlocked = false;
-  final List<String> reauthenticateCalls = <String>[];
 
   @override
-  Future<Map<String, dynamic>> getAdminCapabilities() async {
+  Future<Map<String, dynamic>> getCapabilities() async {
     return <String, dynamic>{
       'is_platform_admin': true,
       'can_read': true,
@@ -21,13 +21,6 @@ class _FakeApiService extends ApiService {
           ? DateTime.now().add(const Duration(minutes: 10)).toIso8601String()
           : null,
     };
-  }
-
-  @override
-  Future<DateTime?> reauthenticate(String password, {String? totpCode}) async {
-    reauthenticateCalls.add(password);
-    unlocked = true;
-    return DateTime.now().add(const Duration(minutes: 10));
   }
 
   @override
@@ -42,6 +35,20 @@ class _FakeApiService extends ApiService {
   }
 }
 
+class _FakeAuthService extends AuthService {
+  final _FakeAdminService adminService;
+  final List<String> reauthenticateCalls = <String>[];
+
+  _FakeAuthService(this.adminService);
+
+  @override
+  Future<DateTime?> reauthenticate(String password, {String? totpCode}) async {
+    reauthenticateCalls.add(password);
+    adminService.unlocked = true;
+    return DateTime.now().add(const Duration(minutes: 10));
+  }
+}
+
 class _UnusedImpersonationGateway implements AdminImpersonationGateway {
   @override
   Future<String> fetchImpersonationToken(String userId) {
@@ -49,13 +56,14 @@ class _UnusedImpersonationGateway implements AdminImpersonationGateway {
   }
 }
 
-Widget _buildApp(_FakeApiService apiService) {
+Widget _buildApp(_FakeAdminService adminService, _FakeAuthService authService) {
   return MaterialApp(
     locale: const Locale('zh'),
     localizationsDelegates: AppLocalizations.localizationsDelegates,
     supportedLocales: AppLocalizations.supportedLocales,
     home: AdminPage(
-      apiService: apiService,
+      adminService: adminService,
+      authService: authService,
       impersonationService: AdminImpersonationService(
         gateway: _UnusedImpersonationGateway(),
       ),
@@ -69,8 +77,9 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    final apiService = _FakeApiService();
-    await tester.pumpWidget(_buildApp(apiService));
+    final adminService = _FakeAdminService();
+    final authService = _FakeAuthService(adminService);
+    await tester.pumpWidget(_buildApp(adminService, authService));
     await tester.pumpAndSettle();
 
     final l = AppLocalizations.of(tester.element(find.byType(AdminPage)))!;
@@ -91,7 +100,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(apiService.reauthenticateCalls, <String>['admin-password']);
+    expect(authService.reauthenticateCalls, <String>['admin-password']);
     expect(find.text(l.adminSensitiveActionsLocked), findsNothing);
     expect(find.text(l.adminReauthenticateSuccess), findsOneWidget);
   });

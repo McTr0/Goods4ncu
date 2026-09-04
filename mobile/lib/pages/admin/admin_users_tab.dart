@@ -5,17 +5,17 @@ import 'package:provider/provider.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/admin_impersonation_service.dart';
 import '../../services/admin_user_permissions.dart';
-import '../../services/api_service.dart';
+import '../../services/admin_service.dart';
 import '../../theme/app_theme.dart';
 
 class AdminUsersTab extends StatefulWidget {
-  final ApiService? apiService;
+  final AdminService? adminService;
   final AdminImpersonationService? impersonationService;
   final bool canManage;
 
   const AdminUsersTab({
     super.key,
-    this.apiService,
+    this.adminService,
     this.impersonationService,
     this.canManage = true,
   });
@@ -25,7 +25,7 @@ class AdminUsersTab extends StatefulWidget {
 }
 
 class _AdminUsersTabState extends State<AdminUsersTab> {
-  late final ApiService _apiService;
+  late final AdminService _adminService;
   late final AdminImpersonationService _adminImpersonationService;
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -39,7 +39,7 @@ class _AdminUsersTabState extends State<AdminUsersTab> {
   @override
   void initState() {
     super.initState();
-    _apiService = widget.apiService ?? context.read<ApiService>();
+    _adminService = widget.adminService ?? context.read<AdminService>();
     _adminImpersonationService =
         widget.impersonationService ??
         context.read<AdminImpersonationService>();
@@ -72,7 +72,7 @@ class _AdminUsersTabState extends State<AdminUsersTab> {
       _error = null;
     });
     try {
-      final data = await _apiService.getAdminUsers(
+      final data = await _adminService.getAllUsers(
         q: query.isEmpty ? null : query,
         limit: 20,
         offset: _offset,
@@ -107,7 +107,7 @@ class _AdminUsersTabState extends State<AdminUsersTab> {
       _loadingMore = true;
     });
     try {
-      final data = await _apiService.getAdminUsers(
+      final data = await _adminService.getAllUsers(
         q: query.isEmpty ? null : query,
         limit: 20,
         offset: _offset,
@@ -300,7 +300,7 @@ class _AdminUsersTabState extends State<AdminUsersTab> {
                         Navigator.pop(ctx);
                       }
                       try {
-                        await _apiService.banUser(userId);
+                        await _adminService.banUser(userId);
                         if (!mounted) return;
                         messenger.showSnackBar(
                           SnackBar(
@@ -365,7 +365,7 @@ class _AdminUsersTabState extends State<AdminUsersTab> {
                         Navigator.pop(ctx);
                       }
                       try {
-                        await _apiService.unbanUser(userId);
+                        await _adminService.unbanUser(userId);
                         if (!mounted) return;
                         messenger.showSnackBar(
                           SnackBar(

@@ -2,7 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../services/api_service.dart';
+import '../services/admin_service.dart';
+import '../services/auth_service.dart';
 import '../services/admin_impersonation_service.dart';
 import '../l10n/app_localizations.dart';
 import '../theme/app_theme.dart';
@@ -19,10 +20,16 @@ export 'admin/admin_users_tab.dart';
 export 'admin/admin_moderation_tab.dart';
 
 class AdminPage extends StatefulWidget {
-  final ApiService? apiService;
+  final AdminService? adminService;
+  final AuthService? authService;
   final AdminImpersonationService? impersonationService;
 
-  const AdminPage({super.key, this.apiService, this.impersonationService});
+  const AdminPage({
+    super.key,
+    this.adminService,
+    this.authService,
+    this.impersonationService,
+  });
 
   @override
   State<AdminPage> createState() => _AdminPageState();
@@ -50,8 +57,8 @@ class _AdminPageState extends State<AdminPage>
   }
 
   Future<Map<String, dynamic>> _fetchCapabilities() async {
-    final apiService = widget.apiService ?? context.read<ApiService>();
-    final capabilities = await apiService.getAdminCapabilities();
+    final adminService = widget.adminService ?? context.read<AdminService>();
+    final capabilities = await adminService.getCapabilities();
     _scheduleRecentAuthExpiry(capabilities);
     return capabilities;
   }
@@ -135,8 +142,8 @@ class _AdminPageState extends State<AdminPage>
 
     setState(() => _reauthenticating = true);
     try {
-      final apiService = widget.apiService ?? context.read<ApiService>();
-      await apiService.reauthenticate(
+      final authService = widget.authService ?? context.read<AuthService>();
+      await authService.reauthenticate(
         password,
         totpCode: totpCode.isEmpty ? null : totpCode,
       );
@@ -160,7 +167,7 @@ class _AdminPageState extends State<AdminPage>
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context)!;
-    final apiService = widget.apiService ?? context.read<ApiService>();
+    final adminService = widget.adminService ?? context.read<AdminService>();
     final impersonationService =
         widget.impersonationService ??
         context.read<AdminImpersonationService>();
@@ -184,18 +191,22 @@ class _AdminPageState extends State<AdminPage>
         final canReview = capabilities['can_review'] == true;
         final recentAuthenticationValid =
             capabilities['recent_authentication_valid'] == true;
-        final canManage = canReview && recentAuthenticationValid;
+        final canManage =
+            canReview && (!isPlatformAdmin || recentAuthenticationValid);
+
         return Scaffold(
           appBar: AppBar(
             title: Text(l.adminConsole),
             bottom: TabBar(
               controller: _tabController,
               isScrollable: true,
-              indicatorColor: AppTheme.primary.withValues(alpha: 0.8),
               tabs: [
-                Tab(icon: const Icon(Icons.dashboard), text: l.adminStatsTab),
                 Tab(
-                  icon: const Icon(Icons.inventory),
+                  icon: const Icon(Icons.analytics_outlined),
+                  text: l.adminStatsTab,
+                ),
+                Tab(
+                  icon: const Icon(Icons.inventory_2_outlined),
                   text: l.adminListingsTab,
                 ),
                 Tab(
@@ -221,22 +232,22 @@ class _AdminPageState extends State<AdminPage>
                 child: TabBarView(
                   controller: _tabController,
                   children: [
-                    AdminStatsTab(apiService: apiService),
+                    AdminStatsTab(adminService: adminService),
                     AdminListingsTab(
-                      apiService: apiService,
+                      adminService: adminService,
                       canManage: canManage,
                     ),
                     AdminOrdersTab(
-                      apiService: apiService,
+                      adminService: adminService,
                       canManage: canManage,
                     ),
                     AdminUsersTab(
-                      apiService: apiService,
+                      adminService: adminService,
                       impersonationService: impersonationService,
                       canManage: canManage,
                     ),
                     AdminModerationTab(
-                      apiService: apiService,
+                      adminService: adminService,
                       canReview: canManage,
                       readOnlyMessage:
                           isPlatformAdmin && !recentAuthenticationValid

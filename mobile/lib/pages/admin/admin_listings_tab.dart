@@ -2,17 +2,17 @@ import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../models/models.dart';
-import '../../services/api_service.dart';
+import '../../services/admin_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/category_utils.dart';
 
 class AdminListingsTab extends StatefulWidget {
-  final ApiService apiService;
+  final AdminService adminService;
   final bool canManage;
 
   const AdminListingsTab({
     super.key,
-    required this.apiService,
+    required this.adminService,
     this.canManage = true,
   });
 
@@ -59,7 +59,7 @@ class _AdminListingsTabState extends State<AdminListingsTab> {
       _error = null;
     });
     try {
-      final data = await widget.apiService.getAdminListings(
+      final data = await widget.adminService.getAdminListings(
         limit: 20,
         offset: 0,
       );
@@ -94,7 +94,7 @@ class _AdminListingsTabState extends State<AdminListingsTab> {
       _loadingMore = true;
     });
     try {
-      final data = await widget.apiService.getAdminListings(
+      final data = await widget.adminService.getAdminListings(
         limit: 20,
         offset: _offset,
       );
@@ -253,9 +253,9 @@ class _AdminListingsTabState extends State<AdminListingsTab> {
             });
             try {
               if (takedown) {
-                await widget.apiService.takedownListing(item.id);
+                await widget.adminService.takedownListing(item.id);
               } else {
-                await widget.apiService.restoreListing(
+                await widget.adminService.restoreListing(
                   item.id,
                   reason: restoreReason!,
                 );
