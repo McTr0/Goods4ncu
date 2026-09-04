@@ -8,7 +8,10 @@ import 'admin_service.dart';
 import 'negotiate_service.dart';
 
 /// Remaining ApiService methods after domain split.
-/// Routes to split services internally; pages migrate to individual services over time.
+/// Routes to split services internally; all UI pages have migrated to individual domain services.
+@Deprecated(
+  'Use domain-specific services (AuthService, UserService, ListingService, AdminService, ChatService, NegotiateService) directly.',
+)
 class ApiService extends BaseService {
   // Static navigatorKey is inherited from BaseService — accessible as ApiService.navigatorKey
   final ChatService _chatService = ChatService();
@@ -17,32 +20,6 @@ class ApiService extends BaseService {
   final ListingService _listingService = ListingService();
   final AdminService _adminService = AdminService();
   final NegotiateService _negotiateService = NegotiateService();
-
-  // -----------------------------------------------------------------
-  // Stats
-  // -----------------------------------------------------------------
-
-  /// Get platform statistics (no auth required).
-  /// GET /api/stats
-  Future<Map<String, dynamic>> getStats() async {
-    final response = await get(Uri.parse('$baseUrl/api/stats'), {
-      'Content-Type': 'application/json',
-    });
-    return handleResponse(response, (data) => data as Map<String, dynamic>);
-  }
-
-  // -----------------------------------------------------------------
-  // Recommendations
-  // -----------------------------------------------------------------
-
-  /// Get personalized recommendations (no auth required).
-  /// GET /api/recommendations
-  Future<Map<String, dynamic>> getRecommendations() async {
-    final response = await get(Uri.parse('$baseUrl/api/recommendations'), {
-      'Content-Type': 'application/json',
-    });
-    return handleResponse(response, (data) => data as Map<String, dynamic>);
-  }
 
   // -----------------------------------------------------------------
   // Conversations (legacy — prefer ChatService)
