@@ -3,13 +3,16 @@
 - **Date**: 2026-09-04
 - **Branch**: `main` (tracking `origin/main`)
 - **Starting Baseline HEAD**: `983d4b05a50450117805ef46817e9f3a58bb9bfe`
-- **Current Milestone Commits**:
+- **Final Remediation HEAD**: `342f77b5a5aa485985d5d49b7b530796618df4bf`
+- **Milestone Commits**:
   1. `e33ed0d17bebfa647ff32bf7ba339ca4fd315e2c`: `refactor(schema): purge zero-compatibility UUID shadow columns, dual-writes, and triggers`
   2. `a63d37be326a266fc96741cedadb4fa04b25e9d0`: `refactor(post): enforce type-level post taxonomy and domain invariants`
   3. `6fe5df64ad8a4dba38c1653dcdaf17b0dc8b47e8`: `refactor(agent): enforce typed tool execution boundary and audit resource tracking`
   4. `47902bdd88ae5af245a0d46312def88da998a3fa`: `fix(ws): enforce stable connection UUIDs, atomic teardown, and bounded runtime concurrency`
   5. `3b4610e340088da31087990fc3b554a7f766bc4b`: `refactor(config): remove deprecated LLM config aliases and update operations docs`
   6. `bb92f1b0b40117114d3e6ccaf550f1a2fa72bf6c`: `refactor(mobile): remove deprecated ApiService, purge dead event UI, and add category routing safeguards`
+  7. `cc89fe6d3284713213cd5de332c2e2d126fd28e5`: `docs(audit): add comprehensive architectural compliance audit report`
+  8. `342f77b5a5aa485985d5d49b7b530796618df4bf`: `refactor(api): extract 119 handler SQL queries into repositories and services`
 - **Policy & Authority**: Pre-launch zero-compatibility authorization per `ORIGINAL_REQUEST.md`.
 - **Safety Confirmation**: No credentials, tokens, passwords, API keys, JWT secrets, database secrets, or remote infrastructure configurations were modified or exposed. All remediations are strictly local to the repository and local development database schemas.
 
