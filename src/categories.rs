@@ -51,20 +51,6 @@ pub fn valid_category_message() -> String {
     )
 }
 
-/// Unified post categories. This IS the post kind. Bootstrap fallback only —
-/// the authoritative set lives in post_categories (migrations 0101/0103) and
-/// is cached from the DB at runtime (see services::post::allowed_categories).
-pub const POST_CATEGORIES: &[&str] = &[
-    "announcement",
-    "offer",
-    "wanted",
-    "share",
-    "question",
-    "discussion",
-    "recruit",
-    "team_up",
-];
-
 #[cfg(test)]
 mod tests {
     use super::*;

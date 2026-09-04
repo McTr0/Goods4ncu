@@ -170,13 +170,14 @@ pub(crate) async fn execute_create_listing_in_tx(
     let cmd = crate::services::post::PublishPostCommand {
         campus_id,
         author_id: owner.to_string(),
+        category: crate::services::post::PostCategory::Offer,
         title: title.clone(),
         body: if args.original_description.trim().is_empty() {
             title.clone()
         } else {
             args.original_description.clone()
         },
-        payload: crate::services::post::PublishPostPayload::Offer(
+        payload: crate::services::post::PublishPostPayload::Marketplace(
             crate::services::post::CreatePostMarketplaceInput {
                 category: args.category,
                 brand: args.brand,

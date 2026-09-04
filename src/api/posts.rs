@@ -642,9 +642,9 @@ mod tests {
     fn normalize_filter_with_fallback(query: &PostListQuery) -> Result<PostFilter, ApiError> {
         normalize_filter(
             query,
-            &crate::categories::POST_CATEGORIES
+            &crate::services::post::PostCategory::ALL
                 .iter()
-                .map(|key| key.to_string())
+                .map(|key| key.as_str().to_string())
                 .collect::<Vec<_>>(),
         )
     }
