@@ -149,12 +149,6 @@ impl UserRepository for PostgresUserRepository {
         role: &str,
     ) -> Result<String, ApiError> {
         let user_id = uuid::Uuid::new_v4().to_string();
-        let user_uuid = Uuid::parse_str(&user_id).map_err(|e| {
-            ApiError::Internal(anyhow::anyhow!(
-                "Generated user id is not UUID-compatible: {}",
-                e
-            ))
-        })?;
         let student_id = email.and_then(derive_student_id);
         let mut tx = self
             .pool
@@ -162,11 +156,10 @@ impl UserRepository for PostgresUserRepository {
             .await
             .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
         sqlx::query(
-            "INSERT INTO users (id, new_id, username, email, student_id, password_hash, role)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            "INSERT INTO users (id, username, email, student_id, password_hash, role)
+             VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(&user_id)
-        .bind(user_uuid)
         .bind(username)
         .bind(email)
         .bind(student_id.as_deref())
@@ -826,7 +819,7 @@ mod tests {
     use crate::test_infra::with_test_pool;
 
     #[tokio::test]
-    async fn create_dual_writes_shadow_uuid_column() {
+    async fn create_user_persists_standard_user_record() {
         with_test_pool(|pool| async move {
             let repo = PostgresUserRepository::new(pool.clone());
 
@@ -839,15 +832,15 @@ mod tests {
                 )
                 .await
                 .expect("create user");
-            let user_uuid = Uuid::parse_str(&user_id).expect("uuid id");
+            assert!(Uuid::parse_str(&user_id).is_ok());
 
-            let row = sqlx::query("SELECT new_id, username, email, role FROM users WHERE id = $1")
+            let row = sqlx::query("SELECT id, username, email, role FROM users WHERE id = $1")
                 .bind(&user_id)
                 .fetch_one(&pool)
                 .await
                 .expect("select user");
 
-            assert_eq!(row.get::<Uuid, _>("new_id"), user_uuid);
+            assert_eq!(row.get::<String, _>("id"), user_id);
             assert_eq!(row.get::<String, _>("username"), "shadow_profile_user");
             assert_eq!(
                 row.get::<Option<String>, _>("email").as_deref(),

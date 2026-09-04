@@ -44,12 +44,6 @@ impl AuthRepository for PostgresAuthRepository {
         password_hash: &str,
     ) -> Result<String, ApiError> {
         let user_id = uuid::Uuid::new_v4().to_string();
-        let user_uuid = Uuid::parse_str(&user_id).map_err(|e| {
-            ApiError::Internal(anyhow::anyhow!(
-                "Generated user id is not UUID-compatible: {}",
-                e
-            ))
-        })?;
         let mut tx = self
             .pool
             .begin()
@@ -58,10 +52,9 @@ impl AuthRepository for PostgresAuthRepository {
 
         let result = if let Some(e) = email {
             sqlx::query(
-                "INSERT INTO users (id, new_id, username, email, password_hash, role) VALUES ($1, $2, $3, $4, $5, $6)",
+                "INSERT INTO users (id, username, email, password_hash, role) VALUES ($1, $2, $3, $4, $5)",
             )
             .bind(&user_id)
-            .bind(user_uuid)
             .bind(username)
             .bind(e)
             .bind(password_hash)
@@ -70,10 +63,9 @@ impl AuthRepository for PostgresAuthRepository {
             .await
         } else {
             sqlx::query(
-                "INSERT INTO users (id, new_id, username, password_hash, role) VALUES ($1, $2, $3, $4, $5)",
+                "INSERT INTO users (id, username, password_hash, role) VALUES ($1, $2, $3, $4)",
             )
             .bind(&user_id)
-            .bind(user_uuid)
             .bind(username)
             .bind(password_hash)
             .bind("user")

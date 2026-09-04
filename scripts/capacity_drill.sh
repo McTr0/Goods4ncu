@@ -70,9 +70,8 @@ VALUES ('c0000000-0000-0000-0000-00000000c0b0', 'cap-b', '容量测试大学', '
 ON CONFLICT (slug) DO NOTHING;
 
 -- Users + verified memberships split across the two campuses.
-INSERT INTO users (id, new_id, username, password_hash, role)
+INSERT INTO users (id, username, password_hash, role)
 SELECT 'cap-user-' || g,
-       gen_random_uuid(),
        'cap_user_' || g,
        '$argon2id$v=19$m=19456,t=2,p=1$c2VlZHNlZWRzZWVk$3m0CzD1Yy4Zl4a5S3n8m6QHW4kY0FZlYQm1n8m6QHW4',
        'user'
@@ -87,11 +86,10 @@ FROM generate_series(1, :users) AS g;
 
 -- Listings: mixed categories/directions/status across both campuses, spread
 -- creation times so recency ordering is realistic.
-INSERT INTO inventory (id, new_id, campus_id, title, category, brand, direction,
+INSERT INTO inventory (id, campus_id, title, category, brand, direction,
                        condition_score, suggested_price_cny, defects, description,
-                       owner_id, new_owner_id, status, created_at)
+                       owner_id, status, created_at)
 SELECT 'cap-listing-' || g,
-       gen_random_uuid(),
        CASE WHEN g % 2 = 0
             THEN 'c0000000-0000-0000-0000-000000000001'::uuid
             ELSE 'c0000000-0000-0000-0000-00000000c0b0'::uuid END,
@@ -104,7 +102,6 @@ SELECT 'cap-listing-' || g,
        '[]',
        'seeded capacity listing',
        'cap-user-' || (1 + g % :users),
-       (SELECT new_id FROM users WHERE id = 'cap-user-' || (1 + g % :users)),
        CASE WHEN g % 11 = 0 THEN 'sold' ELSE 'active' END,
        NOW() - (g % 90) * INTERVAL '1 day' - (g % 86400) * INTERVAL '1 second'
 FROM generate_series(1, :listings) AS g;

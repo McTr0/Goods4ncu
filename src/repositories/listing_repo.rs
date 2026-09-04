@@ -88,12 +88,6 @@ impl PostgresListingRepository {
         }
 
         let listing_id = uuid::Uuid::new_v4().to_string();
-        let listing_uuid = Uuid::parse_str(&listing_id).map_err(|e| {
-            ApiError::Internal(anyhow::anyhow!(
-                "Generated listing id is not UUID-compatible: {}",
-                e
-            ))
-        })?;
         let price_cents = (input.suggested_price_cny * 100.0).round() as i32;
         let defects_json = serde_json::to_string(&input.defects)
             .map_err(|e| ApiError::BadRequest(format!("invalid defects: {}", e)))?;
@@ -101,14 +95,13 @@ impl PostgresListingRepository {
         let inserted_id = sqlx::query_scalar::<_, String>(
             r#"
             INSERT INTO inventory (
-                id, new_id, campus_id,
+                id, campus_id,
                 title, category, brand, direction, condition_score,
                 suggested_price_cny, defects, description, image_url,
-                owner_id, new_owner_id, status,
+                owner_id, status,
                 idempotency_key, idempotency_hash
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                    (SELECT new_id FROM users WHERE id = $13), 'active', $14, $15)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'active', $13, $14)
             ON CONFLICT (owner_id, idempotency_key)
                 WHERE idempotency_key IS NOT NULL
                 DO NOTHING
@@ -116,7 +109,6 @@ impl PostgresListingRepository {
             "#,
         )
         .bind(&listing_id)
-        .bind(listing_uuid)
         .bind(input.campus_id)
         .bind(&input.title)
         .bind(&input.category)
@@ -1113,7 +1105,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_dual_writes_shadow_uuid_columns() {
+    async fn create_listing_persists_standard_columns() {
         with_test_pool(|pool| async move {
             sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')")
                 .bind("listing-owner")
@@ -1121,12 +1113,6 @@ mod tests {
                 .execute(&pool)
                 .await
                 .expect("insert owner");
-
-            let owner_uuid: Uuid =
-                sqlx::query_scalar("SELECT new_id FROM users WHERE id = 'listing-owner'")
-                    .fetch_one(&pool)
-                    .await
-                    .expect("owner uuid");
 
             let repo = PostgresListingRepository::new(pool.clone());
             let listing_id = repo
@@ -1145,18 +1131,18 @@ mod tests {
                 })
                 .await
                 .expect("create listing");
-            let listing_uuid = Uuid::parse_str(&listing_id).expect("uuid id");
+            assert!(Uuid::parse_str(&listing_id).is_ok());
 
             let row = sqlx::query(
-                "SELECT new_id, new_owner_id, suggested_price_cny, status FROM inventory WHERE id = $1",
+                "SELECT id, owner_id, suggested_price_cny, status FROM inventory WHERE id = $1",
             )
             .bind(&listing_id)
             .fetch_one(&pool)
             .await
             .expect("select listing");
 
-            assert_eq!(row.get::<Uuid, _>("new_id"), listing_uuid);
-            assert_eq!(row.get::<Uuid, _>("new_owner_id"), owner_uuid);
+            assert_eq!(row.get::<String, _>("id"), listing_id);
+            assert_eq!(row.get::<String, _>("owner_id"), "listing-owner");
             assert_eq!(row.get::<i64, _>("suggested_price_cny"), 12345);
             assert_eq!(row.get::<String, _>("status"), "active");
         })

@@ -1481,7 +1481,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_user_dual_writes_shadow_uuid_column() {
+    async fn test_create_user_persists_standard_record() {
         with_test_pool(|pool| async move {
             let auth_repo = PostgresAuthRepository::new(pool.clone());
 
@@ -1489,15 +1489,15 @@ pub(crate) mod tests {
                 .create_user("shadow_user", Some("shadow@example.com"), "hash")
                 .await
                 .expect("create user");
-            let user_uuid = Uuid::parse_str(&user_id).expect("uuid id");
+            assert!(Uuid::parse_str(&user_id).is_ok());
 
-            let row = sqlx::query("SELECT new_id, username, email FROM users WHERE id = $1")
+            let row = sqlx::query("SELECT id, username, email FROM users WHERE id = $1")
                 .bind(&user_id)
                 .fetch_one(&pool)
                 .await
                 .expect("select user");
 
-            assert_eq!(row.get::<Uuid, _>("new_id"), user_uuid);
+            assert_eq!(row.get::<String, _>("id"), user_id);
             assert_eq!(row.get::<String, _>("username"), "shadow_user");
             assert_eq!(
                 row.get::<Option<String>, _>("email").as_deref(),

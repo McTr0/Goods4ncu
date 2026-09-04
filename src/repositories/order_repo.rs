@@ -3,7 +3,6 @@
 use crate::api::error::ApiError;
 use crate::repositories::traits::{Order, OrderRepository, OrderSummary};
 use sqlx::{PgPool, Postgres, Row, Transaction};
-use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
@@ -45,23 +44,18 @@ impl PostgresOrderRepository {
         seller_id: &str,
         final_price: i64,
     ) -> Result<(), ApiError> {
-        let order_uuid = Uuid::parse_str(id).map_err(|e| {
-            ApiError::Internal(anyhow::anyhow!("Order id must be UUID-compatible: {}", e))
-        })?;
-
         sqlx::query(
             r#"
             INSERT INTO orders (
-                id, new_id, campus_id,
+                id, campus_id,
                 listing_id, buyer_id, seller_id,
                 final_price, status
             )
-            VALUES ($1, $2, (SELECT campus_id FROM inventory WHERE id = $3),
-                    $3, $4, $5, $6, 'intent_pending')
+            VALUES ($1, (SELECT campus_id FROM inventory WHERE id = $2),
+                    $2, $3, $4, $5, 'intent_pending')
             "#,
         )
         .bind(id)
-        .bind(order_uuid)
         .bind(listing_id)
         .bind(buyer_id)
         .bind(seller_id)
@@ -122,25 +116,21 @@ impl OrderRepository for PostgresOrderRepository {
         seller_id: &str,
         final_price: i64,
     ) -> Result<(), ApiError> {
-        let order_uuid = Uuid::parse_str(id).map_err(|e| {
-            ApiError::Internal(anyhow::anyhow!("Order id must be UUID-compatible: {}", e))
-        })?;
         sqlx::query(
             r#"
             INSERT INTO orders (
-                id, new_id, campus_id,
+                id, campus_id,
                 listing_id, buyer_id, seller_id,
                 final_price, status
             )
             VALUES (
-                $1, $2,
-                (SELECT campus_id FROM inventory WHERE id = $3),
-                $3, $4, $5, $6, 'intent_pending'
+                $1,
+                (SELECT campus_id FROM inventory WHERE id = $2),
+                $2, $3, $4, $5, 'intent_pending'
             )
             "#,
         )
         .bind(id)
-        .bind(order_uuid)
         .bind(listing_id)
         .bind(buyer_id)
         .bind(seller_id)
@@ -311,9 +301,10 @@ impl OrderRepository for PostgresOrderRepository {
 mod tests {
     use super::*;
     use crate::test_infra::with_test_pool;
+    use uuid::Uuid;
 
     #[tokio::test]
-    async fn create_dual_writes_shadow_uuid_columns() {
+    async fn create_order_persists_standard_columns() {
         with_test_pool(|pool| async move {
             for (id, username) in [("seller-1", "seller"), ("buyer-1", "buyer")] {
                 sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')")
@@ -337,36 +328,22 @@ mod tests {
             repo.create(&order_id, "listing-1", "buyer-1", "seller-1", 10000)
                 .await
                 .expect("create order");
-            let order_uuid = Uuid::parse_str(&order_id).expect("uuid id");
-
-            let listing_uuid: Uuid =
-                sqlx::query_scalar("SELECT new_id FROM inventory WHERE id = 'listing-1'")
-                    .fetch_one(&pool)
-                    .await
-                    .expect("listing uuid");
-            let buyer_uuid: Uuid =
-                sqlx::query_scalar("SELECT new_id FROM users WHERE id = 'buyer-1'")
-                    .fetch_one(&pool)
-                    .await
-                    .expect("buyer uuid");
-            let seller_uuid: Uuid =
-                sqlx::query_scalar("SELECT new_id FROM users WHERE id = 'seller-1'")
-                    .fetch_one(&pool)
-                    .await
-                    .expect("seller uuid");
+            assert!(Uuid::parse_str(&order_id).is_ok());
 
             let row = sqlx::query(
-                "SELECT new_id, new_listing_id, new_buyer_id, new_seller_id FROM orders WHERE id = $1",
+                "SELECT id, listing_id, buyer_id, seller_id, final_price, status FROM orders WHERE id = $1",
             )
             .bind(&order_id)
             .fetch_one(&pool)
             .await
             .expect("select order");
 
-            assert_eq!(row.get::<Uuid, _>("new_id"), order_uuid);
-            assert_eq!(row.get::<Uuid, _>("new_listing_id"), listing_uuid);
-            assert_eq!(row.get::<Uuid, _>("new_buyer_id"), buyer_uuid);
-            assert_eq!(row.get::<Uuid, _>("new_seller_id"), seller_uuid);
+            assert_eq!(row.get::<String, _>("id"), order_id);
+            assert_eq!(row.get::<String, _>("listing_id"), "listing-1");
+            assert_eq!(row.get::<String, _>("buyer_id"), "buyer-1");
+            assert_eq!(row.get::<String, _>("seller_id"), "seller-1");
+            assert_eq!(row.get::<i64, _>("final_price"), 10000);
+            assert_eq!(row.get::<String, _>("status"), "intent_pending");
 
             let mut tx = pool.begin().await.expect("begin tx");
             let pending_order_id = Uuid::new_v4().to_string();
@@ -381,20 +358,22 @@ mod tests {
             .await
             .expect("create pending in tx");
             tx.commit().await.expect("commit tx");
-            let pending_order_uuid = Uuid::parse_str(&pending_order_id).expect("uuid id");
+            assert!(Uuid::parse_str(&pending_order_id).is_ok());
 
             let pending_row = sqlx::query(
-                "SELECT new_id, new_listing_id, new_buyer_id, new_seller_id FROM orders WHERE id = $1",
+                "SELECT id, listing_id, buyer_id, seller_id, final_price, status FROM orders WHERE id = $1",
             )
             .bind(&pending_order_id)
             .fetch_one(&pool)
             .await
             .expect("select pending order");
 
-            assert_eq!(pending_row.get::<Uuid, _>("new_id"), pending_order_uuid);
-            assert_eq!(pending_row.get::<Uuid, _>("new_listing_id"), listing_uuid);
-            assert_eq!(pending_row.get::<Uuid, _>("new_buyer_id"), buyer_uuid);
-            assert_eq!(pending_row.get::<Uuid, _>("new_seller_id"), seller_uuid);
+            assert_eq!(pending_row.get::<String, _>("id"), pending_order_id);
+            assert_eq!(pending_row.get::<String, _>("listing_id"), "listing-1");
+            assert_eq!(pending_row.get::<String, _>("buyer_id"), "buyer-1");
+            assert_eq!(pending_row.get::<String, _>("seller_id"), "seller-1");
+            assert_eq!(pending_row.get::<i64, _>("final_price"), 12000);
+            assert_eq!(pending_row.get::<String, _>("status"), "intent_pending");
         })
         .await;
     }

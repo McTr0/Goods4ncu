@@ -6,7 +6,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 #[tokio::test]
-async fn create_order_explicitly_dual_writes_shadow_uuid_columns() {
+async fn create_order_persists_standard_order_record() {
     with_test_pool(|pool| async move {
         for (id, username) in [("seller-1", "seller"), ("buyer-1", "buyer")] {
             sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')")
@@ -19,45 +19,33 @@ async fn create_order_explicitly_dual_writes_shadow_uuid_columns() {
 
         sqlx::query(
             "INSERT INTO inventory (id, title, category, brand, condition_score, suggested_price_cny, defects, owner_id, status) \
-             VALUES ('listing-1', 'Test', 'misc', 'Brand', 8, 10000, '[]', 'seller-1', 'active')",
+             VALUES ('listing-1', 'Test', 'other', 'Brand', 8, 10000, '[]', 'seller-1', 'active')",
         )
         .execute(&pool)
         .await
         .unwrap();
-
-        let seller_uuid: Uuid = sqlx::query_scalar("SELECT new_id FROM users WHERE id = 'seller-1'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        let buyer_uuid: Uuid = sqlx::query_scalar("SELECT new_id FROM users WHERE id = 'buyer-1'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        let listing_uuid: Uuid =
-            sqlx::query_scalar("SELECT new_id FROM inventory WHERE id = 'listing-1'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
 
         let service = OrderService::new(pool.clone());
         let order_id = service
             .create_order("listing-1", "buyer-1", "seller-1", 10000)
             .await
             .unwrap();
-        let order_uuid = Uuid::parse_str(&order_id).unwrap();
+        assert!(Uuid::parse_str(&order_id).is_ok());
 
         let order = sqlx::query(
-            "SELECT new_id, new_listing_id, new_buyer_id, new_seller_id FROM orders WHERE id = $1",
+            "SELECT id, listing_id, buyer_id, seller_id, final_price, status FROM orders WHERE id = $1",
         )
         .bind(&order_id)
         .fetch_one(&pool)
         .await
         .unwrap();
 
-        assert_eq!(order.get::<Uuid, _>("new_id"), order_uuid);
-        assert_eq!(order.get::<Uuid, _>("new_listing_id"), listing_uuid);
-        assert_eq!(order.get::<Uuid, _>("new_buyer_id"), buyer_uuid);
-        assert_eq!(order.get::<Uuid, _>("new_seller_id"), seller_uuid);
+        assert_eq!(order.get::<String, _>("id"), order_id);
+        assert_eq!(order.get::<String, _>("listing_id"), "listing-1");
+        assert_eq!(order.get::<String, _>("buyer_id"), "buyer-1");
+        assert_eq!(order.get::<String, _>("seller_id"), "seller-1");
+        assert_eq!(order.get::<i64, _>("final_price"), 10000);
+        assert_eq!(order.get::<String, _>("status"), "intent_pending");
     })
     .await;
 }
