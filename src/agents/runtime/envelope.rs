@@ -31,6 +31,11 @@ impl ToolResultEnvelope {
         serde_json::to_string(self).unwrap_or_else(|_| self.model_data.clone())
     }
 
+    /// Parse from JSON envelope string if valid; otherwise gracefully wrap raw text.
+    pub fn parse(raw: &str) -> Self {
+        serde_json::from_str::<Self>(raw).unwrap_or_else(|_| Self::success(raw))
+    }
+
     pub fn with_action(mut self, action: UiAction) -> Self {
         self.ui_actions.push(action);
         self
@@ -68,5 +73,12 @@ mod tests {
         let json = envelope.to_json();
         let decoded: ToolResultEnvelope = serde_json::from_str(&json).expect("decode");
         assert_eq!(decoded, envelope);
+
+        // Test resilient parsing
+        assert_eq!(ToolResultEnvelope::parse(&json), envelope);
+        assert_eq!(
+            ToolResultEnvelope::parse("plain raw string"),
+            ToolResultEnvelope::success("plain raw string")
+        );
     }
 }

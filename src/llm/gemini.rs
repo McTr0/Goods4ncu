@@ -289,8 +289,7 @@ impl MarketplaceAgent for GeminiMarketplaceAgent {
                                 .call_tool(&tool_call.function.name, &args_str)
                                 .await
                                 .map_err(|e| anyhow::anyhow!("tool error: {}", e))?;
-                            let envelope = serde_json::from_str::<crate::agents::runtime::envelope::ToolResultEnvelope>(&result)
-                                .map_err(|e| anyhow::anyhow!("tool error: {e}"))?;
+                            let envelope = crate::agents::runtime::envelope::ToolResultEnvelope::parse(&result);
                             for action in envelope.ui_actions {
                                 yield AgentStreamChunk::UiAction(action);
                             }
@@ -427,8 +426,9 @@ impl MarketplaceAgent for GeminiMarketplaceAgent {
             .call_tool(name, arguments)
             .await
             .map_err(|error| anyhow::anyhow!("tool error: {error}"))?;
-        serde_json::from_str::<crate::agents::runtime::envelope::ToolResultEnvelope>(&result)
-            .map_err(|error| anyhow::anyhow!("failed to deserialize tool envelope: {error}"))
+        Ok(crate::agents::runtime::envelope::ToolResultEnvelope::parse(
+            &result,
+        ))
     }
 }
 
