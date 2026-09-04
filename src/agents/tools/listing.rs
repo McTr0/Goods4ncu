@@ -1,6 +1,8 @@
 use super::common::yuan;
 use super::common::*;
+use crate::agents::runtime::envelope::ToolResultEnvelope;
 use crate::api::error::ApiError;
+use crate::llm::UiAction;
 use crate::services::listing_command::{ListingCommandService, UpdateListingDraft};
 use crate::utils::cents_to_yuan;
 use rig::completion::ToolDefinition;
@@ -30,7 +32,7 @@ impl Tool for CreateListingTool {
     const NAME: &'static str = "create_listing";
     type Error = ToolError;
     type Args = CreateListingArgs;
-    type Output = String;
+    type Output = ToolResultEnvelope;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
@@ -62,7 +64,8 @@ impl Tool for CreateListingTool {
         // listing can be retracted while nobody has acted on it — so charging
         // a confirmation dialog for every publish costs more than it saves.
         // L3 (money, identity) still confirms up front in `propose_action_plan`.
-        execute_l2_create_listing(&self.ctx, args, summary).await
+        let res = execute_l2_create_listing(&self.ctx, args, summary).await?;
+        Ok(ToolResultEnvelope::success(res))
     }
 }
 
@@ -235,7 +238,7 @@ impl Tool for SearchInventoryTool {
     const NAME: &'static str = "search_inventory";
     type Error = ToolError;
     type Args = SearchInventoryArgs;
-    type Output = String;
+    type Output = ToolResultEnvelope;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
@@ -351,9 +354,12 @@ impl Tool for SearchInventoryTool {
         }
 
         if rows.is_empty() {
-            return Ok("No items found matching your criteria.".to_string());
+            return Ok(ToolResultEnvelope::success(
+                "No items found matching your criteria.",
+            ));
         }
 
+        let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
         let mut result = format!("Found {} item(s):\n", rows.len());
         for r in &rows {
             result.push_str(&format!(
@@ -366,7 +372,9 @@ impl Tool for SearchInventoryTool {
                 cents_to_yuan(r.suggested_price_cny)
             ));
         }
-        Ok(result)
+        Ok(ToolResultEnvelope::success(result)
+            .with_action(UiAction::show_posts(ids.clone()))
+            .with_resources(ids))
     }
 }
 
@@ -398,7 +406,7 @@ impl Tool for GetListingDetailsTool {
     const NAME: &'static str = "get_listing_details";
     type Error = ToolError;
     type Args = GetListingDetailsArgs;
-    type Output = String;
+    type Output = ToolResultEnvelope;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
@@ -449,7 +457,7 @@ impl Tool for GetListingDetailsTool {
                     }
                 }
 
-                Ok(format!(
+                let text = format!(
                     "Listing Details:\n\
                      ID: {}\nTitle: {}\nCategory: {}\nBrand: {}\n\
                      Condition: {}/10\nPrice: {} CNY\nDefects: {}\n\
@@ -464,9 +472,15 @@ impl Tool for GetListingDetailsTool {
                     r.description.unwrap_or_default(),
                     owner_display,
                     r.status
-                ))
+                );
+                Ok(ToolResultEnvelope::success(text)
+                    .with_action(UiAction::scroll_to_post(&r.id))
+                    .with_resource(&r.id))
             }
-            None => Ok(format!("No listing found with ID: {}", args.listing_id)),
+            None => Ok(ToolResultEnvelope::success(format!(
+                "No listing found with ID: {}",
+                args.listing_id
+            ))),
         }
     }
 }
@@ -508,7 +522,7 @@ impl Tool for UpdateListingTool {
     const NAME: &'static str = "update_listing";
     type Error = ToolError;
     type Args = UpdateListingArgs;
-    type Output = String;
+    type Output = ToolResultEnvelope;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
@@ -530,10 +544,13 @@ impl Tool for UpdateListingTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         if args.new_price.is_none() && args.new_title.is_none() && args.new_description.is_none() {
-            return Ok("No fields to update were provided.".to_string());
+            return Ok(ToolResultEnvelope::success(
+                "No fields to update were provided.",
+            ));
         }
         let summary = format!("修改商品 {} 的信息", args.listing_id);
-        propose_action_plan(&self.ctx, Self::NAME, "L2", &args, summary).await
+        let res = propose_action_plan(&self.ctx, Self::NAME, "L2", &args, summary).await?;
+        Ok(ToolResultEnvelope::success(res))
     }
 }
 
@@ -627,7 +644,7 @@ impl Tool for DeleteListingTool {
     const NAME: &'static str = "delete_listing";
     type Error = ToolError;
     type Args = DeleteListingArgs;
-    type Output = String;
+    type Output = ToolResultEnvelope;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
@@ -645,7 +662,8 @@ impl Tool for DeleteListingTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let summary = format!("下架商品 {}", args.listing_id);
-        propose_action_plan(&self.ctx, Self::NAME, "L2", &args, summary).await
+        let res = propose_action_plan(&self.ctx, Self::NAME, "L2", &args, summary).await?;
+        Ok(ToolResultEnvelope::success(res))
     }
 }
 
@@ -736,7 +754,7 @@ impl Tool for GetMyListingsTool {
     const NAME: &'static str = "get_my_listings";
     type Error = ToolError;
     type Args = GetMyListingsArgs;
-    type Output = String;
+    type Output = ToolResultEnvelope;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
@@ -767,7 +785,10 @@ impl Tool for GetMyListingsTool {
         .map_err(|e| ToolError(format!("Query error: {}", e)))?;
 
         if rows.is_empty() {
-            return Ok(format!("No listings found for user: {}", owner_id));
+            return Ok(ToolResultEnvelope::success(format!(
+                "No listings found for user: {}",
+                owner_id
+            )));
         }
 
         let mut result = format!("Your listings ({} total):\n", rows.len());
@@ -787,7 +808,7 @@ impl Tool for GetMyListingsTool {
                 r.status
             ));
         }
-        Ok(result)
+        Ok(ToolResultEnvelope::success(result))
     }
 }
 

@@ -96,13 +96,14 @@ async fn execute_registered_tool<M: CompletionModel>(
     agent: &Agent<M>,
     name: &str,
     arguments: &str,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<crate::agents::runtime::envelope::ToolResultEnvelope> {
     let result = agent
         .tool_server_handle
         .call_tool(name, arguments)
         .await
         .map_err(|error| anyhow::anyhow!("tool error: {error}"))?;
-    Ok(serde_json::from_str::<String>(&result).unwrap_or(result))
+    serde_json::from_str::<crate::agents::runtime::envelope::ToolResultEnvelope>(&result)
+        .map_err(|error| anyhow::anyhow!("failed to deserialize tool envelope: {error}"))
 }
 
 /// Generic OpenAI Chat Completions compatible provider.
@@ -443,29 +444,8 @@ impl MarketplaceAgent for OpenAiCompatibleMarketplaceAgent {
                                 .call_tool(&tool_call.function.name, &args_str)
                                 .await
                                 .map_err(|e| anyhow::anyhow!("tool error: {}", e))?;
-                            // Rig serializes the tool Output into a JSON
-                            // string; unwrap that envelope so UI-action
-                            // parsers and the model see the real text.
-                            let result = match serde_json::from_str::<String>(&result) {
-                                Ok(unwrapped) => unwrapped,
-                                Err(_) => result,
-                            };
-                            let mut envelope = crate::agents::runtime::envelope::ToolResultEnvelope::from_tool_result(
-                                &tool_call.function.name,
-                                &result,
-                            );
-                            if tool_call.function.name == "get_listing_details" {
-                                if let Some(id) = tool_call
-                                    .function
-                                    .arguments
-                                    .get("listing_id")
-                                    .and_then(|v| v.as_str())
-                                {
-                                    envelope
-                                        .ui_actions
-                                        .push(crate::llm::UiAction::scroll_to_post(id));
-                                }
-                            }
+                            let envelope = serde_json::from_str::<crate::agents::runtime::envelope::ToolResultEnvelope>(&result)
+                                .map_err(|e| anyhow::anyhow!("tool error: {e}"))?;
                             for action in envelope.ui_actions {
                                 yield AgentStreamChunk::UiAction(action);
                             }
@@ -531,7 +511,11 @@ impl MarketplaceAgent for OpenAiCompatibleMarketplaceAgent {
         stream_single_model_step(self.0.clone(), message, history)
     }
 
-    async fn execute_tool(&self, name: &str, arguments: &str) -> anyhow::Result<String> {
+    async fn execute_tool(
+        &self,
+        name: &str,
+        arguments: &str,
+    ) -> anyhow::Result<crate::agents::runtime::envelope::ToolResultEnvelope> {
         execute_registered_tool(&self.0, name, arguments).await
     }
 }
@@ -668,8 +652,7 @@ impl MarketplaceAgent for OpenAiResponsesMarketplaceAgent {
                 if let Ok(content) = rig::OneOrMany::many(assistant_calls) {
                     history.push(Message::Assistant { id: None, content });
                 }
-                for (id, call_id, name, _arguments, result) in calls {
-                    let envelope = crate::agents::runtime::envelope::ToolResultEnvelope::from_tool_result(&name, &result);
+                for (id, call_id, name, _arguments, envelope) in calls {
                     for action in envelope.ui_actions {
                         yield AgentStreamChunk::UiAction(action);
                     }
@@ -689,7 +672,11 @@ impl MarketplaceAgent for OpenAiResponsesMarketplaceAgent {
         stream_single_model_step(self.0.clone(), message, history)
     }
 
-    async fn execute_tool(&self, name: &str, arguments: &str) -> anyhow::Result<String> {
+    async fn execute_tool(
+        &self,
+        name: &str,
+        arguments: &str,
+    ) -> anyhow::Result<crate::agents::runtime::envelope::ToolResultEnvelope> {
         execute_registered_tool(&self.0, name, arguments).await
     }
 }

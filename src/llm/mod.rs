@@ -282,27 +282,6 @@ impl UiAction {
     }
 }
 
-/// Extract listing IDs from a tool result string.
-/// Tool results format: "1. [listing_id] Title — ..." per line.
-pub fn extract_listing_ids(result: &str) -> Result<Vec<String>, anyhow::Error> {
-    let mut ids = Vec::new();
-    for line in result.lines() {
-        let trimmed = line.trim().trim_start_matches(['-', '*', '•']);
-        let trimmed = trimmed.trim_start();
-        if trimmed.starts_with(|c: char| c.is_ascii_digit()) || trimmed.starts_with('[') {
-            if let Some(start) = trimmed.find('[') {
-                if let Some(end) = trimmed[start..].find(']') {
-                    let id = &trimmed[start + 1..start + end];
-                    if !id.is_empty() {
-                        ids.push(id.to_string());
-                    }
-                }
-            }
-        }
-    }
-    Ok(ids)
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmbeddingModelMetadata {
     pub provider: &'static str,
@@ -393,7 +372,11 @@ pub trait MarketplaceAgent: Send + Sync {
     /// Execute one tool registered on this per-request agent. This stays on
     /// the erased agent so the runtime can separate provider streaming from
     /// tool execution without duplicating the tool set.
-    async fn execute_tool(&self, name: &str, arguments: &str) -> anyhow::Result<String>;
+    async fn execute_tool(
+        &self,
+        name: &str,
+        arguments: &str,
+    ) -> anyhow::Result<crate::agents::runtime::envelope::ToolResultEnvelope>;
 }
 
 #[async_trait]
@@ -507,26 +490,6 @@ mod tests {
         );
         assert!(wrapped.contains("[/UNTRUSTED_PLATFORM_DATA_DISABLED]"));
         assert!(wrapped.ends_with(UNTRUSTED_DATA_END));
-    }
-
-    #[test]
-    fn extract_listing_ids_parses_tool_result_lines() {
-        let result = "找到 3 条相关帖子：\n\
-                      1. [listing_a] 24寸显示器 — 成色 8/10 — 120 元\n\
-                      2. [listing_b] 27寸2K — 成色 7/10 — 200 元\n\
-                      没有更多结果。";
-        let ids = extract_listing_ids(result).expect("extract");
-        assert_eq!(ids, vec!["listing_a", "listing_b"]);
-    }
-
-    #[test]
-    fn extract_listing_ids_parses_dash_bullet_lines() {
-        // SearchInventoryTool formats results as "- [id] Title (…)".
-        let result = "Found 2 item(s):\n\
-                      - [l_a] iPhone 14 Pro Max (Brand: Apple, Condition: 9/10)\n\
-                      * [l_b] 小米手环8 (Condition: 8/10)\n";
-        let ids = extract_listing_ids(result).expect("extract");
-        assert_eq!(ids, vec!["l_a", "l_b"]);
     }
 
     #[test]

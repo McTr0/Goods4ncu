@@ -502,15 +502,13 @@ async fn draft_comment_tool_rejects_missing_or_closed_post() {
         let ctx = tool_context(pool.clone(), Some(user_id.clone()));
         let tool = DraftCommentTool { ctx };
 
-        let valid = tool
+        let envelope = tool
             .call(DraftCommentArgs {
                 post_id: post_id.clone(),
                 draft_text: "请问周末可以自提吗？".to_string(),
             })
             .await
             .expect("valid draft");
-        let envelope: crate::agents::runtime::envelope::ToolResultEnvelope =
-            serde_json::from_str(&valid).expect("envelope json");
         assert_eq!(envelope.resource_ids, vec![post_id.clone()]);
         assert_eq!(envelope.ui_actions.len(), 1);
         assert_eq!(envelope.ui_actions[0].kind, "OPEN_COMMENT_DRAFT");
@@ -541,7 +539,7 @@ async fn draft_message_tool_rejects_missing_listing_or_receiver() {
 
         let ctx = tool_context(pool.clone(), Some(seller_id.clone()));
         let tool = DraftMessageTool { ctx };
-        let valid = tool
+        let envelope = tool
             .call(DraftMessageArgs {
                 listing_id: listing_id.clone(),
                 receiver_id: seller_id.clone(),
@@ -549,8 +547,6 @@ async fn draft_message_tool_rejects_missing_listing_or_receiver() {
             })
             .await
             .expect("valid draft");
-        let envelope: crate::agents::runtime::envelope::ToolResultEnvelope =
-            serde_json::from_str(&valid).expect("envelope json");
         assert_eq!(envelope.resource_ids, vec![listing_id.clone()]);
         assert_eq!(envelope.ui_actions.len(), 1);
         assert_eq!(envelope.ui_actions[0].kind, "OPEN_MESSAGE_DRAFT");

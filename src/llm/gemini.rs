@@ -289,31 +289,8 @@ impl MarketplaceAgent for GeminiMarketplaceAgent {
                                 .call_tool(&tool_call.function.name, &args_str)
                                 .await
                                 .map_err(|e| anyhow::anyhow!("tool error: {}", e))?;
-                            // Rig serializes the tool Output into a JSON
-                            // string; unwrap that envelope so UI-action
-                            // parsers and the model see the real text.
-                            let result = match serde_json::from_str::<String>(&result) {
-                                Ok(unwrapped) => unwrapped,
-                                Err(_) => result,
-                            };
-                            // Emit UI actions for search and details tools so the
-                            // frontend can highlight results and scroll to them.
-                            let mut envelope = crate::agents::runtime::envelope::ToolResultEnvelope::from_tool_result(
-                                &tool_call.function.name,
-                                &result,
-                            );
-                            if tool_call.function.name == "get_listing_details" {
-                                if let Some(id) = tool_call
-                                    .function
-                                    .arguments
-                                    .get("listing_id")
-                                    .and_then(|v| v.as_str())
-                                {
-                                    envelope
-                                        .ui_actions
-                                        .push(crate::llm::UiAction::scroll_to_post(id));
-                                }
-                            }
+                            let envelope = serde_json::from_str::<crate::agents::runtime::envelope::ToolResultEnvelope>(&result)
+                                .map_err(|e| anyhow::anyhow!("tool error: {e}"))?;
                             for action in envelope.ui_actions {
                                 yield AgentStreamChunk::UiAction(action);
                             }
@@ -439,14 +416,19 @@ impl MarketplaceAgent for GeminiMarketplaceAgent {
         })
     }
 
-    async fn execute_tool(&self, name: &str, arguments: &str) -> anyhow::Result<String> {
+    async fn execute_tool(
+        &self,
+        name: &str,
+        arguments: &str,
+    ) -> anyhow::Result<crate::agents::runtime::envelope::ToolResultEnvelope> {
         let result = self
             .0
             .tool_server_handle
             .call_tool(name, arguments)
             .await
             .map_err(|error| anyhow::anyhow!("tool error: {error}"))?;
-        Ok(serde_json::from_str::<String>(&result).unwrap_or(result))
+        serde_json::from_str::<crate::agents::runtime::envelope::ToolResultEnvelope>(&result)
+            .map_err(|error| anyhow::anyhow!("failed to deserialize tool envelope: {error}"))
     }
 }
 

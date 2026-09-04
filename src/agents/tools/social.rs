@@ -1,4 +1,6 @@
 use super::common::*;
+use crate::agents::runtime::envelope::ToolResultEnvelope;
+use crate::llm::UiAction;
 use crate::utils::cents_to_yuan;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
@@ -28,7 +30,7 @@ impl Tool for GetUserPostsTool {
     const NAME: &'static str = "get_user_posts";
     type Error = ToolError;
     type Args = GetUserPostsArgs;
-    type Output = String;
+    type Output = ToolResultEnvelope;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
@@ -59,8 +61,9 @@ impl Tool for GetUserPostsTool {
         .map_err(|e| ToolError(format!("Query error: {}", e)))?;
 
         if rows.is_empty() {
-            return Ok("该用户当前没有在售帖子。".to_string());
+            return Ok(ToolResultEnvelope::success("该用户当前没有在售帖子。"));
         }
+        let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
         let mut out = format!("该用户共有 {} 条在售帖子：\n", rows.len());
         for (i, r) in rows.iter().enumerate() {
             out.push_str(&format!(
@@ -73,7 +76,9 @@ impl Tool for GetUserPostsTool {
                 cents_to_yuan(r.suggested_price_cny),
             ));
         }
-        Ok(out)
+        Ok(ToolResultEnvelope::success(out)
+            .with_action(UiAction::show_posts(ids.clone()))
+            .with_resources(ids))
     }
 }
 
@@ -95,7 +100,7 @@ impl Tool for FindRelatedPostsTool {
     const NAME: &'static str = "find_related_posts";
     type Error = ToolError;
     type Args = FindRelatedPostsArgs;
-    type Output = String;
+    type Output = ToolResultEnvelope;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
@@ -123,7 +128,12 @@ impl Tool for FindRelatedPostsTool {
 
         let (category, price) = match base {
             Some(v) => v,
-            None => return Ok(format!("未找到 ID 为 {} 的帖子。", args.listing_id)),
+            None => {
+                return Ok(ToolResultEnvelope::success(format!(
+                    "未找到 ID 为 {} 的帖子。",
+                    args.listing_id
+                )))
+            }
         };
 
         let min_price = (price as f64 * 0.6) as i64;
@@ -147,8 +157,9 @@ impl Tool for FindRelatedPostsTool {
         .map_err(|e| ToolError(format!("Query error: {}", e)))?;
 
         if rows.is_empty() {
-            return Ok("没有找到相似的帖子。".to_string());
+            return Ok(ToolResultEnvelope::success("没有找到相似的帖子。"));
         }
+        let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
         let mut out = format!("找到 {} 条相关帖子：\n", rows.len());
         for (i, r) in rows.iter().enumerate() {
             out.push_str(&format!(
@@ -160,7 +171,9 @@ impl Tool for FindRelatedPostsTool {
                 cents_to_yuan(r.suggested_price_cny),
             ));
         }
-        Ok(out)
+        Ok(ToolResultEnvelope::success(out)
+            .with_action(UiAction::show_posts(ids.clone()))
+            .with_resources(ids))
     }
 }
 
@@ -189,7 +202,7 @@ impl Tool for GetCommentsTool {
     const NAME: &'static str = "get_comments";
     type Error = ToolError;
     type Args = GetCommentsArgs;
-    type Output = String;
+    type Output = ToolResultEnvelope;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
@@ -208,7 +221,9 @@ impl Tool for GetCommentsTool {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let current = self.ctx.current_user_id.clone().unwrap_or_default();
         if current.is_empty() {
-            return Ok("[hidden] 请先登录后才能读取对话。".to_string());
+            return Ok(ToolResultEnvelope::success(
+                "[hidden] 请先登录后才能读取对话。",
+            ));
         }
         let allowed = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(
@@ -223,7 +238,9 @@ impl Tool for GetCommentsTool {
         .unwrap_or(false);
 
         if !allowed {
-            return Ok("[hidden] 你不是这个对话的参与者。".to_string());
+            return Ok(ToolResultEnvelope::success(
+                "[hidden] 你不是这个对话的参与者。",
+            ));
         }
 
         let rows = sqlx::query_as::<_, CommentRow>(
@@ -237,7 +254,7 @@ impl Tool for GetCommentsTool {
         .map_err(|e| ToolError(format!("Query error: {}", e)))?;
 
         if rows.is_empty() {
-            return Ok("这个对话还没有留言。".to_string());
+            return Ok(ToolResultEnvelope::success("这个对话还没有留言。"));
         }
         let mut out = format!("最近 {} 条留言：\n", rows.len());
         for r in &rows {
@@ -248,7 +265,7 @@ impl Tool for GetCommentsTool {
                 r.content,
             ));
         }
-        Ok(out)
+        Ok(ToolResultEnvelope::success(out))
     }
 }
 
@@ -273,7 +290,7 @@ impl Tool for DraftMessageTool {
     const NAME: &'static str = "draft_message";
     type Error = ToolError;
     type Args = DraftMessageArgs;
-    type Output = String;
+    type Output = ToolResultEnvelope;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
@@ -315,17 +332,15 @@ impl Tool for DraftMessageTool {
             ));
         }
 
-        let envelope = crate::agents::runtime::envelope::ToolResultEnvelope::success(
-            "已为你生成一条私信草稿，请确认后发送。",
-        )
-        .with_action(crate::llm::UiAction::open_message_draft(
-            &args.receiver_id,
-            &args.listing_id,
-            &args.draft_text,
-        ))
-        .with_resource(args.listing_id);
+        let envelope = ToolResultEnvelope::success("已为你生成一条私信草稿，请确认后发送。")
+            .with_action(UiAction::open_message_draft(
+                &args.receiver_id,
+                &args.listing_id,
+                &args.draft_text,
+            ))
+            .with_resource(args.listing_id);
 
-        Ok(envelope.to_json())
+        Ok(envelope)
     }
 }
 
@@ -347,7 +362,7 @@ impl Tool for DraftCommentTool {
     const NAME: &'static str = "draft_comment";
     type Error = ToolError;
     type Args = DraftCommentArgs;
-    type Output = String;
+    type Output = ToolResultEnvelope;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
@@ -382,15 +397,13 @@ impl Tool for DraftCommentTool {
             ));
         }
 
-        let envelope = crate::agents::runtime::envelope::ToolResultEnvelope::success(
-            "已为你生成一条回复草稿，请确认后发布。",
-        )
-        .with_action(crate::llm::UiAction::open_comment_draft(
-            &args.post_id,
-            &args.draft_text,
-        ))
-        .with_resource(args.post_id);
+        let envelope = ToolResultEnvelope::success("已为你生成一条回复草稿，请确认后发布。")
+            .with_action(UiAction::open_comment_draft(
+                &args.post_id,
+                &args.draft_text,
+            ))
+            .with_resource(args.post_id);
 
-        Ok(envelope.to_json())
+        Ok(envelope)
     }
 }

@@ -1,4 +1,5 @@
 use super::common::*;
+use crate::agents::runtime::envelope::ToolResultEnvelope;
 use crate::services::order::{OrderError, OrderService};
 use crate::utils::cents_to_yuan;
 use rig::completion::ToolDefinition;
@@ -24,7 +25,7 @@ impl Tool for PurchaseItemIntentTool {
     const NAME: &'static str = "purchase_item";
     type Error = ToolError;
     type Args = PurchaseItemIntentArgs;
-    type Output = String;
+    type Output = ToolResultEnvelope;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
@@ -48,7 +49,8 @@ impl Tool for PurchaseItemIntentTool {
             args.listing_id,
             cents_to_yuan(args.offered_price)
         );
-        propose_action_plan(&self.ctx, Self::NAME, "L3", &args, summary).await
+        let res = propose_action_plan(&self.ctx, Self::NAME, "L3", &args, summary).await?;
+        Ok(ToolResultEnvelope::success(res))
     }
 }
 
@@ -283,7 +285,7 @@ impl Tool for NegotiateItemTool {
     const NAME: &'static str = "negotiate_item";
     type Error = ToolError;
     type Args = NegotiateItemArgs;
-    type Output = String;
+    type Output = ToolResultEnvelope;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
@@ -307,7 +309,8 @@ impl Tool for NegotiateItemTool {
             args.listing_id,
             cents_to_yuan(args.offered_price)
         );
-        propose_action_plan(&self.ctx, Self::NAME, "L3", &args, summary).await
+        let res = propose_action_plan(&self.ctx, Self::NAME, "L3", &args, summary).await?;
+        Ok(ToolResultEnvelope::success(res))
     }
 }
 

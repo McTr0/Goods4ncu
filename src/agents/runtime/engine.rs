@@ -24,7 +24,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 pub type ToolExecutor = Arc<
-    dyn Fn(&str, &str) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send>>
+    dyn Fn(&str, &str) -> Pin<Box<dyn Future<Output = anyhow::Result<ToolResultEnvelope>> + Send>>
         + Send
         + Sync,
 >;
@@ -368,19 +368,7 @@ impl AgentRuntime {
                     },
                 });
 
-                let mut envelope = ToolResultEnvelope::from_tool_result(&call.name, &raw_result);
-                if call.name == "get_listing_details" {
-                    if let Some(id) = call
-                        .arguments
-                        .get("listing_id")
-                        .and_then(|value| value.as_str())
-                    {
-                        envelope
-                            .ui_actions
-                            .push(crate::llm::UiAction::scroll_to_post(id));
-                        envelope.resource_ids.push(id.to_string());
-                    }
-                }
+                let envelope = raw_result;
                 for action in envelope.ui_actions {
                     emit!(EventData::UiAction {
                         action: crate::agents::runtime::event::UiAction {
