@@ -3,20 +3,20 @@ import 'package:flutter/services.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../models/models.dart';
-import '../../services/api_service.dart';
+import '../../services/negotiate_service.dart';
 
 /// Negotiation action card shown in the chat for HITL requests.
 class NegotiationCard extends StatelessWidget {
   final HitlRequest request;
   final String currentUserId;
-  final ApiService apiService;
+  final NegotiateService negotiateService;
   final VoidCallback onUpdated;
 
   const NegotiationCard({
     super.key,
     required this.request,
     required this.currentUserId,
-    required this.apiService,
+    required this.negotiateService,
     required this.onUpdated,
   });
 
@@ -31,14 +31,14 @@ class NegotiationCard extends StatelessWidget {
     if (isPending && isSeller) {
       return _SellerPendingCard(
         request: request,
-        apiService: apiService,
+        negotiateService: negotiateService,
         onUpdated: onUpdated,
       );
     }
     if (isCountered && !isSeller) {
       return _BuyerCounteredCard(
         request: request,
-        apiService: apiService,
+        negotiateService: negotiateService,
         onUpdated: onUpdated,
       );
     }
@@ -69,12 +69,12 @@ class NegotiationCard extends StatelessWidget {
 
 class _SellerPendingCard extends StatefulWidget {
   final HitlRequest request;
-  final ApiService apiService;
+  final NegotiateService negotiateService;
   final VoidCallback onUpdated;
 
   const _SellerPendingCard({
     required this.request,
-    required this.apiService,
+    required this.negotiateService,
     required this.onUpdated,
   });
 
@@ -96,7 +96,7 @@ class _SellerPendingCardState extends State<_SellerPendingCard> {
     final l = AppLocalizations.of(context)!;
     setState(() => _isLoading = true);
     try {
-      await widget.apiService.respondNegotiation(
+      await widget.negotiateService.respondNegotiation(
         widget.request.id,
         action: 'approve',
       );
@@ -112,7 +112,7 @@ class _SellerPendingCardState extends State<_SellerPendingCard> {
     final l = AppLocalizations.of(context)!;
     setState(() => _isLoading = true);
     try {
-      await widget.apiService.respondNegotiation(
+      await widget.negotiateService.respondNegotiation(
         widget.request.id,
         action: 'reject',
       );
@@ -133,7 +133,7 @@ class _SellerPendingCardState extends State<_SellerPendingCard> {
     }
     setState(() => _isLoading = true);
     try {
-      await widget.apiService.respondNegotiation(
+      await widget.negotiateService.respondNegotiation(
         widget.request.id,
         action: 'counter',
         counterPrice: price,
@@ -270,12 +270,12 @@ class _SellerPendingCardState extends State<_SellerPendingCard> {
 
 class _BuyerCounteredCard extends StatefulWidget {
   final HitlRequest request;
-  final ApiService apiService;
+  final NegotiateService negotiateService;
   final VoidCallback onUpdated;
 
   const _BuyerCounteredCard({
     required this.request,
-    required this.apiService,
+    required this.negotiateService,
     required this.onUpdated,
   });
 
@@ -290,7 +290,7 @@ class _BuyerCounteredCardState extends State<_BuyerCounteredCard> {
     final l = AppLocalizations.of(context)!;
     setState(() => _isLoading = true);
     try {
-      await widget.apiService.acceptCounterNegotiation(widget.request.id);
+      await widget.negotiateService.acceptCounterNegotiation(widget.request.id);
       widget.onUpdated();
     } catch (e) {
       _showError(l.operationFailed(e.toString()));
@@ -303,7 +303,7 @@ class _BuyerCounteredCardState extends State<_BuyerCounteredCard> {
     final l = AppLocalizations.of(context)!;
     setState(() => _isLoading = true);
     try {
-      await widget.apiService.rejectCounterNegotiation(widget.request.id);
+      await widget.negotiateService.rejectCounterNegotiation(widget.request.id);
       widget.onUpdated();
     } catch (e) {
       _showError(l.operationFailed(e.toString()));

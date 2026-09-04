@@ -3,15 +3,26 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/pages/chat_page.dart';
-import 'package:goods4ncu_mobile/services/api_service.dart';
 import 'package:goods4ncu_mobile/services/chat_service.dart';
+import 'package:goods4ncu_mobile/services/negotiate_service.dart';
 import 'package:goods4ncu_mobile/services/sse_service.dart';
 import 'package:goods4ncu_mobile/services/post_service.dart';
 import 'package:goods4ncu_mobile/services/upload_service.dart';
+import 'package:goods4ncu_mobile/services/user_service.dart';
 import 'package:goods4ncu_mobile/theme/app_theme.dart';
 
-class _FakeApiService extends ApiService {
-  _FakeApiService({
+class _FakeUserService extends UserService {
+  @override
+  Future<Map<String, dynamic>> getUserProfile() async => {'user_id': 'user-1'};
+}
+
+class _FakeNegotiateService extends NegotiateService {
+  @override
+  Future<List<HitlRequest>> getNegotiations() async => const [];
+}
+
+class _FakeChatService extends ChatService {
+  _FakeChatService({
     this.undoable = const [],
     this.undoResult,
     List<AgentPlan> agentPlans = const [],
@@ -27,10 +38,21 @@ class _FakeApiService extends ApiService {
   final List<String> confirmedTokens = [];
 
   @override
-  Future<Map<String, dynamic>> getUserProfile() async => {'user_id': 'user-1'};
-
-  @override
-  Future<List<HitlRequest>> getNegotiations() async => const [];
+  Future<AssistantConversationHistory> getAssistantHistory({
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    return AssistantConversationHistory(
+      messages: [
+        ChatMessage(
+          sender: 'bot',
+          content: '欢迎回来',
+          timestamp: DateTime(2026, 7, 9, 10),
+        ),
+      ],
+      total: 1,
+    );
+  }
 
   @override
   Future<List<AgentPlan>> getAgentPlans() async => List.of(agentPlans);
@@ -60,25 +82,6 @@ class _FakeApiService extends ApiService {
   }
 }
 
-class _FakeChatService extends ChatService {
-  @override
-  Future<AssistantConversationHistory> getAssistantHistory({
-    int limit = 50,
-    int offset = 0,
-  }) async {
-    return AssistantConversationHistory(
-      messages: [
-        ChatMessage(
-          sender: 'bot',
-          content: '欢迎回来',
-          timestamp: DateTime(2026, 7, 9, 10),
-        ),
-      ],
-      total: 1,
-    );
-  }
-}
-
 class _FakeUploadService extends UploadService {}
 
 class _FakePostService extends PostService {}
@@ -102,8 +105,9 @@ void main() {
     await tester.pumpWidget(
       _buildTestApp(
         ChatPage(
-          apiService: _FakeApiService(),
           chatService: _FakeChatService(),
+          userService: _FakeUserService(),
+          negotiateService: _FakeNegotiateService(),
           sseService: SseService(),
           uploadService: _FakeUploadService(),
           postService: _FakePostService(),
@@ -140,8 +144,9 @@ void main() {
     await tester.pumpWidget(
       _buildTestApp(
         ChatPage(
-          apiService: _FakeApiService(),
           chatService: _FakeChatService(),
+          userService: _FakeUserService(),
+          negotiateService: _FakeNegotiateService(),
           sseService: SseService(),
           uploadService: _FakeUploadService(),
           postService: _FakePostService(),
@@ -183,8 +188,9 @@ void main() {
     await tester.pumpWidget(
       _buildTestApp(
         ChatPage(
-          apiService: _FakeApiService(),
           chatService: _FakeChatService(),
+          userService: _FakeUserService(),
+          negotiateService: _FakeNegotiateService(),
           sseService: SseService(),
           uploadService: _FakeUploadService(),
           postService: _FakePostService(),
@@ -216,7 +222,7 @@ void main() {
     // The whole trade behind executing low-risk writes immediately is that the
     // user can still take them back. If this affordance is missing the backend
     // undo window buys nothing.
-    final api = _FakeApiService(
+    final chat = _FakeChatService(
       undoable: [
         UndoableAction(
           id: 'action-1',
@@ -230,8 +236,9 @@ void main() {
     await tester.pumpWidget(
       _buildTestApp(
         ChatPage(
-          apiService: api,
-          chatService: _FakeChatService(),
+          chatService: chat,
+          userService: _FakeUserService(),
+          negotiateService: _FakeNegotiateService(),
           sseService: SseService(),
           uploadService: _FakeUploadService(),
           postService: _FakePostService(),
@@ -252,7 +259,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(api.undone, ['action-1']);
+    expect(chat.undone, ['action-1']);
     // The affordance goes away with the action it belonged to.
     expect(find.text(l.undoDoneHeader), findsNothing);
   });
@@ -263,7 +270,7 @@ void main() {
     // A conflict means the world moved on — the item sold — and reverting
     // would have overwritten that. The user needs to read what happened, so
     // this must not surface as a generic failure.
-    final api = _FakeApiService(
+    final chat = _FakeChatService(
       undoable: [
         UndoableAction(
           id: 'action-2',
@@ -282,8 +289,9 @@ void main() {
     await tester.pumpWidget(
       _buildTestApp(
         ChatPage(
-          apiService: api,
-          chatService: _FakeChatService(),
+          chatService: chat,
+          userService: _FakeUserService(),
+          negotiateService: _FakeNegotiateService(),
           sseService: SseService(),
           uploadService: _FakeUploadService(),
           postService: _FakePostService(),
@@ -303,7 +311,7 @@ void main() {
 
   testWidgets('an already-expired action is not offered', (tester) async {
     // Showing a dead button invites a tap that can only fail.
-    final api = _FakeApiService(
+    final chat = _FakeChatService(
       undoable: [
         UndoableAction(
           id: 'action-3',
@@ -319,8 +327,9 @@ void main() {
     await tester.pumpWidget(
       _buildTestApp(
         ChatPage(
-          apiService: api,
-          chatService: _FakeChatService(),
+          chatService: chat,
+          userService: _FakeUserService(),
+          negotiateService: _FakeNegotiateService(),
           sseService: SseService(),
           uploadService: _FakeUploadService(),
           postService: _FakePostService(),
@@ -339,7 +348,7 @@ void main() {
   testWidgets('a pending L3 plan executes only with its rotated second token', (
     tester,
   ) async {
-    final api = _FakeApiService(
+    final chat = _FakeChatService(
       agentPlans: [
         AgentPlan(
           id: 'plan-pending',
@@ -362,8 +371,9 @@ void main() {
     await tester.pumpWidget(
       _buildTestApp(
         ChatPage(
-          apiService: api,
-          chatService: _FakeChatService(),
+          chatService: chat,
+          userService: _FakeUserService(),
+          negotiateService: _FakeNegotiateService(),
           sseService: SseService(),
           uploadService: _FakeUploadService(),
           postService: _FakePostService(),
@@ -379,7 +389,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(api.confirmedTokens, ['primary-token']);
+    expect(chat.confirmedTokens, ['primary-token']);
     expect(find.byType(AlertDialog), findsOneWidget);
 
     await tester.tap(
@@ -391,13 +401,13 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(api.confirmedTokens, ['primary-token', 'rotated-second-token']);
+    expect(chat.confirmedTokens, ['primary-token', 'rotated-second-token']);
   });
 
   testWidgets('an armed L3 plan shows the dialog before sending any request', (
     tester,
   ) async {
-    final api = _FakeApiService(
+    final chat = _FakeChatService(
       agentPlans: [
         AgentPlan(
           id: 'plan-armed',
@@ -416,8 +426,9 @@ void main() {
     await tester.pumpWidget(
       _buildTestApp(
         ChatPage(
-          apiService: api,
-          chatService: _FakeChatService(),
+          chatService: chat,
+          userService: _FakeUserService(),
+          negotiateService: _FakeNegotiateService(),
           sseService: SseService(),
           uploadService: _FakeUploadService(),
           postService: _FakePostService(),
@@ -434,7 +445,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.byType(AlertDialog), findsOneWidget);
-    expect(api.confirmedTokens, isEmpty);
+    expect(chat.confirmedTokens, isEmpty);
 
     await tester.tap(
       find.descendant(
@@ -444,12 +455,12 @@ void main() {
     );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(api.confirmedTokens, isEmpty);
+    expect(chat.confirmedTokens, isEmpty);
 
     await tester.tap(find.text(l.agentPlanConfirmAction));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(api.confirmedTokens, isEmpty);
+    expect(chat.confirmedTokens, isEmpty);
 
     await tester.tap(
       find.descendant(
@@ -459,6 +470,6 @@ void main() {
     );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(api.confirmedTokens, ['second-token-from-list']);
+    expect(chat.confirmedTokens, ['second-token-from-list']);
   });
 }

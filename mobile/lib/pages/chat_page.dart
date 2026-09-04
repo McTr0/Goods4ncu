@@ -10,7 +10,8 @@ import '../components/price_tag.dart';
 import '../l10n/app_localizations.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
-import '../services/api_service.dart';
+import '../services/negotiate_service.dart';
+import '../services/user_service.dart';
 import '../services/chat_service.dart';
 import '../services/companion_character_service.dart';
 import '../services/agent_stream_event.dart';
@@ -43,8 +44,9 @@ import '../widgets/chat/assistant_header.dart';
 import '../widgets/chat/negotiation_card.dart';
 
 class ChatPage extends StatefulWidget {
-  final ApiService? apiService;
   final ChatService? chatService;
+  final UserService? userService;
+  final NegotiateService? negotiateService;
   final SseService? sseService;
   final UploadService? uploadService;
   final PostService? postService;
@@ -56,8 +58,9 @@ class ChatPage extends StatefulWidget {
 
   const ChatPage({
     super.key,
-    this.apiService,
     this.chatService,
+    this.userService,
+    this.negotiateService,
     this.sseService,
     this.uploadService,
     this.postService,
@@ -77,8 +80,9 @@ class _ChatPageState extends State<ChatPage> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _composerFocusNode = FocusNode();
   final List<ChatMessage> _messages = [];
-  late final ApiService _apiService;
   late final ChatService _chatService;
+  late final UserService _userService;
+  late final NegotiateService _negotiateService;
   late final SseService _sseService;
   late final bool _ownsSseService;
   late final UploadService _uploadService;
@@ -155,7 +159,9 @@ class _ChatPageState extends State<ChatPage> {
       ..addListener(_onCompanionCharacterChanged);
     _syncBrainWithPageContext();
     _lipSyncDriver = Live2DLipSyncDriver(controller: _live2DController);
-    _apiService = widget.apiService ?? context.read<ApiService>();
+    _userService = widget.userService ?? context.read<UserService>();
+    _negotiateService =
+        widget.negotiateService ?? context.read<NegotiateService>();
     _chatService = widget.chatService ?? context.read<ChatService>();
     _ownsSseService = widget.sseService == null;
     _sseService = widget.sseService ?? SseService();
@@ -756,7 +762,7 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _loadCurrentUser() async {
     try {
-      final profile = await _apiService.getUserProfile();
+      final profile = await _userService.getUserProfile();
       if (!mounted) return;
       setState(() {
         _currentUserId = profile['user_id']?.toString();
@@ -769,7 +775,7 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _loadNegotiations() async {
     try {
-      final requests = await _apiService.getNegotiations();
+      final requests = await _negotiateService.getNegotiations();
       if (!mounted) return;
       setState(() {
         _hitlRequests = requests
@@ -781,7 +787,7 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _loadAgentPlans() async {
     try {
-      final plans = await _apiService.getAgentPlans();
+      final plans = await _chatService.getAgentPlans();
       if (!mounted) return;
       setState(() => _agentPlans = plans);
     } catch (_) {}
@@ -789,7 +795,7 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _loadUndoableActions() async {
     try {
-      final actions = await _apiService.getUndoableActions();
+      final actions = await _chatService.getUndoableActions();
       if (!mounted) return;
       setState(() {
         _undoableActions = actions.where((a) => !a.expired).toList();
@@ -824,7 +830,7 @@ class _ChatPageState extends State<ChatPage> {
           .toList(),
     );
     try {
-      final result = await _apiService.undoAction(action.id);
+      final result = await _chatService.undoAction(action.id);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -878,7 +884,7 @@ class _ChatPageState extends State<ChatPage> {
         }
       }
 
-      var outcome = await _apiService.confirmAgentPlan(plan.id, token);
+      var outcome = await _chatService.confirmAgentPlan(plan.id, token);
       if (!mounted) return;
       if (outcome.needsSecondConfirmation) {
         // The primary token can only arm an L3 plan. Execution requires the
@@ -912,7 +918,7 @@ class _ChatPageState extends State<ChatPage> {
           return;
         }
         token = secondToken;
-        outcome = await _apiService.confirmAgentPlan(plan.id, token);
+        outcome = await _chatService.confirmAgentPlan(plan.id, token);
         if (!mounted) return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
@@ -936,7 +942,7 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _cancelAgentPlan(AgentPlan plan) async {
     final l = AppLocalizations.of(context)!;
     try {
-      await _apiService.cancelAgentPlan(plan.id);
+      await _chatService.cancelAgentPlan(plan.id);
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -1342,7 +1348,7 @@ class _ChatPageState extends State<ChatPage> {
           isUser: message.sender == 'user',
           hitlRequests: _hitlRequests,
           currentUserId: _currentUserId ?? '',
-          apiService: _apiService,
+          negotiateService: _negotiateService,
           onHitlUpdated: _loadNegotiations,
         );
       },
@@ -1507,7 +1513,7 @@ class _ChatPageState extends State<ChatPage> {
                             isUser: msg.sender == 'user',
                             hitlRequests: _hitlRequests,
                             currentUserId: _currentUserId ?? '',
-                            apiService: _apiService,
+                            negotiateService: _negotiateService,
                             onHitlUpdated: _loadNegotiations,
                           );
                         },
@@ -1951,7 +1957,7 @@ class _ChatPageState extends State<ChatPage> {
           child: NegotiationCard(
             request: req,
             currentUserId: _currentUserId ?? '',
-            apiService: _apiService,
+            negotiateService: _negotiateService,
             onUpdated: _loadNegotiations,
           ),
         ),
@@ -2107,7 +2113,7 @@ class _ChatBubble extends StatelessWidget {
   final bool isUser;
   final List<HitlRequest> hitlRequests;
   final String currentUserId;
-  final ApiService apiService;
+  final NegotiateService negotiateService;
   final VoidCallback onHitlUpdated;
 
   const _ChatBubble({
@@ -2115,7 +2121,7 @@ class _ChatBubble extends StatelessWidget {
     required this.isUser,
     required this.hitlRequests,
     required this.currentUserId,
-    required this.apiService,
+    required this.negotiateService,
     required this.onHitlUpdated,
   });
 
@@ -2135,7 +2141,7 @@ class _ChatBubble extends StatelessWidget {
           trailingCard = NegotiationCard(
             request: relatedReqs.first,
             currentUserId: currentUserId,
-            apiService: apiService,
+            negotiateService: negotiateService,
             onUpdated: onHitlUpdated,
           );
         }
