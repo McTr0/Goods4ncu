@@ -1,9 +1,40 @@
 //! Integration tests for staged UUID shadow-column migration.
 
-use goods4ncu::db::assert_uuid_shadow_drift_zero;
 use goods4ncu::test_infra::with_test_pool;
 use sqlx::Row;
 use uuid::Uuid;
+
+async fn assert_uuid_shadow_drift_zero(db_pool: &sqlx::PgPool) -> anyhow::Result<()> {
+    let rows = sqlx::query(
+        r#"
+        SELECT relation_name, missing_shadow_ids, fk_drift_rows
+        FROM uuid_shadow_divergence
+        WHERE missing_shadow_ids > 0 OR fk_drift_rows > 0
+        ORDER BY relation_name
+        "#,
+    )
+    .fetch_all(db_pool)
+    .await?;
+
+    if rows.is_empty() {
+        return Ok(());
+    }
+
+    let details = rows
+        .into_iter()
+        .map(|row| {
+            let relation_name: String = row.get("relation_name");
+            let missing_shadow_ids: i64 = row.get("missing_shadow_ids");
+            let fk_drift_rows: i64 = row.get("fk_drift_rows");
+            format!(
+                "{relation_name}(missing_shadow_ids={missing_shadow_ids}, fk_drift_rows={fk_drift_rows})"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    anyhow::bail!("uuid shadow drift detected: {details}");
+}
 
 async fn assert_no_uuid_shadow_drift(pool: &sqlx::PgPool) {
     let rows = sqlx::query(

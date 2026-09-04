@@ -242,8 +242,7 @@ impl AppConfig {
     /// 1. `$CONFIG_FILE` env var (if set)
     /// 2. `./goods4ncu.toml` (if exists)
     /// 3. `./config/goods4ncu.toml` (if exists)
-    /// 4. legacy `./good4ncu.toml` or `./config/good4ncu.toml` (if exists)
-    /// 5. No file (env vars only, all TOML fields use defaults)
+    /// 4. No file (env vars only, all TOML fields use defaults)
     pub fn load_with_file(config_path: Option<&Path>) -> Arc<Self> {
         // Phase 1: Load TOML file (ignore if missing or invalid)
         let file = file::load(config_path);

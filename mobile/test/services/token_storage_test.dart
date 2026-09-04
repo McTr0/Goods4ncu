@@ -39,7 +39,6 @@ void main() {
       );
 
       storage = TokenStorage.instance;
-      storage.resetMigrationCheckForTesting();
     });
 
     tearDown(() {
@@ -80,28 +79,6 @@ void main() {
       await storage.clearTokens();
       expect(await storage.getAccessToken(), isNull);
       expect(await storage.getRefreshToken(), isNull);
-    });
-
-    test('migration guard migrates legacy SharedPreferences on first read', () async {
-      SharedPreferences.setMockInitialValues({
-        'jwt_token': 'legacy_jwt',
-        'refresh_token': 'legacy_refresh',
-      });
-      storage.resetMigrationCheckForTesting();
-
-      // First read triggers migration
-      final token = await storage.getAccessToken();
-      expect(token, 'legacy_jwt');
-      expect(await storage.getRefreshToken(), 'legacy_refresh');
-
-      // Secure storage now has the migrated values
-      expect(secureValues['jwt_token'], 'legacy_jwt');
-      expect(secureValues['refresh_token'], 'legacy_refresh');
-
-      // SharedPreferences should have been cleaned up
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('jwt_token'), isNull);
-      expect(prefs.getString('refresh_token'), isNull);
     });
   });
 }
