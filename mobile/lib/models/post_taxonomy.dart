@@ -58,8 +58,6 @@ const List<PostCategory> kPostCategories = [
   ),
 ];
 
-bool categoryHasAttributes(String key) => false;
-
 PostCategory? postCategoryByKey(String key) {
   for (final category in kPostCategories) {
     if (category.key == key) return category;

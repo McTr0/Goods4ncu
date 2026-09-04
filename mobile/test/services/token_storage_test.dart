@@ -15,28 +15,29 @@ void main() {
       SharedPreferences.setMockInitialValues({});
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(
-        const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
-        (MethodCall methodCall) async {
-          final args = methodCall.arguments as Map<dynamic, dynamic>?;
-          if (methodCall.method == 'read') {
-            return secureValues[args?['key']];
-          } else if (methodCall.method == 'write') {
-            if (args != null && args['key'] != null) {
-              secureValues[args['key'].toString()] = args['value'].toString();
-            }
-            return null;
-          } else if (methodCall.method == 'delete') {
-            if (args != null && args['key'] != null) {
-              secureValues.remove(args['key'].toString());
-            }
-            return null;
-          } else if (methodCall.method == 'deleteAll') {
-            secureValues.clear();
-            return null;
-          }
-          return null;
-        },
-      );
+            const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+            (MethodCall methodCall) async {
+              final args = methodCall.arguments as Map<dynamic, dynamic>?;
+              if (methodCall.method == 'read') {
+                return secureValues[args?['key']];
+              } else if (methodCall.method == 'write') {
+                if (args != null && args['key'] != null) {
+                  secureValues[args['key'].toString()] = args['value']
+                      .toString();
+                }
+                return null;
+              } else if (methodCall.method == 'delete') {
+                if (args != null && args['key'] != null) {
+                  secureValues.remove(args['key'].toString());
+                }
+                return null;
+              } else if (methodCall.method == 'deleteAll') {
+                secureValues.clear();
+                return null;
+              }
+              return null;
+            },
+          );
 
       storage = TokenStorage.instance;
     });
@@ -44,9 +45,9 @@ void main() {
     tearDown(() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(
-        const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
-        null,
-      );
+            const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+            null,
+          );
     });
 
     test('getAccessToken and setAccessToken work properly', () async {

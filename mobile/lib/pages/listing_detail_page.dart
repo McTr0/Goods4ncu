@@ -1274,7 +1274,9 @@ class _ListingDetailPageState extends State<ListingDetailPage> {
     markResponseReadOnly();
 
     try {
-      final refreshedListing = await _listingService.getListingDetail(listingId);
+      final refreshedListing = await _listingService.getListingDetail(
+        listingId,
+      );
       if (mounted &&
           generation == _loadGeneration &&
           listingId == widget.listingId) {

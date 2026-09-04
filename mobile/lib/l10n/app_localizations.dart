@@ -6071,6 +6071,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Stop generating'**
   String get composerStopTooltip;
+
+  /// No description provided for @postCategoryAnnouncementAdminOnlySuffix.
+  ///
+  /// In en, this message translates to:
+  /// **' · Operators only'**
+  String get postCategoryAnnouncementAdminOnlySuffix;
+
+  /// No description provided for @postAnnouncementAdminOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Announcements can only be published by operators'**
+  String get postAnnouncementAdminOnly;
+
+  /// No description provided for @postTagGroupLocation.
+  ///
+  /// In en, this message translates to:
+  /// **'Location'**
+  String get postTagGroupLocation;
+
+  /// No description provided for @postTagGroupTtl.
+  ///
+  /// In en, this message translates to:
+  /// **'Validity'**
+  String get postTagGroupTtl;
+
+  /// No description provided for @postTagsPickerHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Multiple tags allowed; max 1 each for location and timeframe'**
+  String get postTagsPickerHelper;
+
+  /// No description provided for @publishGoodsCategorySelectTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Select item category (required)'**
+  String get publishGoodsCategorySelectTitle;
+
+  /// No description provided for @publishGoodsCategoryRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Please select an item category first'**
+  String get publishGoodsCategoryRequired;
+
+  /// No description provided for @publishGoodsCategoryHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Required: select item category'**
+  String get publishGoodsCategoryHelper;
+
+  /// No description provided for @publishGoodsCategoryPlaceholder.
+  ///
+  /// In en, this message translates to:
+  /// **'Please select a category'**
+  String get publishGoodsCategoryPlaceholder;
+
+  /// No description provided for @publishBrandRequiredLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Brand / source (required)'**
+  String get publishBrandRequiredLabel;
+
+  /// No description provided for @publishBrandRequiredError.
+  ///
+  /// In en, this message translates to:
+  /// **'Please enter the brand or source'**
+  String get publishBrandRequiredError;
 }
 
 class _AppLocalizationsDelegate

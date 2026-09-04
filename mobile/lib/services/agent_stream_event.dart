@@ -102,7 +102,9 @@ class AgentStreamEvent {
       case 'text_delta':
         final rawText = json['text'];
         if (rawText is! String) {
-          throw const FormatException('Missing or invalid text in text_delta event');
+          throw const FormatException(
+            'Missing or invalid text in text_delta event',
+          );
         }
         text = rawText;
       case 'tool_started' || 'tool_finished':
@@ -118,11 +120,15 @@ class AgentStreamEvent {
       case 'ui_action':
         final action = json['action'];
         if (action is! Map) {
-          throw const FormatException('Missing or invalid action in ui_action event');
+          throw const FormatException(
+            'Missing or invalid action in ui_action event',
+          );
         }
         actionType = action['action_type'] as String?;
         if (actionType == null || actionType.trim().isEmpty) {
-          throw const FormatException('Missing or empty action_type in ui_action event');
+          throw const FormatException(
+            'Missing or empty action_type in ui_action event',
+          );
         }
         if (action['payload'] != null) {
           actionPayload = Map<String, dynamic>.from(action['payload'] as Map);
@@ -130,7 +136,9 @@ class AgentStreamEvent {
       case 'status_changed':
         final rawStatus = json['status'];
         if (rawStatus is! String || rawStatus.trim().isEmpty) {
-          throw const FormatException('Missing or empty status in status_changed event');
+          throw const FormatException(
+            'Missing or empty status in status_changed event',
+          );
         }
         status = rawStatus;
       case 'turn_started':
@@ -140,9 +148,7 @@ class AgentStreamEvent {
         if (rawUsage is! Map) {
           throw const FormatException('Missing usage in turn_completed event');
         }
-        usage = AgentUsageSummary.fromJson(
-          Map<String, dynamic>.from(rawUsage),
-        );
+        usage = AgentUsageSummary.fromJson(Map<String, dynamic>.from(rawUsage));
       case 'turn_failed':
         final error = json['error'];
         if (error is! Map) {
@@ -150,8 +156,13 @@ class AgentStreamEvent {
         }
         errorCode = error['code'] as String?;
         errorMessage = error['message'] as String?;
-        if (errorCode == null || errorCode.trim().isEmpty || errorMessage == null || errorMessage.trim().isEmpty) {
-          throw const FormatException('Missing error code or message in turn_failed event');
+        if (errorCode == null ||
+            errorCode.trim().isEmpty ||
+            errorMessage == null ||
+            errorMessage.trim().isEmpty) {
+          throw const FormatException(
+            'Missing error code or message in turn_failed event',
+          );
         }
       case 'turn_cancelled':
         final reason = json['reason'];
@@ -166,9 +177,7 @@ class AgentStreamEvent {
         if (rawUsage is! Map) {
           throw const FormatException('Missing usage in usage event');
         }
-        usage = AgentUsageSummary.fromJson(
-          Map<String, dynamic>.from(rawUsage),
-        );
+        usage = AgentUsageSummary.fromJson(Map<String, dynamic>.from(rawUsage));
     }
 
     return AgentStreamEvent(
@@ -273,7 +282,9 @@ class AgentTurnValidator {
 
     final convId = event.conversationId;
     if (convId == null || convId.trim().isEmpty) {
-      throw const ProtocolViolationException('Missing or empty conversation_id');
+      throw const ProtocolViolationException(
+        'Missing or empty conversation_id',
+      );
     }
 
     if (expectedConversationId != null && convId != expectedConversationId) {

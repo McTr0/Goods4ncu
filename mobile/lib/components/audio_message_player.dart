@@ -2,11 +2,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 
 class AudioMessagePlayer extends StatefulWidget {
-  const AudioMessagePlayer({
-    super.key,
-    this.audioUrl,
-    required this.isMe,
-  });
+  const AudioMessagePlayer({super.key, this.audioUrl, required this.isMe});
 
   final String? audioUrl;
   final bool isMe;

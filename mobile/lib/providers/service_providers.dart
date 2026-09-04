@@ -4,7 +4,6 @@ import '../services/intent_service.dart';
 import '../services/agreement_service.dart';
 import '../services/reputation_service.dart';
 import '../services/price_discovery_service.dart';
-import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/listing_service.dart';
 import '../services/chat_service.dart';
@@ -24,14 +23,12 @@ import '../services/feed_feedback_service.dart';
 import '../services/post_service.dart';
 
 /// All service providers for dependency injection.
-/// Pages can use these directly for better testability,
-/// or continue using ApiService for backward compatibility.
+/// Pages use these domain services directly for testability and clean boundaries.
 List<SingleChildWidget> get serviceProviders => [
   if (kCompanionEnabled)
     ChangeNotifierProvider<CompanionRuntimeHost>(
       create: (_) => CompanionRuntimeHost(),
     ),
-  Provider<ApiService>(create: (_) => ApiService()),
   Provider<AuthService>(create: (_) => AuthService()),
   Provider<ListingService>(create: (_) => ListingService()),
   Provider<ChatService>(create: (_) => ChatService()),

@@ -2179,8 +2179,7 @@ class _ChatBubble extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (message.imageUrl != null &&
-                    message.imageUrl!.isNotEmpty)
+                if (message.imageUrl != null && message.imageUrl!.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8.0),
                     child: ClipRRect(

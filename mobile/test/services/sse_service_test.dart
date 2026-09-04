@@ -46,64 +46,58 @@ void main() {
       expect(event.errorCode, 'provider_error');
     });
 
-    test(
-      'retries once with refreshed token when first response is 401',
-      () async {
-        final client = _QueuedClient([
-          _response(401),
-          _response(
-            200,
-            body: [
-              'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"conv-1","seq":1,"type":"turn_started"}\n\n',
-              'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"conv-1","seq":2,"type":"text_delta","text":"ok"}\n\n',
-              'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"conv-1","seq":3,"type":"turn_completed","usage":{"model_steps":1,"tool_calls":0}}\n\n',
-            ].join(),
-          ),
-        ]);
+    test('retries once with refreshed token when first response is 401', () async {
+      final client = _QueuedClient([
+        _response(401),
+        _response(
+          200,
+          body: [
+            'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"conv-1","seq":1,"type":"turn_started"}\n\n',
+            'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"conv-1","seq":2,"type":"text_delta","text":"ok"}\n\n',
+            'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"conv-1","seq":3,"type":"turn_completed","usage":{"model_steps":1,"tool_calls":0}}\n\n',
+          ].join(),
+        ),
+      ]);
 
-        var accessToken = 'expired-token';
-        var refreshCalls = 0;
+      var accessToken = 'expired-token';
+      var refreshCalls = 0;
 
-        final service = SseService(
-          baseUrl: 'https://api.test',
-          getAccessToken: () async => accessToken,
-          refreshAccessToken: () async {
-            refreshCalls += 1;
-            accessToken = 'fresh-token';
-            return true;
-          },
-          clientFactory: () => client,
-        );
+      final service = SseService(
+        baseUrl: 'https://api.test',
+        getAccessToken: () async => accessToken,
+        refreshAccessToken: () async {
+          refreshCalls += 1;
+          accessToken = 'fresh-token';
+          return true;
+        },
+        clientFactory: () => client,
+      );
 
-        await service.connect(message: 'hello', conversationId: 'conv-1');
+      await service.connect(message: 'hello', conversationId: 'conv-1');
 
-        expect(refreshCalls, 1);
-        expect(client.requests.length, 2);
-        expect(
-          client.requests[0].headers['Authorization'],
-          'Bearer expired-token',
-        );
-        expect(
-          client.requests[1].headers['Authorization'],
-          'Bearer fresh-token',
-        );
+      expect(refreshCalls, 1);
+      expect(client.requests.length, 2);
+      expect(
+        client.requests[0].headers['Authorization'],
+        'Bearer expired-token',
+      );
+      expect(client.requests[1].headers['Authorization'], 'Bearer fresh-token');
 
-        final firstRequest = client.requests[0] as http.Request;
-        final secondRequest = client.requests[1] as http.Request;
-        expect(firstRequest.method, 'POST');
-        expect(firstRequest.url.path, '/api/chat/stream');
-        expect(jsonDecode(firstRequest.body), {
-          'message': 'hello',
-          'conversation_id': 'conv-1',
-        });
-        expect(jsonDecode(secondRequest.body), {
-          'message': 'hello',
-          'conversation_id': 'conv-1',
-        });
+      final firstRequest = client.requests[0] as http.Request;
+      final secondRequest = client.requests[1] as http.Request;
+      expect(firstRequest.method, 'POST');
+      expect(firstRequest.url.path, '/api/chat/stream');
+      expect(jsonDecode(firstRequest.body), {
+        'message': 'hello',
+        'conversation_id': 'conv-1',
+      });
+      expect(jsonDecode(secondRequest.body), {
+        'message': 'hello',
+        'conversation_id': 'conv-1',
+      });
 
-        await service.disconnect();
-      },
-    );
+      await service.disconnect();
+    });
 
     test('throws auth error when 401 cannot be recovered by refresh', () async {
       final client = _QueuedClient([_response(401)]);
@@ -309,30 +303,44 @@ void main() {
       },
     );
 
-    test('emits StreamTruncatedException when stream ends without terminal event', () async {
-      final body = [
-        'data: {"protocol_version":"2.0","turn_id":"t1","conversation_id":"__agent__","seq":1,"type":"turn_started"}\n\n',
-        'data: {"protocol_version":"2.0","turn_id":"t1","conversation_id":"__agent__","seq":2,"type":"text_delta","text":"partial"}\n\n',
-      ].join();
-      final client = _QueuedClient([_response(200, body: body)]);
-      final service = SseService(
-        baseUrl: 'https://api.test',
-        getAccessToken: () async => 'token-123',
-        refreshAccessToken: () async => false,
-        clientFactory: () => client,
-      );
+    test(
+      'emits StreamTruncatedException when stream ends without terminal event',
+      () async {
+        final body = [
+          'data: {"protocol_version":"2.0","turn_id":"t1","conversation_id":"__agent__","seq":1,"type":"turn_started"}\n\n',
+          'data: {"protocol_version":"2.0","turn_id":"t1","conversation_id":"__agent__","seq":2,"type":"text_delta","text":"partial"}\n\n',
+        ].join();
+        final client = _QueuedClient([_response(200, body: body)]);
+        final service = SseService(
+          baseUrl: 'https://api.test',
+          getAccessToken: () async => 'token-123',
+          refreshAccessToken: () async => false,
+          clientFactory: () => client,
+        );
 
-      await service.connect(message: 'hi');
-      expect(
-        service.stream.toList(),
-        throwsA(isA<StreamTruncatedException>()),
-      );
-    });
+        await service.connect(message: 'hi');
+        expect(
+          service.stream.toList(),
+          throwsA(isA<StreamTruncatedException>()),
+        );
+      },
+    );
 
     test('validates monotonic sequence and rejects gaps', () async {
       final validator = AgentTurnValidator();
-      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1', conversationId: 'c1');
-      final ev3 = AgentStreamEvent(type: 'text_delta', seq: 3, turnId: 't1', conversationId: 'c1', text: 'hi');
+      final ev1 = AgentStreamEvent(
+        type: 'turn_started',
+        seq: 1,
+        turnId: 't1',
+        conversationId: 'c1',
+      );
+      final ev3 = AgentStreamEvent(
+        type: 'text_delta',
+        seq: 3,
+        turnId: 't1',
+        conversationId: 'c1',
+        text: 'hi',
+      );
 
       expect(validator.validateEvent(ev1), isFalse);
       expect(
@@ -343,14 +351,25 @@ void main() {
 
     test('rejects first event when not turn_started or seq != 1', () {
       final validator = AgentTurnValidator();
-      final evText = AgentStreamEvent(type: 'text_delta', seq: 1, turnId: 't1', conversationId: 'c1', text: 'hi');
+      final evText = AgentStreamEvent(
+        type: 'text_delta',
+        seq: 1,
+        turnId: 't1',
+        conversationId: 'c1',
+        text: 'hi',
+      );
       expect(
         () => validator.validateEvent(evText),
         throwsA(isA<ProtocolViolationException>()),
       );
 
       validator.reset();
-      final evTurnStartedSeq2 = AgentStreamEvent(type: 'turn_started', seq: 2, turnId: 't1', conversationId: 'c1');
+      final evTurnStartedSeq2 = AgentStreamEvent(
+        type: 'turn_started',
+        seq: 2,
+        turnId: 't1',
+        conversationId: 'c1',
+      );
       expect(
         () => validator.validateEvent(evTurnStartedSeq2),
         throwsA(isA<ProtocolViolationException>()),
@@ -358,89 +377,126 @@ void main() {
     });
 
     test('rejects conversation ID mismatch', () {
-      final validator = AgentTurnValidator(expectedConversationId: 'expected-conv');
-      final evWrongConv = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1', conversationId: 'other-conv');
+      final validator = AgentTurnValidator(
+        expectedConversationId: 'expected-conv',
+      );
+      final evWrongConv = AgentStreamEvent(
+        type: 'turn_started',
+        seq: 1,
+        turnId: 't1',
+        conversationId: 'other-conv',
+      );
       expect(
         () => validator.validateEvent(evWrongConv),
         throwsA(isA<ProtocolViolationException>()),
       );
 
       final dynamicValidator = AgentTurnValidator();
-      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1', conversationId: 'conv-a');
+      final ev1 = AgentStreamEvent(
+        type: 'turn_started',
+        seq: 1,
+        turnId: 't1',
+        conversationId: 'conv-a',
+      );
       dynamicValidator.validateEvent(ev1);
-      final ev2 = AgentStreamEvent(type: 'text_delta', seq: 2, turnId: 't1', conversationId: 'conv-b', text: 'hi');
+      final ev2 = AgentStreamEvent(
+        type: 'text_delta',
+        seq: 2,
+        turnId: 't1',
+        conversationId: 'conv-b',
+        text: 'hi',
+      );
       expect(
         () => dynamicValidator.validateEvent(ev2),
         throwsA(isA<ProtocolViolationException>()),
       );
     });
 
-    test('AgentStreamEvent.fromJson rejects invalid seq, unknown types, or missing fields', () {
-      // Float seq
-      expect(
-        () => AgentStreamEvent.fromJson({
-          'protocol_version': '2.0',
-          'turn_id': 't1',
-          'conversation_id': 'c1',
-          'type': 'turn_started',
-          'seq': 1.5,
-        }),
-        throwsA(isA<FormatException>()),
-      );
+    test(
+      'AgentStreamEvent.fromJson rejects invalid seq, unknown types, or missing fields',
+      () {
+        // Float seq
+        expect(
+          () => AgentStreamEvent.fromJson({
+            'protocol_version': '2.0',
+            'turn_id': 't1',
+            'conversation_id': 'c1',
+            'type': 'turn_started',
+            'seq': 1.5,
+          }),
+          throwsA(isA<FormatException>()),
+        );
 
-      // Negative seq
-      expect(
-        () => AgentStreamEvent.fromJson({
-          'protocol_version': '2.0',
-          'turn_id': 't1',
-          'conversation_id': 'c1',
-          'type': 'turn_started',
-          'seq': -1,
-        }),
-        throwsA(isA<FormatException>()),
-      );
+        // Negative seq
+        expect(
+          () => AgentStreamEvent.fromJson({
+            'protocol_version': '2.0',
+            'turn_id': 't1',
+            'conversation_id': 'c1',
+            'type': 'turn_started',
+            'seq': -1,
+          }),
+          throwsA(isA<FormatException>()),
+        );
 
-      // Unknown event type
-      expect(
-        () => AgentStreamEvent.fromJson({
-          'protocol_version': '2.0',
-          'turn_id': 't1',
-          'conversation_id': 'c1',
-          'type': 'custom_unknown_type',
-          'seq': 1,
-        }),
-        throwsA(isA<FormatException>()),
-      );
+        // Unknown event type
+        expect(
+          () => AgentStreamEvent.fromJson({
+            'protocol_version': '2.0',
+            'turn_id': 't1',
+            'conversation_id': 'c1',
+            'type': 'custom_unknown_type',
+            'seq': 1,
+          }),
+          throwsA(isA<FormatException>()),
+        );
 
-      // Missing conversation_id
-      expect(
-        () => AgentStreamEvent.fromJson({
-          'protocol_version': '2.0',
-          'turn_id': 't1',
-          'type': 'turn_started',
-          'seq': 1,
-        }),
-        throwsA(isA<FormatException>()),
-      );
+        // Missing conversation_id
+        expect(
+          () => AgentStreamEvent.fromJson({
+            'protocol_version': '2.0',
+            'turn_id': 't1',
+            'type': 'turn_started',
+            'seq': 1,
+          }),
+          throwsA(isA<FormatException>()),
+        );
 
-      // text_delta missing text
-      expect(
-        () => AgentStreamEvent.fromJson({
-          'protocol_version': '2.0',
-          'turn_id': 't1',
-          'conversation_id': 'c1',
-          'type': 'text_delta',
-          'seq': 2,
-        }),
-        throwsA(isA<FormatException>()),
-      );
-    });
+        // text_delta missing text
+        expect(
+          () => AgentStreamEvent.fromJson({
+            'protocol_version': '2.0',
+            'turn_id': 't1',
+            'conversation_id': 'c1',
+            'type': 'text_delta',
+            'seq': 2,
+          }),
+          throwsA(isA<FormatException>()),
+        );
+      },
+    );
 
     test('heartbeat advances sequence count and is flagged for filtering', () {
       final validator = AgentTurnValidator();
-      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1', conversationId: 'c1');
-      final evHb = AgentStreamEvent(type: 'heartbeat', seq: 2, turnId: 't1', conversationId: 'c1');
-      final ev3 = AgentStreamEvent(type: 'text_delta', seq: 3, turnId: 't1', conversationId: 'c1', text: 'hi');
+      final ev1 = AgentStreamEvent(
+        type: 'turn_started',
+        seq: 1,
+        turnId: 't1',
+        conversationId: 'c1',
+      );
+      final evHb = AgentStreamEvent(
+        type: 'heartbeat',
+        seq: 2,
+        turnId: 't1',
+        conversationId: 'c1',
+      );
+      final ev3 = AgentStreamEvent(
+        type: 'text_delta',
+        seq: 3,
+        turnId: 't1',
+        conversationId: 'c1',
+        text: 'hi',
+      );
 
       expect(validator.validateEvent(ev1), isFalse);
       expect(validator.validateEvent(evHb), isTrue);
@@ -449,9 +505,25 @@ void main() {
 
     test('rejects events after terminal event', () {
       final validator = AgentTurnValidator();
-      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1', conversationId: 'c1');
-      final evTerm = AgentStreamEvent(type: 'turn_completed', seq: 2, turnId: 't1', conversationId: 'c1');
-      final evPost = AgentStreamEvent(type: 'text_delta', seq: 3, turnId: 't1', conversationId: 'c1', text: 'extra');
+      final ev1 = AgentStreamEvent(
+        type: 'turn_started',
+        seq: 1,
+        turnId: 't1',
+        conversationId: 'c1',
+      );
+      final evTerm = AgentStreamEvent(
+        type: 'turn_completed',
+        seq: 2,
+        turnId: 't1',
+        conversationId: 'c1',
+      );
+      final evPost = AgentStreamEvent(
+        type: 'text_delta',
+        seq: 3,
+        turnId: 't1',
+        conversationId: 'c1',
+        text: 'extra',
+      );
 
       expect(validator.validateEvent(ev1), isFalse);
       expect(validator.validateEvent(evTerm), isFalse);
@@ -464,7 +536,12 @@ void main() {
 
     test('assertTerminalEventSeen throws if stream ends prematurely', () {
       final validator = AgentTurnValidator();
-      final ev1 = AgentStreamEvent(type: 'turn_started', seq: 1, turnId: 't1', conversationId: 'c1');
+      final ev1 = AgentStreamEvent(
+        type: 'turn_started',
+        seq: 1,
+        turnId: 't1',
+        conversationId: 'c1',
+      );
       validator.validateEvent(ev1);
 
       expect(
@@ -473,69 +550,77 @@ void main() {
       );
     });
 
-    test('validateEvent does not mutate internal state when validation fails on first event', () {
-      final validator = AgentTurnValidator(expectedConversationId: 'expected-conv');
-      final evWrongConv = AgentStreamEvent(
-        type: 'turn_started',
-        seq: 1,
-        turnId: 'wrong-turn',
-        conversationId: 'wrong-conv',
-      );
+    test(
+      'validateEvent does not mutate internal state when validation fails on first event',
+      () {
+        final validator = AgentTurnValidator(
+          expectedConversationId: 'expected-conv',
+        );
+        final evWrongConv = AgentStreamEvent(
+          type: 'turn_started',
+          seq: 1,
+          turnId: 'wrong-turn',
+          conversationId: 'wrong-conv',
+        );
 
-      expect(
-        () => validator.validateEvent(evWrongConv),
-        throwsA(isA<ProtocolViolationException>()),
-      );
+        expect(
+          () => validator.validateEvent(evWrongConv),
+          throwsA(isA<ProtocolViolationException>()),
+        );
 
-      // Now pass the genuine expected event with seq=1
-      final validEv = AgentStreamEvent(
-        type: 'turn_started',
-        seq: 1,
-        turnId: 'actual-turn',
-        conversationId: 'expected-conv',
-      );
-      expect(validator.validateEvent(validEv), isFalse);
-    });
+        // Now pass the genuine expected event with seq=1
+        final validEv = AgentStreamEvent(
+          type: 'turn_started',
+          seq: 1,
+          turnId: 'actual-turn',
+          conversationId: 'expected-conv',
+        );
+        expect(validator.validateEvent(validEv), isFalse);
+      },
+    );
 
-    test('protocol violation in chunk terminates stream immediately with single error and no EOF duplicate', () async {
-      final client = _QueuedClient([
-        _response(
-          200,
-          body:
-              'data: {"protocol_version":"2.0","type":"turn_started","seq":1,"turn_id":"t1","conversation_id":"c1"}\n\n'
-              'data: {"protocol_version":"2.0","type":"text_delta","seq":99,"turn_id":"t1","conversation_id":"c1","text":"gap"}\n\n'
-              'data: {"protocol_version":"2.0","type":"text_delta","seq":100,"turn_id":"t1","conversation_id":"c1","text":"after"}\n\n',
-        ),
-      ]);
+    test(
+      'protocol violation in chunk terminates stream immediately with single error and no EOF duplicate',
+      () async {
+        final client = _QueuedClient([
+          _response(
+            200,
+            body:
+                'data: {"protocol_version":"2.0","type":"turn_started","seq":1,"turn_id":"t1","conversation_id":"c1"}\n\n'
+                'data: {"protocol_version":"2.0","type":"text_delta","seq":99,"turn_id":"t1","conversation_id":"c1","text":"gap"}\n\n'
+                'data: {"protocol_version":"2.0","type":"text_delta","seq":100,"turn_id":"t1","conversation_id":"c1","text":"after"}\n\n',
+          ),
+        ]);
 
-      final service = SseService(
-        baseUrl: 'http://example.test',
-        getAccessToken: () async => 'test-token',
-        clientFactory: () => client,
-      );
+        final service = SseService(
+          baseUrl: 'http://example.test',
+          getAccessToken: () async => 'test-token',
+          clientFactory: () => client,
+        );
 
-      await service.connect(message: 'hi');
+        await service.connect(message: 'hi');
 
-      final events = <AgentStreamEvent>[];
-      final errors = <dynamic>[];
+        final events = <AgentStreamEvent>[];
+        final errors = <dynamic>[];
 
-      final completer = Completer<void>();
-      service.stream.listen(
-        events.add,
-        onError: (err) {
-          errors.add(err);
-        },
-        onDone: () {
-          completer.complete();
-        },
-      );
+        final completer = Completer<void>();
+        service.stream.listen(
+          events.add,
+          onError: (err) {
+            errors.add(err);
+          },
+          onDone: () {
+            completer.complete();
+          },
+        );
 
-      await completer.future;
+        await completer.future;
 
-      expect(events.length, 1);
-      expect(events.first.type, 'turn_started');
-      expect(errors.length, 1);
-      expect(errors.first, isA<ProtocolViolationException>());
-    });
+        expect(events.length, 1);
+        expect(events.first.type, 'turn_started');
+        expect(errors.length, 1);
+        expect(errors.first, isA<ProtocolViolationException>());
+      },
+    );
   });
 }

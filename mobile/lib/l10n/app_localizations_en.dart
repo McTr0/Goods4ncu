@@ -3297,4 +3297,41 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get composerStopTooltip => 'Stop generating';
+
+  @override
+  String get postCategoryAnnouncementAdminOnlySuffix => ' · Operators only';
+
+  @override
+  String get postAnnouncementAdminOnly =>
+      'Announcements can only be published by operators';
+
+  @override
+  String get postTagGroupLocation => 'Location';
+
+  @override
+  String get postTagGroupTtl => 'Validity';
+
+  @override
+  String get postTagsPickerHelper =>
+      'Multiple tags allowed; max 1 each for location and timeframe';
+
+  @override
+  String get publishGoodsCategorySelectTitle =>
+      'Select item category (required)';
+
+  @override
+  String get publishGoodsCategoryRequired =>
+      'Please select an item category first';
+
+  @override
+  String get publishGoodsCategoryHelper => 'Required: select item category';
+
+  @override
+  String get publishGoodsCategoryPlaceholder => 'Please select a category';
+
+  @override
+  String get publishBrandRequiredLabel => 'Brand / source (required)';
+
+  @override
+  String get publishBrandRequiredError => 'Please enter the brand or source';
 }

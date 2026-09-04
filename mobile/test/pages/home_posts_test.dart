@@ -362,12 +362,7 @@ void main() {
     tester,
   ) async {
     final posts = _FakePostService(
-      const PostsResponse(
-        items: [],
-        total: 0,
-        limit: 20,
-        offset: 0,
-      ),
+      const PostsResponse(items: [], total: 0, limit: 20, offset: 0),
     );
     String? navigatedRoute;
     final router = GoRouter(

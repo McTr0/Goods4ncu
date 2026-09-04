@@ -35,7 +35,11 @@ void main() {
     expect(
       kDoroExpressions,
       containsAll([
-        'Exp1', 'Exp8', 'TongueOut', 'Highlight OFF', 'Running OFF',
+        'Exp1',
+        'Exp8',
+        'TongueOut',
+        'Highlight OFF',
+        'Running OFF',
       ]),
     );
     expect(kDoroExpressions.length, 11);

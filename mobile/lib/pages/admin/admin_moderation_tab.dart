@@ -39,9 +39,7 @@ class _AdminModerationTabState extends State<AdminModerationTab> {
       _error = null;
     });
     try {
-      final response = await widget.adminService.getModerationCases(
-        limit: 100,
-      );
+      final response = await widget.adminService.getModerationCases(limit: 100);
       if (!mounted) return;
       setState(() {
         _cases = (response['cases'] as List<dynamic>? ?? const [])

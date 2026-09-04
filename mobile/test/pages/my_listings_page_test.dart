@@ -68,8 +68,9 @@ Widget _app(_RecordingUserService service) {
       ),
       GoRoute(
         path: '/publish',
-        builder: (context, state) =>
-            Scaffold(body: Text('publish-${state.uri.queryParameters['category']}')),
+        builder: (context, state) => Scaffold(
+          body: Text('publish-${state.uri.queryParameters['category']}'),
+        ),
       ),
     ],
   );

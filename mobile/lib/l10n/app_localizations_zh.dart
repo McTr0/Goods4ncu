@@ -3149,4 +3149,37 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get composerStopTooltip => '停止生成';
+
+  @override
+  String get postCategoryAnnouncementAdminOnlySuffix => ' · 仅运营';
+
+  @override
+  String get postAnnouncementAdminOnly => '公告仅限运营发布';
+
+  @override
+  String get postTagGroupLocation => '地点';
+
+  @override
+  String get postTagGroupTtl => '时效';
+
+  @override
+  String get postTagsPickerHelper => '可多选；地点/时效各限一个';
+
+  @override
+  String get publishGoodsCategorySelectTitle => '选择商品分区（必填）';
+
+  @override
+  String get publishGoodsCategoryRequired => '请先选择商品分区';
+
+  @override
+  String get publishGoodsCategoryHelper => '必填：选择商品分区';
+
+  @override
+  String get publishGoodsCategoryPlaceholder => '请选择分区';
+
+  @override
+  String get publishBrandRequiredLabel => '品牌 / 来源（必填）';
+
+  @override
+  String get publishBrandRequiredError => '请填写品牌或来源';
 }

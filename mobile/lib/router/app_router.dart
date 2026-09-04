@@ -23,6 +23,7 @@ import '../pages/watchlist_page.dart';
 import '../pages/notifications_page.dart';
 import '../pages/moderation_cases_page.dart';
 import '../models/models.dart';
+import '../models/post_taxonomy.dart';
 import '../services/base_service.dart';
 import '../services/chat_service.dart';
 import '../services/user_service.dart';
@@ -52,6 +53,16 @@ Map<String, dynamic>? assistantPageContext(Uri uri) {
   };
   if (listingId == null) context.remove('listingId');
   return context;
+}
+
+/// Validates and normalizes the publish category query parameter against [kPostCategories].
+/// Invalid categories (e.g. legacy 'event', 'help', 'lost', 'found', or arbitrary strings)
+/// are safely normalized to 'discussion'.
+String normalizePublishCategory(String? rawCategory) {
+  if (rawCategory == null) return 'discussion';
+  final category = postCategoryByKey(rawCategory);
+  if (category == null) return 'discussion';
+  return category.key;
 }
 
 Future<bool> getLoginStatus() async {
@@ -313,8 +324,9 @@ final GoRouter appRouter = GoRouter(
           pageBuilder: (context, state) => NoTransitionPage(
             key: state.pageKey,
             child: CreatePostPage(
-              initialCategory:
-                  state.uri.queryParameters['category'] ?? 'discussion',
+              initialCategory: normalizePublishCategory(
+                state.uri.queryParameters['category'],
+              ),
             ),
           ),
         ),

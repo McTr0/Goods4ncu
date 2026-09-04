@@ -696,8 +696,7 @@ class _PostEmptyState extends StatelessWidget {
             if (showCreateAction) ...[
               const SizedBox(height: AppTheme.sp16),
               FilledButton.icon(
-                onPressed: () =>
-                    context.push('/publish?category=discussion'),
+                onPressed: () => context.push('/publish?category=discussion'),
                 icon: const Icon(Icons.edit_rounded),
                 label: Text(l.postStartAction),
               ),

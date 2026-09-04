@@ -69,7 +69,6 @@ class ListingService extends BaseService {
     );
   }
 
-
   /// Get active offers matching a wanted listing.
   Future<ListingsResponse> getWantedMatches(String wantedId) async {
     final headers = await authHeaders();

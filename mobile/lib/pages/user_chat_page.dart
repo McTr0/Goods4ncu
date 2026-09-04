@@ -517,15 +517,12 @@ class _UserChatPageState extends State<UserChatPage> {
       await _mediaSender.sendPickedImage(
         picked,
         sendMessage:
-            ({
-              required String content,
-              String? imageUrl,
-              String? audioUrl,
-            }) => _chatNotifier.sendMessage(
-              content: content,
-              imageUrl: imageUrl,
-              audioUrl: audioUrl,
-            ),
+            ({required String content, String? imageUrl, String? audioUrl}) =>
+                _chatNotifier.sendMessage(
+                  content: content,
+                  imageUrl: imageUrl,
+                  audioUrl: audioUrl,
+                ),
       );
     } on UserChatMediaSendException catch (e) {
       _showSnackBar(e.message);

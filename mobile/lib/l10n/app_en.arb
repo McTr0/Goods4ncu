@@ -1520,5 +1520,16 @@
   "postEmptyBody": "Start a useful campus conversation and classmates can build the thread with you.",
   "postEmptyListingBody": "No marketplace posts match this filter yet.",
   "postStartAction": "Start a discussion",
-  "composerStopTooltip": "Stop generating"
+  "composerStopTooltip": "Stop generating",
+  "postCategoryAnnouncementAdminOnlySuffix": " · Operators only",
+  "postAnnouncementAdminOnly": "Announcements can only be published by operators",
+  "postTagGroupLocation": "Location",
+  "postTagGroupTtl": "Validity",
+  "postTagsPickerHelper": "Multiple tags allowed; max 1 each for location and timeframe",
+  "publishGoodsCategorySelectTitle": "Select item category (required)",
+  "publishGoodsCategoryRequired": "Please select an item category first",
+  "publishGoodsCategoryHelper": "Required: select item category",
+  "publishGoodsCategoryPlaceholder": "Please select a category",
+  "publishBrandRequiredLabel": "Brand / source (required)",
+  "publishBrandRequiredError": "Please enter the brand or source"
 }

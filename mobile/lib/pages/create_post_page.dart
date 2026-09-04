@@ -133,7 +133,8 @@ class _CreatePostPageState extends State<CreatePostPage> {
   PickedPostImage? _coverImage;
   bool _submitting = false;
 
-  late String _category = widget.initialCategory;
+  late String _category =
+      postCategoryByKey(widget.initialCategory)?.key ?? 'discussion';
   final Set<String> _selectedTags = {};
 
   // Goods fields (offer/wanted attach a listing).
@@ -142,8 +143,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
   double _conditionScore = 8;
   final _goodsPriceController = TextEditingController();
   String? _goodsCategory;
-  DateTime? _eventStartsAt;
-  final _eventPlaceController = TextEditingController();
   bool _canAnnounce = false;
   _SubmissionAttempt? _activeAttempt;
 
@@ -174,23 +173,23 @@ class _CreatePostPageState extends State<CreatePostPage> {
     _goodsTitleController.dispose();
     _goodsBrandController.dispose();
     _goodsPriceController.dispose();
-    _eventPlaceController.dispose();
     super.dispose();
   }
 
   bool get _needsGoods => postCategoryByKey(_category)?.isGoods ?? false;
 
   Future<void> _pickCategory() async {
+    final l = AppLocalizations.of(context)!;
     final selected = await showSearchablePickerSheet<String>(
       context: context,
-      title: AppLocalizations.of(context)!.postCategoryLabel,
+      title: l.postCategoryLabel,
       options: [
         for (final category in kPostCategories)
           PickerOption(
             value: category.key,
             label: category.key == 'announcement' && !_canAnnounce
-                ? '${category.label} · 仅运营'
-                : category.label,
+                ? '${postCategoryLabel(context, category.key)}${l.postCategoryAnnouncementAdminOnlySuffix}'
+                : postCategoryLabel(context, category.key),
             keywords: [category.key],
           ),
       ],
@@ -201,7 +200,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
     if (next == 'announcement' && !_canAnnounce) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('公告仅限运营发布')));
+      ).showSnackBar(SnackBar(content: Text(l.postAnnouncementAdminOnly)));
       return;
     }
     setState(() {
@@ -210,13 +209,11 @@ class _CreatePostPageState extends State<CreatePostPage> {
     });
   }
 
-  static const String _locationGroupLabel = '地点';
-  static const String _ttlGroupLabel = '时效';
-
   Future<void> _pickTags() async {
+    final l = AppLocalizations.of(context)!;
     final selected = await showSearchablePickerSheet<String>(
       context: context,
-      title: AppLocalizations.of(context)!.postTagsLabel,
+      title: l.postTagsLabel,
       options: [
         for (final tag in kPostTags)
           PickerOption(
@@ -224,9 +221,9 @@ class _CreatePostPageState extends State<CreatePostPage> {
             // Same emoji+label rendering as the discover-page filter.
             label: postTagLabel(context, tag.key),
             subtitle: tag.group == 'location'
-                ? _locationGroupLabel
+                ? l.postTagGroupLocation
                 : tag.group == 'ttl'
-                ? _ttlGroupLabel
+                ? l.postTagGroupTtl
                 : null,
             keywords: [if (tag.group != null) tag.group!],
           ),
@@ -258,7 +255,11 @@ class _CreatePostPageState extends State<CreatePostPage> {
     if (_submitting || _formKey.currentState?.validate() != true) return;
     if (_needsGoods && _goodsCategory == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先选择商品分区')),
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(context)!.publishGoodsCategoryRequired,
+          ),
+        ),
       );
       return;
     }
@@ -270,12 +271,14 @@ class _CreatePostPageState extends State<CreatePostPage> {
     final goodsCategory = _needsGoods ? _goodsCategory : null;
     final goodsBrand = _goodsBrandController.text.trim();
     final conditionScore = _conditionScore.round();
-    final goodsPrice = double.tryParse(_goodsPriceController.text.trim()) ?? 0.0;
+    final goodsPrice =
+        double.tryParse(_goodsPriceController.text.trim()) ?? 0.0;
     final spaceId = widget.spaceId;
     final coverBytes = _coverImage?.bytes;
 
     final attempt = _activeAttempt;
-    final currentAttempt = (attempt != null &&
+    final currentAttempt =
+        (attempt != null &&
             attempt.matches(
               title: title,
               body: body,
@@ -307,12 +310,14 @@ class _CreatePostPageState extends State<CreatePostPage> {
     setState(() => _submitting = true);
     try {
       final selectedImage = _coverImage;
-      if (currentAttempt.uploadedCoverImageUrl == null && selectedImage != null) {
-        currentAttempt.uploadedCoverImageUrl = await _uploadService.uploadPostImageBytes(
-          selectedImage.bytes,
-          extension: selectedImage.extension,
-          contentType: selectedImage.contentType,
-        );
+      if (currentAttempt.uploadedCoverImageUrl == null &&
+          selectedImage != null) {
+        currentAttempt.uploadedCoverImageUrl = await _uploadService
+            .uploadPostImageBytes(
+              selectedImage.bytes,
+              extension: selectedImage.extension,
+              contentType: selectedImage.contentType,
+            );
       }
       final coverImageUrl = currentAttempt.uploadedCoverImageUrl;
 
@@ -452,10 +457,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
                 ),
                 const SizedBox(height: AppTheme.sp14),
                 _buildTagsSection(l),
-                if (_category == 'event') ...[
-                  const SizedBox(height: AppTheme.sp14),
-                  _buildEventAttributes(l),
-                ],
                 if (_needsGoods) ...[
                   const SizedBox(height: AppTheme.sp14),
                   _buildGoodsSection(l),
@@ -538,7 +539,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
           child: InputDecorator(
             decoration: InputDecoration(
               labelText: l.postTagsLabel,
-              helperText: '可多选；地点/时效各限一个',
+              helperText: l.postTagsPickerHelper,
               prefixIcon: const Icon(Icons.sell_outlined),
               suffixIcon: const Icon(Icons.expand_more_rounded),
               border: OutlineInputBorder(
@@ -568,9 +569,10 @@ class _CreatePostPageState extends State<CreatePostPage> {
   }
 
   Future<void> _pickGoodsCategory() async {
+    final l = AppLocalizations.of(context)!;
     final selected = await showSearchablePickerSheet<String>(
       context: context,
-      title: '选择商品分区（必填）',
+      title: l.publishGoodsCategorySelectTitle,
       options: [
         for (final key in _listingCategoryKeys)
           PickerOption(value: key, label: localizedCategoryLabel(context, key)),
@@ -579,73 +581,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
     );
     if (selected == null || selected.isEmpty || !mounted) return;
     setState(() => _goodsCategory = selected.first);
-  }
-
-  Widget _buildEventAttributes(AppLocalizations l) {
-    final startsAt = _eventStartsAt;
-    return Container(
-      padding: const EdgeInsets.all(AppTheme.sp16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text('活动信息', style: const TextStyle(fontWeight: FontWeight.w800)),
-          const SizedBox(height: AppTheme.sp12),
-          InkWell(
-            key: const ValueKey('publish-event-starts-at'),
-            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-            onTap: () async {
-              final date = await showDatePicker(
-                context: context,
-                initialDate:
-                    startsAt ?? DateTime.now().add(const Duration(days: 1)),
-                firstDate: DateTime.now(),
-                lastDate: DateTime.now().add(const Duration(days: 365)),
-              );
-              if (date == null || !mounted) return;
-              final time = await showTimePicker(
-                context: context,
-                initialTime: TimeOfDay.fromDateTime(
-                  startsAt ?? date.add(const Duration(hours: 10)),
-                ),
-              );
-              if (!mounted) return;
-              setState(() {
-                _eventStartsAt = DateTime(
-                  date.year,
-                  date.month,
-                  date.day,
-                  time?.hour ?? 10,
-                  time?.minute ?? 0,
-                );
-              });
-            },
-            child: InputDecorator(
-              decoration: InputDecoration(
-                labelText: '开始时间 *',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-                ),
-              ),
-              child: Text(
-                startsAt == null
-                    ? '请选择日期和时间'
-                    : '开始于 ${startsAt.toLocal()}'.substring(0, 22),
-              ),
-            ),
-          ),
-          const SizedBox(height: AppTheme.sp12),
-          TextFormField(
-            controller: _eventPlaceController,
-            maxLength: 120,
-            decoration: InputDecoration(labelText: '活动地点（选填）'),
-          ),
-        ],
-      ),
-    );
   }
 
   Widget _buildGoodsSection(AppLocalizations l) {
@@ -668,7 +603,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
             initialValue: _goodsCategory,
             validator: (_) {
               if (_needsGoods && _goodsCategory == null) {
-                return '请先选择商品分区';
+                return l.publishGoodsCategoryRequired;
               }
               return null;
             },
@@ -685,7 +620,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
                 child: InputDecorator(
                   decoration: InputDecoration(
                     labelText: '${l.category} *',
-                    helperText: '必填：选择商品分区',
+                    helperText: l.publishGoodsCategoryHelper,
                     errorText: field.errorText,
                     suffixIcon: const Icon(Icons.expand_more_rounded),
                     border: OutlineInputBorder(
@@ -694,7 +629,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
                   ),
                   child: Text(
                     _goodsCategory == null
-                        ? '请选择分区'
+                        ? l.publishGoodsCategoryPlaceholder
                         : localizedCategoryLabel(context, _goodsCategory!),
                     style: TextStyle(
                       color: _goodsCategory == null
@@ -712,12 +647,13 @@ class _CreatePostPageState extends State<CreatePostPage> {
             controller: _goodsBrandController,
             decoration: InputDecoration(
               labelText: _category == 'offer'
-                  ? '品牌 / 来源（必填）'
+                  ? l.publishBrandRequiredLabel
                   : l.publishBrandLabel,
             ),
             validator: (value) {
-              if (_category == 'offer' && (value == null || value.trim().isEmpty)) {
-                return '请填写品牌或来源';
+              if (_category == 'offer' &&
+                  (value == null || value.trim().isEmpty)) {
+                return l.publishBrandRequiredError;
               }
               return null;
             },

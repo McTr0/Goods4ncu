@@ -413,7 +413,7 @@ class BaseService {
     return response;
   }
 
-  // Token storage helpers (used by AuthService and ApiService)
+  // Token storage helpers (used by AuthService)
   Future<String?> getToken() async {
     return _tokenStorage.getAccessToken();
   }
