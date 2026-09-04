@@ -132,19 +132,21 @@ async fn two_instances_deliver_across_processes() {
     let Some(url) = redis_url() else { return };
 
     let spawn = |port: u16| {
-        std::process::Command::new(env!("CARGO_BIN_EXE_goods4ncu"))
-            .env("SERVER_PORT", port.to_string())
-            .env("REDIS_URL", &url)
-            .env("DEPLOYMENT_PROFILE", "replicated")
-            .env("SHUTDOWN_DRAIN_SECS", "0")
-            .env("SHUTDOWN_TIMEOUT_SECS", "5")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .expect("spawn instance")
+        ChildGuard::new(
+            std::process::Command::new(env!("CARGO_BIN_EXE_goods4ncu"))
+                .env("SERVER_PORT", port.to_string())
+                .env("REDIS_URL", &url)
+                .env("DEPLOYMENT_PROFILE", "replicated")
+                .env("SHUTDOWN_DRAIN_SECS", "0")
+                .env("SHUTDOWN_TIMEOUT_SECS", "5")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("spawn instance"),
+        )
     };
-    let mut instance_a = spawn(4101);
-    let mut instance_b = spawn(4102);
+    let _instance_a = spawn(4101);
+    let _instance_b = spawn(4102);
 
     let client = reqwest::Client::new();
     for port in [4101u16, 4102] {
@@ -234,6 +236,22 @@ async fn two_instances_deliver_across_processes() {
         .expect("switch A json");
     let active_token_a = switch_a["token"].as_str().expect("token A");
 
+    // Enable stranger realtime connections for user A so B's message is accepted without pre-existing contact.
+    let pref_resp = client
+        .put("http://127.0.0.1:4101/api/chat/connection-preferences")
+        .header("Authorization", format!("Bearer {active_token_a}"))
+        .json(&serde_json::json!({
+            "allow_strangers": true
+        }))
+        .send()
+        .await
+        .expect("set connection preferences for user A");
+    assert!(
+        pref_resp.status().is_success(),
+        "set connection preferences on A failed: {:?}",
+        pref_resp.text().await
+    );
+
     let switch_b: serde_json::Value = client
         .post("http://127.0.0.1:4102/api/user/active-campus")
         .header("Authorization", format!("Bearer {token_b}"))
@@ -300,13 +318,22 @@ async fn two_instances_deliver_across_processes() {
     .await
     .expect("cross-process delivery within 10s");
     assert!(frame.contains("conversation_created"));
+}
 
-    // Orderly SIGTERM drain for both instances.
-    for instance in [&mut instance_a, &mut instance_b] {
-        sigterm(instance.id());
+struct ChildGuard(Option<std::process::Child>);
+
+impl ChildGuard {
+    fn new(child: std::process::Child) -> Self {
+        Self(Some(child))
     }
-    for instance in [&mut instance_a, &mut instance_b] {
-        let _ = instance.wait();
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            sigterm(child.id());
+            let _ = child.wait();
+        }
     }
 }
 
