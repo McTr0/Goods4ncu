@@ -11,20 +11,6 @@ use crate::middleware::rate_limit::traits::RateLimiter;
 use crate::middleware::rate_limit::RateLimitResult;
 use async_trait::async_trait;
 
-const WHITELISTED_PATHS: &[&str] = &[
-    // Orchestrator probes poll every few seconds from a small set of source
-    // addresses. Rate limiting them would report the instance as unhealthy and
-    // trigger a restart loop under exactly the load the limiter exists to
-    // survive.
-    "/api/livez",
-    "/api/readyz",
-    "/api/stats",
-    "/api/categories",
-    "/api/chat/connections",
-    "/api/chat/conversations",
-    "/api/chat/messages",
-];
-
 /// Token bucket rate limiter using moka cache.
 /// Each IP gets a token bucket that refills over time.
 #[derive(Clone)]
@@ -205,9 +191,14 @@ mod tests {
     }
 
     #[test]
-    fn test_ws_endpoint_is_not_whitelisted() {
-        assert!(!is_whitelisted("/api/ws"));
-        assert!(is_whitelisted("/api/readyz"));
+    fn test_whitelist_policy() {
+        use axum::http::Method;
+        assert!(!is_whitelisted(&Method::GET, "/api/ws"));
+        assert!(!is_whitelisted(&Method::POST, "/api/chat/conversations"));
+        assert!(!is_whitelisted(&Method::POST, "/api/chat/messages"));
+        assert!(!is_whitelisted(&Method::POST, "/api/readyz"));
+        assert!(is_whitelisted(&Method::GET, "/api/livez"));
+        assert!(is_whitelisted(&Method::GET, "/api/readyz"));
     }
 }
 
@@ -233,20 +224,6 @@ impl RateLimitStateHandle {
     /// window of reduced protection, while the cost of denying it is that nobody
     /// can use the product at all. Turning a dependency wobble into a total
     /// outage is a much worse failure than the one being mitigated.
-    ///
-    /// This was `unwrap_or(false)`. Redis lost the ability to write its snapshot,
-    /// so it rejected every write command, so every rate-limit check errored,
-    /// so **every request in the deployment returned 429** — a full outage caused
-    /// by the component whose only job is to keep the service available under
-    /// load.
-    ///
-    /// Note this is the opposite choice from the interruption budget, which fails
-    /// closed. The asymmetry is not inconsistency: there, failing closed means
-    /// "do not push a notification", which harms nobody; here it means "serve
-    /// nobody".
-    ///
-    /// The error is logged at WARN rather than swallowed, because silently
-    /// unprotected is its own kind of bad.
     pub async fn check_rate_limit(&self, ip: &str) -> bool {
         let check_future = self.0.check_rate_limit(ip);
         match tokio::time::timeout(std::time::Duration::from_millis(250), check_future).await {
@@ -270,7 +247,8 @@ impl RateLimitStateHandle {
     }
 }
 
-/// Returns `true` if the given path is whitelisted from rate limiting.
-pub fn is_whitelisted(path: &str) -> bool {
-    WHITELISTED_PATHS.contains(&path)
+/// Returns `true` if the given method and path are whitelisted from rate limiting.
+/// Strictly restricted to orchestrator GET probes (/api/livez and /api/readyz).
+pub fn is_whitelisted(method: &axum::http::Method, path: &str) -> bool {
+    method == axum::http::Method::GET && (path == "/api/livez" || path == "/api/readyz")
 }

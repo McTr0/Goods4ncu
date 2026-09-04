@@ -156,7 +156,7 @@ pub async fn rate_limit_middleware(
 
     let path = request.uri().path().to_string();
 
-    if is_whitelisted(&path) {
+    if is_whitelisted(request.method(), &path) {
         return next.run(request).await;
     }
 
@@ -290,6 +290,7 @@ pub struct ApiInfrastructure {
     pub notification: NotificationService,
     #[allow(dead_code)]
     pub ws_connections: Arc<ws::WsConnections>,
+    pub ws_hub: Arc<ws::WsHub>,
     pub metrics: Arc<MetricsService>,
     pub order_service: order::OrderService,
     pub admin_service: crate::services::admin::AdminService,
