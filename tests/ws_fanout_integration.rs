@@ -332,7 +332,22 @@ impl Drop for ChildGuard {
     fn drop(&mut self) {
         if let Some(mut child) = self.0.take() {
             sigterm(child.id());
-            let _ = child.wait();
+            let start = std::time::Instant::now();
+            let mut exited = false;
+            while start.elapsed() < Duration::from_secs(3) {
+                match child.try_wait() {
+                    Ok(Some(_)) => {
+                        exited = true;
+                        break;
+                    }
+                    Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+                    Err(_) => break,
+                }
+            }
+            if !exited {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
         }
     }
 }
