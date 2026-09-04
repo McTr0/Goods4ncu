@@ -24,7 +24,6 @@
 | `CAMPUS_VERIFICATION_DELIVERY_TOKEN` | 生产必需 | 调用验证码投递 webhook 的 bearer token。 |
 | `GEMINI_API_KEY` | 条件必需 | `gemini` provider 必需；其它 chat provider 当前也需要它做 embedding/RAG。 |
 | `MINIMAX_API_KEY` | 条件必需 | 使用 MiniMax provider 时需要。 |
-| `MINIMAX_API_BASE_URL` | 已弃用 | MiniMax 自定义 base URL 的兼容别名；新部署使用 `LLM_BASE_URL`。 |
 | `LLM_PROVIDER` | 可选 | `gemini`、`minimax`，或 OpenAI-compatible alias：`openai`、`deepseek`、`groq`、`openrouter`、`xai`、`together`、`openai_compatible`。 |
 | `LLM_MODEL` | 条件必需 | Chat model 名称；OpenAI-compatible provider 必须设置。 |
 | `LLM_BASE_URL` | 可选 | OpenAI-compatible 自定义 base URL；命名 alias 有默认 base URL，可覆盖。 |
@@ -536,7 +535,7 @@ WebSocket 只从 `Authorization` header 取 Bearer token。检查 access token �
 - 在生产快照脱敏副本运行升级，记录锁时间、表扫描和磁盘增长。
 - 先部署兼容 schema，再部署应用读写，最后单独清理旧字段。
 - 应用 rollback 不依赖回滚已执行 migration。
-- 核心 TEXT/UUID shadow column divergence 检查为零或有批准的兼容清单。
+- 核心 ID 已完全收敛为原生 UUID 语义，无 shadow columns 遗留。
 
 ### 核心用户旅程
 

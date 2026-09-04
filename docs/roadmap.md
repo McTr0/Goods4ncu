@@ -88,7 +88,7 @@
 - [已实现] `POST /api/orders/{id}/confirm` 支持卖家范围内的 `Idempotency-Key`；重复确认不会重复下架，同 key 改变确认参数会安全冲突。
 - [目标态] 定义 `/api/v1` 嵌套错误对象和 cursor pagination，并把幂等扩展到联系、成交和 Agent confirm 等其余关键写接口。
 - 兼容未版本化接口，记录使用量并制定弃用窗口。
-- 继续收敛 TEXT/UUID shadow columns：repository 优先 UUID、旧数据兼容、divergence 为零。
+- [已完成] 彻底清理 TEXT/UUID shadow columns 与 dual-writes，全链路收敛为原生 UUID。
 - 关键写入添加资源版本或等价冲突检查。
 
 ### 媒体与审核

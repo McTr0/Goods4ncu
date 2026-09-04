@@ -282,11 +282,6 @@ impl AppConfig {
 
         let llm_base_url = read_non_empty_env("LLM_BASE_URL")
             .or_else(|| file.as_ref()?.llm.base_url.clone())
-            .or_else(|| {
-                (llm_provider == "minimax")
-                    .then(|| read_non_empty_env("MINIMAX_API_BASE_URL"))
-                    .flatten()
-            })
             .or_else(|| default_llm_base_url(&llm_provider).map(str::to_string));
 
         let configured_api_style = ApiStyle::parse(
@@ -301,8 +296,7 @@ impl AppConfig {
         let llm_api_style = configured_api_style.resolve(&llm_provider);
 
         let llm_api_key = read_non_empty_env("LLM_API_KEY")
-            .or_else(|| provider_api_key_env(&llm_provider).and_then(read_non_empty_env))
-            .or_else(|| read_non_empty_env("OPENAI_COMPAT_API_KEY"));
+            .or_else(|| provider_api_key_env(&llm_provider).and_then(read_non_empty_env));
 
         let vector_dim: usize = read_non_empty_env("VECTOR_DIM")
             .or_else(|| file.as_ref()?.llm.vector_dim.map(|v| v.to_string()))

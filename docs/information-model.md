@@ -352,15 +352,13 @@ wanted(active) + offer(active)
 5. 管理员跨校园操作必须使用平台角色、理由和审计事件；强认证仍是上线前目标。
 6. 向量和全文检索必须先限定 campus，再计算相似度。
 
-## ID 与兼容策略
+## ID 与数据模型
 
-当前系统处在 TEXT id 与 UUID shadow column 并存阶段。公开 API 继续把 ID 序列化为字符串，内部逐步采用 UUID 语义。
+系统核心实体全面采用原生 UUID 语义与主键类型。历史过度的 TEXT shadow columns、触发器与双写机制已彻底清理（Zero-Compatibility Reset）。公开 API 继续把 ID 序列化为规范 UUID 字符串。
 
-- 不在文档中把“字符串”误写成“任意字符串”。
-- 新目标表使用 UUID 主键。
-- repository 封装兼容解析，不让 handler 自行拼接新旧 join。
-- API 版本迁移期间保持旧字段名，直到有明确弃用窗口。
-- 任何 backfill 都要有 divergence 检查和混合数据测试。
+- 所有核心表（users, inventory, orders, posts, campuses 等）主键与外键使用原生 UUID。
+- repository 统一使用强类型 UUID 字段，拒绝任何双写逻辑。
+- 领域模型中禁止未经验证的任意字符串 ID。
 
 ## 事实来源优先级
 

@@ -11,7 +11,6 @@
 #   1. $CONFIG_FILE env var (if set)
 #   2. ./goods4ncu.toml (if exists)
 #   3. ./config/goods4ncu.toml (if exists)
-#   4. ./goods4ncu.toml or ./config/goods4ncu.toml (legacy fallback)
 # =============================================================================
 
 # -----------------------------------------------------------------------
