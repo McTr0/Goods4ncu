@@ -342,6 +342,16 @@ pub trait AuthRepository: Send + Sync {
 
     /// Revoke all refresh tokens for a user.
     async fn revoke_all_user_tokens(&self, user_id: &str) -> Result<(), ApiError>;
+
+    /// Revoke an access token JTI until expires_at.
+    async fn revoke_access_token_jti(
+        &self,
+        jti: &str,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), ApiError>;
+
+    /// Check if an access token JTI is revoked in DB. Returns expiry epoch seconds if revoked.
+    async fn get_revoked_token_expiry(&self, jti: &str) -> Result<Option<i64>, ApiError>;
 }
 
 #[derive(Debug, Clone)]

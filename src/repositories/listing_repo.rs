@@ -590,6 +590,266 @@ impl PostgresListingRepository {
         }
         Ok(DeleteOwnedResult::Deleted)
     }
+
+    pub async fn ping(&self) -> Result<(), ApiError> {
+        sqlx::query("SELECT 1")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| {
+                tracing::error!(%e, "Readiness check failed: database unreachable");
+                ApiError::ServiceUnavailable("database_unreachable")
+            })?;
+        Ok(())
+    }
+
+    pub async fn get_order_target(
+        &self,
+        listing_id: &str,
+    ) -> Result<Option<ListingOrderTarget>, ApiError> {
+        let row = sqlx::query(
+            "SELECT owner_id, suggested_price_cny, status, campus_id,
+                    listing_has_active_restriction(id) AS restricted
+             FROM inventory WHERE id = $1",
+        )
+        .bind(listing_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("fetch listing error: {}", e);
+            ApiError::Internal(anyhow::anyhow!("Failed to fetch listing"))
+        })?;
+
+        Ok(row.map(|r| ListingOrderTarget {
+            owner_id: r.get("owner_id"),
+            suggested_price_cny: r.get("suggested_price_cny"),
+            status: r.get("status"),
+            campus_id: r.get("campus_id"),
+            restricted: r.get("restricted"),
+        }))
+    }
+
+    pub async fn find_active_unrestricted_owner(
+        &self,
+        listing_id: &str,
+        campus_id: Uuid,
+    ) -> Result<Option<String>, ApiError> {
+        let owner: Option<String> = sqlx::query_scalar(
+            "SELECT owner_id FROM inventory
+             WHERE id = $1 AND campus_id = $2 AND status = 'active'
+               AND NOT listing_has_active_restriction(id)",
+        )
+        .bind(listing_id)
+        .bind(campus_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+
+        Ok(owner)
+    }
+
+    pub async fn get_marketplace_stats(&self) -> Result<MarketplaceStatsData, ApiError> {
+        let (total_listings, active_listings, total_users, total_orders) = tokio::try_join!(
+            async {
+                let row = sqlx::query("SELECT COUNT(*) as cnt FROM inventory")
+                    .fetch_one(&self.pool)
+                    .await
+                    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+                row.try_get::<i64, _>("cnt")
+                    .map_err(|_| ApiError::Internal(anyhow::anyhow!("Failed to parse count")))
+            },
+            async {
+                let row = sqlx::query(
+                    "SELECT COUNT(*) as cnt FROM inventory WHERE status = 'active'
+                       AND NOT listing_has_active_restriction(id)",
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+                row.try_get::<i64, _>("cnt")
+                    .map_err(|_| ApiError::Internal(anyhow::anyhow!("Failed to parse count")))
+            },
+            async {
+                let row = sqlx::query("SELECT COUNT(*) as cnt FROM users")
+                    .fetch_one(&self.pool)
+                    .await
+                    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+                row.try_get::<i64, _>("cnt")
+                    .map_err(|_| ApiError::Internal(anyhow::anyhow!("Failed to parse count")))
+            },
+            async {
+                let row = sqlx::query("SELECT COUNT(*) as cnt FROM orders")
+                    .fetch_one(&self.pool)
+                    .await
+                    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+                row.try_get::<i64, _>("cnt")
+                    .map_err(|_| ApiError::Internal(anyhow::anyhow!("Failed to parse count")))
+            },
+        )?;
+
+        let category_rows = sqlx::query(
+            "SELECT category, COUNT(*) as cnt FROM inventory
+             WHERE status = 'active' AND NOT listing_has_active_restriction(id)
+             GROUP BY category ORDER BY cnt DESC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+        let mut category_counts = Vec::with_capacity(category_rows.len());
+        for row in category_rows {
+            let category: String = row.get("category");
+            let count: i64 = row.get("cnt");
+            category_counts.push((category, count));
+        }
+
+        Ok(MarketplaceStatsData {
+            total_listings,
+            active_listings,
+            total_users,
+            total_orders,
+            category_counts,
+        })
+    }
+
+    pub async fn is_listing_restricted(&self, listing_id: &str) -> Result<bool, ApiError> {
+        let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
+            .bind(listing_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        Ok(restricted)
+    }
+
+    pub async fn get_listing_restriction_details(
+        &self,
+        listing_id: &str,
+        campus_id: Uuid,
+    ) -> Result<Option<ListingRestrictionDetails>, ApiError> {
+        let restriction = sqlx::query(
+            "SELECT COUNT(*) AS count,
+                    (ARRAY_AGG(moderation_case.public_reason ORDER BY effect.imposed_at DESC))[1]
+                        AS public_reason,
+                    (ARRAY_AGG(effect.imposed_at ORDER BY effect.imposed_at DESC))[1]
+                        AS restricted_at,
+                    (ARRAY_AGG(effect.case_id ORDER BY effect.imposed_at DESC))[1]
+                        AS moderation_case_id,
+                    (ARRAY_AGG(
+                        moderation_case.status IN ('actioned', 'resolved')
+                        AND moderation_case.resolution = 'content_restricted'
+                        AND NOT EXISTS (
+                            SELECT 1 FROM moderation_appeals appeal
+                            WHERE appeal.case_id = moderation_case.id
+                              AND appeal.appellant_id = moderation_case.subject_user_id
+                        )
+                        ORDER BY effect.imposed_at DESC
+                    ))[1] AS can_appeal
+             FROM listing_restriction_effects effect
+             JOIN moderation_cases moderation_case ON moderation_case.id = effect.case_id
+             WHERE effect.listing_id = $1 AND effect.campus_id = $2
+               AND effect.released_at IS NULL",
+        )
+        .bind(listing_id)
+        .bind(campus_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+
+        let count: i64 = restriction.get("count");
+        if count == 0 {
+            return Ok(None);
+        }
+
+        Ok(Some(ListingRestrictionDetails {
+            public_reason: restriction.try_get("public_reason").ok().flatten(),
+            restricted_at: restriction.try_get("restricted_at").ok().flatten(),
+            moderation_case_id: restriction.try_get("moderation_case_id").ok().flatten(),
+            can_appeal: restriction.try_get("can_appeal").ok().flatten(),
+        }))
+    }
+
+    pub async fn get_active_restrictions_for_listings(
+        &self,
+        listing_ids: &[String],
+        user_id: &str,
+    ) -> Result<std::collections::HashMap<String, ActiveRestrictionView>, ApiError> {
+        if listing_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let restriction_rows = sqlx::query(
+            "SELECT DISTINCT ON (effect.listing_id)
+                    effect.listing_id, effect.imposed_at, effect.case_id,
+                    moderation_case.public_reason,
+                    moderation_case.status IN ('actioned', 'resolved')
+                        AND moderation_case.resolution = 'content_restricted'
+                        AND NOT EXISTS (
+                            SELECT 1 FROM moderation_appeals appeal
+                            WHERE appeal.case_id = moderation_case.id
+                              AND appeal.appellant_id = $2
+                        ) AS can_appeal
+             FROM listing_restriction_effects effect
+             JOIN moderation_cases moderation_case ON moderation_case.id = effect.case_id
+             WHERE effect.listing_id = ANY($1::text[])
+               AND effect.released_at IS NULL
+             ORDER BY effect.listing_id, effect.imposed_at DESC",
+        )
+        .bind(listing_ids)
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+
+        let restrictions = restriction_rows
+            .into_iter()
+            .map(|row| {
+                (
+                    row.get("listing_id"),
+                    ActiveRestrictionView {
+                        public_reason: row.get("public_reason"),
+                        restricted_at: row.get("imposed_at"),
+                        moderation_case_id: row.get("case_id"),
+                        can_appeal: row.get("can_appeal"),
+                    },
+                )
+            })
+            .collect();
+
+        Ok(restrictions)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ListingOrderTarget {
+    pub owner_id: String,
+    pub suggested_price_cny: i64,
+    pub status: String,
+    pub campus_id: Uuid,
+    pub restricted: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct MarketplaceStatsData {
+    pub total_listings: i64,
+    pub active_listings: i64,
+    pub total_users: i64,
+    pub total_orders: i64,
+    pub category_counts: Vec<(String, i64)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ListingRestrictionDetails {
+    pub public_reason: Option<String>,
+    pub restricted_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub moderation_case_id: Option<Uuid>,
+    pub can_appeal: Option<bool>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActiveRestrictionView {
+    pub public_reason: String,
+    pub restricted_at: chrono::DateTime<chrono::Utc>,
+    pub moderation_case_id: Uuid,
+    pub can_appeal: bool,
 }
 
 impl ListingRepository for PostgresListingRepository {

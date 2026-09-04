@@ -4,7 +4,6 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use uuid::Uuid;
 
 use crate::api::auth::{
@@ -13,7 +12,7 @@ use crate::api::auth::{
 use crate::api::error::ApiError;
 use crate::api::AppState;
 use crate::repositories::traits::{AuthRepository, UserRepository};
-use crate::services::admin::NewAuditLog;
+use crate::services::admin::{AdminService, NewAuditLog};
 use crate::services::campus::CampusService;
 use crate::services::moderation_case::{
     AppealDecision, CaseReviewAction, ModerationAppealRecord, ModerationCaseRecord,
@@ -168,11 +167,9 @@ impl FromRequestParts<AppState> for AdminReadScope {
 }
 
 async fn active_campus_exists(state: &AppState, campus_id: Uuid) -> Result<bool, ApiError> {
-    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM campuses WHERE id = $1 AND status = 'active')")
-        .bind(campus_id)
-        .fetch_one(&state.infra.db)
+    CampusService::new(state.infra.db.clone())
+        .active_campus_exists(campus_id)
         .await
-        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))
 }
 
 async fn require_admin_scope(
@@ -185,18 +182,15 @@ async fn require_admin_scope(
     let session = extract_auth_session_from_token(headers, &state.secrets.jwt_secret)
         .map_err(|_| ApiError::Unauthorized)?;
     let campus_service = CampusService::new(state.infra.db.clone());
-    let actor = sqlx::query("SELECT role, status FROM users WHERE id = $1")
-        .bind(&session.user_id)
-        .fetch_optional(&state.infra.db)
-        .await
-        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?
+    let actor = state
+        .user_repo
+        .find_by_id(&session.user_id)
+        .await?
         .ok_or(ApiError::Unauthorized)?;
-    let actor_role: String = actor.get("role");
-    let actor_status: String = actor.get("status");
-    if actor_status != "active" {
+    if actor.status != "active" {
         return Err(ApiError::Forbidden);
     }
-    let is_platform_admin = session.role == "admin" && actor_role == "admin";
+    let is_platform_admin = session.role == "admin" && actor.role == "admin";
 
     if require_platform_admin && !is_platform_admin {
         return Err(ApiError::Forbidden);
@@ -249,15 +243,9 @@ async fn require_admin_scope(
     };
 
     if !is_platform_admin {
-        let membership_role = sqlx::query_scalar::<_, String>(
-            "SELECT role FROM campus_memberships
-             WHERE user_id = $1 AND campus_id = $2 AND status = 'verified'",
-        )
-        .bind(&session.user_id)
-        .bind(campus_id)
-        .fetch_optional(&state.infra.db)
-        .await
-        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+        let membership_role = campus_service
+            .get_verified_membership_role(&session.user_id, campus_id)
+            .await?;
         if !matches!(membership_role.as_deref(), Some("operator")) {
             return Err(ApiError::Forbidden);
         }
@@ -278,17 +266,10 @@ async fn require_user_in_scope(
     user_id: &str,
     campus_id: Uuid,
 ) -> Result<(), ApiError> {
-    let in_scope: bool = sqlx::query_scalar(
-        "SELECT EXISTS(
-            SELECT 1 FROM campus_memberships
-            WHERE user_id = $1 AND campus_id = $2 AND status <> 'revoked'
-         )",
-    )
-    .bind(user_id)
-    .bind(campus_id)
-    .fetch_one(&state.infra.db)
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+    let campus_service = CampusService::new(state.infra.db.clone());
+    let in_scope = campus_service
+        .is_user_in_campus_scope(user_id, campus_id)
+        .await?;
     if !in_scope {
         return Err(ApiError::NotFound);
     }
@@ -429,46 +410,28 @@ pub async fn get_admin_stats(
     State(state): State<AppState>,
     scope: AdminReadScope,
 ) -> Result<Json<AdminStats>, ApiError> {
-    let row = sqlx::query(
-        "SELECT
-            (SELECT COUNT(*) FROM inventory WHERE campus_id = $1) AS total_listings,
-            (SELECT COUNT(*) FROM inventory WHERE campus_id = $1 AND status = 'active'
-                AND NOT listing_has_active_restriction(id)) AS active_listings,
-            (SELECT COUNT(*) FROM campus_memberships WHERE campus_id = $1 AND status <> 'revoked') AS total_users,
-            (SELECT COUNT(*) FROM orders WHERE campus_id = $1) AS total_orders,
-            (SELECT COUNT(*) FROM campus_memberships membership
-             JOIN users u ON u.id = membership.user_id
-             WHERE membership.campus_id = $1 AND membership.status <> 'revoked'
-               AND (membership.role IN ('operator', 'admin') OR u.role = 'admin')) AS admin_users",
-    )
-    .bind(scope.campus_id)
-    .fetch_one(&state.infra.db)
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+    let admin_service = AdminService::new(state.infra.db.clone());
+    let data = admin_service
+        .get_admin_stats(scope.campus_id)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("Admin service error: {}", error)))?;
 
-    let categories = sqlx::query(
-        "SELECT category, COUNT(*) AS count
-         FROM inventory WHERE campus_id = $1
-         GROUP BY category ORDER BY count DESC, category ASC",
-    )
-    .bind(scope.campus_id)
-    .fetch_all(&state.infra.db)
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?
-    .into_iter()
-    .map(|category| CategoryCount {
-        category: category.get("category"),
-        count: category.get("count"),
-    })
-    .collect();
+    let categories = data
+        .categories
+        .into_iter()
+        .map(|category| CategoryCount {
+            category: category.category,
+            count: category.count,
+        })
+        .collect();
 
     Ok(Json(AdminStats {
         campus_id: scope.campus_id,
-        total_listings: row.get("total_listings"),
-        active_listings: row.get("active_listings"),
-        total_users: row.get("total_users"),
-        total_orders: row.get("total_orders"),
-        admin_users: row.get("admin_users"),
+        total_listings: data.total_listings,
+        active_listings: data.active_listings,
+        total_users: data.total_users,
+        total_orders: data.total_orders,
+        admin_users: data.admin_users,
         categories,
     }))
 }
@@ -521,61 +484,30 @@ pub async fn get_admin_users(
     Query(query): Query<AdminListQuery>,
 ) -> Result<Json<AdminUsersResponse>, ApiError> {
     let search_term = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty());
-    let users = sqlx::query(
-        "SELECT u.id, u.username, u.role, u.status, u.created_at,
-                membership.role AS membership_role,
-                membership.status AS membership_status,
-                COUNT(i.id) AS listing_count
-         FROM campus_memberships membership
-         JOIN users u ON u.id = membership.user_id
-         LEFT JOIN inventory i ON i.owner_id = u.id AND i.campus_id = membership.campus_id
-         WHERE membership.campus_id = $1 AND membership.status <> 'revoked'
-           AND ($2::TEXT IS NULL
-                OR STRPOS(LOWER(u.username), LOWER($2)) > 0
-                OR STRPOS(LOWER(u.id), LOWER($2)) > 0)
-         GROUP BY u.id, u.username, u.role, u.status, u.created_at,
-                  membership.role, membership.status
-         ORDER BY u.created_at DESC
-         LIMIT $3 OFFSET $4",
-    )
-    .bind(scope.campus_id)
-    .bind(search_term)
-    .bind(query.limit())
-    .bind(query.offset())
-    .fetch_all(&state.infra.db)
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
-    let total = sqlx::query_scalar(
-        "SELECT COUNT(*)
-         FROM campus_memberships membership
-         JOIN users u ON u.id = membership.user_id
-         WHERE membership.campus_id = $1 AND membership.status <> 'revoked'
-           AND ($2::TEXT IS NULL
-                OR STRPOS(LOWER(u.username), LOWER($2)) > 0
-                OR STRPOS(LOWER(u.id), LOWER($2)) > 0)",
-    )
-    .bind(scope.campus_id)
-    .bind(search_term)
-    .fetch_one(&state.infra.db)
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+    let admin_service = AdminService::new(state.infra.db.clone());
+    let (users_data, total) = admin_service
+        .get_admin_users(scope.campus_id, search_term, query.limit(), query.offset())
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("Admin service error: {}", error)))?;
+
+    let users = users_data
+        .into_iter()
+        .map(|u| UserInfo {
+            id: u.id,
+            username: u.username,
+            role: u.role,
+            membership_role: u.membership_role,
+            membership_status: u.membership_status,
+            status: u.status,
+            created_at: u.created_at,
+            listing_count: u.listing_count,
+        })
+        .collect();
 
     Ok(Json(AdminUsersResponse {
         campus_id: scope.campus_id,
         total,
-        users: users
-            .into_iter()
-            .map(|row| UserInfo {
-                id: row.get("id"),
-                username: row.get("username"),
-                role: row.get("role"),
-                membership_role: row.get("membership_role"),
-                membership_status: row.get("membership_status"),
-                status: row.get("status"),
-                created_at: row.get("created_at"),
-                listing_count: row.get("listing_count"),
-            })
-            .collect(),
+        users,
     }))
 }
 
@@ -621,96 +553,58 @@ pub async fn get_admin_listings(
     scope: AdminReadScope,
     Query(query): Query<AdminListQuery>,
 ) -> Result<Json<AdminListingsResponse>, ApiError> {
-    let listings = sqlx::query(
-        "SELECT id, title, category, COALESCE(brand, '') AS brand, direction, condition_score,
-                suggested_price_cny, description, status, owner_id, created_at,
-                (SELECT COUNT(*) FROM listing_restriction_effects effect
-                 WHERE effect.listing_id = inventory.id
-                   AND effect.released_at IS NULL) AS active_restriction_count,
-                EXISTS(
-                    SELECT 1 FROM listing_restriction_effects effect
-                    WHERE effect.listing_id = inventory.id
-                      AND effect.released_at IS NULL
-                      AND effect.source_kind IN ('admin_takedown', 'legacy_admin_takedown')
-                ) AS has_admin_restriction,
-                latest_effect.case_id AS restriction_case_id,
-                latest_effect.imposed_at AS restricted_at,
-                latest_effect.public_reason AS restriction_public_reason,
-                latest_effect.can_appeal AS restriction_can_appeal
-         FROM inventory
-         LEFT JOIN LATERAL (
-             SELECT effect.case_id, effect.imposed_at,
-                    moderation_case.public_reason,
-                    moderation_case.status IN ('actioned', 'resolved')
-                        AND moderation_case.resolution = 'content_restricted'
-                        AND NOT EXISTS (
-                            SELECT 1 FROM moderation_appeals appeal
-                            WHERE appeal.case_id = moderation_case.id
-                              AND appeal.appellant_id = moderation_case.subject_user_id
-                        ) AS can_appeal
-             FROM listing_restriction_effects effect
-             JOIN moderation_cases moderation_case ON moderation_case.id = effect.case_id
-             WHERE effect.listing_id = inventory.id AND effect.released_at IS NULL
-             ORDER BY effect.imposed_at DESC
-             LIMIT 1
-         ) latest_effect ON TRUE
-         WHERE campus_id = $1 AND ($2::text IS NULL OR status = $2)
-         ORDER BY created_at DESC LIMIT $3 OFFSET $4",
-    )
-    .bind(scope.campus_id)
-    .bind(query.status.as_deref())
-    .bind(query.limit())
-    .bind(query.offset())
-    .fetch_all(&state.infra.db)
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
-    let total = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM inventory
-         WHERE campus_id = $1 AND ($2::text IS NULL OR status = $2)",
-    )
-    .bind(scope.campus_id)
-    .bind(query.status.as_deref())
-    .fetch_one(&state.infra.db)
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+    let admin_service = AdminService::new(state.infra.db.clone());
+    let (listings_data, total) = admin_service
+        .get_admin_listings(
+            scope.campus_id,
+            query.status.as_deref(),
+            query.limit(),
+            query.offset(),
+        )
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("Admin service error: {}", error)))?;
 
     Ok(Json(AdminListingsResponse {
         campus_id: scope.campus_id,
         total,
-        listings: listings
+        listings: listings_data
             .into_iter()
             .map(|row| ListingInfo {
-                restricted: row.get::<i64, _>("active_restriction_count") > 0,
-                restriction_state: if row.get::<i64, _>("active_restriction_count") > 0 {
+                restricted: row.active_restriction_count > 0,
+                restriction_state: if row.active_restriction_count > 0 {
                     "restricted"
                 } else {
                     "clear"
                 },
                 restriction: row
-                    .get::<Option<Uuid>, _>("restriction_case_id")
+                    .restriction_case_id
                     .map(|case_id| AdminListingRestriction {
-                        public_reason: row.get("restriction_public_reason"),
-                        restricted_at: row.get("restricted_at"),
+                        public_reason: row.restriction_public_reason.unwrap_or_default(),
+                        restricted_at: row.restricted_at.unwrap_or_else(chrono::Utc::now),
                         moderation_case_id: case_id,
-                        can_appeal: row.get("restriction_can_appeal"),
+                        can_appeal: row.restriction_can_appeal.unwrap_or(false),
                     }),
-                active_restriction_count: row.get("active_restriction_count"),
-                available_admin_actions: if row.get::<bool, _>("has_admin_restriction") {
+                active_restriction_count: row.active_restriction_count,
+                available_admin_actions: if row.has_admin_restriction {
                     vec!["restore"]
                 } else {
                     vec!["takedown"]
                 },
-                id: row.get("id"),
-                title: row.get("title"),
-                category: row.get("category"),
-                brand: row.get("brand"),
-                direction: row.get("direction"),
-                condition_score: row.get("condition_score"),
-                suggested_price_cny: row.get::<i64, _>("suggested_price_cny") as f64 / 100.0,
-                description: row.try_get("description").ok(),
-                status: row.get("status"),
-                owner_id: row.get("owner_id"),
-                created_at: row.get("created_at"),
+                id: row.id,
+                title: row.title,
+                category: row.category,
+                brand: row.brand,
+                direction: row.direction,
+                condition_score: row.condition_score,
+                suggested_price_cny: row.suggested_price_cny as f64 / 100.0,
+                description: if row.description.is_empty() {
+                    None
+                } else {
+                    Some(row.description)
+                },
+                status: row.status,
+                owner_id: row.owner_id,
+                created_at: row.created_at,
             })
             .collect(),
     }))
@@ -784,17 +678,13 @@ pub async fn get_admin_orders(
     }))
 }
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize)]
 pub struct ModerationJobInfo {
     pub id: String,
     pub campus_id: Uuid,
     pub resource_type: String,
     pub resource_id: String,
     pub image_url: String,
-    /// Internal stable object key. It is never serialized; the handler uses it
-    /// to mint a fresh review URL instead of returning a stale presigned URL.
-    #[serde(skip_serializing)]
-    pub storage_key: Option<String>,
     pub status: String,
     pub reject_reason: Option<String>,
     pub retry_count: i32,
@@ -815,40 +705,43 @@ pub async fn get_moderation_jobs(
     scope: AdminReadScope,
     Query(query): Query<AdminListQuery>,
 ) -> Result<Json<ModerationJobsResponse>, ApiError> {
-    let mut jobs = sqlx::query_as::<_, ModerationJobInfo>(
-        "SELECT id, campus_id, resource_type, resource_id, image_url, storage_key, status,
-                reject_reason, retry_count, created_at, processed_at
-         FROM moderation_jobs
-         WHERE campus_id = $1 AND ($2::text IS NULL OR status = $2)
-         ORDER BY created_at DESC LIMIT $3 OFFSET $4",
-    )
-    .bind(scope.campus_id)
-    .bind(query.status.as_deref())
-    .bind(query.limit())
-    .bind(query.offset())
-    .fetch_all(&state.infra.db)
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
-    for job in &mut jobs {
+    let admin_service = AdminService::new(state.infra.db.clone());
+    let (jobs_data, total) = admin_service
+        .get_moderation_jobs(
+            scope.campus_id,
+            query.status.as_deref(),
+            query.limit(),
+            query.offset(),
+        )
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("Admin service error: {}", error)))?;
+
+    let mut jobs = Vec::with_capacity(jobs_data.len());
+    for job in jobs_data {
+        let mut image_url = job.image_url;
         if let Some(storage_key) = job.storage_key.as_deref() {
             // Never fall back to a persisted presigned URL for a platform
             // object: it may have expired or, worse, be an untrusted legacy
             // value. An invalid server key is represented as an empty URL and
             // remains visible in the queue for operator remediation.
-            job.image_url = state
+            image_url = state
                 .public_platform_media_url(storage_key)
                 .unwrap_or_default();
         }
+        jobs.push(ModerationJobInfo {
+            id: job.id,
+            campus_id: job.campus_id,
+            resource_type: job.resource_type,
+            resource_id: job.resource_id,
+            image_url,
+            status: job.status,
+            reject_reason: job.reject_reason,
+            retry_count: job.retry_count,
+            created_at: job.created_at,
+            processed_at: job.processed_at,
+        });
     }
-    let total = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM moderation_jobs
-         WHERE campus_id = $1 AND ($2::text IS NULL OR status = $2)",
-    )
-    .bind(scope.campus_id)
-    .bind(query.status.as_deref())
-    .fetch_one(&state.infra.db)
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+
     Ok(Json(ModerationJobsResponse {
         campus_id: scope.campus_id,
         total,
@@ -1076,33 +969,15 @@ pub async fn create_campus(
         domains.push(domain);
     }
 
-    let campus_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO campuses (id, slug, name_zh, name_en, email_domains, status)
-         VALUES (gen_random_uuid(), $1, $2, $3, $4, 'inactive')
-         RETURNING id",
-    )
-    .bind(&slug)
-    .bind(payload.name_zh.trim())
-    .bind(payload.name_en.trim())
-    .bind(&domains)
-    .fetch_one(&state.infra.db)
-    .await
-    .map_err(|e| {
-        if e.as_database_error()
-            .and_then(|db| db.code())
-            .is_some_and(|code| code == "23505")
-        {
-            ApiError::Conflict("该校园 slug 已存在".to_string())
-        } else if e
-            .as_database_error()
-            .and_then(|db| db.code())
-            .is_some_and(|code| code == "23514")
-        {
-            ApiError::BadRequest("slug 只能是小写字母、数字和连字符".to_string())
-        } else {
-            ApiError::Internal(anyhow::anyhow!("DB error: {}", e))
-        }
-    })?;
+    let campus_service = CampusService::new(state.infra.db.clone());
+    let campus_id = campus_service
+        .create_campus(
+            &slug,
+            payload.name_zh.trim(),
+            payload.name_en.trim(),
+            &domains,
+        )
+        .await?;
 
     record_audit(
         &state,
@@ -1134,17 +1009,10 @@ pub async fn set_campus_status(
         _ => return Err(ApiError::NotFound),
     };
 
-    let old_status: String = sqlx::query_scalar(
-        "UPDATE campuses SET status = $2, updated_at = NOW()
-         WHERE id = $1
-         RETURNING (SELECT status FROM campuses WHERE id = $1)",
-    )
-    .bind(campus_id)
-    .bind(new_status)
-    .fetch_optional(&state.infra.db)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-    .ok_or(ApiError::NotFound)?;
+    let campus_service = CampusService::new(state.infra.db.clone());
+    let old_status = campus_service
+        .set_campus_status(campus_id, new_status)
+        .await?;
 
     record_audit(
         &state,
@@ -1209,13 +1077,10 @@ pub async fn restore_listing(
     Ok(Json(serde_json::json!({
         "message": "管理员下架效果已解除，发布生命周期状态保持不变",
         "case_id": case_id,
-        "restricted": sqlx::query_scalar::<_, bool>(
-            "SELECT listing_has_active_restriction($1)"
-        )
-        .bind(&listing_id)
-        .fetch_one(&state.infra.db)
-        .await
-        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?
+        "restricted": state
+            .listing_repo
+            .is_listing_restricted(&listing_id)
+            .await?,
     })))
 }
 
@@ -1321,14 +1186,13 @@ pub async fn update_order_status(
             "平台不负责资金中转或物流状态，后台只能确认成交或取消记录".to_string(),
         ));
     }
-    let order = sqlx::query("SELECT status, campus_id FROM orders WHERE id = $1")
-        .bind(&order_id)
-        .fetch_optional(&state.infra.db)
+    let (current_status_raw, order_campus_id) = state
+        .infra
+        .order_service
+        .get_order_scope(&order_id)
         .await
-        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("Order error: {}", error)))?
         .ok_or(ApiError::NotFound)?;
-    let current_status_raw: String = order.get("status");
-    let order_campus_id: Uuid = order.get("campus_id");
     if order_campus_id != scope.campus_id {
         return Err(ApiError::NotFound);
     }

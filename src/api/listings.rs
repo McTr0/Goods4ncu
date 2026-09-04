@@ -5,7 +5,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::Row;
 
 use crate::api::error::ApiError;
 use crate::api::request_context::idempotency_key_from_headers;
@@ -19,6 +18,7 @@ use crate::services::campus::CampusService;
 use crate::services::listing_command::{ListingCommandService, UpdateListingDraft};
 use crate::services::notification::NewNotification;
 use crate::services::wanted_match::WantedMatchService;
+use crate::services::wanted_response::{CreateWantedResponseParams, WantedResponseService};
 use crate::utils::cents_to_yuan;
 
 // ---------------------------------------------------------------------------
@@ -368,55 +368,29 @@ pub async fn get_listing(
 
     let created_at = listing.created_at.to_rfc3339();
     let is_owner = viewer_id.as_deref() == Some(listing.owner_id.as_str());
-    let restriction = sqlx::query(
-        "SELECT COUNT(*) AS count,
-                (ARRAY_AGG(moderation_case.public_reason ORDER BY effect.imposed_at DESC))[1]
-                    AS public_reason,
-                (ARRAY_AGG(effect.imposed_at ORDER BY effect.imposed_at DESC))[1]
-                    AS restricted_at,
-                (ARRAY_AGG(effect.case_id ORDER BY effect.imposed_at DESC))[1]
-                    AS moderation_case_id,
-                (ARRAY_AGG(
-                    moderation_case.status IN ('actioned', 'resolved')
-                    AND moderation_case.resolution = 'content_restricted'
-                    AND NOT EXISTS (
-                        SELECT 1 FROM moderation_appeals appeal
-                        WHERE appeal.case_id = moderation_case.id
-                          AND appeal.appellant_id = moderation_case.subject_user_id
-                    )
-                    ORDER BY effect.imposed_at DESC
-                ))[1] AS can_appeal
-         FROM listing_restriction_effects effect
-         JOIN moderation_cases moderation_case ON moderation_case.id = effect.case_id
-         WHERE effect.listing_id = $1 AND effect.campus_id = $2
-           AND effect.released_at IS NULL",
-    )
-    .bind(&listing.id)
-    .bind(campus_id)
-    .fetch_one(&state.infra.db)
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
-    let restriction_count: i64 = restriction.get("count");
-    let restricted = restriction_count > 0;
+    let restriction_opt = state
+        .listing_repo
+        .get_listing_restriction_details(&listing.id, campus_id)
+        .await?;
+    let restricted = restriction_opt.is_some();
     if restricted && !is_owner {
         return Err(ApiError::NotFound);
     }
     let restriction_reason = if is_owner && restricted {
-        restriction
-            .try_get::<Option<String>, _>("public_reason")
-            .ok()
-            .flatten()
+        restriction_opt
+            .as_ref()
+            .and_then(|r| r.public_reason.clone())
     } else {
         None
     };
     let restriction = if is_owner && restricted {
-        Some(ListingRestrictionDetail {
-            public_reason: restriction_reason
-                .clone()
+        restriction_opt.map(|r| ListingRestrictionDetail {
+            public_reason: r
+                .public_reason
                 .unwrap_or_else(|| "该发布受平台限制".to_string()),
-            restricted_at: restriction.get("restricted_at"),
-            moderation_case_id: restriction.get("moderation_case_id"),
-            can_appeal: restriction.get("can_appeal"),
+            restricted_at: r.restricted_at.unwrap_or_default(),
+            moderation_case_id: r.moderation_case_id.unwrap_or_default(),
+            can_appeal: r.can_appeal.unwrap_or(false),
         })
     } else {
         None
@@ -546,209 +520,22 @@ pub async fn respond_to_wanted(
         .transpose()?;
     let user_id = &tenant.session.user_id;
 
-    let mut tx = state
-        .infra
-        .db
-        .begin()
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    let outcome = WantedResponseService::new(state.infra.db.clone())
+        .create_wanted_response(CreateWantedResponseParams {
+            user_id,
+            campus_id: tenant.campus_id,
+            wanted_id: &id,
+            offer_listing_id: payload.offer_listing_id.trim(),
+            message: message.as_deref(),
+            idempotency_key: idempotency_key.as_deref(),
+            request_hash: request_hash.as_deref(),
+        })
+        .await?;
 
-    // A completed attempt replays even if the wanted has since closed or
-    // reopened. Idempotency describes the original mutation, not today's
-    // eligibility. The request hash prevents a key from changing meaning.
-    if let Some(key) = idempotency_key.as_deref() {
-        if let Some((existing_id, existing_hash)) =
-            sqlx::query_as::<_, (uuid::Uuid, Option<String>)>(
-                "SELECT id, idempotency_hash
-                 FROM wanted_responses
-                 WHERE campus_id = $1 AND responder_id = $2 AND idempotency_key = $3",
-            )
-            .bind(tenant.campus_id)
-            .bind(user_id)
-            .bind(key)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-        {
-            if existing_hash.as_deref() != request_hash.as_deref() {
-                return Err(ApiError::Conflict(
-                    "Idempotency-Key 已用于不同的推荐内容".to_string(),
-                ));
-            }
-            tx.commit()
-                .await
-                .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-            return Ok(Json(WantedResponseResult {
-                id: existing_id.to_string(),
-                message: "已推荐给需求方".to_string(),
-                replayed: true,
-            }));
-        }
-    }
-
-    // All lifecycle mutations lock the wanted row first. Response actions use
-    // the same wanted -> offer -> response order, preventing a create/fulfill/
-    // reopen race from validating one round and writing into another.
-    let wanted = sqlx::query(
-        "SELECT id, title, owner_id, status, direction, lifecycle_epoch
-         FROM inventory
-         WHERE id = $1 AND campus_id = $2
-         FOR UPDATE",
-    )
-    .bind(&id)
-    .bind(tenant.campus_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-    .ok_or(ApiError::NotFound)?;
-    let wanted_id: String = wanted.get("id");
-    let wanted_title: String = wanted.get("title");
-    let wanted_owner_id: String = wanted.get("owner_id");
-    let wanted_status: String = wanted.get("status");
-    let wanted_direction: String = wanted.get("direction");
-    let lifecycle_epoch: i64 = wanted.get("lifecycle_epoch");
-    let wanted_restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
-        .bind(&wanted_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-    if wanted_restricted {
-        return Err(ApiError::CodedConflict {
-            code: "wanted_response_round_closed",
-            message: "该收物需求已受平台限制，当前轮次不可响应".to_string(),
-        });
-    }
-    if wanted_direction != "wanted" || wanted_status != "active" {
-        return Err(ApiError::BadRequest("这不是可响应的收物需求".to_string()));
-    }
-    if wanted_owner_id == *user_id {
-        return Err(ApiError::BadRequest("不能给自己的需求推荐商品".to_string()));
-    }
-
-    // Preserve the existing "both people are verified in the same active
-    // campus" trust boundary while keeping the listing state decision inside
-    // this transaction.
-    let requester_is_verified: bool = sqlx::query_scalar(
-        "SELECT EXISTS(
-            SELECT 1
-            FROM campus_memberships AS membership
-            JOIN campuses AS campus
-              ON campus.id = membership.campus_id AND campus.status = 'active'
-            WHERE membership.campus_id = $1
-              AND membership.user_id = $2
-              AND membership.status = 'verified'
-         )",
-    )
-    .bind(tenant.campus_id)
-    .bind(&wanted_owner_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-    if !requester_is_verified {
-        return Err(ApiError::CampusScopeMismatch);
-    }
-
-    let offer = sqlx::query(
-        "SELECT id, title, owner_id, status, direction
-         FROM inventory
-         WHERE id = $1 AND campus_id = $2
-         FOR UPDATE",
-    )
-    .bind(payload.offer_listing_id.trim())
-    .bind(tenant.campus_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-    .ok_or(ApiError::NotFound)?;
-    let offer_id: String = offer.get("id");
-    let offer_title: String = offer.get("title");
-    let offer_owner_id: String = offer.get("owner_id");
-    let offer_status: String = offer.get("status");
-    let offer_direction: String = offer.get("direction");
-    let offer_restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
-        .bind(&offer_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-    if offer_restricted {
-        return Err(ApiError::CodedConflict {
-            code: "listing_restricted",
-            message: "推荐商品已受平台限制".to_string(),
-        });
-    }
-    if offer_direction != "offer" || offer_status != "active" {
-        return Err(ApiError::BadRequest("只能推荐正在出的商品".to_string()));
-    }
-    if offer_owner_id != *user_id {
-        return Err(ApiError::Forbidden);
-    }
-
-    let inserted = sqlx::query_scalar::<_, uuid::Uuid>(
-        r#"
-        INSERT INTO wanted_responses (
-            campus_id, wanted_listing_id, offer_listing_id, responder_id,
-            requester_id, message, lifecycle_epoch,
-            idempotency_key, idempotency_hash
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        ON CONFLICT DO NOTHING
-        RETURNING id
-        "#,
-    )
-    .bind(tenant.campus_id)
-    .bind(&wanted_id)
-    .bind(&offer_id)
-    .bind(user_id)
-    .bind(&wanted_owner_id)
-    .bind(&message)
-    .bind(lifecycle_epoch)
-    .bind(idempotency_key.as_deref())
-    .bind(request_hash.as_deref())
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-    let (response_id, replayed) = if let Some(response_id) = inserted {
-        (response_id, false)
-    } else if let Some(key) = idempotency_key.as_deref() {
-        match sqlx::query_as::<_, (uuid::Uuid, Option<String>)>(
-            "SELECT id, idempotency_hash
-             FROM wanted_responses
-             WHERE campus_id = $1 AND responder_id = $2 AND idempotency_key = $3",
-        )
-        .bind(tenant.campus_id)
-        .bind(user_id)
-        .bind(key)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-        {
-            Some((existing_id, existing_hash))
-                if existing_hash.as_deref() == request_hash.as_deref() =>
-            {
-                (existing_id, true)
-            }
-            Some(_) => {
-                return Err(ApiError::Conflict(
-                    "Idempotency-Key 已用于不同的推荐内容".to_string(),
-                ))
-            }
-            None => return Err(ApiError::BadRequest("本轮已经推荐过这件商品".to_string())),
-        }
-    } else {
-        return Err(ApiError::BadRequest("本轮已经推荐过这件商品".to_string()));
-    };
-
-    tx.commit()
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-    if replayed {
+    if outcome.replayed {
         return Ok(Json(WantedResponseResult {
-            id: response_id.to_string(),
-            message: "已推荐给需求方".to_string(),
+            id: outcome.id,
+            message: outcome.message,
             replayed: true,
         }));
     }
@@ -757,11 +544,14 @@ pub async fn respond_to_wanted(
     // stops one person recommending fifty different items to it, so the push
     // is budgeted. Over budget the recommendation still lands in the inbox —
     // it is the interruption that is rationed, not the message.
-    let reason = format!("你在找“{}”，有人推荐了“{}”", wanted_title, offer_title);
+    let reason = format!(
+        "你在找“{}”，有人推荐了“{}”",
+        outcome.wanted_title, outcome.offer_title
+    );
     let decision = crate::services::interruption::InterruptionService::new(state.infra.db.clone())
         .request(crate::services::interruption::InterruptionRequest {
             campus_id: tenant.campus_id,
-            user_id: &wanted_owner_id,
+            user_id: &outcome.wanted_owner_id,
             channel: "in_app",
             topic: crate::services::interruption::topics::WANTED_RESPONSE,
             reason: &reason,
@@ -775,7 +565,7 @@ pub async fn respond_to_wanted(
         Ok(decision) => {
             if let crate::services::interruption::Decision::Withheld { reason, .. } = &decision {
                 tracing::debug!(
-                    ?reason, wanted_id = %wanted_id,
+                    ?reason, wanted_id = %id,
                     "wanted response held back from push",
                 );
             }
@@ -784,7 +574,7 @@ pub async fn respond_to_wanted(
         Err(e) => {
             // Budget bookkeeping must never cost the user their
             // recommendation, and must never fail open into a spam vector.
-            tracing::warn!(%e, wanted_id = %wanted_id, "interruption budget check failed");
+            tracing::warn!(%e, wanted_id = %id, "interruption budget check failed");
             crate::services::interruption::Decision::Unavailable
         }
     };
@@ -796,24 +586,27 @@ pub async fn respond_to_wanted(
             &decision,
             NewNotification {
                 campus_id: tenant.campus_id,
-                user_id: &wanted_owner_id,
+                user_id: &outcome.wanted_owner_id,
                 event_type: crate::services::interruption::topics::WANTED_RESPONSE,
                 title: "有人给你的收物需求推荐了商品",
-                body: &format!("“{}”收到一个匹配推荐：{}", wanted_title, offer_title),
+                body: &format!(
+                    "“{}”收到一个匹配推荐：{}",
+                    outcome.wanted_title, outcome.offer_title
+                ),
                 related_order_id: None,
-                related_listing_id: Some(&wanted_id),
+                related_listing_id: Some(&id),
                 related_conversation_id: None,
                 related_space_id: None,
             },
         )
         .await
     {
-        tracing::warn!(%e, wanted_id = %wanted_id, offer_id = %offer_id, "Failed to create wanted response notification");
+        tracing::warn!(%e, wanted_id = %id, offer_id = %payload.offer_listing_id, "Failed to create wanted response notification");
     }
 
     Ok(Json(WantedResponseResult {
-        id: response_id.to_string(),
-        message: "已推荐给需求方".to_string(),
+        id: outcome.id,
+        message: outcome.message,
         replayed: false,
     }))
 }
@@ -829,102 +622,11 @@ pub async fn fulfill_wanted(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user_id = &tenant.session.user_id;
-    let mut tx = state
-        .infra
-        .db
-        .begin()
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-    let listing = sqlx::query(
-        "SELECT owner_id, title, status, direction, lifecycle_epoch
-         FROM inventory
-         WHERE id = $1 AND campus_id = $2
-         FOR UPDATE",
-    )
-    .bind(&id)
-    .bind(tenant.campus_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-    .ok_or(ApiError::NotFound)?;
-    let owner_id: String = listing.get("owner_id");
-    let title: String = listing.get("title");
-    let status: String = listing.get("status");
-    let direction: String = listing.get("direction");
-    let lifecycle_epoch: i64 = listing.get("lifecycle_epoch");
-    let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
-        .bind(&id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    let outcome = WantedResponseService::new(state.infra.db.clone())
+        .fulfill_wanted(user_id, tenant.campus_id, &id)
+        .await?;
 
-    if owner_id != *user_id {
-        return Err(ApiError::Forbidden);
-    }
-    if direction != "wanted" {
-        return Err(ApiError::BadRequest(
-            "只有收物需求可以标记为已完成".to_string(),
-        ));
-    }
-    if restricted {
-        return Err(ApiError::CodedConflict {
-            code: "listing_restricted",
-            message: "该发布受平台限制，不能标记完成".to_string(),
-        });
-    }
-    if status != "active" {
-        return Err(ApiError::Conflict(format!(
-            "当前状态为'{}'，无法标记完成",
-            status
-        )));
-    }
-
-    // The row lock is shared with response creation/actions/reopen. Once this
-    // transition commits, no response can be inserted or acted on in this
-    // round using an eligibility decision made before fulfillment.
-    let updated = sqlx::query(
-        "UPDATE inventory SET status = 'fulfilled'
-         WHERE id = $1
-           AND campus_id = $2
-           AND owner_id = $3
-           AND direction = 'wanted'
-           AND status = 'active'
-           AND lifecycle_epoch = $4",
-    )
-    .bind(&id)
-    .bind(tenant.campus_id)
-    .bind(user_id)
-    .bind(lifecycle_epoch)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-    if updated.rows_affected() == 0 {
-        return Err(ApiError::Conflict(
-            "收物需求状态已发生变化，无法标记完成".to_string(),
-        ));
-    }
-
-    // Tell only this round's pending responders. The response status remains
-    // truthful history (`pending`); list/action APIs derive that the round is
-    // now closed from the parent state and epoch.
-    let pending_responders: Vec<String> = sqlx::query_scalar(
-        "SELECT DISTINCT responder_id FROM wanted_responses
-         WHERE wanted_listing_id = $1
-           AND campus_id = $2
-           AND lifecycle_epoch = $3
-           AND status = 'pending'",
-    )
-    .bind(&id)
-    .bind(tenant.campus_id)
-    .bind(lifecycle_epoch)
-    .fetch_all(&mut *tx)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-    tx.commit()
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-    for responder in pending_responders {
+    for responder in outcome.pending_responders {
         if let Err(e) = state
             .infra
             .notification
@@ -933,7 +635,7 @@ pub async fn fulfill_wanted(
                 user_id: &responder,
                 event_type: "wanted_fulfilled",
                 title: "对方的收物需求已完成",
-                body: &format!("“{}”已标记完成，感谢你的推荐", title),
+                body: &format!("“{}”已标记完成，感谢你的推荐", outcome.title),
                 related_order_id: None,
                 related_listing_id: Some(&id),
                 related_conversation_id: None,
@@ -948,7 +650,7 @@ pub async fn fulfill_wanted(
     tracing::info!(
         listing_id = %id,
         owner_id = %user_id,
-        lifecycle_epoch,
+        lifecycle_epoch = outcome.lifecycle_epoch,
         "Wanted marked fulfilled"
     );
     Ok(Json(serde_json::json!({

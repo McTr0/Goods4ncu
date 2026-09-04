@@ -9,13 +9,15 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
-use sqlx::Row;
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
 use crate::api::session::VerifiedTenant;
 use crate::api::AppState;
 use crate::services::notification::NewNotification;
+use crate::services::wanted_response::{
+    ActionWantedResponseParams, ListWantedResponsesParams, WantedResponseService,
+};
 
 #[derive(Deserialize)]
 pub struct ResponseListQuery {
@@ -58,73 +60,35 @@ pub async fn list_wanted_responses(
         .map(str::trim)
         .filter(|value| !value.is_empty());
 
-    let filter = format!(
-        "FROM wanted_responses r
-         WHERE r.{column} = $1
-           AND r.campus_id = $2
-           AND ($3::text IS NULL OR r.status = $3)
-           AND ($4::text IS NULL OR r.wanted_listing_id = $4)"
-    );
-    let total: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) {filter}"))
-        .bind(&session.user_id)
-        .bind(tenant.campus_id)
-        .bind(params.status.as_deref())
-        .bind(wanted_listing_id)
-        .fetch_one(&state.infra.db)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-    let rows = sqlx::query(&format!(
-        "SELECT r.id, r.wanted_listing_id, r.offer_listing_id, r.responder_id, r.requester_id,
-                r.message, r.status, r.created_at, r.responded_at, r.lifecycle_epoch,
-                w.title AS wanted_title, w.status AS wanted_status,
-                w.lifecycle_epoch AS current_lifecycle_epoch,
-                listing_has_active_restriction(w.id) AS wanted_restricted,
-                o.title AS offer_title, o.status AS offer_status,
-                listing_has_active_restriction(o.id) AS offer_restricted
-         FROM wanted_responses r
-         JOIN inventory w ON w.id = r.wanted_listing_id
-         JOIN inventory o ON o.id = r.offer_listing_id
-         WHERE r.{column} = $1
-           AND r.campus_id = $2
-           AND ($3::text IS NULL OR r.status = $3)
-           AND ($4::text IS NULL OR r.wanted_listing_id = $4)
-         ORDER BY r.created_at DESC
-         LIMIT $5 OFFSET $6"
-    ))
-    .bind(&session.user_id)
-    .bind(tenant.campus_id)
-    .bind(params.status.as_deref())
-    .bind(wanted_listing_id)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(&state.infra.db)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    let service = WantedResponseService::new(state.infra.db.clone());
+    let (rows, total) = service
+        .list_responses(ListWantedResponsesParams {
+            column,
+            user_id: &session.user_id,
+            campus_id: tenant.campus_id,
+            status: params.status.as_deref(),
+            wanted_listing_id,
+            limit,
+            offset,
+        })
+        .await?;
 
     let items: Vec<serde_json::Value> = rows
-        .iter()
+        .into_iter()
         .map(|row| {
-            let response_status = row.get::<String, _>("status");
-            let wanted_status = row.get::<String, _>("wanted_status");
-            let offer_status = row.get::<String, _>("offer_status");
-            let lifecycle_epoch = row.get::<Option<i64>, _>("lifecycle_epoch");
-            let current_lifecycle_epoch = row.get::<i64, _>("current_lifecycle_epoch");
-            let wanted_restricted = row.get::<bool, _>("wanted_restricted");
-            let offer_restricted = row.get::<bool, _>("offer_restricted");
-            let round_is_current = lifecycle_epoch == Some(current_lifecycle_epoch)
-                && wanted_status == "active"
-                && !wanted_restricted;
-            let available_actions: Vec<&str> = if response_status == "pending" && round_is_current {
+            let round_is_current = row.lifecycle_epoch == Some(row.current_lifecycle_epoch)
+                && row.wanted_status == "active"
+                && !row.wanted_restricted;
+            let available_actions: Vec<&str> = if row.status == "pending" && round_is_current {
                 match role {
                     "requester" => {
-                        if offer_status == "active" && !offer_restricted {
+                        if row.offer_status == "active" && !row.offer_restricted {
                             vec!["accept", "dismiss"]
                         } else {
                             vec!["dismiss"]
                         }
                     }
-                    "responder" if offer_status == "active" && !offer_restricted => {
+                    "responder" if row.offer_status == "active" && !row.offer_restricted => {
                         vec!["withdraw"]
                     }
                     "responder" => Vec::new(),
@@ -134,21 +98,21 @@ pub async fn list_wanted_responses(
                 Vec::new()
             };
             serde_json::json!({
-                "id": row.get::<Uuid, _>("id").to_string(),
-                "wanted_listing_id": row.get::<String, _>("wanted_listing_id"),
-                "wanted_title": row.get::<String, _>("wanted_title"),
-                "wanted_status": wanted_status,
-                "offer_listing_id": row.get::<String, _>("offer_listing_id"),
-                "offer_title": row.get::<String, _>("offer_title"),
-                "offer_status": offer_status,
-                "responder_id": row.get::<String, _>("responder_id"),
-                "requester_id": row.get::<String, _>("requester_id"),
-                "message": row.get::<Option<String>, _>("message"),
-                "status": response_status,
-                "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at"),
-                "responded_at": row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("responded_at"),
-                "lifecycle_epoch": lifecycle_epoch,
-                "current_lifecycle_epoch": current_lifecycle_epoch,
+                "id": row.id.to_string(),
+                "wanted_listing_id": row.wanted_listing_id,
+                "wanted_title": row.wanted_title,
+                "wanted_status": row.wanted_status,
+                "offer_listing_id": row.offer_listing_id,
+                "offer_title": row.offer_title,
+                "offer_status": row.offer_status,
+                "responder_id": row.responder_id,
+                "requester_id": row.requester_id,
+                "message": row.message,
+                "status": row.status,
+                "created_at": row.created_at,
+                "responded_at": row.responded_at,
+                "lifecycle_epoch": row.lifecycle_epoch,
+                "current_lifecycle_epoch": row.current_lifecycle_epoch,
                 "round_state": if round_is_current { "current" } else { "closed" },
                 "available_actions": available_actions,
             })
@@ -183,191 +147,30 @@ async fn act_on_response(
     response_id: Uuid,
     action: ResponseAction,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let mut tx = state
-        .infra
-        .db
-        .begin()
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-    // Resolve the immutable parent ids without a lock, while retaining
-    // actor/campus non-disclosure. We then lock in the same global order used
-    // by response creation: wanted -> offer -> response. Explicit ordering
-    // avoids create/action deadlocks and makes fulfill/reopen serialization
-    // independent of the planner's join order.
-    let link = sqlx::query(&format!(
-        "SELECT wanted_listing_id, offer_listing_id
-         FROM wanted_responses
-         WHERE id = $1 AND campus_id = $2 AND {} = $3",
-        action.actor_column
-    ))
-    .bind(response_id)
-    .bind(campus_id)
-    .bind(user_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-    .ok_or(ApiError::NotFound)?;
-    let wanted_listing_id: String = link.get("wanted_listing_id");
-    let offer_listing_id: String = link.get("offer_listing_id");
-
-    let wanted = sqlx::query(
-        "SELECT status, lifecycle_epoch
-         FROM inventory
-         WHERE id = $1 AND campus_id = $2
-         FOR UPDATE",
-    )
-    .bind(&wanted_listing_id)
-    .bind(campus_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-    .ok_or(ApiError::NotFound)?;
-    let wanted_status: String = wanted.get("status");
-    let current_lifecycle_epoch: i64 = wanted.get("lifecycle_epoch");
-    let wanted_restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
-        .bind(&wanted_listing_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-    let offer = sqlx::query(
-        "SELECT status, title
-         FROM inventory
-         WHERE id = $1 AND campus_id = $2
-         FOR UPDATE",
-    )
-    .bind(&offer_listing_id)
-    .bind(campus_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-    .ok_or(ApiError::NotFound)?;
-    let offer_status: String = offer.get("status");
-    let offer_title: String = offer.get("title");
-    let offer_restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
-        .bind(&offer_listing_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-    let row = sqlx::query(&format!(
-        "SELECT responder_id, requester_id, status, lifecycle_epoch,
-                wanted_listing_id, offer_listing_id
-         FROM wanted_responses
-         WHERE id = $1 AND campus_id = $2 AND {} = $3
-         FOR UPDATE",
-        action.actor_column
-    ))
-    .bind(response_id)
-    .bind(campus_id)
-    .bind(user_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-    .ok_or(ApiError::NotFound)?;
-
-    let status: String = row.get("status");
-    let lifecycle_epoch: Option<i64> = row.get("lifecycle_epoch");
-    let locked_wanted_listing_id: String = row.get("wanted_listing_id");
-    let locked_offer_listing_id: String = row.get("offer_listing_id");
-    if locked_wanted_listing_id != wanted_listing_id || locked_offer_listing_id != offer_listing_id
-    {
-        return Err(ApiError::Conflict(
-            "该推荐关联的商品已发生变化，请刷新后重试".to_string(),
-        ));
-    }
-
-    let ineligible_reason = if status != "pending" {
-        Some(ApiError::Conflict(format!(
-            "该推荐当前状态为 {status}，无法操作"
-        )))
-    } else if lifecycle_epoch != Some(current_lifecycle_epoch)
-        || wanted_status != "active"
-        || wanted_restricted
-    {
-        Some(ApiError::CodedConflict {
-            code: "wanted_response_round_closed",
-            message: "该推荐属于已结束的收物轮次，请刷新后查看历史".to_string(),
+    let service = WantedResponseService::new(state.infra.db.clone());
+    let outcome = service
+        .action_response(ActionWantedResponseParams {
+            user_id,
+            campus_id,
+            response_id,
+            actor_column: action.actor_column,
+            to_status: action.to_status,
+            require_offer_active: action.require_offer_active,
+            notify_column: action.notify_column,
         })
-    } else if offer_restricted && action.to_status != "dismissed" {
-        Some(ApiError::CodedConflict {
-            code: "listing_restricted",
-            message: "推荐商品已受平台限制，无法操作".to_string(),
-        })
-    } else if action.require_offer_active && offer_status != "active" {
-        Some(ApiError::Conflict(format!(
-            "推荐商品当前状态为 {offer_status}，无法操作"
-        )))
-    } else {
-        None
-    };
-    if let Some(error) = ineligible_reason {
-        return Err(error);
-    }
+        .await?;
 
-    // Keep lifecycle and listing-state predicates on the write as defense in
-    // depth. The explicit row locks make these stable for this transaction.
-    let updated = sqlx::query(&format!(
-        "UPDATE wanted_responses AS r
-         SET status = $2, responded_at = NOW()
-         WHERE r.id = $1
-           AND r.status = 'pending'
-           AND r.{} = $3
-           AND r.campus_id = $4
-           AND r.lifecycle_epoch = $5
-           AND EXISTS (
-               SELECT 1
-               FROM inventory AS w
-               WHERE w.id = r.wanted_listing_id
-                 AND w.campus_id = r.campus_id
-                 AND w.status = 'active'
-                 AND NOT listing_has_active_restriction(w.id)
-                 AND w.lifecycle_epoch = r.lifecycle_epoch
-           )
-           AND (
-               NOT $6::boolean
-               OR EXISTS (
-                   SELECT 1
-                   FROM inventory AS o
-                   WHERE o.id = r.offer_listing_id
-                     AND o.campus_id = r.campus_id
-                     AND o.status = 'active'
-                     AND NOT listing_has_active_restriction(o.id)
-               )
-           )",
-        action.actor_column
-    ))
-    .bind(response_id)
-    .bind(action.to_status)
-    .bind(user_id)
-    .bind(campus_id)
-    .bind(lifecycle_epoch)
-    .bind(action.require_offer_active)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-    if updated.rows_affected() == 0 {
-        return Err(ApiError::Conflict(
-            "该推荐状态已发生变化，无法操作".to_string(),
-        ));
-    }
-    tx.commit()
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-    let counterpart: String = row.get(action.notify_column);
     if let Err(e) = state
         .infra
         .notification
         .create(NewNotification {
             campus_id,
-            user_id: &counterpart,
+            user_id: &outcome.counterpart_id,
             event_type: action.event_type,
             title: action.title,
-            body: &(action.body)(&offer_title),
+            body: &(action.body)(&outcome.offer_title),
             related_order_id: None,
-            related_listing_id: Some(&wanted_listing_id),
+            related_listing_id: Some(&outcome.wanted_listing_id),
             related_conversation_id: None,
             related_space_id: None,
         })

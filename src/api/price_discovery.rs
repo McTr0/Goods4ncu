@@ -39,17 +39,11 @@ pub async fn propose(
     tenant: VerifiedTenant,
     Json(payload): Json<ProposeRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let owner: Option<String> = sqlx::query_scalar(
-        "SELECT owner_id FROM inventory
-         WHERE id = $1 AND campus_id = $2 AND status = 'active'
-           AND NOT listing_has_active_restriction(id)",
-    )
-    .bind(&payload.listing_id)
-    .bind(tenant.campus_id)
-    .fetch_optional(&state.infra.db)
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
-    let owner = owner.ok_or(ApiError::NotFound)?;
+    let owner = state
+        .listing_repo
+        .find_active_unrestricted_owner(&payload.listing_id, tenant.campus_id)
+        .await?
+        .ok_or(ApiError::NotFound)?;
 
     if owner == tenant.session.user_id {
         // The seller cannot open a session with themselves, and this endpoint

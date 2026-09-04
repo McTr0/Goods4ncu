@@ -1,3 +1,4 @@
+use pgvector::Vector;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
@@ -257,6 +258,424 @@ impl FeedService {
             signals_reset_at: row.get("signals_reset_at"),
         })
     }
+
+    pub async fn fetch_recency_feed(
+        &self,
+        campus_id: Uuid,
+        direction: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<RecommendationItem>, ApiError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, title, category, brand, direction, condition_score,
+                   suggested_price_cny, status,
+                   CASE WHEN images_moderation_status = 'approved' THEN image_url ELSE NULL END AS image_url,
+                   defects
+            FROM inventory
+            WHERE status = 'active'
+              AND NOT listing_has_active_restriction(id)
+              AND campus_id = $3
+              AND ($4 = 'all' OR direction = $4)
+            ORDER BY created_at DESC
+            LIMIT $1 OFFSET $2
+            "#,
+        )
+        .bind(limit)
+        .bind(offset)
+        .bind(campus_id)
+        .bind(direction)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_error)?;
+
+        Ok(rows
+            .iter()
+            .map(|row| recommendation_item_with_reason(row, "最新发布".to_string(), "recency"))
+            .collect())
+    }
+
+    pub async fn fetch_personalized_feed(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+        direction: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<RecommendationItem>, ApiError> {
+        let rows = sqlx::query(
+            r#"
+            WITH preferences AS (
+                SELECT COALESCE(pref.personalization_enabled, TRUE) AS personalization_enabled,
+                       COALESCE(pref.signals_reset_at, '-infinity'::timestamptz) AS signals_reset_at
+                FROM (SELECT 1) seed
+                LEFT JOIN feed_preferences pref
+                  ON pref.campus_id = $5 AND pref.user_id = $1
+            ), affinity AS (
+                SELECT i.category, COUNT(*)::float8 AS weight
+                FROM (
+                    SELECT watch.listing_id
+                    FROM watchlist watch CROSS JOIN preferences pref
+                    WHERE watch.user_id = $1
+                      AND pref.personalization_enabled
+                      AND watch.created_at >= pref.signals_reset_at
+                    UNION ALL
+                    SELECT purchase.listing_id
+                    FROM orders purchase CROSS JOIN preferences pref
+                    WHERE purchase.buyer_id = $1
+                      AND purchase.campus_id = $5
+                      AND pref.personalization_enabled
+                      AND purchase.created_at >= pref.signals_reset_at
+                ) signals
+                JOIN inventory i ON i.id = signals.listing_id
+                WHERE i.campus_id = $5
+                GROUP BY i.category
+            ), less_like AS (
+                SELECT feedback.signal_key, COUNT(*)::float8 AS weight
+                FROM feed_feedback feedback CROSS JOIN preferences pref
+                WHERE feedback.user_id = $1
+                  AND feedback.campus_id = $5
+                  AND feedback.resource_type = 'listing'
+                  AND feedback.action = 'less_like_this'
+                  AND pref.personalization_enabled
+                  AND feedback.updated_at >= pref.signals_reset_at
+                GROUP BY feedback.signal_key
+            )
+            SELECT inv.id, inv.title, inv.category, inv.brand, inv.direction, inv.condition_score,
+                   inv.suggested_price_cny, inv.status,
+                   CASE WHEN inv.images_moderation_status = 'approved' THEN inv.image_url ELSE NULL END AS image_url,
+                   inv.defects,
+                   CASE WHEN pref.personalization_enabled
+                        THEN COALESCE(a.weight, 0) - COALESCE(downrank.weight, 0)
+                        ELSE 0 END AS effective_weight,
+                   pref.personalization_enabled
+            FROM inventory inv
+            CROSS JOIN preferences pref
+            LEFT JOIN affinity a ON a.category = inv.category
+            LEFT JOIN less_like downrank
+              ON downrank.signal_key = 'listing:category:' || LOWER(BTRIM(inv.category))
+            WHERE inv.status = 'active'
+              AND NOT listing_has_active_restriction(inv.id)
+              AND inv.campus_id = $5
+              AND inv.owner_id <> $1
+              AND ($4 = 'all' OR inv.direction = $4)
+              AND NOT EXISTS (
+                  SELECT 1 FROM watchlist w
+                  WHERE pref.personalization_enabled
+                    AND w.user_id = $1 AND w.listing_id = inv.id
+                    AND w.created_at >= pref.signals_reset_at
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM feed_feedback exact_feedback
+                  WHERE exact_feedback.user_id = $1
+                    AND exact_feedback.campus_id = $5
+                    AND exact_feedback.resource_type = 'listing'
+                    AND exact_feedback.resource_id = inv.id
+              )
+            ORDER BY CASE WHEN pref.personalization_enabled
+                          THEN COALESCE(a.weight, 0) - COALESCE(downrank.weight, 0)
+                          ELSE 0 END DESC,
+                     inv.created_at DESC
+            LIMIT $2 OFFSET $3
+            "#,
+        )
+        .bind(user_id)
+        .bind(limit)
+        .bind(offset)
+        .bind(direction)
+        .bind(campus_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_error)?;
+
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let weight: f64 = row.try_get("effective_weight").unwrap_or(0.0);
+                let personalization_enabled: bool =
+                    row.try_get("personalization_enabled").unwrap_or(true);
+                if personalization_enabled && weight > 0.0 {
+                    let category: String = row.get("category");
+                    recommendation_item_with_reason(
+                        row,
+                        format!("与你关注的“{}”类相关", category),
+                        "category_affinity",
+                    )
+                } else {
+                    recommendation_item_with_reason(row, "最新发布".to_string(), "recency")
+                }
+            })
+            .collect())
+    }
+
+    pub async fn fetch_similar_recency(
+        &self,
+        campus_id: Uuid,
+        viewer_id: Option<&str>,
+        source_listing_id: &str,
+        limit: i64,
+    ) -> Result<Vec<RecommendationItem>, ApiError> {
+        let rows = sqlx::query(
+            r#"
+            WITH preferences AS (
+                SELECT COALESCE(pref.personalization_enabled, TRUE) AS personalization_enabled,
+                       COALESCE(pref.signals_reset_at, '-infinity'::timestamptz) AS signals_reset_at
+                FROM (SELECT 1) seed
+                LEFT JOIN feed_preferences pref
+                  ON pref.campus_id = $2 AND pref.user_id = $3
+            ), less_like AS (
+                SELECT feedback.signal_key, COUNT(*)::float8 AS weight
+                FROM feed_feedback feedback CROSS JOIN preferences pref
+                WHERE $3::text IS NOT NULL
+                  AND feedback.user_id = $3
+                  AND feedback.campus_id = $2
+                  AND feedback.resource_type = 'listing'
+                  AND feedback.action = 'less_like_this'
+                  AND pref.personalization_enabled
+                  AND feedback.updated_at >= pref.signals_reset_at
+                GROUP BY feedback.signal_key
+            )
+            SELECT inv.id, inv.title, inv.category, inv.brand, inv.direction,
+                   inv.condition_score, inv.suggested_price_cny, inv.status,
+                   CASE WHEN inv.images_moderation_status = 'approved'
+                        THEN inv.image_url ELSE NULL END AS image_url,
+                   inv.defects
+            FROM inventory inv
+            CROSS JOIN preferences pref
+            LEFT JOIN less_like downrank
+              ON downrank.signal_key = 'listing:category:' || LOWER(BTRIM(inv.category))
+            WHERE inv.id <> $1
+              AND inv.status = 'active'
+              AND NOT listing_has_active_restriction(inv.id)
+              AND inv.direction = 'offer'
+              AND inv.campus_id = $2
+              AND ($3::text IS NULL OR inv.owner_id <> $3)
+              AND (
+                  $3::text IS NULL
+                  OR NOT EXISTS (
+                      SELECT 1 FROM feed_feedback exact_feedback
+                      WHERE exact_feedback.user_id = $3
+                        AND exact_feedback.campus_id = $2
+                        AND exact_feedback.resource_type = 'listing'
+                        AND exact_feedback.resource_id = inv.id
+                  )
+              )
+            ORDER BY CASE
+                         WHEN $3::text IS NOT NULL AND pref.personalization_enabled
+                         THEN COALESCE(downrank.weight, 0)
+                         ELSE 0
+                     END ASC,
+                     inv.created_at DESC,
+                     inv.id ASC
+            LIMIT $4
+            "#,
+        )
+        .bind(source_listing_id)
+        .bind(campus_id)
+        .bind(viewer_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_error)?;
+
+        Ok(rows
+            .iter()
+            .map(|row| recommendation_item_with_reason(row, "recency".to_string(), "recency"))
+            .collect())
+    }
+
+    pub async fn fetch_vector_similar(
+        &self,
+        campus_id: Uuid,
+        viewer_id: Option<&str>,
+        source_listing_id: &str,
+        source_embedding: &Vector,
+        limit: i64,
+    ) -> Result<Vec<RecommendationItem>, ApiError> {
+        let candidate_pool_limit = similar_candidate_pool_limit(limit);
+        let mut tx = self.pool.begin().await.map_err(db_error)?;
+
+        sqlx::query("SET LOCAL hnsw.iterative_scan = strict_order")
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?;
+
+        let rows = sqlx::query(
+            r#"
+            WITH semantic_candidates AS MATERIALIZED (
+                SELECT inv.id, inv.title, inv.category, inv.brand, inv.direction,
+                       inv.condition_score, inv.suggested_price_cny, inv.status,
+                       CASE WHEN inv.images_moderation_status = 'approved'
+                            THEN inv.image_url ELSE NULL END AS image_url,
+                       inv.defects, inv.created_at,
+                       doc.embedding <=> $2 AS semantic_distance
+                FROM documents doc
+                JOIN inventory inv ON inv.id = doc.id
+                WHERE inv.id <> $1
+                  AND inv.status = 'active'
+                  AND NOT listing_has_active_restriction(inv.id)
+                  AND inv.direction = 'offer'
+                  AND inv.campus_id = $4
+                  AND doc.embedding IS NOT NULL
+                  AND ($5::text IS NULL OR inv.owner_id <> $5)
+                  AND (
+                      $5::text IS NULL
+                      OR NOT EXISTS (
+                          SELECT 1 FROM feed_feedback exact_feedback
+                          WHERE exact_feedback.user_id = $5
+                            AND exact_feedback.campus_id = $4
+                            AND exact_feedback.resource_type = 'listing'
+                            AND exact_feedback.resource_id = inv.id
+                      )
+                  )
+                ORDER BY doc.embedding <=> $2
+                LIMIT $6
+            ), preferences AS (
+                SELECT COALESCE(pref.personalization_enabled, TRUE) AS personalization_enabled,
+                       COALESCE(pref.signals_reset_at, '-infinity'::timestamptz) AS signals_reset_at
+                FROM (SELECT 1) seed
+                LEFT JOIN feed_preferences pref
+                  ON pref.campus_id = $4 AND pref.user_id = $5
+            ), less_like AS (
+                SELECT feedback.signal_key, COUNT(*)::float8 AS weight
+                FROM feed_feedback feedback CROSS JOIN preferences pref
+                WHERE $5::text IS NOT NULL
+                  AND feedback.user_id = $5
+                  AND feedback.campus_id = $4
+                  AND feedback.resource_type = 'listing'
+                  AND feedback.action = 'less_like_this'
+                  AND pref.personalization_enabled
+                  AND feedback.updated_at >= pref.signals_reset_at
+                GROUP BY feedback.signal_key
+            )
+            SELECT candidate.id, candidate.title, candidate.category, candidate.brand,
+                   candidate.direction, candidate.condition_score,
+                   candidate.suggested_price_cny, candidate.status,
+                   candidate.image_url, candidate.defects
+            FROM semantic_candidates candidate
+            CROSS JOIN preferences pref
+            LEFT JOIN less_like downrank
+              ON downrank.signal_key =
+                 'listing:category:' || LOWER(BTRIM(candidate.category))
+            ORDER BY CASE
+                         WHEN $5::text IS NOT NULL AND pref.personalization_enabled
+                         THEN COALESCE(downrank.weight, 0)
+                         ELSE 0
+                     END ASC,
+                     candidate.semantic_distance ASC,
+                     candidate.created_at DESC,
+                     candidate.id ASC
+            LIMIT $3
+            "#,
+        )
+        .bind(source_listing_id)
+        .bind(source_embedding)
+        .bind(limit)
+        .bind(campus_id)
+        .bind(viewer_id)
+        .bind(candidate_pool_limit)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(db_error)?;
+
+        tx.commit().await.map_err(db_error)?;
+
+        Ok(rows
+            .iter()
+            .map(|row| {
+                recommendation_item_with_reason(
+                    row,
+                    "vector_similarity".to_string(),
+                    "vector_similarity",
+                )
+            })
+            .collect())
+    }
+
+    pub async fn get_source_listing_embedding(
+        &self,
+        listing_id: &str,
+        campus_id: Uuid,
+    ) -> Result<Option<Vector>, ApiError> {
+        let source = sqlx::query(
+            "SELECT d.embedding
+             FROM inventory i
+             LEFT JOIN documents d ON d.id = i.id
+             WHERE i.id = $1
+               AND i.campus_id = $2
+               AND i.status = 'active'
+               AND NOT listing_has_active_restriction(i.id)
+               AND i.direction = 'offer'",
+        )
+        .bind(listing_id)
+        .bind(campus_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_error)?
+        .ok_or(ApiError::NotFound)?;
+
+        let source_embedding: Option<Vector> = source.try_get("embedding").map_err(db_error)?;
+        Ok(source_embedding)
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct RecommendationItem {
+    pub id: String,
+    pub title: String,
+    pub category: String,
+    pub brand: String,
+    pub direction: String,
+    pub condition_score: i32,
+    pub suggested_price_cny: f64,
+    pub status: String,
+    pub image_url: Option<String>,
+    pub defect_hint: Option<String>,
+    pub rank_reason: String,
+    pub source: String,
+}
+
+fn recommendation_item_from_row(row: &sqlx::postgres::PgRow, source: &str) -> RecommendationItem {
+    let defects_raw: Option<String> = row.try_get("defects").ok().flatten();
+    let defect_hint = defects_raw
+        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+        .and_then(|list| list.into_iter().next());
+    let rank_reason = row
+        .try_get("rank_reason")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    RecommendationItem {
+        id: row.get("id"),
+        title: row.get("title"),
+        category: row.get("category"),
+        brand: row.try_get("brand").ok().flatten().unwrap_or_default(),
+        direction: row
+            .try_get("direction")
+            .ok()
+            .unwrap_or_else(|| "offer".to_string()),
+        condition_score: row.get("condition_score"),
+        suggested_price_cny: crate::utils::cents_to_yuan(row.get::<i64, _>("suggested_price_cny")),
+        status: row.get("status"),
+        image_url: row.get("image_url"),
+        defect_hint,
+        rank_reason,
+        source: source.to_string(),
+    }
+}
+
+fn recommendation_item_with_reason(
+    row: &sqlx::postgres::PgRow,
+    reason: String,
+    source: &str,
+) -> RecommendationItem {
+    let mut item = recommendation_item_from_row(row, source);
+    item.rank_reason = reason;
+    item
+}
+
+pub fn similar_candidate_pool_limit(limit: i64) -> i64 {
+    limit.saturating_mul(10).clamp(50, 200)
 }
 
 fn normalized_signal(value: &str) -> String {

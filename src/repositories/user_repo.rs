@@ -14,9 +14,70 @@ pub struct PostgresUserRepository {
     pool: PgPool,
 }
 
+#[derive(Debug, Clone)]
+pub struct UserPublicProfileData {
+    pub user_id: String,
+    pub username: String,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub avatar_url: Option<String>,
+    pub public_wechat_pay_qr_url: Option<String>,
+    pub public_alipay_qr_url: Option<String>,
+    pub listing_count: i64,
+}
+
 impl PostgresUserRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    pub async fn get_public_profile(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+    ) -> Result<Option<UserPublicProfileData>, ApiError> {
+        let row = sqlx::query(
+            r#"
+            SELECT u.id as user_id, u.username, u.created_at,
+                   CASE WHEN u.avatar_moderation_status = 'approved' THEN u.avatar_url
+                        ELSE NULL END AS avatar_url,
+                   CASE
+                       WHEN u.show_wechat_pay_qr = TRUE THEN u.wechat_pay_qr_url
+                       ELSE NULL
+                   END AS public_wechat_pay_qr_url,
+                   CASE
+                       WHEN u.show_alipay_qr = TRUE THEN u.alipay_qr_url
+                       ELSE NULL
+                   END AS public_alipay_qr_url,
+                   COUNT(i.id) as listing_count
+            FROM users u
+            JOIN campus_memberships membership
+              ON membership.user_id = u.id
+             AND membership.campus_id = $2
+             AND membership.status = 'verified'
+            LEFT JOIN inventory i ON u.id = i.owner_id
+             AND i.status = 'active' AND i.campus_id = $2
+             AND NOT listing_has_active_restriction(i.id)
+            WHERE u.id = $1
+            GROUP BY u.id, u.username, u.created_at, u.avatar_url,
+                     u.show_wechat_pay_qr, u.wechat_pay_qr_url,
+                     u.show_alipay_qr, u.alipay_qr_url
+            "#,
+        )
+        .bind(user_id)
+        .bind(campus_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+        Ok(row.map(|r| UserPublicProfileData {
+            user_id: r.get("user_id"),
+            username: r.get("username"),
+            created_at: r.try_get("created_at").ok(),
+            avatar_url: r.get("avatar_url"),
+            public_wechat_pay_qr_url: r.get("public_wechat_pay_qr_url"),
+            public_alipay_qr_url: r.get("public_alipay_qr_url"),
+            listing_count: r.get("listing_count"),
+        }))
     }
 }
 

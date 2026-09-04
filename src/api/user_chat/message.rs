@@ -20,11 +20,10 @@ use super::{
 };
 
 async fn conversation_campus_id(state: &AppState, conversation_id: Uuid) -> Result<Uuid, ApiError> {
-    sqlx::query_scalar("SELECT campus_id FROM chat_conversations WHERE id = $1")
-        .bind(conversation_id)
-        .fetch_optional(&state.infra.db)
-        .await
-        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?
+    let service = ChatConversationService::new(state.infra.db.clone());
+    service
+        .get_conversation_campus_id(conversation_id)
+        .await?
         .ok_or(ApiError::NotFound)
 }
 

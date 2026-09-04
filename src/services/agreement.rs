@@ -108,6 +108,26 @@ impl AgreementService {
         Self { db }
     }
 
+    pub async fn user_participates_in_conversation(
+        &self,
+        conversation_id: Uuid,
+        campus_id: Uuid,
+        user_id: &str,
+    ) -> Result<bool> {
+        let participates: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+                 SELECT 1 FROM chat_conversations
+                 WHERE id = $1 AND campus_id = $2 AND (initiator_id = $3 OR recipient_id = $3)
+             )",
+        )
+        .bind(conversation_id)
+        .bind(campus_id)
+        .bind(user_id)
+        .fetch_one(&self.db)
+        .await?;
+        Ok(participates)
+    }
+
     /// The card for a conversation, creating it on first use.
     ///
     /// Idempotent: two clients opening the same conversation must not produce two

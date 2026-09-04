@@ -3,7 +3,6 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use uuid::Uuid;
 
 use crate::api::auth::AuthSessionContext;
@@ -232,40 +231,15 @@ pub async fn update_profile(
         let Some((_, domain)) = email.split_once('@') else {
             return Err(ApiError::BadRequest("邮箱格式无效".to_string()));
         };
-        let campus_id_for_email: Option<uuid::Uuid> = sqlx::query_scalar(
-            "SELECT c.id FROM campuses c
-             WHERE c.status = 'active'
-               AND EXISTS (
-                   SELECT 1 FROM unnest(c.email_domains) AS d
-                   WHERE lower(d) = lower($1)
-               )
-             ORDER BY (c.slug = 'ncu') DESC, c.created_at ASC
-             LIMIT 1",
-        )
-        .bind(domain)
-        .fetch_optional(&state.infra.db)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        let campus_service = CampusService::new(state.infra.db.clone());
+        let campus_id_for_email = campus_service.find_active_campus_by_domain(domain).await?;
         let Some(email_campus_id) = campus_id_for_email else {
             // Same reasoning as registration: name the domain rather than
             // asking someone to guess it.
-            let domains: Vec<String> = sqlx::query_scalar(
-                // The primary campus only. Listing every active campus would
-                // enumerate which schools are onboard to anyone who mistypes an
-                // address, and tell an NCU student about domains that are not
-                // theirs. The LIMIT has to sit inside the subquery: `unnest`
-                // expands after the outer limit, so limiting rows out here
-                // still listed every campus.
-                "SELECT unnest(email_domains) FROM (
-                     SELECT email_domains FROM campuses
-                     WHERE status = 'active'
-                     ORDER BY (slug = 'ncu') DESC, created_at ASC
-                     LIMIT 1
-                 ) primary_campus",
-            )
-            .fetch_all(&state.infra.db)
-            .await
-            .unwrap_or_default();
+            let domains = campus_service
+                .get_primary_campus_domains()
+                .await
+                .unwrap_or_default();
             return Err(ApiError::BadRequest(if domains.is_empty() {
                 "请使用学校邮箱".to_string()
             } else {
@@ -280,16 +254,9 @@ pub async fn update_profile(
             }));
         };
         state.user_repo.update_email(&user_id, email).await?;
-        sqlx::query(
-            "INSERT INTO campus_memberships (campus_id, user_id, status, role, verification_method)
-             VALUES ($1, $2, 'pending', 'member', 'email_change')
-             ON CONFLICT (campus_id, user_id) DO NOTHING",
-        )
-        .bind(email_campus_id)
-        .bind(&user_id)
-        .execute(&state.infra.db)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        campus_service
+            .add_pending_email_membership(email_campus_id, &user_id)
+            .await?;
     }
 
     if let Some(discoverability) = &body.discoverability {
@@ -376,43 +343,21 @@ pub async fn get_user_listings(
         .await?;
 
     let listing_ids: Vec<String> = listings.iter().map(|listing| listing.id.clone()).collect();
-    let restriction_rows = if listing_ids.is_empty() {
-        Vec::new()
-    } else {
-        sqlx::query(
-            "SELECT DISTINCT ON (effect.listing_id)
-                    effect.listing_id, effect.imposed_at, effect.case_id,
-                    moderation_case.public_reason,
-                    moderation_case.status IN ('actioned', 'resolved')
-                        AND moderation_case.resolution = 'content_restricted'
-                        AND NOT EXISTS (
-                            SELECT 1 FROM moderation_appeals appeal
-                            WHERE appeal.case_id = moderation_case.id
-                              AND appeal.appellant_id = $2
-                        ) AS can_appeal
-             FROM listing_restriction_effects effect
-             JOIN moderation_cases moderation_case ON moderation_case.id = effect.case_id
-             WHERE effect.listing_id = ANY($1::text[])
-               AND effect.released_at IS NULL
-             ORDER BY effect.listing_id, effect.imposed_at DESC",
-        )
-        .bind(&listing_ids)
-        .bind(&session.user_id)
-        .fetch_all(&state.infra.db)
-        .await
-        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?
-    };
+    let raw_restrictions = state
+        .listing_repo
+        .get_active_restrictions_for_listings(&listing_ids, &session.user_id)
+        .await?;
     let restrictions: std::collections::HashMap<String, ListingRestrictionSummary> =
-        restriction_rows
+        raw_restrictions
             .into_iter()
-            .map(|row| {
+            .map(|(listing_id, r)| {
                 (
-                    row.get("listing_id"),
+                    listing_id,
                     ListingRestrictionSummary {
-                        public_reason: row.get("public_reason"),
-                        restricted_at: row.get("imposed_at"),
-                        moderation_case_id: row.get("case_id"),
-                        can_appeal: row.get("can_appeal"),
+                        public_reason: r.public_reason,
+                        restricted_at: r.restricted_at,
+                        moderation_case_id: r.moderation_case_id,
+                        can_appeal: r.can_appeal,
                     },
                 )
             })
@@ -626,55 +571,26 @@ pub async fn get_user_profile(
     Path(user_id): Path<String>,
 ) -> Result<Json<UserPublicProfile>, ApiError> {
     let campus_id = resolve_public_request_campus(&state, session.as_ref()).await?;
-    let row = sqlx::query(
-        r#"
-        SELECT u.id as user_id, u.username, u.created_at,
-               CASE WHEN u.avatar_moderation_status = 'approved' THEN u.avatar_url
-                    ELSE NULL END AS avatar_url,
-               CASE
-                   WHEN u.show_wechat_pay_qr = TRUE THEN u.wechat_pay_qr_url
-                   ELSE NULL
-               END AS public_wechat_pay_qr_url,
-               CASE
-                   WHEN u.show_alipay_qr = TRUE THEN u.alipay_qr_url
-                   ELSE NULL
-               END AS public_alipay_qr_url,
-               COUNT(i.id) as listing_count
-        FROM users u
-        JOIN campus_memberships membership
-          ON membership.user_id = u.id
-         AND membership.campus_id = $2
-         AND membership.status = 'verified'
-        LEFT JOIN inventory i ON u.id = i.owner_id
-         AND i.status = 'active' AND i.campus_id = $2
-         AND NOT listing_has_active_restriction(i.id)
-        WHERE u.id = $1
-        GROUP BY u.id, u.username, u.created_at, u.avatar_url,
-                 u.show_wechat_pay_qr, u.wechat_pay_qr_url,
-                 u.show_alipay_qr, u.alipay_qr_url
-        "#,
-    )
-    .bind(&user_id)
-    .bind(campus_id)
-    .fetch_optional(&state.infra.db)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-    .ok_or(ApiError::NotFound)?;
+    let profile = state
+        .user_repo
+        .get_public_profile(&user_id, campus_id)
+        .await?
+        .ok_or(ApiError::NotFound)?;
 
-    let created_at: String = row
-        .try_get::<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>, _>("created_at")
+    let created_at = profile
+        .created_at
         .map(|dt| dt.to_rfc3339())
-        .unwrap_or_else(|_| String::new());
+        .unwrap_or_default();
 
     Ok(Json(UserPublicProfile {
-        user_id: row.get("user_id"),
-        username: row.get("username"),
-        avatar_url: state.public_media_url(row.get("avatar_url")),
-        listing_count: row.get("listing_count"),
+        user_id: profile.user_id,
+        username: profile.username,
+        avatar_url: state.public_media_url(profile.avatar_url),
+        listing_count: profile.listing_count,
         joined_at: created_at,
         payment_qr: UserPublicPaymentQr {
-            wechat_url: row.get("public_wechat_pay_qr_url"),
-            alipay_url: row.get("public_alipay_qr_url"),
+            wechat_url: profile.public_wechat_pay_qr_url,
+            alipay_url: profile.public_alipay_qr_url,
         },
     }))
 }

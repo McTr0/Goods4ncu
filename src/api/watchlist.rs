@@ -3,11 +3,11 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 
 use crate::api::error::ApiError;
 use crate::api::session::{Session, VerifiedTenant};
 use crate::api::AppState;
+use crate::repositories::PostgresWatchlistRepository;
 use crate::utils::cents_to_yuan;
 
 #[derive(Deserialize)]
@@ -43,58 +43,25 @@ pub async fn get_watchlist(
     Session(session): Session,
     Query(params): Query<WatchlistQuery>,
 ) -> Result<Json<WatchlistResponse>, ApiError> {
-    let user_id = session.user_id;
-
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
     let offset = params.offset.unwrap_or(0).max(0);
 
-    let count_row = sqlx::query(
-        "SELECT COUNT(*) as cnt FROM watchlist w \
-         JOIN inventory i ON w.listing_id = i.id \
-         WHERE w.user_id = $1 AND i.status = 'active'
-           AND NOT listing_has_active_restriction(i.id)",
-    )
-    .bind(&user_id)
-    .fetch_one(&state.infra.db)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-    let total: i64 = count_row.try_get("cnt").unwrap_or(0);
-
-    let rows = sqlx::query(
-        r#"
-        SELECT i.id as listing_id, i.title, i.category, i.brand, i.condition_score,
-               i.suggested_price_cny, i.status, i.owner_id, i.created_at
-        FROM watchlist w
-        JOIN inventory i ON w.listing_id = i.id
-        WHERE w.user_id = $1 AND i.status = 'active'
-          AND NOT listing_has_active_restriction(i.id)
-        ORDER BY w.created_at DESC
-        LIMIT $2 OFFSET $3
-        "#,
-    )
-    .bind(&user_id)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(&state.infra.db)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    let repo = PostgresWatchlistRepository::new(state.infra.db.clone());
+    let (rows, total) = repo.get_watchlist(&session.user_id, limit, offset).await?;
 
     let items: Vec<WatchlistItem> = rows
-        .iter()
+        .into_iter()
         .map(|row| {
-            let created_at: String = row
-                .try_get::<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>, _>("created_at")
-                .map(|dt| dt.to_rfc3339())
-                .unwrap_or_else(|_| String::new());
+            let created_at = row.created_at.map(|dt| dt.to_rfc3339()).unwrap_or_default();
             WatchlistItem {
-                listing_id: row.get("listing_id"),
-                title: row.get("title"),
-                category: row.get("category"),
-                brand: row.try_get("brand").ok().flatten().unwrap_or_default(),
-                condition_score: row.get("condition_score"),
-                suggested_price_cny: cents_to_yuan(row.get::<i64, _>("suggested_price_cny")),
-                status: row.get("status"),
-                owner_id: row.get("owner_id"),
+                listing_id: row.listing_id,
+                title: row.title,
+                category: row.category,
+                brand: row.brand,
+                condition_score: row.condition_score,
+                suggested_price_cny: cents_to_yuan(row.suggested_price_cny),
+                status: row.status,
+                owner_id: row.owner_id,
                 created_at,
             }
         })
@@ -114,52 +81,9 @@ pub async fn add_to_watchlist(
     tenant: VerifiedTenant,
     Path(listing_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = tenant.session.user_id;
-    let mut tx = state
-        .infra
-        .db
-        .begin()
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-    // Lock the target so a concurrent restriction cannot commit between the
-    // eligibility decision and insertion of the side fact.
-    let listing = sqlx::query(
-        "SELECT owner_id, status FROM inventory
-         WHERE id = $1 AND campus_id = $2 FOR UPDATE",
-    )
-    .bind(&listing_id)
-    .bind(tenant.campus_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-    .ok_or(ApiError::NotFound)?;
-    let owner_id: String = listing.get("owner_id");
-    let status: String = listing.get("status");
-    let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
-        .bind(&listing_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-    if status != "active" || restricted {
-        return Err(ApiError::NotFound);
-    }
-    if owner_id == user_id {
-        return Err(ApiError::BadRequest("不能收藏自己的商品".to_string()));
-    }
-
-    // Insert into watchlist (ignore if already exists)
-    sqlx::query(
-        "INSERT INTO watchlist (user_id, listing_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-    )
-    .bind(&user_id)
-    .bind(&listing_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-    tx.commit()
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    let repo = PostgresWatchlistRepository::new(state.infra.db.clone());
+    repo.add_to_watchlist(&tenant.session.user_id, &listing_id, tenant.campus_id)
+        .await?;
 
     Ok(Json(serde_json::json!({
         "message": "已添加到关注列表",
@@ -173,14 +97,9 @@ pub async fn remove_from_watchlist(
     Session(session): Session,
     Path(listing_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = session.user_id;
-
-    sqlx::query("DELETE FROM watchlist WHERE user_id = $1 AND listing_id = $2")
-        .bind(&user_id)
-        .bind(&listing_id)
-        .execute(&state.infra.db)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    let repo = PostgresWatchlistRepository::new(state.infra.db.clone());
+    repo.remove_from_watchlist(&session.user_id, &listing_id)
+        .await?;
 
     Ok(Json(serde_json::json!({
         "message": "已从关注列表移除",
@@ -194,15 +113,8 @@ pub async fn check_watchlist(
     Session(session): Session,
     Path(listing_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user_id = session.user_id;
-
-    let exists = sqlx::query("SELECT 1 FROM watchlist WHERE user_id = $1 AND listing_id = $2")
-        .bind(&user_id)
-        .bind(&listing_id)
-        .fetch_optional(&state.infra.db)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-        .is_some();
+    let repo = PostgresWatchlistRepository::new(state.infra.db.clone());
+    let exists = repo.check_watchlist(&session.user_id, &listing_id).await?;
 
     Ok(Json(serde_json::json!({
         "watched": exists,

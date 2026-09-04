@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Postgres, Row, Transaction};
+use uuid::Uuid;
 
 use crate::api::metrics::GLOBAL_METRICS;
 use crate::repositories::PostgresOrderRepository;
@@ -592,6 +593,22 @@ impl OrderService {
             let status: String = r.get("status");
             let final_price: i64 = r.get("final_price");
             (status, final_price)
+        }))
+    }
+
+    pub async fn get_order_scope(
+        &self,
+        order_id: &str,
+    ) -> Result<Option<(String, Uuid)>, OrderError> {
+        let row = sqlx::query("SELECT status, campus_id FROM orders WHERE id = $1")
+            .bind(order_id)
+            .fetch_optional(&self.db)
+            .await
+            .map_err(OrderError::Db)?;
+        Ok(row.map(|r| {
+            let status: String = r.get("status");
+            let campus_id: Uuid = r.get("campus_id");
+            (status, campus_id)
         }))
     }
 }

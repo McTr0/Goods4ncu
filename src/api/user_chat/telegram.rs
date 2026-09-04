@@ -4,11 +4,12 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
 use crate::api::AppState;
+use crate::services::chat_space::ChatSpaceService;
+pub use crate::services::chat_space::{CallView, SpaceMessageView, SpaceView};
 
 use super::{authenticated_session, authenticated_user, moderate_text};
 
@@ -18,20 +19,6 @@ pub struct CreateSpaceBody {
     pub kind: String,
     pub name: String,
     pub description: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SpaceView {
-    pub id: String,
-    pub kind: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub owner_id: Option<String>,
-    pub my_role: String,
-    pub member_count: i64,
-    pub online_count: i64,
-    pub created_at: String,
-    pub updated_at: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,17 +44,6 @@ pub struct SendSpaceMessageBody {
     pub client_message_id: Uuid,
     pub content: String,
     pub reply_to_message_id: Option<i64>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SpaceMessageView {
-    pub id: i64,
-    pub space_id: String,
-    pub sender_id: String,
-    pub sender_username: Option<String>,
-    pub content: String,
-    pub reply_to_message_id: Option<i64>,
-    pub created_at: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -98,19 +74,6 @@ pub struct EndCallBody {
     pub reason: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct CallView {
-    pub id: String,
-    pub conversation_id: String,
-    pub caller_id: String,
-    pub callee_id: String,
-    pub media: String,
-    pub state: String,
-    pub offer_sdp: String,
-    pub answer_sdp: Option<String>,
-    pub created_at: String,
-}
-
 pub async fn create_space(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -133,32 +96,11 @@ pub async fn create_space(
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty());
-    let mut tx = state.infra.db.begin().await.map_err(db_error)?;
-    let row = sqlx::query(
-        "INSERT INTO chat_spaces (campus_id, kind, name, description, owner_id)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id",
-    )
-    .bind(tenant.campus_id)
-    .bind(kind)
-    .bind(name)
-    .bind(description)
-    .bind(&user_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(db_error)?;
-    let space_id: Uuid = row.get("id");
-    sqlx::query(
-        "INSERT INTO chat_space_members (space_id, user_id, role)
-         VALUES ($1, $2, 'owner')",
-    )
-    .bind(space_id)
-    .bind(&user_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(db_error)?;
-    tx.commit().await.map_err(db_error)?;
-    Ok(Json(load_space_view(&state, space_id, &user_id).await?))
+    let space_svc = ChatSpaceService::new(state.infra.db.clone());
+    let space_id = space_svc
+        .create_space(tenant.campus_id, kind, name, description, &user_id)
+        .await?;
+    Ok(Json(space_svc.load_space_view(space_id, &user_id).await?))
 }
 
 pub async fn list_spaces(
@@ -177,29 +119,19 @@ pub async fn list_spaces(
         .as_deref()
         .map(normalize_space_kind)
         .transpose()?;
-    let rows = sqlx::query(
-        "SELECT s.id
-         FROM chat_spaces s
-         JOIN chat_space_members m ON m.space_id = s.id AND m.user_id = $1
-         WHERE s.status = 'active'
-           AND s.campus_id = $2
-           AND s.kind = 'group'
-           AND m.role <> 'banned'
-           AND ($3::TEXT IS NULL OR s.kind = $3)
-         ORDER BY s.updated_at DESC
-         LIMIT $4 OFFSET $5",
-    )
-    .bind(&user_id)
-    .bind(campus_id)
-    .bind(kind)
-    .bind(query.limit.unwrap_or(30).clamp(1, 100))
-    .bind(query.offset.unwrap_or(0).max(0))
-    .fetch_all(&state.infra.db)
-    .await
-    .map_err(db_error)?;
+    let space_svc = ChatSpaceService::new(state.infra.db.clone());
+    let rows = space_svc
+        .list_space_ids(
+            &user_id,
+            campus_id,
+            kind,
+            query.limit.unwrap_or(30).clamp(1, 100),
+            query.offset.unwrap_or(0).max(0),
+        )
+        .await?;
     let mut items = Vec::with_capacity(rows.len());
-    for row in rows {
-        items.push(load_space_view(&state, row.get("id"), &user_id).await?);
+    for id in rows {
+        items.push(space_svc.load_space_view(id, &user_id).await?);
     }
     Ok(Json(SpaceListResponse { items }))
 }
@@ -211,7 +143,8 @@ pub async fn get_space(
 ) -> Result<Json<SpaceView>, ApiError> {
     let (user_id, campus_id) = verified_space_user(&state, &headers, space_id).await?;
     ensure_space_chat_access(&state, campus_id, space_id, &user_id).await?;
-    Ok(Json(load_space_view(&state, space_id, &user_id).await?))
+    let space_svc = ChatSpaceService::new(state.infra.db.clone());
+    Ok(Json(space_svc.load_space_view(space_id, &user_id).await?))
 }
 
 pub async fn add_space_member(
@@ -227,18 +160,10 @@ pub async fn add_space_member(
         .require_verified_in_campus(&body.user_id, campus_id)
         .await?;
     let role = normalize_member_role(body.role.as_deref().unwrap_or("member"))?;
-    sqlx::query(
-        "INSERT INTO chat_space_members (space_id, user_id, role)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (space_id, user_id)
-         DO UPDATE SET role = EXCLUDED.role, joined_at = NOW()",
-    )
-    .bind(space_id)
-    .bind(&body.user_id)
-    .bind(role)
-    .execute(&state.infra.db)
-    .await
-    .map_err(db_error)?;
+    let space_svc = ChatSpaceService::new(state.infra.db.clone());
+    space_svc
+        .add_space_member(space_id, &body.user_id, role)
+        .await?;
     broadcast_space_event(&state, space_id, "space_member_changed").await?;
     Ok(Json(serde_json::json!({ "added": true })))
 }
@@ -253,12 +178,10 @@ pub async fn remove_space_member(
     if user_id != target_user_id && !matches!(my_role.as_str(), "owner" | "admin") {
         return Err(ApiError::Forbidden);
     }
-    sqlx::query("DELETE FROM chat_space_members WHERE space_id = $1 AND user_id = $2")
-        .bind(space_id)
-        .bind(&target_user_id)
-        .execute(&state.infra.db)
-        .await
-        .map_err(db_error)?;
+    let space_svc = ChatSpaceService::new(state.infra.db.clone());
+    space_svc
+        .remove_space_member(space_id, &target_user_id)
+        .await?;
     broadcast_space_event(&state, space_id, "space_member_changed").await?;
     Ok(Json(serde_json::json!({ "removed": true })))
 }
@@ -278,56 +201,24 @@ pub async fn send_space_message(
             "消息长度必须为 1 到 4000 字".to_string(),
         ));
     }
+    let space_svc = ChatSpaceService::new(state.infra.db.clone());
     if let Some(reply_to) = body.reply_to_message_id {
-        let is_root_topic: bool = sqlx::query_scalar(
-            "SELECT EXISTS(
-                 SELECT 1
-                 FROM chat_space_messages
-                 WHERE id = $1
-                   AND space_id = $2
-                   AND reply_to_message_id IS NULL
-             )",
-        )
-        .bind(reply_to)
-        .bind(space_id)
-        .fetch_one(&state.infra.db)
-        .await
-        .map_err(db_error)?;
+        let is_root_topic = space_svc.is_root_topic(reply_to, space_id).await?;
         if !is_root_topic {
             return Err(ApiError::BadRequest(
                 "回复必须归属当前群聊的根话题".to_string(),
             ));
         }
     }
-    let row = sqlx::query(
-        "WITH saved AS (
-             INSERT INTO chat_space_messages (
-                 space_id, client_message_id, sender_id, content, reply_to_message_id
-             )
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (space_id, sender_id, client_message_id)
-             DO UPDATE SET content = chat_space_messages.content
-             RETURNING id, space_id, sender_id, content, reply_to_message_id, created_at
-         )
-         SELECT saved.id, saved.space_id, saved.sender_id, u.username AS sender_username,
-                saved.content, saved.reply_to_message_id, saved.created_at
-         FROM saved
-         LEFT JOIN users u ON u.id = saved.sender_id",
-    )
-    .bind(space_id)
-    .bind(body.client_message_id)
-    .bind(&user_id)
-    .bind(content)
-    .bind(body.reply_to_message_id)
-    .fetch_one(&state.infra.db)
-    .await
-    .map_err(db_error)?;
-    sqlx::query("UPDATE chat_spaces SET updated_at = NOW() WHERE id = $1")
-        .bind(space_id)
-        .execute(&state.infra.db)
-        .await
-        .map_err(db_error)?;
-    let view = row_to_space_message(row);
+    let view = space_svc
+        .send_space_message(
+            space_id,
+            body.client_message_id,
+            &user_id,
+            content,
+            body.reply_to_message_id,
+        )
+        .await?;
     broadcast_space_event(&state, space_id, "space_message_created").await?;
     Ok(Json(view))
 }
@@ -340,24 +231,15 @@ pub async fn list_space_messages(
 ) -> Result<Json<SpaceMessageListResponse>, ApiError> {
     let (user_id, campus_id) = verified_space_user(&state, &headers, space_id).await?;
     ensure_space_chat_access(&state, campus_id, space_id, &user_id).await?;
-    let rows = sqlx::query(
-        "SELECT m.id, m.space_id, m.sender_id, u.username AS sender_username,
-                m.content, m.reply_to_message_id, m.created_at
-         FROM chat_space_messages m
-         LEFT JOIN users u ON u.id = m.sender_id
-         WHERE m.space_id = $1
-         ORDER BY m.created_at DESC, m.id DESC
-         LIMIT $2 OFFSET $3",
-    )
-    .bind(space_id)
-    .bind(query.limit.unwrap_or(50).clamp(1, 100))
-    .bind(query.offset.unwrap_or(0).max(0))
-    .fetch_all(&state.infra.db)
-    .await
-    .map_err(db_error)?;
-    Ok(Json(SpaceMessageListResponse {
-        items: rows.into_iter().map(row_to_space_message).collect(),
-    }))
+    let space_svc = ChatSpaceService::new(state.infra.db.clone());
+    let items = space_svc
+        .list_space_messages(
+            space_id,
+            query.limit.unwrap_or(50).clamp(1, 100),
+            query.offset.unwrap_or(0).max(0),
+        )
+        .await?;
+    Ok(Json(SpaceMessageListResponse { items }))
 }
 
 pub async fn create_call(
@@ -374,20 +256,16 @@ pub async fn create_call(
     } else {
         conversation.0
     };
-    let row = sqlx::query(
-        "INSERT INTO chat_calls (conversation_id, caller_id, callee_id, media, offer_sdp)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, conversation_id, caller_id, callee_id, media, state, offer_sdp, answer_sdp, created_at",
-    )
-    .bind(body.conversation_id)
-    .bind(&user_id)
-    .bind(&callee_id)
-    .bind(media)
-    .bind(&body.offer_sdp)
-    .fetch_one(&state.infra.db)
-    .await
-    .map_err(db_error)?;
-    let view = row_to_call(row);
+    let space_svc = ChatSpaceService::new(state.infra.db.clone());
+    let view = space_svc
+        .create_call(
+            body.conversation_id,
+            &user_id,
+            &callee_id,
+            media,
+            &body.offer_sdp,
+        )
+        .await?;
     state.infra.ws_hub.broadcast_to_user(
         &callee_id,
         &serde_json::json!({
@@ -408,20 +286,10 @@ pub async fn answer_call(
     Json(body): Json<AnswerCallBody>,
 ) -> Result<Json<CallView>, ApiError> {
     let user_id = authenticated_user(&state, &headers)?;
-    let row = sqlx::query(
-        "UPDATE chat_calls
-         SET state = 'accepted', answer_sdp = $1, answered_at = NOW()
-         WHERE id = $2 AND callee_id = $3 AND state = 'ringing'
-         RETURNING id, conversation_id, caller_id, callee_id, media, state, offer_sdp, answer_sdp, created_at",
-    )
-    .bind(&body.answer_sdp)
-    .bind(call_id)
-    .bind(&user_id)
-    .fetch_optional(&state.infra.db)
-    .await
-    .map_err(db_error)?
-    .ok_or(ApiError::NotFound)?;
-    let view = row_to_call(row);
+    let space_svc = ChatSpaceService::new(state.infra.db.clone());
+    let view = space_svc
+        .answer_call(call_id, &user_id, &body.answer_sdp)
+        .await?;
     state.infra.ws_hub.broadcast_to_user(
         &view.caller_id,
         &serde_json::json!({
@@ -441,20 +309,10 @@ pub async fn end_call(
     Json(body): Json<EndCallBody>,
 ) -> Result<Json<CallView>, ApiError> {
     let user_id = authenticated_user(&state, &headers)?;
-    let row = sqlx::query(
-        "UPDATE chat_calls
-         SET state = 'ended', ended_reason = $1, ended_at = NOW()
-         WHERE id = $2 AND (caller_id = $3 OR callee_id = $3) AND state <> 'ended'
-         RETURNING id, conversation_id, caller_id, callee_id, media, state, offer_sdp, answer_sdp, created_at",
-    )
-    .bind(body.reason.as_deref().unwrap_or("ended"))
-    .bind(call_id)
-    .bind(&user_id)
-    .fetch_optional(&state.infra.db)
-    .await
-    .map_err(db_error)?
-    .ok_or(ApiError::NotFound)?;
-    let view = row_to_call(row);
+    let space_svc = ChatSpaceService::new(state.infra.db.clone());
+    let view = space_svc
+        .end_call(call_id, &user_id, body.reason.as_deref().unwrap_or("ended"))
+        .await?;
     let other = if user_id == view.caller_id {
         &view.callee_id
     } else {
@@ -499,69 +357,16 @@ fn normalize_call_media(media: &str) -> Result<&str, ApiError> {
     }
 }
 
-async fn load_space_view(
-    state: &AppState,
-    space_id: Uuid,
-    user_id: &str,
-) -> Result<SpaceView, ApiError> {
-    let row = sqlx::query(
-        "SELECT s.id, s.kind, s.name, s.description, s.owner_id,
-                m.role AS my_role,
-                (SELECT COUNT(*)::BIGINT FROM chat_space_members sm WHERE sm.space_id = s.id AND sm.role <> 'banned') AS member_count,
-                (SELECT COUNT(*)::BIGINT FROM chat_space_presence presence
-                  WHERE presence.space_id = s.id
-                    AND presence.expires_at > NOW()
-                    AND NOT EXISTS (
-                        SELECT 1 FROM chat_space_members banned
-                         WHERE banned.space_id = presence.space_id
-                           AND banned.user_id = presence.user_id
-                           AND banned.role = 'banned'
-                    )) AS online_count,
-                s.created_at, s.updated_at
-         FROM chat_spaces s
-         LEFT JOIN chat_space_members m ON m.space_id = s.id AND m.user_id = $2
-         WHERE s.id = $1",
-    )
-    .bind(space_id)
-    .bind(user_id)
-    .fetch_optional(&state.infra.db)
-    .await
-    .map_err(db_error)?
-    .ok_or(ApiError::NotFound)?;
-    Ok(SpaceView {
-        id: row.get::<Uuid, _>("id").to_string(),
-        kind: row.get("kind"),
-        name: row.get("name"),
-        description: row.get("description"),
-        owner_id: row.get("owner_id"),
-        my_role: row
-            .get::<Option<String>, _>("my_role")
-            .unwrap_or_else(|| "visitor".to_string()),
-        member_count: row.get("member_count"),
-        online_count: row.get("online_count"),
-        created_at: row
-            .get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-            .to_rfc3339(),
-        updated_at: row
-            .get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
-            .to_rfc3339(),
-    })
-}
-
 async fn ensure_space_member(
     state: &AppState,
     space_id: Uuid,
     user_id: &str,
 ) -> Result<String, ApiError> {
-    let role = sqlx::query_scalar::<_, String>(
-        "SELECT role FROM chat_space_members WHERE space_id = $1 AND user_id = $2",
-    )
-    .bind(space_id)
-    .bind(user_id)
-    .fetch_optional(&state.infra.db)
-    .await
-    .map_err(db_error)?
-    .ok_or(ApiError::Forbidden)?;
+    let space_svc = ChatSpaceService::new(state.infra.db.clone());
+    let role = space_svc
+        .get_member_role(space_id, user_id)
+        .await?
+        .ok_or(ApiError::Forbidden)?;
     if role == "banned" {
         Err(ApiError::Forbidden)
     } else {
@@ -575,15 +380,12 @@ async fn ensure_space_chat_access(
     space_id: Uuid,
     user_id: &str,
 ) -> Result<String, ApiError> {
-    let existing_role = sqlx::query_scalar::<_, String>(
-        "SELECT role FROM chat_space_members WHERE space_id = $1 AND user_id = $2",
-    )
-    .bind(space_id)
-    .bind(user_id)
-    .fetch_optional(&state.infra.db)
-    .await
-    .map_err(db_error)?;
+    let space_svc = ChatSpaceService::new(state.infra.db.clone());
+    let existing_role = space_svc.get_member_role(space_id, user_id).await?;
     if let Some(role) = existing_role {
+        if role == "banned" {
+            return Err(ApiError::Forbidden);
+        }
         return Ok(role);
     }
     ensure_space_member(state, space_id, user_id).await
@@ -603,12 +405,8 @@ async fn ensure_space_admin(
 }
 
 async fn load_space_campus(state: &AppState, space_id: Uuid) -> Result<Uuid, ApiError> {
-    sqlx::query_scalar("SELECT campus_id FROM chat_spaces WHERE id = $1")
-        .bind(space_id)
-        .fetch_optional(&state.infra.db)
-        .await
-        .map_err(db_error)?
-        .ok_or(ApiError::NotFound)
+    let space_svc = ChatSpaceService::new(state.infra.db.clone());
+    space_svc.load_space_campus(space_id).await
 }
 
 async fn verified_space_user(
@@ -631,42 +429,18 @@ async fn broadcast_space_event(
     space_id: Uuid,
     event: &str,
 ) -> Result<(), ApiError> {
-    let rows = sqlx::query(
-        "SELECT user_id
-           FROM chat_space_members
-          WHERE space_id = $1 AND role <> 'banned'
-         UNION
-         SELECT user_id
-           FROM chat_space_presence presence
-          WHERE presence.space_id = $1
-            AND presence.expires_at > NOW()
-            AND NOT EXISTS (
-                SELECT 1 FROM chat_space_members banned
-                 WHERE banned.space_id = presence.space_id
-                   AND banned.user_id = presence.user_id
-                   AND banned.role = 'banned'
-            )
-            AND EXISTS (
-                SELECT 1
-                  FROM chat_spaces location
-                 WHERE location.id = presence.space_id
-                   AND location.origin IN ('campus_location', 'location_child')
-            )",
-    )
-    .bind(space_id)
-    .fetch_all(&state.infra.db)
-    .await
-    .map_err(db_error)?;
+    let space_svc = ChatSpaceService::new(state.infra.db.clone());
+    let rows = space_svc.list_broadcast_user_ids(space_id).await?;
     let payload = serde_json::json!({
         "event": event,
         "space_id": space_id,
     })
     .to_string();
-    for row in rows {
+    for user_id in rows {
         state
             .infra
             .ws_hub
-            .broadcast_to_user(row.get::<String, _>("user_id").as_str(), &payload);
+            .broadcast_to_user(user_id.as_str(), &payload);
     }
 
     Ok(())
@@ -677,59 +451,15 @@ async fn load_active_realtime_conversation(
     conversation_id: Uuid,
     user_id: &str,
 ) -> Result<(String, String), ApiError> {
-    let row = sqlx::query(
-        "SELECT initiator_id, recipient_id
-         FROM chat_conversations
-         WHERE id = $1 AND mode = 'realtime' AND state = 'active'",
-    )
-    .bind(conversation_id)
-    .fetch_optional(&state.infra.db)
-    .await
-    .map_err(db_error)?
-    .ok_or(ApiError::Conflict(
-        "call_requires_active_realtime".to_string(),
-    ))?;
-    let initiator_id: String = row.get("initiator_id");
-    let recipient_id: String = row.get("recipient_id");
+    let space_svc = ChatSpaceService::new(state.infra.db.clone());
+    let (initiator_id, recipient_id) = space_svc
+        .load_active_realtime_conversation(conversation_id)
+        .await?;
     if user_id == initiator_id || user_id == recipient_id {
         Ok((initiator_id, recipient_id))
     } else {
         Err(ApiError::Forbidden)
     }
-}
-
-fn row_to_space_message(row: sqlx::postgres::PgRow) -> SpaceMessageView {
-    SpaceMessageView {
-        id: row.get("id"),
-        space_id: row.get::<Uuid, _>("space_id").to_string(),
-        sender_id: row.get("sender_id"),
-        sender_username: row.try_get("sender_username").ok(),
-        content: row.get("content"),
-        reply_to_message_id: row.get("reply_to_message_id"),
-        created_at: row
-            .get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-            .to_rfc3339(),
-    }
-}
-
-fn row_to_call(row: sqlx::postgres::PgRow) -> CallView {
-    CallView {
-        id: row.get::<Uuid, _>("id").to_string(),
-        conversation_id: row.get::<Uuid, _>("conversation_id").to_string(),
-        caller_id: row.get("caller_id"),
-        callee_id: row.get("callee_id"),
-        media: row.get("media"),
-        state: row.get("state"),
-        offer_sdp: row.get("offer_sdp"),
-        answer_sdp: row.get("answer_sdp"),
-        created_at: row
-            .get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-            .to_rfc3339(),
-    }
-}
-
-fn db_error(error: sqlx::Error) -> ApiError {
-    ApiError::Internal(anyhow::anyhow!(error))
 }
 
 #[cfg(test)]

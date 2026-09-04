@@ -4479,6 +4479,108 @@ fn commit_error(error: sqlx::Error) -> ApiError {
     ApiError::Internal(anyhow::anyhow!("chat conversation commit error: {error}"))
 }
 
+impl ChatConversationService {
+    pub async fn get_conversation_campus_id(
+        &self,
+        conversation_id: Uuid,
+    ) -> Result<Option<Uuid>, ApiError> {
+        sqlx::query_scalar("SELECT campus_id FROM chat_conversations WHERE id = $1")
+            .bind(conversation_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))
+    }
+
+    pub async fn get_message_campus_id(&self, message_id: i64) -> Result<Option<Uuid>, ApiError> {
+        sqlx::query_scalar(
+            "SELECT c.campus_id
+             FROM chat_messages m
+             JOIN chat_conversations c ON c.id = m.direct_conversation_id
+             WHERE m.id = $1",
+        )
+        .bind(message_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))
+    }
+
+    pub async fn get_conversation_participants(
+        &self,
+        conversation_id: Uuid,
+    ) -> Result<Option<(String, String)>, ApiError> {
+        sqlx::query_as(
+            "SELECT initiator_id, recipient_id
+             FROM chat_conversations
+             WHERE id = $1",
+        )
+        .bind(conversation_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))
+    }
+
+    pub async fn ensure_shared_object_moderation_job(
+        &self,
+        object_id: Uuid,
+        resource_id: &str,
+        campus_id: Uuid,
+        media_url: &str,
+        storage_key: &str,
+        moderation_service: &crate::services::moderation::ModerationService,
+    ) -> Result<(), ApiError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
+        let status: Option<String> =
+            sqlx::query_scalar("SELECT status FROM chat_shared_objects WHERE id = $1 FOR UPDATE")
+                .bind(object_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
+        if status.as_deref() != Some("pending_review") {
+            tx.commit()
+                .await
+                .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB commit error: {error}")))?;
+            return Ok(());
+        }
+        let pending: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                 SELECT 1 FROM moderation_jobs
+                 WHERE resource_type = 'chat_shared_object'
+                   AND resource_id = $1
+                   AND status IN ('pending', 'processing')
+             )",
+        )
+        .bind(resource_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
+        if pending {
+            tx.commit()
+                .await
+                .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB commit error: {error}")))?;
+            return Ok(());
+        }
+        moderation_service
+            .submit_image_job_in_tx_with_storage_key(
+                &mut tx,
+                campus_id,
+                resource_id,
+                media_url,
+                Some(storage_key),
+                "chat_shared_object",
+            )
+            .await
+            .map_err(|error| ApiError::Internal(anyhow::anyhow!("enqueue moderation: {error}")))?;
+        tx.commit()
+            .await
+            .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB commit error: {error}")))?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

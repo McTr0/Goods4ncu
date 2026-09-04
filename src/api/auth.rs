@@ -80,7 +80,7 @@ fn generate_refresh_token() -> String {
 }
 
 /// Hash a refresh token with SHA-256 for storage (hex-encoded)
-fn hash_token(token: &str) -> String {
+pub fn hash_token(token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(token.as_bytes());
     let result = hasher.finalize();
@@ -168,7 +168,7 @@ async fn store_refresh_token(
 
 /// Validate a refresh token: returns user_id if valid, None if invalid/revoked/expired
 /// On success, atomically revokes the presented token and issues a new one.
-async fn rotate_refresh_token(
+pub async fn rotate_refresh_token(
     auth_repo: &PostgresAuthRepository,
     user_repo: &PostgresUserRepository,
     token: &str,
@@ -331,54 +331,9 @@ fn validate_registration_email(email: &str) -> Result<&str, ApiError> {
 /// The domain must belong to an active campus; the resulting membership is
 /// routed to that campus at creation time.
 async fn ensure_campus_email_domain(db: &sqlx::PgPool, domain: &str) -> Result<(), ApiError> {
-    let allowed: bool = sqlx::query_scalar(
-        "SELECT EXISTS (
-            SELECT 1 FROM campuses c
-            WHERE c.status = 'active'
-              AND EXISTS (
-                  SELECT 1 FROM unnest(c.email_domains) AS d
-                  WHERE lower(d) = lower($1)
-              )
-         )",
-    )
-    .bind(domain)
-    .fetch_one(db)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-    if !allowed {
-        // Say which domain, not just that this one is wrong. This is the first
-        // wall a real student hits, and "use a school email" without naming it
-        // asks them to guess.
-        let domains: Vec<String> = sqlx::query_scalar(
-            // The primary campus only, and the LIMIT has to sit inside the
-            // subquery: `unnest` expands after the outer limit, so limiting the
-            // rows out here still listed every campus. Enumerating which
-            // schools are onboard to anyone who mistypes an address is a leak,
-            // and telling an NCU student about someone else's domain is noise.
-            "SELECT unnest(email_domains) FROM (
-                 SELECT email_domains FROM campuses
-                 WHERE status = 'active'
-                 ORDER BY (slug = 'ncu') DESC, created_at ASC
-                 LIMIT 1
-             ) primary_campus",
-        )
-        .fetch_all(db)
+    CampusService::new(db.clone())
+        .ensure_campus_email_domain(domain)
         .await
-        .unwrap_or_default();
-        return Err(ApiError::BadRequest(if domains.is_empty() {
-            "请使用学校邮箱注册".to_string()
-        } else {
-            format!(
-                "请使用学校邮箱注册（{}）",
-                domains
-                    .iter()
-                    .map(|domain| format!("@{domain}"))
-                    .collect::<Vec<_>>()
-                    .join(" 或 ")
-            )
-        }));
-    }
-    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -887,17 +842,10 @@ pub(crate) async fn revoke_access_token_jti(
     jti: &str,
     expires_at: chrono::DateTime<chrono::Utc>,
 ) -> Result<(), ApiError> {
-    sqlx::query(
-        r#"INSERT INTO revoked_access_tokens (jti, expires_at)
-           VALUES ($1, $2)
-           ON CONFLICT (jti)
-           DO UPDATE SET expires_at = GREATEST(revoked_access_tokens.expires_at, EXCLUDED.expires_at)"#,
-    )
-    .bind(jti)
-    .bind(expires_at)
-    .execute(&state.infra.db)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+    state
+        .auth_repo
+        .revoke_access_token_jti(jti, expires_at)
+        .await?;
 
     state
         .infra
@@ -920,14 +868,7 @@ pub async fn ensure_token_not_revoked(state: &AppState, token: &str) -> Result<(
         return Ok(());
     }
 
-    let persisted_exp = sqlx::query_scalar::<_, i64>(
-        "SELECT EXTRACT(EPOCH FROM expires_at)::bigint
-         FROM revoked_access_tokens
-         WHERE jti = $1 AND expires_at > NOW()",
-    )
-    .bind(&jti)
-    .fetch_optional(&state.infra.db)
-    .await;
+    let persisted_exp = state.auth_repo.get_revoked_token_expiry(&jti).await;
 
     match persisted_exp {
         Ok(Some(exp)) if exp > 0 => {
@@ -950,16 +891,19 @@ pub async fn ensure_user_not_banned(state: &AppState, user_id: &str) -> Result<(
         return Ok(());
     }
 
-    let status = sqlx::query_scalar::<_, String>("SELECT status FROM users WHERE id = $1")
-        .bind(user_id)
-        .fetch_optional(&state.infra.db)
+    let user = state
+        .user_repo
+        .find_by_id(user_id)
         .await
         .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
         .ok_or(ApiError::Unauthorized)?;
 
-    state.infra.token_denylist.set_user_status(user_id, &status);
+    state
+        .infra
+        .token_denylist
+        .set_user_status(user_id, &user.status);
 
-    if status.eq_ignore_ascii_case("banned") {
+    if user.status.eq_ignore_ascii_case("banned") {
         return Err(ApiError::AuthFailed("账号已被封禁".to_string()));
     }
 
@@ -1047,12 +991,14 @@ pub(crate) mod tests {
     use super::*;
     use crate::agents::router::IntentRouter;
     use crate::api::{ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
-    use crate::repositories::{AuthRepository, PostgresAuthRepository, PostgresUserRepository};
+    use crate::repositories::{
+        PostgresAuthRepository, PostgresListingRepository, PostgresOrderRepository,
+        PostgresUserRepository,
+    };
     use crate::services::{self, notification::NotificationService};
-    use crate::test_infra::with_test_pool;
-    use axum::{extract::State, Json};
-    use sqlx::Row;
+    use axum::http::HeaderMap;
     use std::sync::Arc;
+    use uuid::Uuid;
 
     pub(crate) fn build_test_state(pool: sqlx::PgPool) -> AppState {
         let admin_service = services::admin::AdminService::new(pool.clone());
@@ -1107,10 +1053,10 @@ pub(crate) mod tests {
                 ),
                 agent_enabled: true,
             },
-            listing_repo: crate::repositories::PostgresListingRepository::new(pool.clone()),
+            listing_repo: PostgresListingRepository::new(pool.clone()),
             user_repo: PostgresUserRepository::new(pool.clone()),
             auth_repo: PostgresAuthRepository::new(pool.clone()),
-            order_repo: crate::repositories::PostgresOrderRepository::new(pool),
+            order_repo: PostgresOrderRepository::new(pool),
         }
     }
 
@@ -1375,359 +1321,6 @@ pub(crate) mod tests {
         malformed_headers.insert("Authorization", "Basic 12345".parse().unwrap());
         let err = extract_claims_from_token(&malformed_headers, secret);
         assert!(matches!(err, Err(ApiError::Unauthorized)));
-    }
-
-    #[tokio::test]
-    async fn test_revoke_refresh_token_is_single_use() {
-        with_test_pool(|pool| async move {
-            sqlx::query(
-                "INSERT INTO users (id, username, password_hash, role) VALUES ($1, $2, 'hash', 'user')",
-            )
-            .bind("auth-user-single-use")
-            .bind("auth_single_use")
-            .execute(&pool)
-            .await
-            .expect("insert user");
-
-            let auth_repo = PostgresAuthRepository::new(pool.clone());
-            let token_hash = hash_token("single-use-refresh-token");
-            let expires_at = chrono::Utc::now() + chrono::Duration::hours(1);
-
-            sqlx::query(
-                "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
-            )
-            .bind("auth-user-single-use")
-            .bind(&token_hash)
-            .bind(expires_at)
-            .execute(&pool)
-            .await
-            .expect("insert refresh token");
-
-            auth_repo
-                .revoke_refresh_token(&token_hash)
-                .await
-                .expect("first revoke should succeed");
-
-            let second = auth_repo.revoke_refresh_token(&token_hash).await;
-            assert!(matches!(second, Err(ApiError::Unauthorized)));
-        })
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_rotate_refresh_replay_revokes_all_user_sessions() {
-        with_test_pool(|pool| async move {
-            let user_id = "auth-user-replay";
-            sqlx::query(
-                "INSERT INTO users (id, username, password_hash, role) VALUES ($1, $2, 'hash', 'user')",
-            )
-            .bind(user_id)
-            .bind("auth_replay")
-            .execute(&pool)
-            .await
-            .expect("insert user");
-
-            let revoked_hash = hash_token("revoked-refresh-token");
-            let active_hash = hash_token("active-refresh-token");
-            let expires_at = chrono::Utc::now() + chrono::Duration::hours(1);
-
-            sqlx::query(
-                "INSERT INTO refresh_tokens (user_id, token_hash, expires_at, revoked_at) VALUES ($1, $2, $3, NOW())",
-            )
-            .bind(user_id)
-            .bind(&revoked_hash)
-            .bind(expires_at)
-            .execute(&pool)
-            .await
-            .expect("insert revoked token");
-
-            sqlx::query(
-                "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
-            )
-            .bind(user_id)
-            .bind(&active_hash)
-            .bind(expires_at)
-            .execute(&pool)
-            .await
-            .expect("insert active token");
-
-            let auth_repo = PostgresAuthRepository::new(pool.clone());
-            let user_repo = PostgresUserRepository::new(pool.clone());
-            let campus_service = CampusService::new(pool.clone());
-
-            let result = rotate_refresh_token(
-                &auth_repo,
-                &user_repo,
-                "revoked-refresh-token",
-                "test_jwt_secret_at_least_32_characters_long",
-                &campus_service,
-                None,
-                None,
-            )
-            .await;
-            assert!(result.is_err());
-
-            let active_count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM refresh_tokens WHERE user_id = $1 AND revoked_at IS NULL",
-            )
-            .bind(user_id)
-            .fetch_one(&pool)
-            .await
-            .expect("count active tokens");
-
-            assert_eq!(active_count, 0);
-        })
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_create_user_persists_standard_record() {
-        with_test_pool(|pool| async move {
-            let auth_repo = PostgresAuthRepository::new(pool.clone());
-
-            let user_id = auth_repo
-                .create_user("shadow_user", Some("shadow@example.com"), "hash")
-                .await
-                .expect("create user");
-            assert!(Uuid::parse_str(&user_id).is_ok());
-
-            let row = sqlx::query("SELECT id, username, email FROM users WHERE id = $1")
-                .bind(&user_id)
-                .fetch_one(&pool)
-                .await
-                .expect("select user");
-
-            assert_eq!(row.get::<String, _>("id"), user_id);
-            assert_eq!(row.get::<String, _>("username"), "shadow_user");
-            assert_eq!(
-                row.get::<Option<String>, _>("email").as_deref(),
-                Some("shadow@example.com")
-            );
-        })
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_change_password_updates_hash_via_repository_path() {
-        with_test_pool(|pool| async move {
-            let old_hash = hash_password("current-pass-123".to_string())
-                .await
-                .expect("hash password");
-
-            let user_repo = PostgresUserRepository::new(pool.clone());
-            let user_id = user_repo
-                .create("change_password_user", None, &old_hash, "user")
-                .await
-                .expect("create user");
-
-            let state = build_test_state(pool.clone());
-            let (token, _jti, _exp) =
-                generate_access_token(&user_id, "user", &state.secrets.jwt_secret, 3600)
-                    .expect("generate token");
-
-            let mut headers = HeaderMap::new();
-            headers.insert(
-                "Authorization",
-                format!("Bearer {}", token).parse().unwrap(),
-            );
-
-            let _ = change_password(
-                State(state),
-                headers,
-                Json(ChangePasswordRequest {
-                    current_password: "current-pass-123".to_string(),
-                    new_password: "brand-new-pass-456".to_string(),
-                }),
-            )
-            .await
-            .expect("change password");
-
-            let updated_hash: String =
-                sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1")
-                    .bind(&user_id)
-                    .fetch_one(&pool)
-                    .await
-                    .expect("select updated hash");
-
-            assert!(
-                verify_password("brand-new-pass-456".to_string(), updated_hash)
-                    .await
-                    .expect("new password verifies")
-            );
-        })
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_reauthenticate_rejects_wrong_password_and_issues_recent_token() {
-        with_test_pool(|pool| async move {
-            let password = "reauth-pass-123";
-            let password_hash = hash_password(password.to_string())
-                .await
-                .expect("hash password");
-            let user_repo = PostgresUserRepository::new(pool.clone());
-            let user_id = user_repo
-                .create(
-                    &format!("reauth_{}", Uuid::new_v4()),
-                    None,
-                    &password_hash,
-                    "admin",
-                )
-                .await
-                .expect("create admin");
-            let state = build_test_state(pool);
-            let (stale_token, _, _) = generate_access_token_for_campus_with_auth_time(
-                &user_id,
-                "admin",
-                None,
-                None,
-                &state.secrets.jwt_secret,
-                3600,
-            )
-            .expect("stale token");
-            let mut headers = HeaderMap::new();
-            headers.insert(
-                "Authorization",
-                format!("Bearer {stale_token}").parse().expect("header"),
-            );
-
-            let error = reauthenticate(
-                State(state.clone()),
-                headers.clone(),
-                Json(ReauthenticateRequest {
-                    password: "wrong-password".to_string(),
-                    totp_code: None,
-                }),
-            )
-            .await
-            .err()
-            .expect("wrong password must fail");
-            assert!(matches!(error, ApiError::RecentAuthenticationFailed));
-
-            let response = reauthenticate(
-                State(state.clone()),
-                headers,
-                Json(ReauthenticateRequest {
-                    password: password.to_string(),
-                    totp_code: None,
-                }),
-            )
-            .await
-            .expect("reauthenticate")
-            .0;
-            let context =
-                extract_auth_session_from_token_str(&response.token, &state.secrets.jwt_secret)
-                    .expect("decode recent token");
-            assert_eq!(context.user_id, user_id);
-            assert!(context.has_recent_authentication());
-            assert!(response.recent_auth_expires_at > chrono::Utc::now());
-        })
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_switch_active_campus_rotates_session_and_revokes_access_token() {
-        with_test_pool(|pool| async move {
-            let suffix = Uuid::new_v4();
-            let user_repo = PostgresUserRepository::new(pool.clone());
-            let user_id = user_repo
-                .create(&format!("campus_switch_{suffix}"), None, "hash", "user")
-                .await
-                .expect("create user");
-            let ncu_id = Uuid::parse_str("c0000000-0000-0000-0000-000000000001").expect("ncu id");
-            let second_campus_id = Uuid::new_v4();
-            sqlx::query(
-                "INSERT INTO campuses (id, slug, name_zh, name_en, email_domains)
-                 VALUES ($1, $2, '第二校园', 'Second Campus', ARRAY['second.example.edu'])",
-            )
-            .bind(second_campus_id)
-            .bind(format!("second-{suffix}"))
-            .execute(&pool)
-            .await
-            .expect("insert second campus");
-            sqlx::query(
-                "UPDATE campus_memberships
-                 SET status = 'verified', verification_method = 'test', verified_at = NOW()
-                 WHERE campus_id = $1 AND user_id = $2",
-            )
-            .bind(ncu_id)
-            .bind(&user_id)
-            .execute(&pool)
-            .await
-            .expect("verify ncu membership");
-            sqlx::query(
-                "INSERT INTO campus_memberships (
-                    campus_id, user_id, status, role, verification_method, verified_at
-                 ) VALUES ($1, $2, 'verified', 'member', 'test', NOW())",
-            )
-            .bind(second_campus_id)
-            .bind(&user_id)
-            .execute(&pool)
-            .await
-            .expect("insert second verified membership");
-
-            let state = build_test_state(pool.clone());
-            let current_refresh = format!("refresh-{suffix}");
-            state
-                .auth_repo
-                .store_refresh_token(
-                    &user_id,
-                    &hash_token(&current_refresh),
-                    chrono::Utc::now() + chrono::Duration::hours(1),
-                    Some(ncu_id),
-                )
-                .await
-                .expect("store current refresh token");
-            let (current_access, current_jti, _) = generate_access_token_for_campus(
-                &user_id,
-                "user",
-                Some(ncu_id),
-                &state.secrets.jwt_secret,
-                3600,
-            )
-            .expect("current access token");
-            let mut headers = HeaderMap::new();
-            headers.insert(
-                "Authorization",
-                format!("Bearer {current_access}").parse().expect("header"),
-            );
-
-            let response = switch_active_campus(
-                State(state.clone()),
-                headers,
-                Json(SwitchCampusRequest {
-                    campus_id: second_campus_id,
-                    refresh_token: current_refresh,
-                }),
-            )
-            .await
-            .expect("switch active campus")
-            .0;
-            assert_eq!(response.active_campus_id, second_campus_id);
-            let new_context =
-                extract_auth_session_from_token_str(&response.token, &state.secrets.jwt_secret)
-                    .expect("decode switched access token");
-            assert_eq!(new_context.campus_id, Some(second_campus_id));
-            assert!(!new_context.has_recent_authentication());
-
-            let new_record = state
-                .auth_repo
-                .find_refresh_token(&hash_token(&response.refresh_token))
-                .await
-                .expect("load switched refresh token")
-                .expect("switched refresh token exists");
-            assert_eq!(new_record.user_id, user_id);
-            assert_eq!(new_record.campus_id, Some(second_campus_id));
-            let revoked: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM revoked_access_tokens WHERE jti = $1)",
-            )
-            .bind(current_jti)
-            .fetch_one(&pool)
-            .await
-            .expect("check access revocation");
-            assert!(revoked);
-        })
-        .await;
     }
 
     #[tokio::test]

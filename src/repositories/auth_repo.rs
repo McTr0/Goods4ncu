@@ -199,4 +199,38 @@ impl AuthRepository for PostgresAuthRepository {
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
         Ok(())
     }
+
+    async fn revoke_access_token_jti(
+        &self,
+        jti: &str,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), ApiError> {
+        sqlx::query(
+            r#"INSERT INTO revoked_access_tokens (jti, expires_at)
+               VALUES ($1, $2)
+               ON CONFLICT (jti)
+               DO UPDATE SET expires_at = GREATEST(revoked_access_tokens.expires_at, EXCLUDED.expires_at)"#,
+        )
+        .bind(jti)
+        .bind(expires_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+        Ok(())
+    }
+
+    async fn get_revoked_token_expiry(&self, jti: &str) -> Result<Option<i64>, ApiError> {
+        let persisted_exp = sqlx::query_scalar::<_, i64>(
+            "SELECT EXTRACT(EPOCH FROM expires_at)::bigint
+             FROM revoked_access_tokens
+             WHERE jti = $1 AND expires_at > NOW()",
+        )
+        .bind(jti)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+        Ok(persisted_exp)
+    }
 }

@@ -101,6 +101,193 @@ impl CampusService {
         .ok_or(ApiError::NotFound)
     }
 
+    pub async fn find_active_campus_by_domain(
+        &self,
+        domain: &str,
+    ) -> Result<Option<Uuid>, ApiError> {
+        let campus_id: Option<Uuid> = sqlx::query_scalar(
+            "SELECT c.id FROM campuses c
+             WHERE c.status = 'active'
+               AND EXISTS (
+                   SELECT 1 FROM unnest(c.email_domains) AS d
+                   WHERE lower(d) = lower($1)
+               )
+             ORDER BY (c.slug = 'ncu') DESC, c.created_at ASC
+             LIMIT 1",
+        )
+        .bind(domain)
+        .fetch_optional(&self.db)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        Ok(campus_id)
+    }
+
+    pub async fn get_primary_campus_domains(&self) -> Result<Vec<String>, ApiError> {
+        let domains: Vec<String> = sqlx::query_scalar(
+            "SELECT unnest(email_domains) FROM (
+                 SELECT email_domains FROM campuses
+                 WHERE status = 'active'
+                 ORDER BY (slug = 'ncu') DESC, created_at ASC
+                 LIMIT 1
+             ) primary_campus",
+        )
+        .fetch_all(&self.db)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        Ok(domains)
+    }
+
+    pub async fn add_pending_email_membership(
+        &self,
+        campus_id: Uuid,
+        user_id: &str,
+    ) -> Result<(), ApiError> {
+        sqlx::query(
+            "INSERT INTO campus_memberships (campus_id, user_id, status, role, verification_method)
+             VALUES ($1, $2, 'pending', 'member', 'email_change')
+             ON CONFLICT (campus_id, user_id) DO NOTHING",
+        )
+        .bind(campus_id)
+        .bind(user_id)
+        .execute(&self.db)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        Ok(())
+    }
+
+    pub async fn is_campus_email_domain_allowed(&self, domain: &str) -> Result<bool, ApiError> {
+        let allowed: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+                 SELECT 1 FROM campuses c
+                 WHERE c.status = 'active'
+                   AND EXISTS (
+                       SELECT 1 FROM unnest(c.email_domains) AS d
+                       WHERE lower(d) = lower($1)
+                   )
+             )",
+        )
+        .bind(domain)
+        .fetch_one(&self.db)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        Ok(allowed)
+    }
+
+    pub async fn ensure_campus_email_domain(&self, domain: &str) -> Result<(), ApiError> {
+        let allowed = self.is_campus_email_domain_allowed(domain).await?;
+        if !allowed {
+            let domains: Vec<String> = sqlx::query_scalar(
+                "SELECT unnest(email_domains) FROM (
+                     SELECT email_domains FROM campuses
+                     WHERE status = 'active'
+                     ORDER BY (slug = 'ncu') DESC, created_at ASC
+                     LIMIT 1
+                 ) primary_campus",
+            )
+            .fetch_all(&self.db)
+            .await
+            .unwrap_or_default();
+
+            return Err(ApiError::BadRequest(if domains.is_empty() {
+                "请使用学校邮箱注册".to_string()
+            } else {
+                format!(
+                    "请使用学校邮箱注册（{}）",
+                    domains
+                        .iter()
+                        .map(|d| format!("@{d}"))
+                        .collect::<Vec<_>>()
+                        .join(" 或 ")
+                )
+            }));
+        }
+        Ok(())
+    }
+
+    pub async fn active_campus_exists(&self, campus_id: Uuid) -> Result<bool, ApiError> {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM campuses WHERE id = $1 AND status = 'active')",
+        )
+        .bind(campus_id)
+        .fetch_one(&self.db)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        Ok(exists)
+    }
+
+    pub async fn get_verified_membership_role(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+    ) -> Result<Option<String>, ApiError> {
+        let role: Option<String> = sqlx::query_scalar(
+            "SELECT role FROM campus_memberships WHERE user_id = $1 AND campus_id = $2 AND status = 'verified'",
+        )
+        .bind(user_id)
+        .bind(campus_id)
+        .fetch_optional(&self.db)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        Ok(role)
+    }
+
+    pub async fn is_user_in_campus_scope(
+        &self,
+        user_id: &str,
+        campus_id: Uuid,
+    ) -> Result<bool, ApiError> {
+        let in_scope: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM campus_memberships WHERE user_id = $1 AND campus_id = $2 AND status <> 'revoked')",
+        )
+        .bind(user_id)
+        .bind(campus_id)
+        .fetch_one(&self.db)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        Ok(in_scope)
+    }
+
+    pub async fn create_campus(
+        &self,
+        slug: &str,
+        name_zh: &str,
+        name_en: &str,
+        email_domains: &[String],
+    ) -> Result<Uuid, ApiError> {
+        let id: Uuid = sqlx::query_scalar(
+            "INSERT INTO campuses (id, slug, name_zh, name_en, email_domains, status)
+             VALUES (gen_random_uuid(), $1, $2, $3, $4, 'inactive')
+             RETURNING id",
+        )
+        .bind(slug)
+        .bind(name_zh)
+        .bind(name_en)
+        .bind(email_domains)
+        .fetch_one(&self.db)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        Ok(id)
+    }
+
+    pub async fn set_campus_status(
+        &self,
+        campus_id: Uuid,
+        status: &str,
+    ) -> Result<String, ApiError> {
+        let updated_status: Option<String> = sqlx::query_scalar(
+            "UPDATE campuses SET status = $2, updated_at = NOW()
+             WHERE id = $1
+             RETURNING (SELECT status FROM campuses WHERE id = $1)",
+        )
+        .bind(campus_id)
+        .bind(status)
+        .fetch_optional(&self.db)
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+
+        updated_status.ok_or(ApiError::NotFound)
+    }
+
     pub async fn list_user_memberships(
         &self,
         user_id: &str,

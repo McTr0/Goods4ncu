@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::api::error::ApiError;
 use crate::api::session::Session;
 use crate::api::AppState;
+use crate::repositories::traits::UserRepository;
 use crate::services::admin_mfa::{AdminMfaService, TotpRejection};
 use crate::services::totp;
 
@@ -26,13 +27,12 @@ async fn require_recent_admin(
     state: &AppState,
     session: &crate::api::auth::AuthSessionContext,
 ) -> Result<(), ApiError> {
-    let row = sqlx::query_as::<_, (String, String)>("SELECT role, status FROM users WHERE id = $1")
-        .bind(&session.user_id)
-        .fetch_optional(&state.infra.db)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
+    let user = state
+        .user_repo
+        .find_by_id(&session.user_id)
+        .await?
         .ok_or(ApiError::Unauthorized)?;
-    if row.1 != "active" || session.role != "admin" || row.0 != "admin" {
+    if user.status != "active" || session.role != "admin" || user.role != "admin" {
         return Err(ApiError::Forbidden);
     }
     if !session.has_recent_authentication() {

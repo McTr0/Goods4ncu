@@ -182,18 +182,13 @@ async fn broadcast_shared_object(
     object: &crate::services::chat_conversation::ChatSharedObjectView,
     event: &str,
 ) -> Result<(), ApiError> {
-    let (initiator_id, recipient_id): (String, String) =
-        sqlx::query_as(
-            "SELECT initiator_id, recipient_id
-         FROM chat_conversations
-         WHERE id = $1",
-        )
-        .bind(Uuid::parse_str(&object.conversation_id).map_err(|error| {
-            ApiError::Internal(anyhow::anyhow!("invalid conversation id: {error}"))
-        })?)
-        .fetch_optional(&state.infra.db)
-        .await
-        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?
+    let service =
+        crate::services::chat_conversation::ChatConversationService::new(state.infra.db.clone());
+    let conv_id = Uuid::parse_str(&object.conversation_id)
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("invalid conversation id: {error}")))?;
+    let (initiator_id, recipient_id) = service
+        .get_conversation_participants(conv_id)
+        .await?
         .ok_or(ApiError::NotFound)?;
     let payload = serde_json::json!({
         "event": event,
@@ -222,65 +217,25 @@ async fn ensure_shared_object_moderation_job(
 ) -> Result<(), ApiError> {
     let object_id = Uuid::parse_str(&object.id)
         .map_err(|error| ApiError::Internal(anyhow::anyhow!("invalid object id: {error}")))?;
-    let mut tx = state
-        .infra
-        .db
-        .begin()
-        .await
-        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
-    let status: Option<String> =
-        sqlx::query_scalar("SELECT status FROM chat_shared_objects WHERE id = $1 FOR UPDATE")
-            .bind(object_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
-    if status.as_deref() != Some("pending_review") {
-        tx.commit()
-            .await
-            .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB commit error: {error}")))?;
-        return Ok(());
-    }
-    let pending: bool = sqlx::query_scalar(
-        "SELECT EXISTS(
-             SELECT 1 FROM moderation_jobs
-             WHERE resource_type = 'chat_shared_object'
-               AND resource_id = $1
-               AND status IN ('pending', 'processing')
-         )",
-    )
-    .bind(&object.id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {error}")))?;
-    if pending {
-        tx.commit()
-            .await
-            .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB commit error: {error}")))?;
-        return Ok(());
-    }
     let key = object.upload_key.as_deref().ok_or(ApiError::NotFound)?;
     let media_url = state
         .public_platform_media_url(key)
         .ok_or_else(|| ApiError::NotImplemented("平台文件服务未配置".to_string()))?;
-    state
-        .infra
-        .moderation
-        .submit_image_job_in_tx_with_storage_key(
-            &mut tx,
-            Uuid::parse_str(&object.campus_id).map_err(|error| {
-                ApiError::Internal(anyhow::anyhow!("invalid campus id: {error}"))
-            })?,
+    let campus_id = Uuid::parse_str(&object.campus_id)
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("invalid campus id: {error}")))?;
+
+    let service =
+        crate::services::chat_conversation::ChatConversationService::new(state.infra.db.clone());
+    service
+        .ensure_shared_object_moderation_job(
+            object_id,
             &object.id,
+            campus_id,
             &media_url,
-            Some(key),
-            "chat_shared_object",
+            key,
+            &state.infra.moderation,
         )
         .await
-        .map_err(|error| ApiError::Internal(anyhow::anyhow!("enqueue moderation: {error}")))?;
-    tx.commit()
-        .await
-        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB commit error: {error}")))?;
-    Ok(())
 }
 
 fn shared_object_response(

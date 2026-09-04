@@ -1192,13 +1192,7 @@ async fn check_ready(state: &AppState) -> Result<(), ApiError> {
         return Err(ApiError::ServiceUnavailable("draining"));
     }
 
-    sqlx::query("SELECT 1")
-        .fetch_one(&state.infra.db)
-        .await
-        .map_err(|e| {
-            tracing::error!(%e, "Readiness check failed: database unreachable");
-            ApiError::ServiceUnavailable("database_unreachable")
-        })?;
+    state.listing_repo.ping().await?;
 
     if state.infra.deployment_profile == crate::config::DeploymentProfile::Replicated {
         #[cfg(feature = "redis")]

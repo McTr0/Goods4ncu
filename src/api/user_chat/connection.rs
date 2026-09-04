@@ -600,12 +600,9 @@ pub(crate) async fn ensure_conversation_campus(
     let Some(campus_id) = ensure_active_campus(state, session).await? else {
         return Ok(());
     };
-    let conversation_campus: Option<Uuid> =
-        sqlx::query_scalar("SELECT campus_id FROM chat_conversations WHERE id = $1")
-            .bind(conversation_id)
-            .fetch_optional(&state.infra.db)
-            .await
-            .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+    let service =
+        crate::services::chat_conversation::ChatConversationService::new(state.infra.db.clone());
+    let conversation_campus = service.get_conversation_campus_id(conversation_id).await?;
     match conversation_campus {
         Some(value) if value == campus_id => Ok(()),
         Some(_) => Err(ApiError::CampusScopeMismatch),
@@ -621,16 +618,9 @@ pub(crate) async fn ensure_message_campus(
     let Some(campus_id) = ensure_active_campus(state, session).await? else {
         return Ok(None);
     };
-    let message_campus: Option<Uuid> = sqlx::query_scalar(
-        "SELECT c.campus_id
-         FROM chat_messages m
-         JOIN chat_conversations c ON c.id = m.direct_conversation_id
-         WHERE m.id = $1",
-    )
-    .bind(message_id)
-    .fetch_optional(&state.infra.db)
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+    let service =
+        crate::services::chat_conversation::ChatConversationService::new(state.infra.db.clone());
+    let message_campus = service.get_message_campus_id(message_id).await?;
     match message_campus {
         Some(value) if value == campus_id => Ok(Some(value)),
         Some(_) => Err(ApiError::CampusScopeMismatch),

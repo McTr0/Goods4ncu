@@ -5,7 +5,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::Row;
 
 use crate::api::error::ApiError;
 use crate::api::request_context::idempotency_key_from_headers;
@@ -213,35 +212,19 @@ pub async fn create_order(
     Session(session): Session,
     Json(payload): Json<CreateOrderRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let listing_row = sqlx::query(
-        "SELECT owner_id, suggested_price_cny, status, campus_id,
-                listing_has_active_restriction(id) AS restricted
-         FROM inventory WHERE id = $1",
-    )
-    .bind(&payload.listing_id)
-    .fetch_optional(&state.infra.db)
-    .await
-    .map_err(|e| {
-        tracing::error!("fetch listing error: {}", e);
-        ApiError::Internal(anyhow::anyhow!("Failed to fetch listing"))
-    })?;
+    let target = state
+        .listing_repo
+        .get_order_target(&payload.listing_id)
+        .await?
+        .ok_or(ApiError::NotFound)?;
 
-    let (seller_id, suggested_price, listing_status, campus_id, restricted): (
-        String,
-        i64,
-        String,
-        uuid::Uuid,
-        bool,
-    ) = match listing_row {
-        Some(row) => (
-            row.get("owner_id"),
-            row.get("suggested_price_cny"),
-            row.get("status"),
-            row.get("campus_id"),
-            row.get("restricted"),
-        ),
-        None => return Err(ApiError::NotFound),
-    };
+    let (seller_id, suggested_price, listing_status, campus_id, restricted) = (
+        target.owner_id,
+        target.suggested_price_cny,
+        target.status,
+        target.campus_id,
+        target.restricted,
+    );
 
     let tenant = CampusService::new(state.infra.db.clone())
         .require_shared_verified_campus_for_session(&session.user_id, &seller_id, session.campus_id)

@@ -34,23 +34,19 @@ pub async fn ensure(
     // Membership of the conversation is the authorisation. Checked before
     // creating anything, so this cannot be used to probe which conversations
     // exist.
-    let participates: bool = sqlx::query_scalar(
-        "SELECT EXISTS (
-             SELECT 1 FROM chat_conversations
-             WHERE id = $1 AND campus_id = $2 AND (initiator_id = $3 OR recipient_id = $3)
-         )",
-    )
-    .bind(payload.conversation_id)
-    .bind(tenant.campus_id)
-    .bind(&tenant.session.user_id)
-    .fetch_one(&state.infra.db)
-    .await
-    .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
+    let service = AgreementService::new(state.infra.db.clone());
+    let participates = service
+        .user_participates_in_conversation(
+            payload.conversation_id,
+            tenant.campus_id,
+            &tenant.session.user_id,
+        )
+        .await
+        .map_err(|error| ApiError::Internal(anyhow::anyhow!("DB error: {}", error)))?;
     if !participates {
         return Err(ApiError::NotFound);
     }
 
-    let service = AgreementService::new(state.infra.db.clone());
     let id = service
         .ensure_for_conversation(tenant.campus_id, payload.conversation_id, &payload.kind)
         .await
