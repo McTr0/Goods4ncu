@@ -193,10 +193,7 @@ pub struct PublishPostCommand {
 }
 
 impl PublishPostCommand {
-    pub fn from_input(input: CreatePost, category_str: &str) -> Result<Self, ApiError> {
-        let category = PostCategory::parse(category_str)
-            .ok_or_else(|| ApiError::BadRequest(format!("未知分类: {category_str}")))?;
-
+    pub fn from_input(input: CreatePost, category: PostCategory) -> Result<Self, ApiError> {
         let kind = match category {
             PostCategory::Offer => {
                 let mp = input.marketplace.ok_or_else(|| {
@@ -250,8 +247,8 @@ impl TryFrom<CreatePost> for PublishPostCommand {
     type Error = ApiError;
 
     fn try_from(input: CreatePost) -> Result<Self, Self::Error> {
-        let category = input.category.trim().to_string();
-        Self::from_input(input, &category)
+        let category = normalize_post_category(Some(&input.category))?;
+        Self::from_input(input, category)
     }
 }
 
@@ -481,8 +478,7 @@ impl<R: PostRepository> PostService<R> {
     }
 
     pub async fn create(&self, input: CreatePost) -> Result<Post, ApiError> {
-        let category = normalize_post_category(Some(input.category.clone()))?;
-        let cmd = PublishPostCommand::from_input(input, &category)?;
+        let cmd = PublishPostCommand::try_from(input)?;
         self.publish(cmd).await
     }
 
@@ -865,14 +861,13 @@ fn required_text(value: String, field: &str, max_chars: usize) -> Result<String,
     Ok(value)
 }
 
-fn normalize_post_category(value: Option<String>) -> Result<String, ApiError> {
-    let value = value.unwrap_or_else(|| "discussion".to_string());
+pub fn normalize_post_category(value: Option<&str>) -> Result<PostCategory, ApiError> {
+    let value = value.unwrap_or("discussion");
     let trimmed = value.trim();
-    let cat = PostCategory::parse(trimmed).ok_or_else(|| {
+    PostCategory::parse(trimmed).ok_or_else(|| {
         let allowed: Vec<&str> = PostCategory::ALL.iter().map(|k| k.as_str()).collect();
         ApiError::BadRequest(format!("category 可选值为 {}", allowed.join("、")))
-    })?;
-    Ok(cat.as_str().to_string())
+    })
 }
 
 async fn ensure_space_member(
@@ -967,7 +962,8 @@ mod tests {
                 marketplace: None,
                 idempotency_key: None,
             };
-            let cmd = PublishPostCommand::from_input(input.clone(), cat_str);
+            let category = PostCategory::parse(cat_str).unwrap();
+            let cmd = PublishPostCommand::from_input(input.clone(), category);
             assert!(cmd.is_ok(), "Failed for valid category {cat_str}");
             let cmd = cmd.unwrap();
             assert_eq!(cmd.kind.category_str(), cat_str);
@@ -983,7 +979,7 @@ mod tests {
                 defects: vec![],
                 description: None,
             });
-            let cmd_err = PublishPostCommand::from_input(input_with_mp, cat_str);
+            let cmd_err = PublishPostCommand::from_input(input_with_mp, category);
             assert!(cmd_err.is_err(), "Must reject marketplace for {cat_str}");
         }
     }
@@ -991,6 +987,7 @@ mod tests {
     #[test]
     fn marketplace_categories_require_marketplace_details() {
         for cat_str in ["offer", "wanted"] {
+            let category = PostCategory::parse(cat_str).unwrap();
             let input = CreatePost {
                 campus_id: Uuid::new_v4(),
                 author_id: "user-1".to_string(),
@@ -1003,7 +1000,7 @@ mod tests {
                 marketplace: None,
                 idempotency_key: None,
             };
-            assert!(PublishPostCommand::from_input(input, cat_str).is_err());
+            assert!(PublishPostCommand::from_input(input, category).is_err());
 
             let input_with_mp = CreatePost {
                 campus_id: Uuid::new_v4(),
@@ -1024,7 +1021,7 @@ mod tests {
                 }),
                 idempotency_key: None,
             };
-            let cmd = PublishPostCommand::from_input(input_with_mp, cat_str);
+            let cmd = PublishPostCommand::from_input(input_with_mp, category);
             assert!(cmd.is_ok());
             let cmd = cmd.unwrap();
             assert_eq!(cmd.kind.category_str(), cat_str);
