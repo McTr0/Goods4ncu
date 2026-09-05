@@ -166,12 +166,15 @@ impl WsHub {
                     metrics.record_ws_stale_pruned(pruned);
                 }
             }
-            if connections.value().is_empty() {
-                drop(connections);
-                self.connections.remove(user_id);
+            drop(connections);
+            if self
+                .connections
+                .remove_if(user_id, |_k, conns| conns.is_empty())
+                .is_some()
+            {
                 tracing::debug!(%user_id, %connection_id, "WS: last connection closed, user removed");
             } else {
-                tracing::debug!(%user_id, %connection_id, remaining = connections.value().len(), "WS: connection cleaned up");
+                tracing::debug!(%user_id, %connection_id, "WS: connection cleaned up");
             }
             pruned > 0
         } else {
@@ -256,10 +259,8 @@ fn deliver_local_scoped_internal(
                         metrics.record_ws_stale_pruned(pruned);
                     }
                 }
-                if connections.value().is_empty() {
-                    drop(connections);
-                    connections_map.remove(user_id);
-                }
+                drop(connections);
+                connections_map.remove_if(user_id, |_k, conns| conns.is_empty());
             }
         }
     }
@@ -506,6 +507,31 @@ mod tests {
         let remaining = hub.connections.get(&user_id).expect("user still exists");
         assert_eq!(remaining.value().len(), 1);
         assert_eq!(remaining.value()[0].connection_id, id_2);
+    }
+
+    #[test]
+    fn concurrent_reconnection_during_disconnect_cleanup_is_preserved() {
+        let hub = WsHub::new();
+        let user_id = format!("ws-reconn-{}", uuid::Uuid::new_v4().simple());
+        let old_id = uuid::Uuid::new_v4();
+        let new_id = uuid::Uuid::new_v4();
+
+        // 1. Initial connection established
+        let _rx_old = hub.register_test_connection_with_id(&user_id, old_id, None);
+
+        // 2. Simulate concurrent reconnect: add new connection
+        let _rx_new = hub.register_test_connection_with_id(&user_id, new_id, None);
+
+        // 3. Cleanup old connection
+        assert!(hub.remove_connection(&user_id, old_id));
+
+        // 4. Verify user entry still exists and new connection is retained
+        let conns = hub
+            .connections
+            .get(&user_id)
+            .expect("user entry must not be deleted");
+        assert_eq!(conns.value().len(), 1);
+        assert_eq!(conns.value()[0].connection_id, new_id);
     }
 
     #[cfg(feature = "redis")]
