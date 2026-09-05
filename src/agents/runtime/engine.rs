@@ -40,6 +40,37 @@ pub enum TurnEvent {
     },
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum EventSinkError {
+    #[error("event sink is closed")]
+    Closed,
+    #[error("event sink error: {0}")]
+    Other(String),
+}
+
+#[async_trait::async_trait]
+pub trait EventSink: Send {
+    async fn emit(&mut self, event: TurnEvent) -> Result<(), EventSinkError>;
+}
+
+#[async_trait::async_trait]
+impl EventSink for tokio::sync::mpsc::Sender<TurnEvent> {
+    async fn emit(&mut self, event: TurnEvent) -> Result<(), EventSinkError> {
+        self.send(event).await.map_err(|_| EventSinkError::Closed)
+    }
+}
+
+#[async_trait::async_trait]
+impl<F> EventSink for F
+where
+    F: FnMut(TurnEvent) + Send,
+{
+    async fn emit(&mut self, event: TurnEvent) -> Result<(), EventSinkError> {
+        (self)(event);
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
 pub struct RuntimeContext {
     pub cancellation: TurnCancellation,
@@ -68,7 +99,7 @@ impl AgentRuntime {
         turn_id: TurnId,
         conversation_id: &str,
         context: RuntimeContext,
-        on_event: &mut (dyn FnMut(TurnEvent) + Send),
+        on_event: &mut (dyn EventSink + Send),
     ) {
         let mut seq = 0_u64;
         let deadline = tokio::time::Instant::now() + self.budget.turn_deadline;
@@ -86,12 +117,19 @@ impl AgentRuntime {
         macro_rules! emit {
             ($data:expr) => {{
                 seq += 1;
-                on_event(TurnEvent::Emit(AgentEvent::new(
-                    turn_id,
-                    conversation_id,
-                    seq,
-                    $data,
-                )));
+                if on_event
+                    .emit(TurnEvent::Emit(AgentEvent::new(
+                        turn_id,
+                        conversation_id,
+                        seq,
+                        $data,
+                    )))
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!(%turn_id, "Agent event sink closed or aborted; ending turn");
+                    return;
+                }
             }};
         }
         macro_rules! terminate {
@@ -99,7 +137,7 @@ impl AgentRuntime {
                 seq += 1;
                 let event = AgentEvent::new(turn_id, conversation_id, seq, $data);
                 context.hooks.on_terminal(&hook_context, &event);
-                on_event(TurnEvent::Emit(event));
+                let _ = on_event.emit(TurnEvent::Emit(event)).await;
                 return;
             }};
         }
@@ -382,12 +420,19 @@ impl AgentRuntime {
                 let model_result =
                     bounded_untrusted_result(&call.name, &envelope.model_data, max_bytes);
                 let correlation_id = call.call_id.clone().unwrap_or_else(|| call.id.clone());
-                on_event(TurnEvent::ToolResult {
-                    call_id: correlation_id,
-                    tool_name: call.name.clone(),
-                    result_text: model_result.clone(),
-                    resource_ids: envelope.resource_ids.clone(),
-                });
+                if on_event
+                    .emit(TurnEvent::ToolResult {
+                        call_id: correlation_id,
+                        tool_name: call.name.clone(),
+                        result_text: model_result.clone(),
+                        resource_ids: envelope.resource_ids.clone(),
+                    })
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!(%turn_id, "Agent event sink closed or aborted; ending turn");
+                    return;
+                }
                 tool_messages.push(Message::tool_result_with_call_id(
                     call.id.clone(),
                     call.call_id.clone(),

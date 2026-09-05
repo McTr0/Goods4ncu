@@ -419,8 +419,7 @@ async fn handle_chat_stream_request(
     let request = ModelRequest::user(prompt_msg, chat_history);
     let turn_id = TurnId::generate();
     let runtime_conversation_id = response_conversation_id.clone();
-    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(128);
-    let run_cancellation = cancellation.clone();
+    let (mut event_tx, mut event_rx) = tokio::sync::mpsc::channel(128);
     let runtime_handle = tokio::spawn(async move {
         AgentRuntime::new(crate::agents::runtime::budget::ExecutionBudget::default())
             .run_turn(
@@ -430,18 +429,7 @@ async fn handle_chat_stream_request(
                 turn_id,
                 &runtime_conversation_id,
                 runtime_context,
-                &mut |event| match event_tx.try_send(event) {
-                    Ok(_) => {}
-                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                        tracing::warn!(
-                            %turn_id,
-                            "SSE event buffer full (128); dropping event to preserve bounded memory"
-                        );
-                    }
-                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                        run_cancellation.cancel();
-                    }
-                },
+                &mut event_tx,
             )
             .await;
     });

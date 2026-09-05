@@ -314,3 +314,27 @@ async fn budget_exhaustion_stops_runaway_loop() {
         );
     }
 }
+
+#[tokio::test]
+async fn mpsc_sender_event_sink_aborts_on_closed_channel() {
+    let driver = FakeModelDriver::text_only("你好！我是小昌。");
+    let runtime = AgentRuntime::new(ExecutionBudget::default());
+    let request = ModelRequest::user("你好", vec![]);
+
+    let (mut tx, rx) = tokio::sync::mpsc::channel(1);
+    // Drop receiver to simulate client disconnect
+    drop(rx);
+
+    runtime
+        .run_turn(
+            &driver,
+            request,
+            noop_executor(),
+            TurnId::generate(),
+            "conv-closed-sink",
+            runtime_context(),
+            &mut tx,
+        )
+        .await;
+    // Execution completes cleanly without panicking or hanging
+}
