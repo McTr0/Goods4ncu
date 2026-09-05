@@ -374,7 +374,7 @@ pub struct AdminListingRowData {
     pub direction: String,
     pub condition_score: i32,
     pub suggested_price_cny: i64,
-    pub description: String,
+    pub description: Option<String>,
     pub status: String,
     pub owner_id: String,
     pub created_at: chrono::DateTime<chrono::Utc>,

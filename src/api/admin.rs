@@ -597,11 +597,7 @@ pub async fn get_admin_listings(
                 direction: row.direction,
                 condition_score: row.condition_score,
                 suggested_price_cny: row.suggested_price_cny as f64 / 100.0,
-                description: if row.description.is_empty() {
-                    None
-                } else {
-                    Some(row.description)
-                },
+                description: row.description,
                 status: row.status,
                 owner_id: row.owner_id,
                 created_at: row.created_at,
