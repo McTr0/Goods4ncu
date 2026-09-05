@@ -30,12 +30,13 @@ This audit and remediation evaluated four primary subsystems across the Good4NCU
 - **Middleware & Security (`src/middleware/`)**: JWT authentication, rate limiting (`RateLimitStateHandle`, `RedisBackend`), audit logging, and campus tenancy enforcement.
 
 ### 1.2 Database Schema & Migrations (`migrations/`)
-- Pure UUID-native schema across users, inventory, orders, posts, comments, conversations, and agent runs.
-- Migration `0017_uuid_shadow_columns.sql` refactored to idempotently drop shadow artifacts rather than creating dual-write structures.
+- Baseline core entities (`users`, `inventory`, `orders`) retain `id TEXT PRIMARY KEY` as originally established in `migrations/0001__init.sql`.
+- Migration `0017_uuid_shadow_columns.sql` was refactored under the pre-launch zero-compatibility authorization to idempotently drop shadow artifacts (`new_id`, `new_user_id`), synchronization triggers, divergence views, and dual-write repository code, eliminating transitional dual-write overhead rather than maintaining an incomplete schema fork.
+- Newer subsystems (campus memberships, moderation jobs/cases, posts, comments, conversation channels, agent runs) natively use UUID primary and foreign keys.
 
 ### 1.3 Concurrency & Realtime Infrastructure
-- **WebSocket Hub (`src/api/ws.rs`)**: Local connection registry managing per-user connection sets with stable UUID tracking, atomic index-independent pruning, and bidirectional cancellation.
-- **Distributed Pub/Sub (`src/services/replicated_runtime.rs`)**: Redis cross-instance message fan-out with safe startup teardown.
+- **WebSocket Hub (`src/api/ws.rs`)**: Local connection registry managing per-user connection sets with stable UUID tracking, atomic index-independent pruning via DashMap `remove_if`, and bidirectional cancellation.
+- **Distributed Pub/Sub (`src/services/replicated_runtime.rs`)**: Redis cross-instance message fan-out with safe startup teardown and complete connection handshake sequencing before background task attachment.
 - **Distributed Rate Limiting (`src/middleware/rate_limit/`)**: Fixed-window Redis rate limiter with unified 250ms timeout ownership and deliberate fail-open availability policy.
 
 ### 1.4 Flutter Application (`mobile/lib/`)
@@ -58,14 +59,17 @@ This audit and remediation evaluated four primary subsystems across the Good4NCU
 | Finding 5 | Post Domain / Schema | P1 | RESOLVED | Single unified post taxonomy across Rust, PostgreSQL, and Flutter. | Stale categories (`event`, `help`, etc.) remained in code and router after schema migration 0109 pruned to 8 categories. |
 | Finding 6 | Post Domain / Type Safety | P0 | RESOLVED | Invalid post category and payload combinations must be unrepresentable at compile time. | `CreatePost` used loose optional fields allowing general posts to carry marketplace payloads or offer posts to omit them. |
 | Finding 7 | Agent Runtime / Security | P1 | RESOLVED | Tool execution boundary must strictly validate envelopes without silent string fallbacks; UI actions and resource IDs must not leak to model text. | `ToolResultEnvelope::parse` used permissive `.unwrap_or_else(Self::success)` masking malformed data; `resource_ids` were dropped before audit persistence. |
-| Finding 8 | Schema / Persistence | P0 | RESOLVED | Zero-compatibility policy authorizes clean native UUID schema with no shadow columns, triggers, or dual writes. | Transitional migration 0017 added shadow columns (`new_id`, etc.) and repositories performed dual writes. |
+| Finding 8 | Schema / Persistence | P0 | RESOLVED | Zero-compatibility policy authorizes clean schema with no shadow columns, triggers, or dual writes. | Transitional migration 0017 added shadow columns (`new_id`, etc.) and repositories performed dual writes; refactored 0017 to drop shadow artifacts and removed repository dual writes. |
 | Finding 9 | Flutter Architecture | P1 | RESOLVED | All Flutter UI and components must inject domain services directly without legacy façade. | `ApiService` was retained in `service_providers.dart` for backward compatibility. |
 | Finding 10 | Flutter UI / Router | P1 | RESOLVED | Removed post categories must have no reachable UI branches, controllers, or unvalidated router parameters. | `CreatePostPage` retained dead event controllers and date pickers; router accepted unvalidated `?category=` query parameter. |
 | Finding 11 | CI / Hygiene | P2 | RESOLVED | All formatting and whitespace checks must pass cleanly with 0 diffs. | Dart formatting diverged across 16 files; trailing whitespace existed in markdown documentation. |
 | Finding 12 | Configuration / Ops | P2 | RESOLVED | Authoritative configuration variables without legacy aliases; operations documentation synchronized. | `src/config.rs` kept fallbacks for `MINIMAX_API_BASE_URL` and `OPENAI_COMPAT_API_KEY`; docs referenced obsolete names and shadow views. |
-| R1 Item | Backend Architecture | P1 | RESOLVED | HTTP handlers must contain no raw SQL; repositories own SQL; services own transactions and rules. | 119 SQL queries existed directly across 18 handler files prior to extraction into repos, services, and dedicated integration test suites. |
-| R3 Item | Concurrency Safety | P1 | RESOLVED | Bounded memory queues for streaming responses; spawned background tasks must be aborted on client disconnect. | Agent SSE stream used unbounded channel and did not abort `run_turn` task on HTTP disconnect. |
-| R4 Item | Localization | P2 | RESOLVED | All user-facing strings must route through `mobile/lib/l10n/`. | Post creation page contained 11 hardcoded Chinese literals. |
+| Finding 13 | Backend Architecture | P1 | RESOLVED | HTTP handlers must contain no raw SQL; repositories own SQL; services own transactions and rules. | 119 SQL queries existed directly across 18 handler files prior to extraction into repos, services, and dedicated integration test suites. |
+| Finding 14 | Admin API / Database Types | P1 | RESOLVED | Data structures must match database column nullability; nullable columns decoded as `Option<T>`. | `AdminListingRowData.description` was typed as `String` but inventory description allows NULL, causing `UnexpectedNullError` panic in admin listing queries. |
+| Finding 15 | Agent Runtime / Backpressure | P1 | RESOLVED | SSE transport queue must propagate backpressure without dropping business events or truncating turns. | 128-event bounded queue used `try_send` and dropped events when full; replaced with async `EventSink` trait implementing channel backpressure and clean abort on disconnect. |
+| Finding 16 | Realtime / Concurrency Race | P1 | RESOLVED | WebSocket disconnect cleanup must not delete newly reconnected users during lock drops. | `remove_connection` and delivery cleanup dropped lock before calling `remove(user_id)`; migrated to DashMap atomic `remove_if(user_id, |conns| conns.is_empty())`. |
+| Finding 17 | Concurrency / Lifecycle | P2 | RESOLVED | Redis startup handshakes must complete before installing publishers or spawning background tasks. | Publisher task was spawned before subscriber subscription; outer timeout could leave orphaned publisher on `ws_hub`. Reordered all handshakes before task/publisher installation. |
+| Finding 18 | Watchlist Architecture | P1 | RESOLVED | Strict layer separation: services own transactions and business rules; repositories own pure SQL. | `PostgresWatchlistRepository::add_to_watchlist` mixed transactions, ownership rules, and HTTP `ApiError`. Extracted `WatchlistService` (`src/services/watchlist.rs`) and made repository pure persistence. |
 
 ---
 
@@ -200,6 +204,51 @@ This audit and remediation evaluated four primary subsystems across the Good4NCU
      - Migrated all 6 database-backed integration tests (12 SQL queries) from `src/api/auth.rs` into `tests/auth_api_integration.rs`, preserving 100% test coverage while enforcing the zero-SQL transport invariant.
   5. **Verification**: Executed `git grep -nE "sqlx::query(_as|_scalar)?" src/api/` which returned 0 matches (exit code 1).
 
+### Finding 14: Admin Listing Null Description Panic (P1)
+- **Evidence**: `tests/admin_auth_regression.rs` failed 3 tests with `ColumnDecode { index: "\"description\"", source: UnexpectedNullError }` at `src/services/admin.rs:289`.
+- **Violated Invariant**: Rust domain and repository data types must match database nullability contracts.
+- **Root Cause**: In commit `342f77b`, `AdminListingRowData.description` was defined as `String` instead of `Option<String>`, while `inventory.description` is nullable in PostgreSQL.
+- **Remediation**:
+  1. Updated `AdminListingRowData.description` to `Option<String>` in `src/services/admin.rs`.
+  2. Simplified `src/api/admin.rs` mapping to pass `row.description` directly into `ListingInfo`.
+  3. Verified `cargo test --test admin_auth_regression` passed all 20/20 tests.
+
+### Finding 15: SSE Backpressure & Event Propagation (P1)
+- **Evidence**: In `src/api/chat.rs`, `AgentRuntime::run_turn` used `event_tx.try_send(event)` with a 128-event buffer, dropping business events (including tool calls and finish events) when full.
+- **Violated Invariant**: Bounded queue backpressure must pause producers or explicitly abort runs rather than silently corrupting business streams and audit logs.
+- **Root Cause**: `run_turn` accepted only a synchronous `FnMut(TurnEvent)` closure, precluding async channel backpressure.
+- **Remediation**:
+  1. Defined `EventSink` async trait in `src/agents/runtime/engine.rs` implemented for `tokio::sync::mpsc::Sender<TurnEvent>` (awaiting on `send`) and blanket-implemented for `FnMut(TurnEvent)`.
+  2. Updated `run_turn` to accept `&mut (dyn EventSink + Send)` and await `on_event.emit(event)`. If the sink disconnects, the run aborts cleanly.
+  3. Passed `&mut event_tx` directly to `run_turn` in `src/api/chat.rs`, establishing true backpressure and eliminating dropped events.
+  4. Added regression test `mpsc_sender_event_sink_aborts_on_closed_channel` in `tests/runtime_evaluation.rs`.
+
+### Finding 16: Atomic WebSocket Disconnection Cleanup (P1)
+- **Evidence**: In `src/api/ws.rs:169` and `259`, `remove_connection` and `deliver_local_scoped_internal` checked `connections.is_empty()`, dropped the lock, and then called `connections.remove(user_id)`. A concurrent reconnection between lock drop and remove would be erased.
+- **Violated Invariant**: WebSocket connection removal must be atomic with respect to the user entry.
+- **Root Cause**: Separation of emptiness check and entry removal across lock release gaps.
+- **Remediation**:
+  1. Replaced separate check and remove with DashMap's atomic `remove_if(user_id, |_k, conns| conns.is_empty())`.
+  2. Applied atomic `remove_if` to both `remove_connection` and dead-sender cleanup in `deliver_local_scoped_internal`.
+  3. Added unit test `concurrent_reconnection_during_disconnect_cleanup_is_preserved` in `src/api/ws.rs`.
+
+### Finding 17: Redis Startup Handshake Ordering (P2)
+- **Evidence**: In `src/services/replicated_runtime.rs:103-170`, the publisher task was spawned and installed on `ws_hub` before the subscriber pubsub connection and channel subscription completed. If the subscriber failed or outer timeout fired, orphaned publisher state remained on `ws_hub`.
+- **Violated Invariant**: Startup failures and cancellations must leave zero background tasks and zero installed handlers.
+- **Root Cause**: Spawning worker tasks before completing all initialization handshakes.
+- **Remediation**:
+  1. Reordered startup sequence: publisher ping, subscriber connection, and channel subscription must all succeed before `ws_hub.set_fanout_publisher` or background tasks are spawned.
+  2. Verified `start_failure_clears_fanout_publisher` test passes.
+
+### Finding 18: Watchlist Layering & Separation of Concerns (P1)
+- **Evidence**: `PostgresWatchlistRepository::add_to_watchlist` in `src/repositories/watchlist_repo.rs` contained database transaction management, business rule checks ("不能收藏自己的商品", active & unrestricted checks), and returned HTTP transport `ApiError`.
+- **Violated Invariant**: Strict repository/service separation: repositories own pure SQL returning `sqlx::Result`; services own transactions, business rules, and domain errors.
+- **Root Cause**: Mechanical dumping of handler logic into repository during SQL extraction without creating a domain service.
+- **Remediation**:
+  1. Created `WatchlistService` in `src/services/watchlist.rs` owning transaction boundaries, business rules, and domain `WatchlistError`.
+  2. Refactored `PostgresWatchlistRepository` to be a pure SQL data access repository returning `sqlx::Result` with 0 references to `ApiError`.
+  3. Updated `src/api/watchlist.rs` to call `WatchlistService` and map `WatchlistError` to `ApiError`.
+
 ---
 
 ## 4. Exact Files and Behavior Changed
@@ -329,33 +378,38 @@ All verification commands were executed from the repository root:
 In compliance with R5 and R6 integrity mandates, all tests requiring external daemon services or environment-specific capabilities are recorded transparently without falsely claiming unexecuted paths passed:
 
 1. **PostgreSQL Database Integration Tests (`goods4ncu_test`)**:
-   - Status: **BLOCKED** in sandbox test execution.
-   - Command: `cargo test --test chat_integration`, `cargo test --test order_transaction_integration`, etc.
-   - Outcome: Panicked at `src/test_infra/mod.rs:44` with `Failed to connect to test database 'goods4ncu_test': error communicating with database: Operation not permitted (os error 1)`.
-   - Reason: Subagent sandbox restricts network socket connections to PostgreSQL daemon `127.0.0.1:5432`.
-   - Invalidation condition: Requires local PostgreSQL instance with `pgvector` extension and `TEST_DATABASE_URL` configured.
+   - Status: **PARTIALLY VERIFIED VIA LOCAL POSTGRESQL**.
+   - Executed: `cargo test --test admin_auth_regression` passed **20/20 tests** against local PostgreSQL `goods4ncu_test`, proving that the nullability fix for `AdminListingRowData.description` resolved all 3 previous `UnexpectedNullError` panics.
+   - Remaining suite: Integration tests requiring full end-to-end multi-service orchestration (e.g. `tests/chat_integration.rs`, `tests/order_transaction_integration.rs`) require the full test suite invocation `cargo test --test '*' -- --nocapture --test-threads=1`.
 
 2. **Live Redis Distributed Rate Limiter & Fan-out E2E (`127.0.0.1:6379`)**:
-   - Status: **BLOCKED / SKIPPED** in sandbox test execution.
-   - Command: `REDIS_TEST_URL=redis://127.0.0.1:6379 cargo test --lib redis_backend` and `cargo test --test ws_fanout_integration`.
-   - Outcome: Real Redis connection failed with `Operation not permitted (os error 1)`; fallback unit tests (`rate_limit_timeout_and_error_fails_open`) and offline fan-out tests (`fanout_fails_fast_in_replicated_mode_when_redis_unreachable`) passed.
-   - Reason: No live Redis service accessible inside the sandbox environment.
+   - Status: **BLOCKED / SKIPPED DUE TO INACTIVE REDIS DAEMON**.
+   - The workstation Redis service on port 6379 is inactive.
+   - Offline fallback tests passed:
+     - `rate_limit_timeout_and_error_fails_open`: verified 250ms fail-open timeout semantics.
+     - `start_failure_clears_fanout_publisher`: verified that handshake connection failure clears any state and leaves zero detached background tasks.
+   - Live cross-instance publication test (`tests/ws_fanout_integration.rs`) remains environment-blocked until a live Redis instance is running.
 
-3. **Flutter CLI in Restricted Subagent Sandbox**:
-   - Status: **BYPASSED VIA HOST BUILD ARTIFACTS**.
-   - Command: `flutter pub get`, `flutter test`.
-   - Outcome: Subagent sandbox restricts execution of `/opt/flutter/bin/flutter`. Verification was accomplished via direct decoded inspection of compiled bundle `mobile/build/web/main.dart.js` and standalone source inspection.
+3. **Flutter Toolchain & Verification**:
+   - Status: **VERIFIED VIA LOCAL FLUTTER SDK**.
+   - `dart format --output=none --set-exit-if-changed lib test`: 247 files checked, 0 changed.
+   - `flutter analyze`: 0 issues found.
+   - `flutter test`: **519/519 unit and widget tests passed**.
+   - `flutter build web --dart-define=COMPANION_ENABLED=true`: bundle compiled and validated.
 
 ---
 
-## 8. Browser & User Journey Contracts Verified
+## 8. Frontend Route Contracts & Bundle Static Analysis (Non-GUI Validation)
 
-The user journey contracts verified through the decoded bundle and domain tests include:
+> [!NOTE]
+> Interactive user journeys were verified via Dart widget/unit test harnesses and compiled JS bundle decoding. Because a live HTTP server on port 3001 was not actively running during this audit run, live in-browser Codex Browser interactions were not executed.
+
+The contracts verified via widget tests, router tests, and decoded bundle strings include:
 1. **Authentication Routing Contract**: Route guards verify authentication tokens and redirect unauthenticated requests to `/login`.
 2. **Post Publication Contract**:
    - General post types (`discussion`, `share`, `question`, `announcement`, `recruit`, `team_up`) publish without marketplace payloads.
    - Marketplace post types (`offer`, `wanted`) enforce condition score (1..=10), non-negative pricing, and non-empty brand requirements.
-   - Navigation to deleted categories (e.g. `/publish?category=event`) safely normalizes to `'discussion'` without rendering dead event fields.
+   - Navigation to deleted categories (e.g. `/publish?category=event`) safely normalizes to `'discussion'` without rendering dead event fields (`mobile/test/router/publish_category_normalization_test.dart`).
 3. **Companion Runtime Contract**: SocialPersona state machine, Live2D bridge, accessibility, and reduced-motion modes operate independently of deleted legacy API layers.
 4. **Chat & Realtime Contract**: Local WebSocket messaging routes through stable UUIDs, preventing cross-tenant message leakage across campuses.
 
@@ -363,7 +417,7 @@ The user journey contracts verified through the decoded bundle and domain tests 
 
 ## 9. Local Database Reset & Migration Instructions
 
-To reset a local development database to the clean UUID-native schema:
+To reset a local development database:
 
 ```bash
 # 1. Drop and recreate the development database
@@ -384,16 +438,16 @@ scripts/capacity_drill.sh
 
 ## 10. Residual Risks & Next Steps
 
-1. **Database-Backed Integration Validation**: When deploying to staging or testing with live PostgreSQL and Redis services, run `cargo test --locked -- --nocapture --test-threads=1` to exercise the 31 database-backed integration tests.
-2. **Web Frontend Cache Invalidation**: Because web browsers cache static bundles aggressively, instruct users to hard-reload (`Cmd+Shift+R`) when accessing `http://localhost:3001` to ensure the new bundle (`d1008a02...`) is loaded.
-3. **DashMap Reconnect Edge Case (Non-blocking)**: As noted in Reviewer M2's report, an extreme microsecond edge case exists if a user reconnects in the exact instant the last connection is being pruned from `WsHub`. DashMap's `remove_if` can be adopted in future maintenance for additional atomic defense.
+1. **Database-Backed Integration Validation**: When deploying to staging or testing with live PostgreSQL and Redis services, run `cargo test --locked -- --nocapture --test-threads=1` to exercise the full live integration suite.
+2. **Web Frontend Cache Invalidation**: Because web browsers cache static bundles aggressively, instruct users to hard-reload (`Cmd+Shift+R`) when accessing `http://localhost:3001` to ensure the new bundle is loaded.
+3. **Live Redis Fan-out Verification**: Once Redis is started on port 6379, execute `cargo test --test ws_fanout_integration` to verify live multi-instance Redis pubsub message delivery across processes.
 
 ---
 
 ## 11. Final Compliance Sign-off
 
-- **Rust Backend Layering**: Handlers contain 0 executable raw SQL; domain invariants enforce valid post taxonomy at compile time; agent tools enforce typed envelope boundary.
-- **Database Schema**: Native UUID architecture; shadow columns, triggers, views, and dual writes completely purged.
-- **Concurrency & Concurrency Safety**: WebSocket connections possess stable UUIDs and atomic teardown; Redis rate limiter timeout ownership unified to 250ms fail-open; SSE streaming uses bounded channels and disconnect abort guards.
+- **Rust Backend Layering**: Handlers contain 0 executable raw SQL; services own transactions, validation, and domain errors; repositories own pure SQL (`sqlx::Result`); domain invariants enforce valid post taxonomy at compile time; agent tools enforce typed envelope boundary.
+- **Database Schema**: Core tables (`users`, `inventory`, `orders`) retain `TEXT PRIMARY KEY` per `0001__init.sql`; transitional shadow columns, triggers, views, and dual writes completely purged from `0017_uuid_shadow_columns.sql`; new subsystems use native UUID.
+- **Concurrency & Concurrency Safety**: WebSocket connections possess stable UUIDs and atomic `remove_if` teardown; Redis startup handshakes complete before task attachment; Redis rate limiter timeout ownership unified to 250ms fail-open; SSE streaming uses async `EventSink` with channel backpressure and disconnect abort guards.
 - **Flutter Decoupling**: `ApiService` completely deleted; dead event UI removed; router query parameters normalized; all post publishing text localized.
 - **Repository Hygiene**: Zero formatting violations, zero clippy warnings, clean `git diff --check`.
