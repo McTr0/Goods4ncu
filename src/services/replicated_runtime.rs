@@ -98,7 +98,23 @@ impl ReplicatedRuntime {
             )));
         }
 
-        // Install bounded fanout publisher into ws_hub
+        // 3. Connect subscriber pubsub & subscribe to channel BEFORE installing publisher or spawning tasks.
+        // This guarantees that if subscription fails or outer timeout fires during connection handshakes,
+        // no publisher is installed on ws_hub and no detached background tasks remain running.
+        let mut pubsub = client
+            .get_async_pubsub()
+            .await
+            .map_err(|e| ReplicatedRuntimeError::SubscriberFailed(e.to_string()))?;
+        pubsub
+            .subscribe(crate::services::ws_fanout::CHANNEL)
+            .await
+            .map_err(|e| ReplicatedRuntimeError::SubscriberFailed(e.to_string()))?;
+        tracing::info!(
+            channel = crate::services::ws_fanout::CHANNEL,
+            "WS fanout subscribed"
+        );
+
+        // 4. Now that all handshakes have succeeded, install bounded fanout publisher into ws_hub
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(String, Option<uuid::Uuid>, String)>(4096);
         ws_hub.set_fanout_publisher(tx);
         tracing::info!("WS fanout publisher installed (Redis)");
@@ -165,25 +181,6 @@ impl ReplicatedRuntime {
             pub_ws_hub.clear_fanout_publisher();
             tracing::info!("WS fanout publisher stopped");
         });
-
-        // 3. Connect subscriber pubsub & subscribe to channel
-        let mut pubsub = match client.get_async_pubsub().await {
-            Ok(ps) => ps,
-            Err(e) => {
-                publisher_handle.abort();
-                ws_hub.clear_fanout_publisher();
-                return Err(ReplicatedRuntimeError::SubscriberFailed(e.to_string()));
-            }
-        };
-        if let Err(e) = pubsub.subscribe(crate::services::ws_fanout::CHANNEL).await {
-            publisher_handle.abort();
-            ws_hub.clear_fanout_publisher();
-            return Err(ReplicatedRuntimeError::SubscriberFailed(e.to_string()));
-        }
-        tracing::info!(
-            channel = crate::services::ws_fanout::CHANNEL,
-            "WS fanout subscribed"
-        );
 
         let is_healthy = Arc::new(AtomicBool::new(true));
         let task_healthy = is_healthy.clone();
