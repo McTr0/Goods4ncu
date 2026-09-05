@@ -7,8 +7,20 @@ use serde::{Deserialize, Serialize};
 use crate::api::error::ApiError;
 use crate::api::session::{Session, VerifiedTenant};
 use crate::api::AppState;
-use crate::repositories::PostgresWatchlistRepository;
+use crate::services::watchlist::{WatchlistError, WatchlistService};
 use crate::utils::cents_to_yuan;
+
+impl From<WatchlistError> for ApiError {
+    fn from(err: WatchlistError) -> Self {
+        match err {
+            WatchlistError::NotFound => ApiError::NotFound,
+            WatchlistError::CannotWatchOwnListing => {
+                ApiError::BadRequest("不能收藏自己的商品".to_string())
+            }
+            WatchlistError::Database(e) => ApiError::Internal(anyhow::anyhow!("DB error: {}", e)),
+        }
+    }
+}
 
 #[derive(Deserialize)]
 pub struct WatchlistQuery {
@@ -46,8 +58,10 @@ pub async fn get_watchlist(
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
     let offset = params.offset.unwrap_or(0).max(0);
 
-    let repo = PostgresWatchlistRepository::new(state.infra.db.clone());
-    let (rows, total) = repo.get_watchlist(&session.user_id, limit, offset).await?;
+    let service = WatchlistService::new(state.infra.db.clone());
+    let (rows, total) = service
+        .get_user_watchlist(&session.user_id, limit, offset)
+        .await?;
 
     let items: Vec<WatchlistItem> = rows
         .into_iter()
@@ -81,8 +95,9 @@ pub async fn add_to_watchlist(
     tenant: VerifiedTenant,
     Path(listing_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let repo = PostgresWatchlistRepository::new(state.infra.db.clone());
-    repo.add_to_watchlist(&tenant.session.user_id, &listing_id, tenant.campus_id)
+    let service = WatchlistService::new(state.infra.db.clone());
+    service
+        .add_to_watchlist(&tenant.session.user_id, &listing_id, tenant.campus_id)
         .await?;
 
     Ok(Json(serde_json::json!({
@@ -97,8 +112,9 @@ pub async fn remove_from_watchlist(
     Session(session): Session,
     Path(listing_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let repo = PostgresWatchlistRepository::new(state.infra.db.clone());
-    repo.remove_from_watchlist(&session.user_id, &listing_id)
+    let service = WatchlistService::new(state.infra.db.clone());
+    service
+        .remove_from_watchlist(&session.user_id, &listing_id)
         .await?;
 
     Ok(Json(serde_json::json!({
@@ -113,8 +129,10 @@ pub async fn check_watchlist(
     Session(session): Session,
     Path(listing_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let repo = PostgresWatchlistRepository::new(state.infra.db.clone());
-    let exists = repo.check_watchlist(&session.user_id, &listing_id).await?;
+    let service = WatchlistService::new(state.infra.db.clone());
+    let exists = service
+        .check_watchlist(&session.user_id, &listing_id)
+        .await?;
 
     Ok(Json(serde_json::json!({
         "watched": exists,

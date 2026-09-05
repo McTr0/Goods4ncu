@@ -1,7 +1,6 @@
-//! Repository for user watchlist operations.
+//! Repository for user watchlist persistence operations.
 
-use crate::api::error::ApiError;
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -17,6 +16,13 @@ pub struct WatchlistRow {
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct WatchlistListingTarget {
+    pub owner_id: String,
+    pub status: String,
+    pub restricted: bool,
+}
+
 #[derive(Clone)]
 pub struct PostgresWatchlistRepository {
     pool: PgPool,
@@ -27,12 +33,12 @@ impl PostgresWatchlistRepository {
         Self { pool }
     }
 
-    pub async fn get_watchlist(
+    pub async fn list_watchlist(
         &self,
         user_id: &str,
         limit: i64,
         offset: i64,
-    ) -> Result<(Vec<WatchlistRow>, i64), ApiError> {
+    ) -> sqlx::Result<(Vec<WatchlistRow>, i64)> {
         let count_row = sqlx::query(
             "SELECT COUNT(*) as cnt FROM watchlist w \
              JOIN inventory i ON w.listing_id = i.id \
@@ -41,8 +47,7 @@ impl PostgresWatchlistRepository {
         )
         .bind(user_id)
         .fetch_one(&self.pool)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        .await?;
         let total: i64 = count_row.try_get("cnt").unwrap_or(0);
 
         let rows = sqlx::query(
@@ -61,8 +66,7 @@ impl PostgresWatchlistRepository {
         .bind(limit)
         .bind(offset)
         .fetch_all(&self.pool)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+        .await?;
 
         let items = rows
             .into_iter()
@@ -82,81 +86,70 @@ impl PostgresWatchlistRepository {
         Ok((items, total))
     }
 
-    pub async fn add_to_watchlist(
+    pub async fn get_listing_for_watch(
         &self,
-        user_id: &str,
+        tx: &mut Transaction<'_, Postgres>,
         listing_id: &str,
         campus_id: Uuid,
-    ) -> Result<(), ApiError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-        let listing = sqlx::query(
+    ) -> sqlx::Result<Option<WatchlistListingTarget>> {
+        let row = sqlx::query(
             "SELECT owner_id, status FROM inventory
              WHERE id = $1 AND campus_id = $2 FOR UPDATE",
         )
         .bind(listing_id)
         .bind(campus_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-        .ok_or(ApiError::NotFound)?;
+        .fetch_optional(&mut **tx)
+        .await?;
 
-        let owner_id: String = listing.get("owner_id");
-        let status: String = listing.get("status");
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let owner_id: String = row.get("owner_id");
+        let status: String = row.get("status");
         let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
             .bind(listing_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        if status != "active" || restricted {
-            return Err(ApiError::NotFound);
-        }
-        if owner_id == user_id {
-            return Err(ApiError::BadRequest("不能收藏自己的商品".to_string()));
-        }
+            .fetch_one(&mut **tx)
+            .await?;
 
+        Ok(Some(WatchlistListingTarget {
+            owner_id,
+            status,
+            restricted,
+        }))
+    }
+
+    pub async fn insert(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        user_id: &str,
+        listing_id: &str,
+    ) -> sqlx::Result<()> {
         sqlx::query(
             "INSERT INTO watchlist (user_id, listing_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
         )
         .bind(user_id)
         .bind(listing_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-        tx.commit()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
+        .execute(&mut **tx)
+        .await?;
         Ok(())
     }
 
-    pub async fn remove_from_watchlist(
-        &self,
-        user_id: &str,
-        listing_id: &str,
-    ) -> Result<(), ApiError> {
+    pub async fn delete(&self, user_id: &str, listing_id: &str) -> sqlx::Result<()> {
         sqlx::query("DELETE FROM watchlist WHERE user_id = $1 AND listing_id = $2")
             .bind(user_id)
             .bind(listing_id)
             .execute(&self.pool)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
+            .await?;
         Ok(())
     }
 
-    pub async fn check_watchlist(&self, user_id: &str, listing_id: &str) -> Result<bool, ApiError> {
-        let exists = sqlx::query("SELECT 1 FROM watchlist WHERE user_id = $1 AND listing_id = $2")
+    pub async fn exists(&self, user_id: &str, listing_id: &str) -> sqlx::Result<bool> {
+        let row = sqlx::query("SELECT 1 FROM watchlist WHERE user_id = $1 AND listing_id = $2")
             .bind(user_id)
             .bind(listing_id)
             .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-            .is_some();
-        Ok(exists)
+            .await?;
+        Ok(row.is_some())
     }
 }

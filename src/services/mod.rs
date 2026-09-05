@@ -43,5 +43,6 @@ pub mod undo;
 pub mod vector;
 pub mod wanted_match;
 pub mod wanted_response;
+pub mod watchlist;
 #[cfg(feature = "redis")]
 pub mod ws_fanout;
