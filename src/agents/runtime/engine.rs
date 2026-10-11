@@ -44,6 +44,10 @@ pub enum TurnEvent {
 pub enum EventSinkError {
     #[error("event sink is closed")]
     Closed,
+    #[error("turn cancelled while waiting for event capacity")]
+    Cancelled,
+    #[error("turn deadline exceeded while waiting for event capacity")]
+    DeadlineExceeded,
     #[error("event sink error: {0}")]
     Other(String),
 }
@@ -51,6 +55,22 @@ pub enum EventSinkError {
 #[async_trait::async_trait]
 pub trait EventSink: Send {
     async fn emit(&mut self, event: TurnEvent) -> Result<(), EventSinkError>;
+}
+
+async fn emit_turn_event(
+    sink: &mut (dyn EventSink + Send),
+    event: TurnEvent,
+    cancellation: &TurnCancellation,
+    deadline: tokio::time::Instant,
+) -> Result<(), EventSinkError> {
+    tokio::select! {
+        // Deliver immediately when possible, including a terminal cancellation
+        // event. A stalled consumer must not extend the turn's lifetime.
+        biased;
+        result = sink.emit(event) => result,
+        _ = cancellation.cancelled() => Err(EventSinkError::Cancelled),
+        _ = tokio::time::sleep_until(deadline) => Err(EventSinkError::DeadlineExceeded),
+    }
 }
 
 #[async_trait::async_trait]
@@ -114,30 +134,18 @@ impl AgentRuntime {
             self.budget.loop_hard_stop_threshold,
         );
 
-        macro_rules! emit {
-            ($data:expr) => {{
-                seq += 1;
-                if on_event
-                    .emit(TurnEvent::Emit(AgentEvent::new(
-                        turn_id,
-                        conversation_id,
-                        seq,
-                        $data,
-                    )))
-                    .await
-                    .is_err()
-                {
-                    tracing::warn!(%turn_id, "Agent event sink closed or aborted; ending turn");
-                    return;
-                }
-            }};
-        }
         macro_rules! terminate {
             ($data:expr) => {{
                 seq += 1;
                 let event = AgentEvent::new(turn_id, conversation_id, seq, $data);
                 context.hooks.on_terminal(&hook_context, &event);
-                let _ = on_event.emit(TurnEvent::Emit(event)).await;
+                let _ = emit_turn_event(
+                    on_event,
+                    TurnEvent::Emit(event),
+                    &context.cancellation,
+                    deadline,
+                )
+                .await;
                 return;
             }};
         }
@@ -157,6 +165,32 @@ impl AgentRuntime {
                     },
                 })
             };
+        }
+        macro_rules! deliver {
+            ($event:expr) => {{
+                match emit_turn_event(on_event, $event, &context.cancellation, deadline).await {
+                    Ok(()) => {}
+                    Err(EventSinkError::Cancelled) => cancelled!(),
+                    Err(EventSinkError::DeadlineExceeded) => {
+                        timed_out!("agent turn deadline exceeded while delivering events")
+                    }
+                    Err(error) => {
+                        tracing::warn!(%turn_id, %error, "Agent event delivery stopped; ending turn");
+                        return;
+                    }
+                }
+            }};
+        }
+        macro_rules! emit {
+            ($data:expr) => {{
+                seq += 1;
+                deliver!(TurnEvent::Emit(AgentEvent::new(
+                    turn_id,
+                    conversation_id,
+                    seq,
+                    $data,
+                )));
+            }};
         }
 
         emit!(EventData::TurnStarted {
@@ -420,19 +454,12 @@ impl AgentRuntime {
                 let model_result =
                     bounded_untrusted_result(&call.name, &envelope.model_data, max_bytes);
                 let correlation_id = call.call_id.clone().unwrap_or_else(|| call.id.clone());
-                if on_event
-                    .emit(TurnEvent::ToolResult {
-                        call_id: correlation_id,
-                        tool_name: call.name.clone(),
-                        result_text: model_result.clone(),
-                        resource_ids: envelope.resource_ids.clone(),
-                    })
-                    .await
-                    .is_err()
-                {
-                    tracing::warn!(%turn_id, "Agent event sink closed or aborted; ending turn");
-                    return;
-                }
+                deliver!(TurnEvent::ToolResult {
+                    call_id: correlation_id,
+                    tool_name: call.name.clone(),
+                    result_text: model_result.clone(),
+                    resource_ids: envelope.resource_ids.clone(),
+                });
                 tool_messages.push(Message::tool_result_with_call_id(
                     call.id.clone(),
                     call.call_id.clone(),

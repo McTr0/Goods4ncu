@@ -3,8 +3,9 @@
 use goods4ncu::agents::runtime::budget::ExecutionBudget;
 use goods4ncu::agents::runtime::engine::{AgentRuntime, RuntimeContext, ToolExecutor, TurnEvent};
 use goods4ncu::agents::runtime::envelope::ToolResultEnvelope;
-use goods4ncu::agents::runtime::event::{EventData, TurnId};
+use goods4ncu::agents::runtime::event::{AgentEvent, EventData, RuntimeErrorCode, TurnId};
 use goods4ncu::agents::runtime::fake_driver::{FakeModelDriver, FakeStep};
+use goods4ncu::agents::runtime::hooks::{Hook, HookChain, HookContext};
 use goods4ncu::agents::runtime::model::{
     ModelCapabilities, ModelDriver, ModelEventStream, ModelRequest,
 };
@@ -29,6 +30,29 @@ fn noop_executor() -> ToolExecutor {
         Box::pin(async { Ok(ToolResultEnvelope::success("ok")) })
             as Pin<Box<dyn Future<Output = anyhow::Result<ToolResultEnvelope>> + Send>>
     })
+}
+
+struct TerminalRecorder(Arc<Mutex<Vec<EventData>>>);
+
+impl Hook for TerminalRecorder {
+    fn name(&self) -> &'static str {
+        "terminal_recorder"
+    }
+
+    fn on_terminal(&self, _context: &HookContext, event: &AgentEvent) {
+        self.0.lock().unwrap().push(event.data.clone());
+    }
+}
+
+fn recording_context() -> (RuntimeContext, Arc<Mutex<Vec<EventData>>>) {
+    let terminals = Arc::new(Mutex::new(Vec::new()));
+    let mut context = runtime_context();
+    context.hooks = Arc::new(
+        HookChain::builder()
+            .push_hook(Box::new(TerminalRecorder(terminals.clone())))
+            .build(),
+    );
+    (context, terminals)
 }
 
 #[tokio::test]
@@ -337,4 +361,151 @@ async fn mpsc_sender_event_sink_aborts_on_closed_channel() {
         )
         .await;
     // Execution completes cleanly without panicking or hanging
+}
+
+#[tokio::test]
+async fn slow_event_consumer_receives_every_delta_and_completion() {
+    let (mut tx, mut rx) = tokio::sync::mpsc::channel(128);
+    let producer = tokio::spawn(async move {
+        let driver = FakeModelDriver {
+            steps: (0..300)
+                .map(|i| FakeStep::Text(format!("{i},")))
+                .chain([FakeStep::StopEndTurn])
+                .collect(),
+        };
+        AgentRuntime::new(ExecutionBudget::default())
+            .run_turn(
+                &driver,
+                ModelRequest::user("hello", vec![]),
+                noop_executor(),
+                TurnId::generate(),
+                "conv-slow-consumer",
+                runtime_context(),
+                &mut tx,
+            )
+            .await;
+    });
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while rx.len() < 128 {
+            assert!(!producer.is_finished(), "producer must wait for capacity");
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("producer should fill the bounded queue");
+    assert!(!producer.is_finished());
+
+    let mut reply = String::new();
+    let mut completions = 0;
+    let mut seq = 0;
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while let Some(TurnEvent::Emit(event)) = rx.recv().await {
+            assert_eq!(event.seq, seq + 1);
+            seq = event.seq;
+            match event.data {
+                EventData::TextDelta { text } => reply.push_str(&text),
+                EventData::TurnCompleted { .. } => completions += 1,
+                _ => {}
+            }
+        }
+        producer.await.unwrap();
+    })
+    .await
+    .expect("draining the queue must release the producer");
+    assert_eq!(reply, (0..300).map(|i| format!("{i},")).collect::<String>());
+    assert_eq!(completions, 1);
+}
+
+#[tokio::test]
+async fn cancellation_interrupts_a_full_event_queue() {
+    let (context, terminals) = recording_context();
+    let cancellation = context.cancellation.clone();
+    let (mut tx, rx) = tokio::sync::mpsc::channel(1);
+    let mut producer = tokio::spawn(async move {
+        AgentRuntime::new(ExecutionBudget::default())
+            .run_turn(
+                &FakeModelDriver::text_only("hello"),
+                ModelRequest::user("hello", vec![]),
+                noop_executor(),
+                TurnId::generate(),
+                "conv-cancel-full",
+                context,
+                &mut tx,
+            )
+            .await;
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while rx.is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    cancellation.cancel();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(1), &mut producer).await;
+    producer.abort();
+    result
+        .expect("cancellation must interrupt backpressure")
+        .unwrap();
+    drop(rx);
+    assert!(matches!(
+        &terminals.lock().unwrap()[..],
+        [EventData::TurnCancelled { .. }]
+    ));
+}
+
+#[tokio::test]
+async fn cancellation_does_not_block_on_a_full_terminal_event_queue() {
+    let context = runtime_context();
+    // The two startup events fill the queue; cancellation then emits a terminal event.
+    context.cancellation.cancel();
+    let (mut tx, rx) = tokio::sync::mpsc::channel(2);
+    let runtime = AgentRuntime::new(ExecutionBudget::default());
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        runtime.run_turn(
+            &FakeModelDriver::text_only("hello"),
+            ModelRequest::user("hello", vec![]),
+            noop_executor(),
+            TurnId::generate(),
+            "conv-terminal-full",
+            context,
+            &mut tx,
+        ),
+    )
+    .await
+    .expect("a terminal event must not wait indefinitely for a reader");
+    assert_eq!(rx.len(), 2);
+}
+
+#[tokio::test]
+async fn deadline_interrupts_a_full_event_queue() {
+    let (context, terminals) = recording_context();
+    let (mut tx, rx) = tokio::sync::mpsc::channel(1);
+    let runtime = AgentRuntime::new(ExecutionBudget {
+        turn_deadline: std::time::Duration::from_millis(20),
+        ..ExecutionBudget::default()
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        runtime.run_turn(
+            &FakeModelDriver::text_only("hello"),
+            ModelRequest::user("hello", vec![]),
+            noop_executor(),
+            TurnId::generate(),
+            "conv-deadline-full",
+            context,
+            &mut tx,
+        ),
+    )
+    .await
+    .expect("the turn deadline must include backpressure waits");
+    assert_eq!(rx.len(), 1);
+    let terminals = terminals.lock().unwrap();
+    assert_eq!(terminals.len(), 1);
+    let EventData::TurnFailed { error } = &terminals[0] else {
+        panic!("the terminal hook must observe a failed turn");
+    };
+    assert_eq!(error.code, RuntimeErrorCode::TimeoutExceeded);
 }
