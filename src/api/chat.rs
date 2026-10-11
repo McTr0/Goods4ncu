@@ -33,6 +33,24 @@ impl Drop for AbortOnDrop {
     }
 }
 
+fn runtime_owned_body(
+    stream: impl futures::Stream<Item = Result<Vec<u8>, std::convert::Infallible>> + Send + 'static,
+    runtime: tokio::task::JoinHandle<()>,
+) -> axum::body::Body {
+    use futures::StreamExt;
+
+    // Construct the guard eagerly: an HTTP body can be dropped without ever
+    // polling the async generator (for example, on an immediate disconnect).
+    let runtime_guard = AbortOnDrop(runtime);
+    axum::body::Body::from_stream(async_stream::stream! {
+        let _runtime_guard = runtime_guard;
+        futures::pin_mut!(stream);
+        while let Some(chunk) = stream.next().await {
+            yield chunk;
+        }
+    })
+}
+
 #[derive(Clone, Deserialize)]
 pub(crate) struct ChatStreamRequest {
     pub message: String,
@@ -455,7 +473,6 @@ async fn handle_chat_stream_request(
     const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
     let sse_stream = async_stream::stream! {
         let _registration = registration;
-        let _runtime_guard = AbortOnDrop(runtime_handle);
         let mut full_reply = String::new();
         let mut completed = false;
         let mut cancelled = false;
@@ -586,6 +603,12 @@ async fn handle_chat_stream_request(
             }
         }
 
+        // Cancellation may close a full event channel before a terminal frame
+        // can be queued. The registered token still owns the run's outcome.
+        if !completed && cancellation.is_cancelled() {
+            cancelled = true;
+        }
+
         if completed && !full_reply.trim().is_empty() {
             if let Err(error) = agent_chat::persist_context_message(
                 &persist_service,
@@ -647,7 +670,7 @@ async fn handle_chat_stream_request(
         }
     };
 
-    let body = axum::body::Body::from_stream(sse_stream);
+    let body = runtime_owned_body(sse_stream, runtime_handle);
     build_sse_response(&response_conversation_id, body)
 }
 
@@ -675,6 +698,52 @@ pub(crate) async fn handle_chat_stream_post(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn pending_runtime() -> (
+        tokio::task::JoinHandle<()>,
+        tokio::sync::oneshot::Receiver<()>,
+    ) {
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _finished = finished_tx;
+            started_tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        started_rx.await.unwrap();
+        (task, finished_rx)
+    }
+
+    #[tokio::test]
+    async fn dropping_unpolled_sse_body_aborts_runtime() {
+        let (task, finished) = pending_runtime().await;
+        let body = runtime_owned_body(futures::stream::pending(), task);
+        drop(body);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), finished)
+                .await
+                .expect("dropping an unread response must abort its runtime")
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn dropping_polled_sse_body_aborts_runtime() {
+        use futures::StreamExt;
+
+        let (task, finished) = pending_runtime().await;
+        let chunks = futures::stream::iter([Ok(b"data: ready\n\n".to_vec())])
+            .chain(futures::stream::pending());
+        let mut body = runtime_owned_body(chunks, task).into_data_stream();
+        assert_eq!(body.next().await.unwrap().unwrap(), &b"data: ready\n\n"[..]);
+        drop(body);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), finished)
+                .await
+                .expect("dropping a streaming response must abort its runtime")
+                .is_err()
+        );
+    }
 
     #[test]
     fn test_chat_stream_request_deserialization() {
