@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goods4ncu_mobile/l10n/app_localizations.dart';
 import 'package:goods4ncu_mobile/models/models.dart';
 import 'package:goods4ncu_mobile/pages/chat_page.dart';
 import 'package:goods4ncu_mobile/services/chat_service.dart';
+import 'package:goods4ncu_mobile/services/agent_stream_event.dart';
 import 'package:goods4ncu_mobile/services/negotiate_service.dart';
 import 'package:goods4ncu_mobile/services/sse_service.dart';
 import 'package:goods4ncu_mobile/services/post_service.dart';
@@ -86,6 +89,77 @@ class _FakeUploadService extends UploadService {}
 
 class _FakePostService extends PostService {}
 
+class _ControlledSseService extends SseService {
+  StreamController<AgentStreamEvent>? events;
+  final cancelled = <String>[];
+  final cancelAcknowledgement = Completer<void>();
+  int connections = 0;
+
+  @override
+  Stream<AgentStreamEvent> get stream => events!.stream;
+
+  @override
+  Future<void> connect({
+    required String message,
+    String? conversationId,
+    String? listingId,
+    Map<String, dynamic>? pageContext,
+    String? imageUrl,
+    String? audioUrl,
+    String? idempotencyKey,
+  }) async {
+    connections++;
+    events = StreamController<AgentStreamEvent>(onCancel: () async {});
+  }
+
+  @override
+  Future<void> cancelTurn(String conversationId) async {
+    cancelled.add(conversationId);
+    await cancelAcknowledgement.future;
+  }
+
+  @override
+  Future<void> disconnect() async {
+    final controller = events;
+    if (controller == null) return;
+    final hasListener = controller.hasListener;
+    final closed = controller.close();
+    if (hasListener) {
+      await closed;
+    } else {
+      unawaited(closed);
+    }
+  }
+}
+
+Future<void> _pumpStreamingChat(
+  WidgetTester tester,
+  _ControlledSseService sse,
+) async {
+  await tester.pumpWidget(
+    _buildTestApp(
+      ChatPage(
+        chatService: _FakeChatService(),
+        userService: _FakeUserService(),
+        negotiateService: _FakeNegotiateService(),
+        sseService: sse,
+        uploadService: _FakeUploadService(),
+        postService: _FakePostService(),
+        embedded: true,
+      ),
+    ),
+  );
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
+  await tester.enterText(find.byType(TextField).first, '帮我整理交易清单');
+  await tester.tap(find.byKey(const Key('composer-send')));
+  await tester.pump();
+  sse.events!.add(
+    const AgentStreamEvent(type: 'text_delta', seq: 1, text: '收到的文字'),
+  );
+  await tester.pump();
+}
+
 Widget _buildTestApp(Widget child, {ThemeMode themeMode = ThemeMode.light}) {
   return MaterialApp(
     theme: AppTheme.light,
@@ -99,6 +173,76 @@ Widget _buildTestApp(Widget child, {ThemeMode themeMode = ThemeMode.light}) {
 }
 
 void main() {
+  testWidgets('server cancellation preserves partial reply without an error', (
+    tester,
+  ) async {
+    final sse = _ControlledSseService();
+    await _pumpStreamingChat(tester, sse);
+    final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
+    sse.events!.add(
+      const AgentStreamEvent(
+        type: 'turn_cancelled',
+        seq: 2,
+        cancelReason: 'user_requested',
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('收到的文字', findRichText: true), findsWidgets);
+    expect(find.text(l.aiError, findRichText: true), findsNothing);
+    expect(find.byKey(const Key('composer-stop')), findsNothing);
+    expect(find.byKey(const Key('composer-send')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'stop releases composer without waiting for remote acknowledgement',
+    (tester) async {
+      final sse = _ControlledSseService();
+      await _pumpStreamingChat(tester, sse);
+      final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
+      await tester.tap(find.byKey(const Key('composer-stop')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(sse.cancelled, isEmpty);
+      expect(sse.cancelAcknowledgement.isCompleted, isFalse);
+      expect(find.byKey(const Key('composer-send')), findsOneWidget);
+      expect(find.text(l.aiError, findRichText: true), findsNothing);
+      expect(find.text('收到的文字', findRichText: true), findsWidgets);
+
+      await tester.enterText(find.byType(TextField).first, '再次发送');
+      await tester.tap(find.byKey(const Key('composer-send')));
+      await tester.pump();
+      expect(sse.connections, 2);
+      sse.events!.add(
+        const AgentStreamEvent(
+          type: 'turn_completed',
+          seq: 1,
+          usage: AgentUsageSummary(modelSteps: 1, toolCalls: 0),
+        ),
+      );
+      unawaited(sse.events!.close());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byKey(const Key('composer-stop')), findsNothing);
+      expect(find.text(l.aiError, findRichText: true), findsNothing);
+      sse.cancelAcknowledgement.complete();
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('unexpected stream EOF still shows an error', (tester) async {
+    final sse = _ControlledSseService();
+    await _pumpStreamingChat(tester, sse);
+    final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
+    unawaited(sse.events!.close());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text(l.aiError, findRichText: true), findsWidgets);
+    expect(find.byKey(const Key('composer-stop')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('assistant stage and reply bubbles follow dark theme colors', (
     tester,
   ) async {
