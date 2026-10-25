@@ -92,6 +92,7 @@ class _ChatPageState extends State<ChatPage> {
   XFile? _selectedImage;
   Uint8List? _selectedImageBytes;
   bool _isStreaming = false;
+  bool _stopRequested = false;
   bool _isLoadingHistory = true;
   String? _historyError;
   String? _currentUserId;
@@ -1059,14 +1060,11 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _stopStreaming() async {
-    if (!_isStreaming) return;
-    // Signal the server to cancel the turn using the assistant conversation.
-    try {
-      await _sseService.cancelTurn('__agent__');
-    } catch (_) {}
-    // Close the local SSE stream so no more chunks arrive.
-    _sseService.disconnect();
-    setState(() => _isStreaming = false);
+    if (!_isStreaming || _stopRequested) return;
+    _stopRequested = true;
+    // The response body owns the server runtime. Closing this stream stops
+    // that exact turn; the send task restores the composer after cleanup.
+    await _sseService.disconnect();
   }
 
   Future<void> _sendMessage() async {
@@ -1080,6 +1078,7 @@ class _ChatPageState extends State<ChatPage> {
 
     setState(() {
       _isStreaming = true;
+      _stopRequested = false;
     });
 
     try {
@@ -1087,6 +1086,7 @@ class _ChatPageState extends State<ChatPage> {
         pickedImage: selectedImage,
         imageBytes: selectedImageBytes,
       );
+      if (_stopRequested) return;
 
       final reference = _pendingReference;
       final referencePrefix = reference == null
@@ -1137,6 +1137,12 @@ class _ChatPageState extends State<ChatPage> {
       } catch (_) {
         connected = false;
       }
+      if (_stopRequested) {
+        if (mounted) {
+          setState(() => _messages.removeAt(botMsgIndex));
+        }
+        return;
+      }
       if (!connected && mounted) {
         final l = AppLocalizations.of(context)!;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1171,6 +1177,7 @@ class _ChatPageState extends State<ChatPage> {
       String fullReply = '';
       var companionSawFirstToken = false;
       var turnCompleted = false;
+      var turnCancelled = false;
       await for (final event in _sseService.stream) {
         if (!mounted) break;
         if (event.type == 'turn_completed') {
@@ -1180,7 +1187,8 @@ class _ChatPageState extends State<ChatPage> {
           throw Exception(event.errorMessage ?? 'Turn failed');
         }
         if (event.type == 'turn_cancelled') {
-          throw Exception(event.cancelReason ?? 'Turn cancelled');
+          turnCancelled = true;
+          break;
         }
         // Dispatch agent UI actions (e.g. SHOW_POSTS, SCROLL_TO_POST).
         if (event.actionType != null) {
@@ -1232,28 +1240,29 @@ class _ChatPageState extends State<ChatPage> {
         }
       }
 
-      if (!turnCompleted) {
+      final stopped = turnCancelled || _stopRequested;
+      if (!turnCompleted && !stopped) {
         throw const StreamTruncatedException(
           'Agent turn completed without terminal turn_completed event',
         );
       }
       _lipSyncDriver.onStreamComplete();
       _companionOnStreamEnd(failed: false);
-      final relationshipEvent = _relationshipSignals.eventForCompletedTurn(
-        userMsg.content,
-      );
+      final relationshipEvent = stopped
+          ? null
+          : _relationshipSignals.eventForCompletedTurn(userMsg.content);
       if (relationshipEvent != null) {
         _recordRelationshipEvent(relationshipEvent);
       }
       if (_useLegacyBrain) {
         _live2DController.brain.onResponseComplete(
           isError: false,
-          reply: fullReply,
+          reply: stopped ? '' : fullReply,
         );
       }
       _live2DController.showSpeechBubble(
         fullReply.isEmpty
-            ? (localizations?.assistantIdleReplyBubble ?? '')
+            ? (stopped ? '' : localizations?.assistantIdleReplyBubble ?? '')
             : fullReply,
       );
 
@@ -1261,12 +1270,16 @@ class _ChatPageState extends State<ChatPage> {
       if (mounted && botMsgIndex < _messages.length) {
         setState(() {
           if (botMsgIndex < _messages.length) {
-            _messages[botMsgIndex] = _messages[botMsgIndex].copyWith(
-              content: fullReply.isEmpty
-                  ? AppLocalizations.of(context)!.emptyReplyPlaceholder
-                  : fullReply,
-              isPartial: false,
-            );
+            if (stopped && fullReply.isEmpty) {
+              _messages.removeAt(botMsgIndex);
+            } else {
+              _messages[botMsgIndex] = _messages[botMsgIndex].copyWith(
+                content: fullReply.isEmpty
+                    ? AppLocalizations.of(context)!.emptyReplyPlaceholder
+                    : fullReply,
+                isPartial: false,
+              );
+            }
           }
         });
       }
@@ -1291,6 +1304,11 @@ class _ChatPageState extends State<ChatPage> {
       });
       return;
     } catch (e) {
+      if (_stopRequested) {
+        _lipSyncDriver.onStreamComplete();
+        _companionOnStreamEnd(failed: false);
+        return;
+      }
       _companionOnStreamEnd(failed: true);
       // Goal §49: the user sees a friendly line, never raw SQL/provider
       // internals. Full detail goes to the debug console only.
