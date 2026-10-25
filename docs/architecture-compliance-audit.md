@@ -1,5 +1,10 @@
 # Architectural Compliance Audit and Remediation Report
 
+> Historical report: sections 1–11 retain the original audit and its subsequent
+> corrections. The scoped follow-up in section 12 (2026-10-25) supersedes their
+> environment-dependent verification status; earlier sign-off is not a new
+> blanket certification of the current codebase.
+
 - **Date**: 2026-09-04
 - **Branch**: `main` (tracking `origin/main`)
 - **Starting Baseline HEAD**: `983d4b05a50450117805ef46817e9f3a58bb9bfe`
@@ -451,3 +456,106 @@ scripts/capacity_drill.sh
 - **Concurrency & Concurrency Safety**: WebSocket connections possess stable UUIDs and atomic `remove_if` teardown; Redis startup handshakes complete before task attachment; Redis rate limiter timeout ownership unified to 250ms fail-open; SSE streaming uses async `EventSink` with channel backpressure and disconnect abort guards.
 - **Flutter Decoupling**: `ApiService` completely deleted; dead event UI removed; router query parameters normalized; all post publishing text localized.
 - **Repository Hygiene**: Zero formatting violations, zero clippy warnings, clean `git diff --check`.
+
+---
+
+## 12. Streaming Lifecycle Follow-up — 2026-10-25
+
+### Scope and provenance
+
+Work began from `28b9ed4` on the isolated `codex/audit-followup` branch. The
+previous fixes for admin nullability, async event sinks, atomic WebSocket
+cleanup, Redis startup ordering, and watchlist layering were already present;
+they were not reimplemented or counted as new work.
+
+This follow-up inspected response/task ownership in `src/api/chat.rs`, event
+delivery and terminal hooks in `src/agents/runtime/engine.rs`, their runtime
+regressions, client cancellation in `mobile/lib/pages/chat_page.dart`, the SSE
+service's disconnect contract, page regression fixtures, and live chat HTTP
+fixtures. Existing PostgreSQL, Redis rate-limit, and fan-out suites were run.
+This is a targeted lifecycle review, not a fresh line-by-line audit of every
+backend or mobile subsystem. No migrations, compatibility paths, production
+configuration, CI workflow, or dependency manifests were changed.
+
+### New findings and exact remediation
+
+| Finding | Severity | Root cause and failure evidence | Applied change and regression proof |
+|---|---|---|---|
+| 19 — Unread response leaves runtime alive | P1 | The abort guard was constructed inside the async SSE generator. Dropping an HTTP body before its first poll never constructed that guard; the new unpolled-drop test timed out against that implementation. | `src/api/chat.rs`: `runtime_owned_body` eagerly captures the task guard before the first poll. Two unit tests prove that both unpolled and partially consumed body drops abort a running task. Cancellation remains the recorded outcome when a full queue prevents its terminal frame from being delivered. Commit `bf6c27f`. |
+| 20 — Backpressure escapes cancellation and deadline | P1 | Awaiting channel capacity could indefinitely suspend ordinary or terminal events, bypassing the turn's cancellation/deadline checks. Full-queue cancellation and deadline regressions reproduced the hangs. | `src/agents/runtime/engine.rs`: one delivery helper selects capacity against the existing cancellation signal and turn deadline. All ordinary events and tool results use it; terminal hooks run once even if the terminal frame cannot be queued. `tests/runtime_evaluation.rs` adds four regressions: 300 ordered deltas plus completion through a 128-slot queue, cancellation under backpressure, a full terminal queue, and deadline expiry with terminal-hook observation. Commit `ced0ca2`. |
+| 21 — Stop is treated as an assistant failure | P2 | The page threw on `turn_cancelled`, overwrote partial text with the generic service error, and waited for a separate conversation-wide cancellation request before disconnecting. Browser interaction reproduced the error. | `mobile/lib/pages/chat_page.dart`: stopping closes only the current SSE connection; the send workflow owns cleanup and composer recovery. Server cancellation is normal, partial text is retained, and cancelled turns do not emit completion-only relationship signals. Unexpected EOF without a stop remains an error. Three widget regressions cover server cancellation, stopping without a remote acknowledgement followed by another send, and genuine truncation. Commit `8ff4a73`. |
+| 22 — Optional HTTP journeys conceal stale fixtures | P2 | The default suite returned early without `TEST_BASE_URL`. Enabling the journeys exposed a stale HTTP 201 registration expectation (the current API returns 200), then missing verified campus memberships (HTTP 403). | `tests/chat_e2e.rs`: require the current auth status, deserialize `active_campus_id` as `Uuid`, explicitly verify synthetic test memberships before login, and provide the required test pool to every fixture. Removed authentication-body dumps from failure messages so token-bearing responses are not logged. All six real HTTP journeys plus two flag tests now pass in required mode. Product authorization was not relaxed. Commit `75b4df1`. |
+
+The design uses one owner for each lifetime: the HTTP body owns its runtime,
+the runtime owns its existing deadline/cancellation budget, and the send task
+owns composer cleanup. It adds neither another timeout policy nor an unbounded
+queue, retry loop, compatibility parser, or alternate execution path. The
+runtime ADR records this contract and refreshes its scoped `last-verified` date.
+
+### Verification run on 2026-10-25
+
+Commands below omit the shared build-cache path and synthetic fixture secrets.
+The full Rust suite used `goods4ncu_test` and a non-persistent Redis instance on
+`127.0.0.1:16379`. The explicitly enabled HTTP journeys used the separate
+`goods4ncu_audit_browser_test_20261010` database and its local HTTP server;
+`TEST_DATABASE_URL` matched that server's database.
+
+| Check | Command | Observed result |
+|---|---|---|
+| Backend compile | `cargo check --locked` | Pass. |
+| Rust formatting | `cargo fmt -- --check` | Pass, no differences. |
+| Rust lint gate | `cargo clippy --all-targets --locked -- -D warnings` | Pass, no warnings. |
+| Full Rust suite | `cargo test --locked -- --nocapture --test-threads=1` | Exit 0; 43 result blocks report 1,190 passed and 2 ignored. This includes duplicate lib/binary tests and conditional early returns; it is not a count of unique executed journeys. The library block is 446 passed, 1 ignored. |
+| Required chat HTTP suite | `TEST_BASE_URL=http://127.0.0.1:3000 CHAT_E2E_REQUIRED=true cargo test --locked --test chat_e2e -- --nocapture --test-threads=1` | 8 passed: six actual HTTP journeys and two required-mode flag tests. |
+| Two-process Redis delivery | `FANOUT_E2E=1 cargo test --locked --test ws_fanout_integration two_instances_deliver_across_processes -- --nocapture --test-threads=1` | 1 passed with real PostgreSQL, Redis, two backend processes, and a WebSocket client. |
+| Dart formatting (`mobile/`) | `dart format --output=none --set-exit-if-changed lib test` | 247 files, 0 changed. |
+| Flutter analyzer (`mobile/`) | `flutter analyze --no-pub` | No issues. |
+| Flutter suite (`mobile/`) | `flutter test --no-pub` | 522 passed. |
+| Architectural regression scans | `rg -n 'sqlx::query(_as|_scalar)?' src/api` and `rg -n 'ApiService' mobile/lib` | No matches. These are scoped scans, not proof of every possible architectural property. |
+| Whitespace | `git diff --check` | Pass. |
+
+The default Rust run skipped six live chat journeys and the cross-process
+fan-out test; the separate required/enabled runs above exercised them. Eight
+real S3 ACL tests still returned early without `S3_TEST_*` credentials. The two
+ignored results are the same sensitive moderation dataset audit in lib and
+binary targets. Neither S3 behavior nor that dataset audit is claimed verified.
+
+### Web build and browser evidence
+
+The unchanged client source was built on 2026-10-10 with
+`flutter build web --no-pub --dart-define=COMPANION_ENABLED=true`. The build
+succeeded; its optional Wasm dry run reported existing
+`flutter_secure_storage_web` incompatibilities. This was a JavaScript build,
+not a successful Wasm build.
+
+On 2026-10-25, Unicode decoding and a fresh HTTP fetch confirmed the served
+`main.dart.js` equals the local build. SHA-256:
+
+```text
+c6292fa7556829b621ecd052ada6ac34dfe03621b2f0ec45bebcde42777ef2c1
+```
+
+Decoded checks require `小昌`, `停止生成`, and `turn_cancelled`; `ApiService`,
+`活动地点`, and `publish-event-location` are absent. Plain Chinese-text searches
+of undecoded compiled JavaScript were not used as evidence.
+
+The 2026-10-10 Browser journey exercised login, partial streaming, stop,
+immediate resend, and a completed reply. The stopped reply remained visible
+without the service-error message; the next reply completed normally. Database
+inspection observed `cancelled` with `client_disconnect_or_timeout` for the
+disconnected run and `completed`/`runtime_completed` for the next turn. An old
+`localhost` tab continued executing its cached package after ordinary reload;
+the successful check used the clean `127.0.0.1` origin. Cache-sensitive users
+should hard-reload after a bundle swap. A refreshed-history journey was started
+but not conclusively observed before interruption, so history restoration is
+not signed off here.
+
+On 2026-10-25, the stopped local services were restored, health returned ready,
+and a real Browser login reached `/agent`. The sidebar browser was made visible
+and retained for user testing. Only the disposable audit database was recreated
+to resolve its fixed seed-account collision; its old synthetic data was removed
+and is not recoverable. The other development databases were not reset. The
+browser uses a deterministic local model fixture with the actual router,
+authentication, services, repositories, and PostgreSQL. This validates local
+transport/UI behavior, not a real external model, production moderation,
+object storage, or production readiness.
