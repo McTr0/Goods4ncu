@@ -1,5 +1,7 @@
 # ADR: Agent Runtime v2
 
+> last-verified: 2026-10-25 (event delivery, HTTP body ownership, and client cancellation)
+
 ## Status
 
 Accepted — 2026-08-24
@@ -57,6 +59,27 @@ Rebuild the agent execution layer in-place as **Agent Runtime v2**:
 7. **ActionPlan** remains the final permission boundary for L2/L3 writes.
 8. **Category immutability** after publish; tags remain freely editable.
 
+### Event delivery and response lifetime
+
+The HTTP response body owns an abort guard for its runtime task from body
+construction, before the first poll. Dropping an unread response or a partially
+consumed SSE stream therefore aborts the task and releases turn registration.
+
+The 128-event channel applies backpressure to text, UI actions, tool audit
+results, and terminal events. Capacity waits use the turn's existing deadline
+and cancellation signal. Cancellation and timeout still reach the terminal
+hooks when the channel is full; a terminal frame can only be delivered if the
+sink accepts it within those bounds. No additional timeout or unbounded queue
+is introduced. A consumer that resumes before cancellation or deadline receives
+the complete ordered stream.
+
+In Flutter, stopping closes the current SSE connection. The response guard
+aborts that connection's runtime; no second cancellation request needs to finish
+before the composer can recover. The send workflow owns final cleanup and keeps
+already received text. A server `turn_cancelled` is a normal terminal outcome;
+unexpected EOF without a stop request remains a protocol error. Cancelled turns
+do not produce relationship signals reserved for completed replies.
+
 ## What we do NOT do
 
 - Do not migrate to Python/Node sidecar (Hermes, Pi).
@@ -91,4 +114,4 @@ the same runtime events and retain provider tool-call correlation IDs.
   `AgentChatService`.
 - Flutter consumes structured events; the send button becomes a stop
   button during active turns.
-- Legacy code paths are deleted only after v2 is stable across all users.
+- Legacy code paths are deleted in-place; no parallel compatibility mode is retained.
