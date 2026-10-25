@@ -39,9 +39,8 @@ async fn register_user(
 
     assert_eq!(
         response.status(),
-        StatusCode::CREATED,
-        "Registration failed: {:?}",
-        response.text().await?
+        StatusCode::OK,
+        "Registration must match the public auth API contract"
     );
     Ok(response.json::<AuthResponse>().await?)
 }
@@ -64,14 +63,14 @@ async fn login_user(
     assert_eq!(
         response.status(),
         StatusCode::OK,
-        "Login failed: {:?}",
-        response.text().await?
+        "Login must match the public auth API contract"
     );
     Ok(response.json::<AuthResponse>().await?)
 }
 
 async fn create_test_user(
     client: &Client,
+    pool: &PgPool,
     base_url: &str,
     prefix: &str,
 ) -> anyhow::Result<TestUser> {
@@ -80,7 +79,20 @@ async fn create_test_user(
     let username = format!("{}_{}", prefix, unique_suffix);
     let password = "testpass123".to_string();
 
-    let _ = register_user(client, base_url, &username, &password).await?;
+    let registered = register_user(client, base_url, &username, &password).await?;
+    // Registration does not verify campus identity. These chat journeys start
+    // with verified peers, just as the public conversation API requires.
+    sqlx::query(
+        "INSERT INTO campus_memberships
+            (campus_id, user_id, status, verification_method, verified_at)
+         VALUES ($1, $2, 'verified', 'manual', NOW())
+         ON CONFLICT (campus_id, user_id) DO UPDATE
+         SET status = 'verified', verification_method = 'manual', verified_at = NOW()",
+    )
+    .bind(registered.active_campus_id)
+    .bind(&registered.user_id)
+    .execute(pool)
+    .await?;
     let login_response = login_user(client, base_url, &username, &password).await?;
 
     let preferences = client
@@ -107,6 +119,7 @@ struct AuthResponse {
     refresh_token: String,
     user_id: String,
     username: String,
+    active_campus_id: Uuid,
     message: String,
 }
 
@@ -426,8 +439,8 @@ async fn test_realtime_conversation_lifecycle() -> anyhow::Result<()> {
         return Ok(());
     };
 
-    let user_a = create_test_user(&client, &base_url, "user_a").await?;
-    let user_b = create_test_user(&client, &base_url, "user_b").await?;
+    let user_a = create_test_user(&client, &pool, &base_url, "user_a").await?;
+    let user_b = create_test_user(&client, &pool, &base_url, "user_b").await?;
     cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
 
     let conversation =
@@ -524,8 +537,8 @@ async fn test_mail_expectation_is_explicit_and_not_attention_state() -> anyhow::
         return Ok(());
     };
 
-    let user_a = create_test_user(&client, &base_url, "mail_a").await?;
-    let user_b = create_test_user(&client, &base_url, "mail_b").await?;
+    let user_a = create_test_user(&client, &pool, &base_url, "mail_a").await?;
+    let user_b = create_test_user(&client, &pool, &base_url, "mail_b").await?;
     cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
 
     let response = client
@@ -585,8 +598,8 @@ async fn test_message_sending() -> anyhow::Result<()> {
         return Ok(());
     };
 
-    let user_a = create_test_user(&client, &base_url, "msg_a").await?;
-    let user_b = create_test_user(&client, &base_url, "msg_b").await?;
+    let user_a = create_test_user(&client, &pool, &base_url, "msg_a").await?;
+    let user_b = create_test_user(&client, &pool, &base_url, "msg_b").await?;
     cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
     let conversation_id =
         create_active_realtime_conversation(&client, &base_url, &user_a, &user_b).await?;
@@ -641,8 +654,8 @@ async fn test_message_editing() -> anyhow::Result<()> {
         return Ok(());
     };
 
-    let user_a = create_test_user(&client, &base_url, "edit_a").await?;
-    let user_b = create_test_user(&client, &base_url, "edit_b").await?;
+    let user_a = create_test_user(&client, &pool, &base_url, "edit_a").await?;
+    let user_b = create_test_user(&client, &pool, &base_url, "edit_b").await?;
     cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
     let conversation_id =
         create_active_realtime_conversation(&client, &base_url, &user_a, &user_b).await?;
@@ -709,8 +722,8 @@ async fn test_cannot_send_to_non_active_realtime_conversation() -> anyhow::Resul
         return Ok(());
     };
 
-    let user_a = create_test_user(&client, &base_url, "noconn_a").await?;
-    let user_b = create_test_user(&client, &base_url, "noconn_b").await?;
+    let user_a = create_test_user(&client, &pool, &base_url, "noconn_a").await?;
+    let user_b = create_test_user(&client, &pool, &base_url, "noconn_b").await?;
     cleanup_pair(&pool, &user_a.user_id, &user_b.user_id).await?;
     let conversation =
         create_realtime_conversation(&client, &base_url, &user_a, &user_b, "This is still SYN.")
@@ -738,12 +751,14 @@ async fn test_cannot_send_to_non_active_realtime_conversation() -> anyhow::Resul
 
 #[tokio::test]
 async fn test_cannot_create_self_conversation() -> anyhow::Result<()> {
+    let database_url = db_safety::resolve_test_database_url();
+    let pool = PgPool::connect(&database_url).await?;
     let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
     let Some(base_url) = resolve_base_url(&client).await? else {
         return Ok(());
     };
 
-    let user_a = create_test_user(&client, &base_url, "self_chat").await?;
+    let user_a = create_test_user(&client, &pool, &base_url, "self_chat").await?;
     let response = client
         .post(format!("{}/api/chat/conversations", base_url))
         .headers(auth_headers(&user_a.token))
