@@ -1,6 +1,6 @@
 # ADR: Agent Runtime v2
 
-> last-verified: 2026-10-25 (event delivery, HTTP body ownership, and client cancellation)
+> last-verified: 2026-10-26 (event delivery, HTTP body ownership, and client connection lifetimes)
 
 ## Status
 
@@ -79,6 +79,15 @@ before the composer can recover. The send workflow owns final cleanup and keeps
 already received text. A server `turn_cancelled` is a normal terminal outcome;
 unexpected EOF without a stop request remains a protocol error. Cancelled turns
 do not produce relationship signals reserved for completed replies.
+
+Each Flutter connection attempt owns its HTTP client, subscription, event
+controller, and protocol validator. The service claims that owner before its
+first await and detaches it before disconnect cleanup. Credential/refresh
+continuations only send while their owner is current; retired attempts cannot
+reset a replacement's validator, close its resources, or surface stale HTTP
+errors. EOF closes the transport but retains queued events/errors for a late
+listener until explicit disconnect or replacement. Transport teardown does not
+wait for a paused UI consumer to drain the event controller.
 
 ## What we do NOT do
 
