@@ -16,19 +16,12 @@ typedef HttpClientFactory = http.Client Function();
 /// Connects to `POST /api/chat/stream` with JWT auth.
 /// Each SSE `data:` line is parsed as JSON and emitted via StreamController.
 class SseService {
-  static const int _maxPendingChars = 65536;
-
   final String _baseUrl;
   final AccessTokenProvider _getAccessToken;
   final RefreshAccessToken _refreshAccessToken;
   final HttpClientFactory _clientFactory;
 
-  http.Client? _client;
-  StreamController<AgentStreamEvent>? _controller;
-  StreamSubscription<String>? _streamSubscription;
-  bool _isConnected = false;
-  int _activeConnectionId = 0;
-  final _validator = AgentTurnValidator();
+  _SseConnection? _connection;
 
   SseService({
     String? baseUrl,
@@ -59,9 +52,9 @@ class SseService {
 
   /// Stream of parsed Agent Runtime v2 events.
   Stream<AgentStreamEvent> get stream =>
-      _controller?.stream ?? const Stream.empty();
+      _connection?.controller.stream ?? const Stream.empty();
 
-  bool get isConnected => _isConnected;
+  bool get isConnected => _connection?.isConnected ?? false;
 
   /// Connect to SSE stream. Idempotent — safe to call multiple times.
   Future<void> connect({
@@ -73,122 +66,86 @@ class SseService {
     String? audioUrl,
     String? idempotencyKey,
   }) async {
-    await disconnect();
-    final connectionId = _activeConnectionId;
-
-    var token = await _getAccessToken();
-    if (token == null || token.isEmpty) {
-      final refreshed = await _attemptRefresh();
-      if (refreshed) {
-        token = await _getAccessToken();
-      }
-    }
-
-    if (token == null || token.isEmpty) {
-      throw Exception('SSE: No JWT token — not authenticated');
-    }
-
-    final client = _clientFactory();
-    _client = client;
-    // Single-subscription stream preserves events that arrive before UI listener attaches.
-    _controller = StreamController<AgentStreamEvent>();
-    _validator.reset(expectedConversationId: conversationId);
-
-    final uri = Uri.parse('$_baseUrl/api/chat/stream');
-    final body = <String, dynamic>{'message': message};
-    if (conversationId != null) body['conversation_id'] = conversationId;
-    if (listingId != null) body['listing_id'] = listingId;
-    if (pageContext != null) body['page_context'] = pageContext;
-    if (imageUrl != null) body['image_url'] = imageUrl;
-    if (audioUrl != null) body['audio_url'] = audioUrl;
-
-    var streamedResponse = await _sendSseRequest(
-      client,
-      uri,
-      token,
-      body,
-      idempotencyKey: idempotencyKey,
+    final previous = _connection;
+    final connection = _SseConnection(
+      _clientFactory(),
+      expectedConversationId: conversationId,
     );
+    // Claim ownership before awaiting anything, including credentials and old
+    // teardown. A disconnect can retire this attempt before it sends a request.
+    _connection = connection;
 
-    if (connectionId != _activeConnectionId) {
-      client.close();
-      if (identical(_client, client)) {
-        _client = null;
-      }
-      return;
-    }
+    bool isCurrent() => identical(_connection, connection);
 
-    if (streamedResponse.statusCode == 401) {
-      final refreshed = await _attemptRefresh();
-      if (refreshed) {
-        final refreshedToken = await _getAccessToken();
-        if (refreshedToken != null && refreshedToken.isNotEmpty) {
-          streamedResponse = await _sendSseRequest(
-            client,
-            uri,
-            refreshedToken,
-            body,
-            idempotencyKey: idempotencyKey,
-          );
+    try {
+      await previous?.close();
+      if (!isCurrent()) return;
+
+      var token = await _getAccessToken();
+      if (!isCurrent()) return;
+      if (token == null || token.isEmpty) {
+        final refreshed = await _attemptRefresh();
+        if (!isCurrent()) return;
+        if (refreshed) {
+          token = await _getAccessToken();
+          if (!isCurrent()) return;
         }
       }
-    }
-
-    if (connectionId != _activeConnectionId) {
-      client.close();
-      if (identical(_client, client)) {
-        _client = null;
+      if (token == null || token.isEmpty) {
+        throw Exception('SSE: No JWT token — not authenticated');
       }
-      return;
-    }
 
-    if (streamedResponse.statusCode != 200) {
-      await _closeController(connectionId: connectionId);
-      client.close();
-      if (identical(_client, client)) {
-        _client = null;
+      final uri = Uri.parse('$_baseUrl/api/chat/stream');
+      final body = <String, dynamic>{'message': message};
+      if (conversationId != null) body['conversation_id'] = conversationId;
+      if (listingId != null) body['listing_id'] = listingId;
+      if (pageContext != null) body['page_context'] = pageContext;
+      if (imageUrl != null) body['image_url'] = imageUrl;
+      if (audioUrl != null) body['audio_url'] = audioUrl;
+
+      var response = await _sendSseRequest(
+        connection.client,
+        uri,
+        token,
+        body,
+        idempotencyKey: idempotencyKey,
+      );
+      if (!isCurrent()) return;
+
+      if (response.statusCode == 401) {
+        final refreshed = await _attemptRefresh();
+        if (!isCurrent()) return;
+        if (refreshed) {
+          final refreshedToken = await _getAccessToken();
+          if (!isCurrent()) return;
+          if (refreshedToken != null && refreshedToken.isNotEmpty) {
+            response = await _sendSseRequest(
+              connection.client,
+              uri,
+              refreshedToken,
+              body,
+              idempotencyKey: idempotencyKey,
+            );
+            if (!isCurrent()) return;
+          }
+        }
       }
-      if (streamedResponse.statusCode == 401) {
+
+      if (response.statusCode == 401) {
         throw Exception('SSE authentication failed: session expired');
       }
-      throw Exception('SSE connection failed: ${streamedResponse.statusCode}');
+      if (response.statusCode != 200) {
+        throw Exception('SSE connection failed: ${response.statusCode}');
+      }
+      connection.listen(response.stream);
+    } catch (_) {
+      final wasCurrent = isCurrent();
+      if (wasCurrent) _connection = null;
+      await connection.close();
+      // Closing a retired HTTP client can complete its pending send with an
+      // error. That belongs to the cancelled attempt, not its replacement.
+      if (wasCurrent) rethrow;
     }
-
-    _isConnected = true;
-    var pendingSseText = '';
-
-    _streamSubscription = streamedResponse.stream
-        .transform(utf8.decoder)
-        .listen(
-          (decodedChunk) {
-            if (connectionId != _activeConnectionId) {
-              return;
-            }
-            pendingSseText = _appendDecodedText(
-              connectionId: connectionId,
-              decodedChunk: decodedChunk,
-              pendingText: pendingSseText,
-            );
-          },
-          onError: (error, st) {
-            _failProtocol(connectionId, error, st);
-          },
-          onDone: () {
-            if (connectionId != _activeConnectionId) {
-              return;
-            }
-            _isConnected = false;
-            _streamSubscription = null;
-            try {
-              _validator.assertTerminalEventSeen();
-            } catch (error, st) {
-              _failProtocol(connectionId, error, st);
-              return;
-            }
-            unawaited(_closeController(connectionId: connectionId));
-          },
-          cancelOnError: true,
-        );
   }
 
   Future<http.StreamedResponse> _sendSseRequest(
@@ -210,150 +167,6 @@ class SseService {
     return client.send(request);
   }
 
-  void _emitEvent(int connectionId, AgentStreamEvent event) {
-    if (connectionId != _activeConnectionId) {
-      return;
-    }
-    final controller = _controller;
-    if (controller == null || controller.isClosed) {
-      return;
-    }
-    try {
-      controller.add(event);
-    } catch (_) {
-      // Ignore stale emissions racing with disconnect.
-    }
-  }
-
-  void _failProtocol(int connectionId, Object error, [StackTrace? stackTrace]) {
-    if (connectionId != _activeConnectionId) {
-      return;
-    }
-    _activeConnectionId += 1;
-    _isConnected = false;
-
-    final sub = _streamSubscription;
-    _streamSubscription = null;
-    try {
-      sub?.cancel();
-    } catch (_) {}
-
-    final client = _client;
-    _client = null;
-    try {
-      client?.close();
-    } catch (_) {}
-
-    final controller = _controller;
-    _controller = null;
-    if (controller != null && !controller.isClosed) {
-      try {
-        controller.addError(error, stackTrace);
-      } catch (_) {}
-      if (!controller.hasListener) {
-        unawaited(controller.close());
-      } else {
-        controller.close();
-      }
-    }
-  }
-
-  Future<void> _closeController({int? connectionId}) async {
-    if (connectionId != null && connectionId != _activeConnectionId) {
-      return;
-    }
-    final controller = _controller;
-    _controller = null;
-    if (controller == null || controller.isClosed) {
-      return;
-    }
-    if (!controller.hasListener) {
-      // Single-subscription controllers may never complete close() if no listener attaches.
-      unawaited(controller.close());
-      return;
-    }
-    await controller.close();
-  }
-
-  String _appendDecodedText({
-    required int connectionId,
-    required String decodedChunk,
-    required String pendingText,
-  }) {
-    if (connectionId != _activeConnectionId) {
-      return pendingText;
-    }
-    if (decodedChunk.isEmpty) {
-      return pendingText;
-    }
-
-    final normalized = decodedChunk
-        .replaceAll('\r\n', '\n')
-        .replaceAll('\r', '\n');
-    var updatedPendingText = pendingText + normalized;
-
-    while (true) {
-      if (connectionId != _activeConnectionId) {
-        return '';
-      }
-      final separatorIndex = updatedPendingText.indexOf('\n\n');
-      if (separatorIndex < 0) {
-        break;
-      }
-
-      final eventBlock = updatedPendingText.substring(0, separatorIndex);
-      updatedPendingText = updatedPendingText.substring(separatorIndex + 2);
-      _processSseEventBlock(connectionId, eventBlock);
-    }
-
-    // Keep memory bounded if server sends malformed chunks without separators.
-    if (updatedPendingText.length > _maxPendingChars) {
-      updatedPendingText = updatedPendingText.substring(
-        updatedPendingText.length - _maxPendingChars,
-      );
-    }
-
-    return updatedPendingText;
-  }
-
-  void _processSseEventBlock(int connectionId, String eventBlock) {
-    if (eventBlock.trim().isEmpty) {
-      return;
-    }
-
-    final lines = eventBlock.split('\n');
-    final dataLines = <String>[];
-
-    for (final line in lines) {
-      final trimmed = line.trimRight();
-      if (trimmed.startsWith('data:')) {
-        dataLines.add(trimmed.substring(5).trimLeft());
-      }
-    }
-
-    if (dataLines.isEmpty) {
-      return;
-    }
-
-    final payload = dataLines.join('\n').trim();
-    if (payload.isEmpty) {
-      return;
-    }
-
-    try {
-      final decodedJson = jsonDecode(payload) as Map<String, dynamic>;
-      final event = AgentStreamEvent.fromJson(decodedJson);
-      final isHeartbeat = _validator.validateEvent(event);
-      if (!isHeartbeat) {
-        _emitEvent(connectionId, event);
-      }
-    } catch (e, st) {
-      debugPrint('SSE validation error: $e — raw: $payload');
-      _failProtocol(connectionId, e, st);
-    }
-  }
-
-  /// Disconnect and clean up. Idempotent.
   /// POST cancel to the server for an in-flight turn.
   ///
   /// Uses an independent [http.Client] so the cancel request survives
@@ -383,16 +196,112 @@ class SseService {
   }
 
   Future<void> disconnect() async {
-    _activeConnectionId += 1;
-    _isConnected = false;
-    await _streamSubscription?.cancel();
-    _streamSubscription = null;
-    _client?.close();
-    _client = null;
-    await _closeController();
+    final connection = _connection;
+    _connection = null;
+    await connection?.close();
   }
 
   void dispose() {
     disconnect();
+  }
+}
+
+/// Resources and protocol state belong to one attempt, even after replacement.
+class _SseConnection {
+  _SseConnection(this.client, {String? expectedConversationId})
+    : _validator = AgentTurnValidator(
+        expectedConversationId: expectedConversationId,
+      );
+
+  static const int _maxPendingChars = 65536;
+
+  final http.Client client;
+  // Retain queued events/errors after EOF until the consumer attaches, or the
+  // service explicitly disconnects/replaces this connection.
+  final controller = StreamController<AgentStreamEvent>();
+  final AgentTurnValidator _validator;
+  StreamSubscription<String>? _subscription;
+  bool isConnected = false;
+  bool _closed = false;
+
+  void listen(Stream<List<int>> bytes) {
+    isConnected = true;
+    var pendingText = '';
+    _subscription = bytes
+        .transform(utf8.decoder)
+        .listen(
+          (chunk) {
+            if (_closed) return;
+            pendingText = _appendDecodedText(chunk, pendingText);
+          },
+          onError: _fail,
+          onDone: () {
+            if (_closed) return;
+            _subscription = null;
+            try {
+              _validator.assertTerminalEventSeen();
+            } catch (error, stackTrace) {
+              _fail(error, stackTrace);
+              return;
+            }
+            unawaited(close());
+          },
+          cancelOnError: true,
+        );
+  }
+
+  void _fail(Object error, StackTrace stackTrace) {
+    if (_closed) return;
+    controller.addError(error, stackTrace);
+    unawaited(close());
+  }
+
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    isConnected = false;
+    final subscription = _subscription;
+    _subscription = null;
+    client.close();
+    // Consumer completion is not transport teardown. A paused or not-yet
+    // attached listener must not hold the next connection's startup hostage.
+    unawaited(controller.close());
+    await subscription?.cancel();
+  }
+
+  String _appendDecodedText(String chunk, String pendingText) {
+    final normalized = chunk.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    var pending = pendingText + normalized;
+    while (!_closed) {
+      final separator = pending.indexOf('\n\n');
+      if (separator < 0) break;
+      final block = pending.substring(0, separator);
+      pending = pending.substring(separator + 2);
+      _processSseEventBlock(block);
+    }
+    // Preserve the existing bound for malformed chunks without separators.
+    if (pending.length > _maxPendingChars) {
+      pending = pending.substring(pending.length - _maxPendingChars);
+    }
+    return pending;
+  }
+
+  void _processSseEventBlock(String block) {
+    final dataLines = <String>[];
+    for (final line in block.split('\n')) {
+      final trimmed = line.trimRight();
+      if (trimmed.startsWith('data:')) {
+        dataLines.add(trimmed.substring(5).trimLeft());
+      }
+    }
+    final payload = dataLines.join('\n').trim();
+    if (payload.isEmpty) return;
+    try {
+      final json = jsonDecode(payload) as Map<String, dynamic>;
+      final event = AgentStreamEvent.fromJson(json);
+      if (!_validator.validateEvent(event)) controller.add(event);
+    } catch (error, stackTrace) {
+      _fail(error, stackTrace);
+    }
   }
 }

@@ -22,6 +22,29 @@ class _QueuedClient extends http.BaseClient {
   }
 }
 
+class _RecordingClient extends http.BaseClient {
+  _RecordingClient(this.respond);
+
+  final Future<http.StreamedResponse> Function(http.BaseRequest) respond;
+  final requests = <http.BaseRequest>[];
+  bool isClosed = false;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    requests.add(request);
+    return respond(request);
+  }
+
+  @override
+  void close() => isClosed = true;
+}
+
+String _completedTurn() => [
+  'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"c","seq":1,"type":"turn_started"}\n\n',
+  'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"c","seq":2,"type":"text_delta","text":"complete reply"}\n\n',
+  'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"c","seq":3,"type":"turn_completed","usage":{"model_steps":1,"tool_calls":0}}\n\n',
+].join();
+
 http.StreamedResponse _response(int statusCode, {String body = ''}) {
   return http.StreamedResponse(
     Stream.value(utf8.encode(body)),
@@ -32,6 +55,275 @@ http.StreamedResponse _response(int statusCode, {String body = ''}) {
 
 void main() {
   group('SseService', () {
+    test('disconnect while loading a token prevents a late request', () async {
+      final tokenRequested = Completer<void>();
+      final token = Completer<String?>();
+      final client = _RecordingClient((_) async => _response(200));
+      final service = SseService(
+        baseUrl: 'https://api.test',
+        getAccessToken: () {
+          tokenRequested.complete();
+          return token.future;
+        },
+        clientFactory: () => client,
+      );
+
+      final connecting = service.connect(message: 'stopped');
+      await tokenRequested.future;
+      await service.disconnect();
+      token.complete('test-token');
+      await connecting;
+
+      expect(client.requests, isEmpty);
+      expect(service.isConnected, isFalse);
+      await service.disconnect();
+    });
+
+    test('disconnect during refresh prevents an obsolete auth retry', () async {
+      final refreshing = Completer<void>();
+      final refreshed = Completer<bool>();
+      final client = _RecordingClient((_) async => _response(401));
+      final service = SseService(
+        baseUrl: 'https://api.test',
+        getAccessToken: () async => 'test-token',
+        refreshAccessToken: () {
+          refreshing.complete();
+          return refreshed.future;
+        },
+        clientFactory: () => client,
+      );
+
+      final connecting = service.connect(message: 'stopped');
+      await refreshing.future;
+      await service.disconnect();
+      refreshed.complete(true);
+      await connecting;
+
+      expect(client.requests, hasLength(1));
+      expect(client.isClosed, isTrue);
+      expect(service.isConnected, isFalse);
+    });
+
+    test(
+      'old teardown cannot block or close a replacement connection',
+      () async {
+        final cancelling = Completer<void>();
+        final releaseCancellation = Completer<void>();
+        final oldBody = StreamController<List<int>>(
+          onCancel: () {
+            cancelling.complete();
+            return releaseCancellation.future;
+          },
+        );
+        final newBody = StreamController<List<int>>();
+        final oldClient = _RecordingClient(
+          (_) async => http.StreamedResponse(oldBody.stream, 200),
+        );
+        final newClient = _RecordingClient(
+          (_) async => http.StreamedResponse(newBody.stream, 200),
+        );
+        final clients = [oldClient, newClient];
+        final service = SseService(
+          baseUrl: 'https://api.test',
+          getAccessToken: () async => 'test-token',
+          clientFactory: () => clients.removeAt(0),
+        );
+
+        await service.connect(message: 'old');
+        final teardown = service.disconnect();
+        await cancelling.future;
+        final replacement = service.connect(message: 'new');
+        try {
+          await replacement.timeout(const Duration(seconds: 1));
+          expect(newClient.requests, hasLength(1));
+          expect(newClient.isClosed, isFalse);
+          expect(service.isConnected, isTrue);
+        } finally {
+          releaseCancellation.complete();
+          await teardown;
+          await replacement;
+        }
+        expect(newClient.isClosed, isFalse);
+        expect(service.isConnected, isTrue);
+
+        final received = service.stream.toList();
+        newBody.add(utf8.encode(_completedTurn()));
+        await newBody.close();
+        expect(await received, hasLength(3));
+        await service.disconnect();
+        await oldBody.close();
+      },
+    );
+
+    test('replacement does not wait for a paused old consumer', () async {
+      final oldBody = StreamController<List<int>>();
+      final newBody = StreamController<List<int>>();
+      final oldClient = _RecordingClient(
+        (_) async => http.StreamedResponse(oldBody.stream, 200),
+      );
+      final newClient = _RecordingClient(
+        (_) async => http.StreamedResponse(newBody.stream, 200),
+      );
+      final clients = [oldClient, newClient];
+      final service = SseService(
+        baseUrl: 'https://api.test',
+        getAccessToken: () async => 'test-token',
+        clientFactory: () => clients.removeAt(0),
+      );
+
+      await service.connect(message: 'old');
+      final consumer = service.stream.listen((_) {});
+      consumer.pause();
+      final replacement = service.connect(message: 'replacement');
+      try {
+        await replacement.timeout(const Duration(seconds: 1));
+        expect(newClient.requests, hasLength(1));
+        expect(oldClient.isClosed, isTrue);
+      } finally {
+        await consumer.cancel();
+        await replacement;
+        await service.disconnect();
+        await oldBody.close();
+        await newBody.close();
+      }
+    });
+
+    test('completed events remain available to a late listener', () async {
+      final client = _QueuedClient([_response(200, body: _completedTurn())]);
+      final service = SseService(
+        baseUrl: 'https://api.test',
+        getAccessToken: () async => 'test-token',
+        clientFactory: () => client,
+      );
+
+      await service.connect(message: 'hello');
+      await Future<void>.delayed(Duration.zero);
+      expect(service.isConnected, isFalse);
+      final events = await service.stream.toList();
+      expect(events, hasLength(3));
+      expect(events[1].text, 'complete reply');
+      expect(events.last.type, 'turn_completed');
+      await service.disconnect();
+    });
+
+    test('protocol errors remain available to a late listener', () async {
+      final client = _QueuedClient([
+        _response(
+          200,
+          body:
+              'data: {"protocol_version":"2.0","turn_id":"t","conversation_id":"c","seq":99,"type":"text_delta","text":"gap"}\n\n',
+        ),
+      ]);
+      final service = SseService(
+        baseUrl: 'https://api.test',
+        getAccessToken: () async => 'test-token',
+        clientFactory: () => client,
+      );
+
+      await service.connect(message: 'hello');
+      await Future<void>.delayed(Duration.zero);
+      await expectLater(
+        service.stream.toList(),
+        throwsA(isA<ProtocolViolationException>()),
+      );
+      await service.disconnect();
+    });
+
+    test('a failed connection releases its own HTTP client', () async {
+      final client = _RecordingClient((_) async => throw StateError('offline'));
+      final service = SseService(
+        baseUrl: 'https://api.test',
+        getAccessToken: () async => 'test-token',
+        clientFactory: () => client,
+      );
+
+      await expectLater(service.connect(message: 'hello'), throwsStateError);
+      expect(client.isClosed, isTrue);
+      expect(service.isConnected, isFalse);
+      await service.disconnect();
+    });
+
+    test('late credentials cannot overwrite the replacement stream', () async {
+      final loadingToken = Completer<void>();
+      final oldToken = Completer<String?>();
+      final body = StreamController<List<int>>();
+      final clients = <_RecordingClient>[];
+      var tokenCalls = 0;
+      final service = SseService(
+        baseUrl: 'https://api.test',
+        getAccessToken: () {
+          if (tokenCalls++ == 0) {
+            loadingToken.complete();
+            return oldToken.future;
+          }
+          return Future.value('test-token');
+        },
+        clientFactory: () {
+          final client = _RecordingClient(
+            (_) async => http.StreamedResponse(body.stream, 200),
+          );
+          clients.add(client);
+          return client;
+        },
+      );
+
+      final oldConnect = service.connect(message: 'obsolete');
+      await loadingToken.future;
+      await service.connect(message: 'replacement');
+      final received = service.stream.toList();
+      oldToken.complete('test-token');
+      await oldConnect;
+      expect(
+        clients
+            .expand((client) => client.requests)
+            .map(
+              (request) =>
+                  jsonDecode((request as http.Request).body)['message'],
+            ),
+        ['replacement'],
+      );
+      expect(service.isConnected, isTrue);
+      body.add(utf8.encode(_completedTurn()));
+      await body.close();
+      expect(await received, hasLength(3));
+      expect(clients.every((client) => client.isClosed), isTrue);
+      await service.disconnect();
+    });
+
+    test('a retired HTTP send error cannot fail its replacement', () async {
+      final requested = Completer<void>();
+      final oldResponse = Completer<http.StreamedResponse>();
+      final body = StreamController<List<int>>();
+      final oldClient = _RecordingClient((_) {
+        requested.complete();
+        return oldResponse.future;
+      });
+      final newClient = _RecordingClient(
+        (_) async => http.StreamedResponse(body.stream, 200),
+      );
+      final clients = [oldClient, newClient];
+      final service = SseService(
+        baseUrl: 'https://api.test',
+        getAccessToken: () async => 'test-token',
+        clientFactory: () => clients.removeAt(0),
+      );
+
+      final oldConnect = service.connect(message: 'obsolete');
+      await requested.future;
+      await service.connect(message: 'replacement');
+      oldResponse.completeError(StateError('client closed'));
+      await oldConnect;
+      expect(service.isConnected, isTrue);
+      expect(oldClient.isClosed, isTrue);
+      expect(newClient.isClosed, isFalse);
+
+      final received = service.stream.toList();
+      body.add(utf8.encode(_completedTurn()));
+      await body.close();
+      expect(await received, hasLength(3));
+      await service.disconnect();
+    });
+
     test('parses server error events', () {
       final event = AgentStreamEvent.fromJson({
         'protocol_version': '2.0',
