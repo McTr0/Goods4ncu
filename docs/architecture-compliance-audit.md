@@ -1,9 +1,9 @@
 # Architectural Compliance Audit and Remediation Report
 
 > Historical report: sections 1–11 retain the original audit and its subsequent
-> corrections. The scoped follow-up in section 12 (2026-10-25) supersedes their
-> environment-dependent verification status; earlier sign-off is not a new
-> blanket certification of the current codebase.
+> corrections. The scoped follow-ups in sections 12–13 (latest: 2026-10-26)
+> supersede their environment-dependent verification status. Earlier sign-off
+> is not a new blanket certification of the current codebase.
 
 - **Date**: 2026-09-04
 - **Branch**: `main` (tracking `origin/main`)
@@ -559,3 +559,109 @@ browser uses a deterministic local model fixture with the actual router,
 authentication, services, repositories, and PostgreSQL. This validates local
 transport/UI behavior, not a real external model, production moderation,
 object storage, or production readiness.
+
+---
+
+## 13. Client SSE Ownership Follow-up — 2026-10-26
+
+### Scope, evidence, and remediation
+
+Baseline: `f2ea1ea`, clean `codex/audit-followup` worktree. This pass reviewed
+`SseService` connection setup, authentication retry, stream parsing/error
+delivery, disconnect/dispose, their callers and tests, and the local browser
+fixture lifecycle. It did not re-audit every backend domain or claim external
+infrastructure readiness.
+
+| Finding | Severity | Reproduced failure | Remediation |
+|---|---|---|---|
+| 23 — Cancelled authentication continuations still send | P1 | Resolving a token after disconnect issued a POST; completing a 401 refresh after disconnect issued a second obsolete POST. | Claim a connection owner before the first await, and check ownership after each credential/HTTP continuation before doing more work. |
+| 24 — Teardown and replacement share mutable resources | P1 | Holding the old subscription's cancellation pending prevented a replacement from starting. The shared client/controller/validator could be reassigned by late continuations. A paused old consumer also blocked replacement while cleanup awaited its controller's done future. | `_SseConnection` owns its HTTP client, subscription, controller, and validator. Disconnect detaches the owner before awaiting cleanup. Cleanup closes transport resources without waiting for application event consumption. Retired send errors cannot affect the replacement. |
+| 25 — EOF or protocol failure loses buffered events | P1 | Delaying listener attachment until after EOF returned an empty list instead of the complete three-event turn. A delayed listener also lost the protocol error. | Retain the closed connection's event stream until explicit disconnect/replacement. EOF releases transport, not unread buffered output; protocol errors use that same stream. |
+| 26 — Failed setup retains its HTTP client | P2 | A failing HTTP send left its client open after `connect` threw. | A single setup failure path releases that attempt's resources; active errors are rethrown, retired cancellation errors are contained within their own attempt. |
+| 27 — Browser fixture requires destructive restart recovery | P2 | The preceding temporary fixture inserted a fixed account on startup; restarting it had already produced a duplicate-account failure and a test database reset (section 12). | Add `examples/browser_fixture.rs`: no account seeding or database reset, loopback-only test database, production refusal, actual application router with deterministic model output, explicit local CORS, and an ephemeral signing key. Existing accounts and history survive restart. |
+
+Commit `e599138` contains the service change, matching runtime ADR, and nine new
+service regressions. Six tests failed against the initial implementation; the
+paused-consumer regression separately reproduced a controller-close hang before
+its cleanup fix. Two additional tests cover late credentials and retired HTTP
+errors while a replacement is active. Existing token-refresh, request/media
+shape, idempotency, heartbeat, sequence, terminal-event, and page tests remain.
+
+The production service shrank from 398 to 307 lines (91 fewer). Shared
+connection-number state, repeated shared-field cleanup, silent stale-emission
+catches, and consumer-dependent close branches were removed. There is no new
+timeout, retry policy, compatibility shim, public API protocol, or dependency.
+Commit `ee97f1a` adds the separate, development-only browser fixture with two
+automated safety/model-output tests.
+
+### Verification on 2026-10-26
+
+| Check | Command / observation | Result |
+|---|---|---|
+| Focused client coverage | `flutter test --no-pub test/services/sse_service_test.dart test/pages/chat_page_test.dart` | 40 passed: 29 service tests and 11 page tests. |
+| Dart formatting | `dart format --output=none --set-exit-if-changed lib test` | 247 files, 0 changed. |
+| Flutter analyzer | `flutter analyze --no-pub` | No issues. |
+| Flutter suite | `flutter test --no-pub` | 531 passed. |
+| Backend compile and formatting | `cargo check --locked`; `cargo fmt -- --check` | Pass. |
+| Rust lint | `cargo clippy --all-targets --locked -- -D warnings` | Pass, including the new example. |
+| Fixture tests | `cargo test --locked --example browser_fixture` | 2 passed: reject remote/non-test/production targets; deterministic text and exactly one stop without tool calls. |
+| Full Rust gate | `cargo test --locked -- --nocapture --test-threads=1` | Exit 0; 43 result blocks, 1,190 reported passed, 2 ignored. Includes lib/binary duplication and conditional early returns, not 1,190 unique live journeys. |
+| Required live chat HTTP | `CHAT_E2E_REQUIRED=true TEST_BASE_URL=http://127.0.0.1:3000 cargo test --locked --test chat_e2e -- --nocapture --test-threads=1` | 8 passed against the browser fixture's own audit database. |
+| Enabled cross-process fan-out | `FANOUT_E2E=1 cargo test --locked --test ws_fanout_integration two_instances_deliver_across_processes -- --nocapture --test-threads=1` | 1 passed with two backend processes and live Redis/PostgreSQL. |
+| Web build | `flutter build web --no-pub --dart-define=COMPANION_ENABLED=true` | JavaScript build succeeded. Existing secure-storage Wasm dry-run advisories remain; Wasm support is not claimed. |
+| Repository whitespace | `git diff --check` | Pass. |
+
+The full Rust gate used `goods4ncu_test` and disposable Redis on port 16379;
+the live HTTP suite used a separate audit database matching its server. As in
+section 12, the default run skipped six HTTP journeys and the process fan-out
+test; the explicit enabled runs above exercised them. Eight S3 ACL checks still
+lacked `S3_TEST_*` settings and returned early. The sensitive dataset audit
+remained ignored in both library and binary targets. These are not new passes.
+
+### Final bundle and real browser path
+
+The final local and HTTP-served `main.dart.js` hashes match:
+
+```text
+5e5393ce767e35ef1111ddcb1f755e572cd0d37cf482fbc9f0afd29ca1aa642c
+```
+
+Unicode-decoded assertions find `小昌`, `停止生成`, and `turn_cancelled`;
+`ApiService`, removed event-location controls/text, and the former raw-payload
+validation log prefix are absent. This hash differs from both the preceding
+test package and this pass's intermediate build.
+
+Codex Browser loaded the rebuilt app at `http://127.0.0.1:3001/agent` and
+verified streaming text, stopping without an error, immediate resend, a full
+100-chunk response, and usable composer recovery. A real reload restored the
+completed response and existing conversation records. This closes the
+refreshed-history verification gap explicitly left open in section 12.
+
+The new fixture was also stopped and restarted against the same database.
+Account and agent-run counts recorded before/after were unchanged, health
+returned ready, and Browser reload restored the prior completed response. The
+browser fixture did not reset its database or remove pre-existing accounts or
+history; HTTP regressions clean up their own new conversation fixtures. Model output is
+deterministic fixture data, not evidence about a real model, embeddings,
+moderation provider, or object storage.
+
+### Repeatable local browser fixture
+
+Set `AUDIT_DATABASE_URL` to a loopback database whose name contains `_test`,
+separate from the full regression suite's database. Then, from the repository:
+
+```bash
+APP_ENV=development cargo run --locked --example browser_fixture
+python3 scripts/serve_web.py
+```
+
+The fixture requires the database to exist and runs the repository's current
+migrations, which may themselves be destructive under development policy.
+It binds only `127.0.0.1:3000`, accepts the two local frontend
+origins on port 3001, and refuses any production environment label. It does not
+load an external model key, seed users/passwords, execute model tools, or perform
+an additional database/schema/data reset. Use an existing local test account,
+or create one through the usual local test workflow. The signing key is transient per
+process: existing accounts/history remain, but a client may need to refresh
+its session or log in again after a restart. This example is not a production
+server configuration.
