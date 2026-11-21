@@ -1,8 +1,19 @@
 # 小昌 Character System
 
+> last-verified: 2026-11-21
+
 小昌 is a Live2D character with a brain that gives every motion intent.
 
+**Current position:** this is the **legacy/fallback brain**. When
+`COMPANION_ENABLED=true` and the companion host is available, the companion
+runtime (`mobile/lib/companion/`, see `docs/companion-architecture.md`) is the
+primary path; the legacy brain takes over otherwise
+(`chat_page.dart` `_useLegacyBrain`). All behavior below still applies to that
+fallback path.
+
 ## Files
+
+All under `mobile/lib/components/live2d/`:
 
 | File | Purpose |
 |------|---------|

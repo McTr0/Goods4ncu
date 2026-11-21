@@ -1,4 +1,7 @@
-> last-verified: 2026-08-24 — taxonomy shipped: 3 fixed categories, curated tag catalog, errand as offer/wanted-only tag.
+> last-verified: 2026-11-21 — taxonomy v5 shipped: 8 post categories + 6 tags
+> (migration `0109_simplify_taxonomy.sql`); errand experiment retired
+> (`0101_post_taxonomy_v2.sql`); posts unified with listings
+> (`0099_unified_posts.sql`).
 
 # 校园帖子分类与关系设计
 
@@ -9,35 +12,38 @@
 
 ### 1. 行为层：用户在这里能做什么
 
-`post_type` 应保持精简：
+统一帖子模型（`0099_unified_posts.sql`）后，`posts.category` 携带行为，
+CHECK 约束限定为 `'offer' | 'wanted' | 'discussion'`。旧的
+`post_type`/`post_kind` 字段已删除；listing 通过可选的 `posts.listing_id`
+引用挂接——没有同步触发器、没有 UNIQUE 约束、没有镜像行，listing 与它的
+帖子是“同一对象、两个场景”的引用关系，不再是投影。
 
 | 行为 | 存储方式 | 主操作 | 生命周期事实源 |
 | --- | --- | --- | --- |
-| 讨论 | `posts.post_type = discussion` | 回复 | `posts` |
-| 闲置出售 | listing post + `inventory.direction = offer` | 联系 / 发起成交 | `inventory` |
-| 求购 | listing post + `inventory.direction = wanted` | 推荐我的商品 | `inventory` |
+| 讨论 | `posts.category = discussion` | 回复 | `posts` |
+| 闲置出售 | `posts.category = offer` + `listing_id` → `inventory.direction = offer` | 联系 / 发起成交 | `inventory` |
+| 求购 | `posts.category = wanted` + `listing_id` → `inventory.direction = wanted` | 推荐我的商品 | `inventory` |
 
-一条 inventory 和它的 listing post 是同一个对象在两个场景下的呈现。
-`inventory` 对价格、成色、方向和上下架状态负责；投影帖子只承载共享的校园讨论。
+### 2. 主题层：8 个分类 + 6 个标签（taxonomy v5）
 
-### 2. 主题/模板层：它解决哪一种校园需求
+发布与展示层使用 8 个固定分类
+（`mobile/lib/models/post_taxonomy.dart`，镜像 `0109_simplify_taxonomy.sql`）：
 
-大部分校园内容仍是讨论帖，通过分类、标签和发布模板表达：
+`announcement`、`offer`、`wanted`、`share`、`question`、`discussion`、
+`recruit`、`team_up`
 
-- 问答与课程求助；
-- 攻略与经验分享；
-- 校园互助和借用；
-- 失物招领；
-- 运动、学习、吃饭等活动搭子；
-- 社团与校园活动；
-- 租房、搬寝和室友协调；
-- 拼车与出行；
-- 实习、兼职和项目招募；
-- 学校或版主公告。
+标签收敛为 6 个：ttl 组（`urgent`、`longterm`）+ location 组 ×4；
+shipping/condition 标签已在 `0106_drop_shipping_condition_tags.sql` 移除。
 
-只有当一种内容需要权威结构化字段、不同主操作或独立生命周期时，才增加行为模板。
-例如失物招领以后可能需要 `found / claimed / returned`，活动可能需要时间、人数和报名
-状态。它们适合成为讨论帖上的结构化模板，而不是互相隔离的独立信息流。
+历史演化：`0100_post_taxonomy.sql` 首版引入 3 分类 + errand（跑腿）标签；
+`0101_post_taxonomy_v2.sql` **完全退役 errand 实验**；中间版本的
+`lost`/`found`/`help`/`event` 分类已在 `0109` 删除（帖子重映射到
+discussion/offer）。Q&A、攻略、互助、失物招领、活动搭子、社团、租房拼车、
+招募等校园需求现在都落在上述 8 分类 + 标签组合里，不再各自成类。
+
+注意：`src/categories.rs` 是**商品库存**分类（electronics/books/
+digitalAccessories/dailyGoods/clothingShoes/other），与帖子分类是两个正交
+轴，不要混用。
 
 ### 3. 关系层：两条内容为什么有关联
 
@@ -45,7 +51,7 @@
 
 | 关系 | 事实源 | 含义 |
 | --- | --- | --- |
-| 商品 ↔ 商品帖子 | `posts.listing_id` | 系统维护的一对一投影 |
+| 商品 ↔ 商品帖子 | `posts.listing_id` | 可选引用，由发布/编辑流程维护 |
 | 求购 → 闲置 | `wanted_responses` | 用户明确把一个有效商品推荐给一条有效求购 |
 | 帖子 → 回复 | `post_replies.post_id` | 同一公开讨论内的回应 |
 | 回复 → 回复 | `post_replies.reply_to_id` | 局部对话上下文，不是另一条帖子 |
@@ -63,16 +69,17 @@
 若实现显式跨帖链接，可以使用校园隔离的边表，例如
 `post_links(source_post_id, target_post_id, relation_type, origin, status)`。
 可用关系包括 `references`、`follow_up`、`duplicate_of` 和 `resolved_by`。
-商品投影与求购响应已有权威事实源，不应复制进这个表；API 只需把它们投影到统一的
+商品引用与求购响应已有权威事实源，不应复制进这个表；API 只需把它们投影到统一的
 相关内容响应中。
 
 ## 发现流与详情规则
 
-- 卡片徽标表达行为：**讨论、闲置、求购**；分类和标签表达主题。
-- 默认排序与个性化可以混排三种行为，用户仍能按行为明确筛选。
+- 卡片徽标表达分类：**offer / wanted / discussion / …** 共 8 类；标签表达
+  ttl 与地点。
+- 默认排序与个性化可以混排各分类，用户仍能按分类明确筛选。
 - 商品详情同时是交易事实和公开讨论的唯一详情层级，不再建立第二个商品帖子详情页。
-- 回复不能自动创建交易、匹配、活动报名或失物认领；这些动作必须形成显式业务记录。
-- 商品生命周期变化应自动隐藏或归档投影帖子；普通讨论按自身审核状态独立保留。
+- 回复不能自动创建交易或匹配；这些动作必须形成显式业务记录。
+- 商品生命周期变化应自动隐藏或归档挂接的帖子；普通讨论按自身审核状态独立保留。
 - 暴露关系之前必须检查校园、可见性、审核和生命周期；禁止跨校园关系。
 
 ## 本地演示场景
@@ -81,7 +88,7 @@
 
 - 2 条闲置与 4 条求购；
 - pending 和 accepted 两种显式求购响应；
-- 5 条覆盖搬寝、学习、互助、失物和活动搭子的讨论；
-- 6 条回复，其中包含一条 reply-to 关系。
+- 覆盖搬寝、学习、互助、失物和活动搭子的讨论；
+- 回复中包含一条 reply-to 关系。
 
 自行车求购特意保持无匹配，用来验证系统能给出有用的空状态，而不是伪造关系。

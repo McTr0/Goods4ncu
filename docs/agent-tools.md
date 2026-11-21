@@ -1,12 +1,18 @@
 # Agent Tools Reference
 
-> last-verified: 2026-08-23
+> last-verified: 2026-11-21
 
 
-Tools are defined in `src/agents/tools.rs`. All tools share a `ToolContext`
+Tools live in the `src/agents/tools/` module directory (`listing.rs`,
+`social.rs`, `trade.rs`, `common.rs`). Registry metadata — names, risk
+levels, timeouts — is declared in `src/agents/tools/registry.rs`
+(`ToolRegistry::marketplace()`, 13 tools). All tools share a `ToolContext`
 with the DB pool, current user, campus scope, moderation, and notifications.
+The runtime (`src/agents/runtime/engine.rs`) resolves each call by name
+through the registry and dispatches execution through a `ToolExecutor`
+closure; there is no per-provider ReAct loop.
 
-## Read Tools (L0 — no confirmation)
+## Read Tools (ReadOnly — execute immediately)
 
 | Tool | Description |
 |------|-------------|
@@ -17,25 +23,41 @@ with the DB pool, current user, campus scope, moderation, and notifications.
 | `find_related_posts` | Similar listings (same category, ±40% price). Emits `SHOW_POSTS`. |
 | `get_comments` | Recent messages in a conversation. Participants only; others get `[hidden]`. |
 
-## Write Tools (L2/L3 — HITL confirmation required)
+## Draft Tools (ReadOnly risk — effect happens outside the agent)
 
-| Tool | Confirmation |
-|------|-------------|
-| `draft_message` | Generates a draft without sending. Frontend shows 发送/编辑/取消 dialog. |
-| `negotiate_item` | Seller must approve before order creation. |
-| `purchase_item_intent` | Creates deal intent; requires offline deal confirmation. |
-| `create_listing` / `update_listing` / `delete_listing` | Moderation gate + owner check. |
+`draft_message` and `draft_comment` are registered `RiskLevel::ReadOnly`
+because they only generate text; sending is always a separate user action.
+The tool emits an `OPEN_MESSAGE_DRAFT` / `OPEN_COMMENT_DRAFT` UI action and
+the frontend shows a 发送/编辑/取消 dialog before anything is sent.
+
+## Write Tools (HITL confirmation required)
+
+| Tool | Risk / Confirmation |
+|------|---------------------|
+| `create_listing` | `Recoverable` — executes immediately with a conditional undo window (`src/services/undo.rs`); moderation gate + owner check apply. |
+| `update_listing` / `delete_listing` | `RequiresConfirmation` — proposes an L2 ActionPlan; executes only after user confirmation. |
+| `purchase_item` | `RequiresConfirmation` (L3) — creates a deal intent with a two-token confirmation; deal completes offline after seller confirmation. |
+| `negotiate_item` | `RequiresConfirmation` (L3, two-token) — seller must approve/counter before any order is created. |
+
+Moderation and owner checks live in the execution layer
+(`ListingCommandService.check_text` + owner-scoped results), not in the
+tool registry itself.
 
 ## Adding a New Tool
 
-1. Define `Args`, the struct, and `impl Tool` in `src/agents/tools.rs`.
-2. Add to `all_tool_schemas()` test list.
-3. Register in each LLM provider (`src/llm/gemini.rs`, `minimax.rs`,
-   `openai_compatible.rs`) with `.tool(...)`.
-4. For ReAct dispatch: add variant to `StepActionType` and match arm in
-   `execute_action`.
-5. If the tool produces results worth showing, emit a `UiAction` from the
-   Gemini stream handler.
+1. Define `Args`, the struct, and `impl Tool` in the matching domain module
+   under `src/agents/tools/`.
+2. Register a `ToolSpec` (risk, execution class, timeout) in
+   `ToolRegistry::marketplace()` — the engine rejects unregistered names.
+3. Add the tool to the `all_tool_schemas()` test list
+   (`src/agents/tools/tests.rs`).
+4. Register the tool with `.tool(...)` in the two provider paths that own
+   tool wiring: `src/llm/gemini.rs` and `src/llm/openai_compatible.rs`
+   (MiniMax rides the OpenAI-compatible driver; there is no separate
+   minimax.rs).
+5. If the tool produces results worth showing, embed a `UiAction` in its
+   `ToolResultEnvelope` — the runtime re-emits each as a UI action event.
+   Constructors for all UI actions live in `src/llm/mod.rs`.
 
 ## Privacy Rules
 

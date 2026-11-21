@@ -1,5 +1,7 @@
 # Avatar interaction system
 
+> last-verified: 2026-11-21
+
 ## Product contract
 
 Avatar actions are explicit presentation feedback, not presence facts. The UI
@@ -7,65 +9,73 @@ may play an action after a local tap, character selection, publish success, or
 another user-visible event. It must not turn `online`, `read`, `typing`, push
 delivery, or inferred emotion into character motion.
 
-Callers send semantic cues (`wave`, `celebrate`, `thinking`) through
-`AvatarActionController`. Each call carries a monotonically increasing local
-revision, so the same action can be replayed without briefly switching to an
-unrelated state. Renderers map those cues to their own frames, bones, or
-parameters; feature pages never address animation frames directly.
+Callers send semantic cues (`wave`, `celebrate`, `thinking`, `poke`,
+`highFive`, …) through `AvatarActionController`
+(`mobile/lib/components/social_persona_renderer.dart`). Each call carries a
+monotonically increasing local revision, so the same action can be replayed
+without briefly switching to an unrelated state. Renderers map those cues to
+their own frames, bones, or parameters; feature pages never address animation
+frames directly.
 
-## Progressive rendering stack
+## Current rendering reality
 
-1. **Poster and transform layer (shipped baseline).** Every character has a
-   512 px transparent WebP poster. Lists at 24/48 px stay static. Large previews
-   use translate, rotate, and scale only, within a `RepaintBoundary`.
-2. **Authored sprite layer.** Frequently used actions can add a versioned sprite
-   atlas and manifest while keeping the same semantic cue API. This is the
-   default upgrade for broad Android, iOS, and Web coverage.
-3. **Rigged flagship layer.** A small number of detail/relationship surfaces may
-   lazy-load Rive or an approved Live2D Cubism runtime. The locally supplied
-   `Doro/` source is a Cubism 3 model with physics, expressions, and an idle
-   motion. It should only be bundled after its redistribution/runtime licences
-   are recorded; unsupported devices fall back to the same poster.
+There is one shipped renderer: a static Doro PNG portrait
+(`assets/live2d/doro/icon.png`) that plays cue-driven motion above the
+`size >= 96` threshold and stays static below `32` px
+(`social_persona_renderer.dart`). There are no WebP posters, no sprite
+atlas/manifest layer, and no Rive dependency in `pubspec.yaml`.
 
-The feature layer therefore remains independent of Rive, Live2D, or a future
-3D renderer. A renderer only needs to implement the cue contract and provide a
-poster fallback.
+The full Live2D Cubism rig (`Doro.moc3`, physics, expressions, idle motion)
+belongs to the **companion stage** (`mobile/web/live2d_stage.js`,
+`mobile/lib/companion/cubism/`) — not to social-avatar surfaces. See
+`docs/companion-architecture.md` for that stack.
 
-## Interaction mapping
+## Cue catalogue
 
-| User-visible event | Cue | Default rendering |
+| User-visible event | Cue | Rendering |
 | --- | --- | --- |
 | Tap or press | `pressed` | quick squash |
 | Choose character | `selected` | short lift |
 | Tap “打招呼” | `wave` | side-to-side greeting |
-| Publish or finish a task | `celebrate` | jump and bounce |
+| Publish or finish a task | `celebrate` / `published` | jump and bounce |
 | Tap “思考” or assistant is locally composing | `thinking` | slow tilted bob |
-| User confirms an action | `confirmedByUser` | small affirmative lift |
+| User confirms an action | `confirmedByUser` / `acknowledge` | small affirmative lift |
+| Interaction with a contact | `poke`, `highFive`, `encourage` | one-shot gesture |
 
-Actions should run once and return visually to a neutral poster. Continuous
-idle is allowed only on a focused large surface and must respect reduced-motion
-settings.
+`AvatarChoreographyController`
+(`mobile/lib/components/avatar_choreography_controller.dart`) decides when
+cues fire and never subscribes to presence, read, or typing state — the
+product-contract boundary is enforced in code, not convention.
+
+## Persisted interactions
+
+Avatar interactions between contacts are recorded as `avatar_interaction`
+chat messages (migration `0091_avatar_interactions.sql`) with per-contact
+recipient policies (`wave` / `poke` / `high_five` / `encourage`) and contact
+overrides. Replaying an interaction re-runs the same cue on both sides
+instead of inventing motion from chat state.
+
+## Catalog rules (SocialPersona)
+
+Avatars are SocialPersona-only: the server catalog restricts characters to
+`doro` (`src/services/social_persona.rs`) and forbids user uploads or
+arbitrary avatar URLs; the client resolves legacy avatar tokens to `doro`
+(`social_persona_renderer.dart`). Multi-character poster/sprite premises from
+the 2026-08 design are retired until a second character actually ships.
 
 ## Performance budgets
 
-- Poster: 512×512 WebP with alpha, normally under 50 KB.
-- Decode buckets: 96 px for list/profile tokens, 320 px for 160 px previews,
-  and 512 px only for large detail surfaces.
+- Static portrait is a single PNG; no decode-bucket pipeline exists yet.
+- Motion plays only on surfaces ≥ 96 px and is suppressed below 32 px.
 - At most one continuously animated avatar per screen; off-screen and route
   background avatars stop ticking.
-- Sprite atlases are lazy-loaded and cached by manifest version. Rigged models
-  are never loaded by list cells and should be released when the detail route
-  is disposed.
-- `MediaQuery.disableAnimations` always selects a static frame. Battery saver
-  and low-memory hooks can force the same poster-only path later.
+- `MediaQuery.disableAnimations` always selects the static frame. Battery
+  saver and low-memory hooks can force the same static path later.
 
-## Doro model integration gate
+## Future upgrade paths (not built)
 
-The supplied `Doro/` directory contains `Doro.moc3`, one 2048 texture, physics,
-eleven expressions, and an idle motion. Before shipping the rigged runtime:
-
-1. record the model redistribution licence and the Cubism SDK/runtime terms;
-2. export a deterministic poster and small action regression set;
-3. prototype lazy loading on Android, iOS, CanvasKit, and HTML renderers;
-4. measure first-frame time, resident texture memory, GPU time, and battery;
-5. retain poster fallback for Web, reduced motion, and failed model loads.
+Poster/decode-bucket layers, versioned sprite atlases, and a rigged flagship
+layer (Rive or bundled Cubism) remain design options behind the same cue
+contract. Bundling the Cubism runtime for avatar surfaces still requires
+recording redistribution/runtime licences first — the companion stage's
+licensing status is tracked in `docs/companion-architecture.md`.
