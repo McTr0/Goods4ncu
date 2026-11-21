@@ -17,9 +17,8 @@ dotenvy = "0.15"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing = "0.1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
-rig-postgres = "0.2.2"
-sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio-rustls", "uuid", "chrono", "json", "migrate", "derive"] }
-pgvector = "0.4"
+sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio-rustls", "uuid", "chrono", "json", "migrate", "macros", "derive"] }
+pgvector = { version = "0.4", features = ["sqlx"] }
 uuid = { version = "1.22.0", features = ["v4", "serde"] }
 axum = { version = "0.8", features = ["json", "ws"] }
 tower = "0.5"
@@ -38,7 +37,6 @@ sha1 = "0.10"
 sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"
-tokio-tungstenite = "0.28"
 futures-util = "0.3"
 futures = "0.3"
 # `default-features = false` drops the protobuf exposition format, which pulls
@@ -50,6 +48,8 @@ prometheus = { version = "0.13", default-features = false }
 # `test-util` enables the paused clock used by lifecycle tests, so worker
 # shutdown on long intervals is verified without real sleeps. Not in "full".
 tokio = { version = "1.34", features = ["full", "test-util"] }
+# WebSocket client used by the cross-process fanout E2E test only.
+tokio-tungstenite = "0.28"
 
 [features]
 # `redis` is on by default so release binaries can join a multi-replica
