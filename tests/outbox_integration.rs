@@ -36,7 +36,7 @@ impl OutboxDispatcher for RecordingDispatcher {
     async fn dispatch(&self, topic: &str, payload: &serde_json::Value) -> anyhow::Result<()> {
         if self
             .failures_remaining
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
             .is_ok()
         {
             anyhow::bail!("injected dispatch failure");
