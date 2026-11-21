@@ -1,4 +1,4 @@
-> last-verified: 2026-08-23
+> last-verified: 2026-11-21
 
 # Platform Tools
 
@@ -14,7 +14,8 @@ trade-off vs spec §30).
 
 Tool activity reaches the character: TOOL_STARTED emits `tool_using_<name>`;
 the BehaviourPlanner maps retrieval tools to a looping toolWorking plan at
-SPEECH_GESTURE priority, with friendly progress copy ("正在翻帖子…" >500 ms).
+SPEECH_GESTURE priority, with friendly progress copy ("正在翻帖子…") shown
+as soon as the tool starts and no reply text has arrived yet.
 
 UI actions: SHOW_POSTS, HIGHLIGHT_POST, SCROLL_TO_POST, OPEN_POST,
 OPEN_PROFILE, OPEN_MESSAGE_DRAFT, OPEN_COMMENT_DRAFT — dispatched through

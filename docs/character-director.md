@@ -1,9 +1,12 @@
-> last-verified: 2026-08-23
+> last-verified: 2026-11-21
 
 # Character Director
 
 The director converts *why* into *what*: states, signals and emotions become
 semantic motion plans; nothing above the library knows clip names (§25–26).
+There is no `CharacterDirector` class — this role is played by
+`CompanionRuntimeHost` driving `BehaviorPlanner` and `AnimationScheduler`
+(`mobile/lib/companion/runtime_host.dart`).
 
 Pipeline: event → BehaviorPlanner.planForState/planForSignal → MotionPlan →
 AnimationScheduler.request → renderer hooks (clip / gaze / tilt).

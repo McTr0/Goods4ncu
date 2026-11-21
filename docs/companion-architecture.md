@@ -1,6 +1,6 @@
 # Companion Architecture
 
-> last-verified: 2026-09-02
+> last-verified: 2026-11-21
 
 
 The companion is a **runtime**, not a chat window: a persistent Dart-side
@@ -26,7 +26,7 @@ agency around the existing campus marketplace.
                  CompanionRuntimeHost
               machine · emotions · attention
                          │
-            CharacterDirector (scheduler+planner)
+            BehaviorPlanner → plans (scheduler+planner role)
                          │
         ┌────────────────┼────────────────┐
         │                │                │
@@ -75,6 +75,9 @@ behaviour.
 
 ## Flags
 
-- `COMPANION_ENABLED=false` (dart-define) removes the runtime shell entirely.
+- `COMPANION_ENABLED=false` (dart-define) removes the companion runtime shell;
+  the legacy 小昌 brain (`mobile/lib/components/live2d/`) still renders the
+  character on the chat page as the fallback path.
 - `AGENT_ENABLED=false` (env) disables AI endpoints server-side.
-Both off ⇒ the original marketplace, byte-for-byte.
+Both off ⇒ the pre-companion marketplace experience (no agent AI, no
+companion runtime), not the agent-first product.

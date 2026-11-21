@@ -1,6 +1,6 @@
 # Agent 系统设计：从理解意图到受控行动
 
-> last-verified: 2026-08-31
+> last-verified: 2026-11-21
 
 
 | 项目 | 内容 |

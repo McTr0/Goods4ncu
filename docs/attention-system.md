@@ -1,4 +1,4 @@
-> last-verified: 2026-08-23
+> last-verified: 2026-11-21
 
 # Attention System
 
@@ -11,5 +11,6 @@ Gaze flows through `GazeSmoother` (exponential approach, snap-on-settle) so
 the eyes glide instead of teleporting (§42). The host ticker publishes
 smoothed values to the body every frame.
 
-Attention changes are announced on the bus (`ATTENTION_CHANGED`) and rendered
-live in the debug console.
+Attention changes are announced on the bus (`ATTENTION_CHANGED`); the runtime
+host consumes them to re-plan behavior and gaze targets. (The debug console
+surface was removed 2026-08-24.)

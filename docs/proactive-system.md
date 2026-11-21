@@ -1,12 +1,15 @@
-> last-verified: 2026-08-23
+> last-verified: 2026-11-21
 
 # Proactive System
 
 The engine decides *whether* to react, never what to say (§36). Triggers:
-post_opened, search_results, message_received, tool_completed.
+post_opened, search_results, message_received, tool_completed. The runtime
+host currently fires the first three; `tool_completed` is defined but not
+yet wired from environment events.
 
 Reactions are levelled (§38): 0 gesture-only, 1 micro reaction, 2 brief
-comment, 3 suggestion. Defaults stay at 0/1; speech-grade levels respect a
+comment, 3 suggestion. Default caps sit at 0/1, with `message_received`
+defaulting to 2 (brief comment); speech-grade levels respect a
 90 s global spoken cooldown, degrading to a silent micro reaction instead of
 talking more (§39, §79).
 

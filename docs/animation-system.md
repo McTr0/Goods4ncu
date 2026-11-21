@@ -1,4 +1,4 @@
-> last-verified: 2026-08-23
+> last-verified: 2026-11-21
 
 # Animation System
 
