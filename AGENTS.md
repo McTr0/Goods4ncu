@@ -2,9 +2,15 @@
 
 ## Project Structure & Module Organization
 
-`src/` contains the Rust backend. Keep HTTP handlers in `src/api/`, business logic in `src/services/`, data access in `src/repositories/`, agent logic in `src/agents/`, middleware in `src/middleware/`, and provider integrations in `src/llm/`. Put schema changes in numbered files under `migrations/` such as `0017_add_feature.sql`.
+Goods4ncu (续樟) is a trusted campus marketplace: Rust/Axum backend + PostgreSQL/pgvector, Flutter mobile & web client, and an agent-first Live2D companion (小昌). Listings are two-directional (`offer`/`wanted`). The Cargo package is named `goods4ncu` even if the checkout dir is `good4ncu`.
+
+`src/` contains the Rust backend. Keep HTTP handlers in `src/api/`, business logic in `src/services/`, data access in `src/repositories/`, agent logic in `src/agents/`, middleware in `src/middleware/`, and provider integrations in `src/llm/`. Put schema changes in numbered files under `migrations/` such as `0116_add_feature.sql` (current head: `0115_post_idempotency.sql`).
 
 `tests/` holds Rust integration and regression suites like `chat_integration.rs` and `admin_auth_regression.rs`. The Flutter app lives in `mobile/`: feature code is under `mobile/lib/`, and Dart tests live in `mobile/test/`. Longer design notes and setup references are in `docs/`.
+
+Before touching agent or moderation logic, read `docs/agent-safety.md` and `docs/trust-safety.md`.
+
+Gitignored local directories: `Doro/` (Live2D model assets for the companion), `uploads/` (runtime uploads), and `sensitive_data_archive/` (sensitive-word/moderation test dataset — never commit it or paste its contents into prompts, logs, or PRs).
 
 ## Build, Test, and Development Commands
 
@@ -12,7 +18,9 @@ Use `cargo check --locked` for a fast backend compile check. Run `cargo run` to 
 
 For quicker backend validation, `cargo test --lib` runs library tests only. For mobile work, run `cd mobile && flutter pub get`, then `flutter analyze` and `flutter test`.
 
-DB-backed backend tests need PostgreSQL with `pgvector` plus local secrets such as `DATABASE_URL`, `TEST_DATABASE_URL`, `JWT_SECRET`, and an LLM key. Sample config lives in `docs/.env.example` and `docs/config.toml.example`.
+DB-backed backend tests need PostgreSQL with `pgvector` plus local secrets such as `DATABASE_URL`, `TEST_DATABASE_URL`, `JWT_SECRET`, and an LLM key. Sample config lives in `docs/.env.example` and `docs/config.toml.example`; `docker compose up -d db` starts the local PostgreSQL 16 + pgvector (service `db` on :5432). Demo/seed data comes from `scripts/seed_demo_*.sql` and `scripts/seed_posts_data.sql`, with accounts documented in `docs/local-test-accounts.md`.
+
+The `redis` Cargo feature is default-on: with `REDIS_URL` set the backend joins multi-replica fanout and distributed rate limiting; without it the instance runs single-node.
 
 If the user says Codex was restarted, assume local long-running processes may have been killed. Before continuing GUI work or integration validation, check and restart the relevant services, typically the Rust backend on `127.0.0.1:3000` and the Flutter Web/static frontend on `127.0.0.1:3001`.
 
