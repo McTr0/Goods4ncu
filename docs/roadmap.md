@@ -114,7 +114,7 @@
 - [已实现] 未认证用户从后端无法发布、联系、响应需求、加入空间或创建成交意向，不只依赖隐藏 UI。
 - [部分完成] 集成测试已证明 NCU 公开市场无法读取 B 校园 listing、跨校园用户不能创建直聊、子业务事实不能关联另一校园 listing；active session 测试覆盖 token claim、refresh 绑定、切换轮换和旧 access 撤销；推荐、公开主页、通知、校园后台、审核队列和案件/申诉的双校园隔离也有回归覆盖。近期认证测试证明旧/刷新 token 不能执行后台敏感写入。统一 extractor 已落地（`src/api/session.rs`，迁移由全量回归套件验证）。平台管理员 TOTP MFA 已落地并有注册/强制/防重放回归覆盖（`tests/admin_auth_regression.rs`）。RLS 策略已安装并在非超级用户角色下验证隔离与写拒绝（`tests/rls_integration.rs`）；生产应用角色绝不可为 superuser（superuser 完全绕过 RLS）。尚需补充浏览器多运营角色验收矩阵。
 - 重复写请求不会创建重复 listing、conversation、message 或 DealRecord。
-- [部分完成] API 层已保证未审核媒体不通过任何公开接口返回（回归覆盖 pending/rejected/approved 三态与所有者例外）；对象存储直链的私有化仍需 bucket ACL。审核失败和 provider 故障有安全降级（failed 状态同样不公开）。
+- [已实现] API 层已保证未审核媒体不通过任何公开接口返回（回归覆盖 pending/rejected/approved 三态与所有者例外）；对象存储层私有化已实现并经真实 MinIO 验证（bucket 私有、owner-scoped presigned PUT、approved 门槛短期 presigned GET，`tests/storage_acl_integration.rs`）。审核失败和 provider 故障有安全降级（failed 状态同样不公开）。CDN 前置与缩略图派生仍待接入。
 - [部分完成] PITR 恢复流程已脚本化并本地演练通过（含验收断言）；对生产级数据量与真实备份存储的 RPO 15 分钟 / RTO 2 小时验证仍需生产环境执行。
 - 普通 API、Feed、消息和 Agent 指标可观察并有告警。
 - [已实现] SIGTERM 后 readiness 立即失败、liveness 保持通过、在途请求不被截断、Worker 不在事务中途退出；`tests/lifecycle_probes_integration.rs` 覆盖探针状态机。滚动发布的多副本验证仍属 Phase 4。

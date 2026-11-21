@@ -1,15 +1,21 @@
 # Agent Safety
 
-> last-verified: 2026-08-23
+> last-verified: 2026-11-21
 
 
-## Confirmation Boundaries (L0–L3)
+## Confirmation Boundaries
 
-| Level | Actions | Behavior |
-|-------|---------|----------|
-| L0 | Read-only tools | Execute immediately |
-| L2 | draft_message, negotiate_item | HITL confirmation before effect |
-| L3 | purchase_intent, delete_listing | Explicit user approval in UI |
+Risk levels come from `RiskLevel` in `src/agents/tools/registry.rs`. The
+legacy L0/L2/L3 labels used in `agent-tools.md` map L0 → ReadOnly and
+L2/L3 → the two write tiers; `draft_message`/`draft_comment` are `ReadOnly`
+risk because they only generate text — sending is always a separate user
+action.
+
+| RiskLevel | Tools | Behavior |
+|-----------|-------|----------|
+| ReadOnly | search_inventory, get_listing_details, get_my_listings, get_user_posts, find_related_posts, get_comments, draft_message, draft_comment | Execute immediately; draft tools produce text only and never send |
+| Recoverable | create_listing | Execute immediately with an undo window; moderation gate + owner check |
+| RequiresConfirmation | update_listing, delete_listing, purchase_item, negotiate_item | HITL confirmation before any effect |
 
 The agent **never** sends messages, creates orders, or deletes data without
 user confirmation. The frontend enforces this with confirmation dialogs.

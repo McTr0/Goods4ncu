@@ -79,7 +79,7 @@ POST /api/posts
   -> 返回 post JSON
 ```
 
-当前已建立 `Campus`/`CampusMembership`、核心资源、通知、审核任务和管理审计的 `campus_id`、同校园写门禁和设备级 active campus session。新 access JWT 带可选 `campus_id`，refresh token 记录同一校园；登录、注册、刷新和切换都会保持二者一致。`CampusService` 在每次受保护操作重新验证 membership，不能只相信 claim。旧 token 缺少 claim 时才回退到首个可用 membership。推荐、公开用户页和通知已跟随活动校园；后台使用独立 `AdminScope` 复核数据库角色，校园运营可读本校，平台管理员跨校园必须给理由并审计。平台管理员写操作还要求 access token 的 `auth_time` 在 10 分钟内；refresh、切换校园和旧 token 会自动回到锁定状态。普通 handler 已收敛为统一 session extractor（`src/api/session.rs`：`Session` 要求有效 token，`VerifiedTenant` 额外要求 verified membership，`OptionalSession` 服务游客可用路径且无效 token 拒绝而非静默降级）。平台管理员已支持 TOTP MFA（确认后 reauth 强制第二因子）；校园运营 MFA 和关键表 RLS 尚未落地，因此不要把当前过渡实现描述成完整多租户。
+当前已建立 `Campus`/`CampusMembership`、核心资源、通知、审核任务和管理审计的 `campus_id`、同校园写门禁和设备级 active campus session。新 access JWT 带可选 `campus_id`，refresh token 记录同一校园；登录、注册、刷新和切换都会保持二者一致。`CampusService` 在每次受保护操作重新验证 membership，不能只相信 claim。旧 token 缺少 claim 时才回退到首个可用 membership。推荐、公开用户页和通知已跟随活动校园；后台使用独立 `AdminScope` 复核数据库角色，校园运营可读本校，平台管理员跨校园必须给理由并审计。平台管理员写操作还要求 access token 的 `auth_time` 在 10 分钟内；refresh、切换校园和旧 token 会自动回到锁定状态。普通 handler 已收敛为统一 session extractor（`src/api/session.rs`：`Session` 要求有效 token，`VerifiedTenant` 额外要求 verified membership，`OptionalSession` 服务游客可用路径且无效 token 拒绝而非静默降级）。平台管理员 TOTP MFA（确认后 reauth 强制第二因子）已实现并有回归覆盖（`tests/admin_auth_regression.rs`）；关键租户表已启用 FORCE RLS（`0042_tenant_rls.sql`，按事务 `SET LOCAL app.campus_id` 武装并在非超级用户角色下验证隔离与写拒绝，未设置 GUC 时 fail-open，服务层仍是主要租户边界）。全请求 fail-closed GUC 注入与校园运营 MFA 仍属目标态（Phase 4），因此不要把当前实现描述成完整多租户。
 
 ## 事务边界
 

@@ -57,7 +57,7 @@ registered
 
 [已实现] `moderation_jobs` 和 `admin_audit_logs` 也已写入不可空校园归属。校园 operator/admin 可以读取自己当前校园的统计、用户、listing、成交记录、审计和媒体审核队列；平台管理员跨校园读取或写入必须显式提交理由，读取和写入都会留下目标校园审计。
 
-[目标态] `0029` 中 NCU 数据库默认值仍是兼容旧 SQL 的过渡护栏，第二校园启用前必须移除。当前普通用户 handler 已按活动校园过滤，但后续仍应收敛为统一 extractor，避免每个 handler 自行解析；管理员 MFA 和 RLS 仍未完成。近期密码认证与统一审核 case 已实现。
+[目标态] `0029` 中 NCU 数据库默认值仍是兼容旧 SQL 的过渡护栏，第二校园启用前必须移除。普通用户 handler 已收敛为统一 session extractor（`src/api/session.rs`）并按活动校园过滤；管理员 TOTP MFA（`0036`）与关键租户表 FORCE RLS（`0042`，未设 GUC 时 fail-open）已实现，全请求 fail-closed GUC 注入仍属目标态（Phase 4）。密码认证与统一审核 case 已实现。
 
 ## Offer / Wanted 生命周期
 
