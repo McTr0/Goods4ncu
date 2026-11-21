@@ -71,6 +71,9 @@ sensitive_data_archive/
 .antigravity/
 .agents/
 
+# Local ZCode agent session artifacts (plans, notes); workstation-only.
+/.zcode/
+
 # === Local Model & Raw Asset Scratchpads ===
 /Doro/
 
