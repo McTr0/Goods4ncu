@@ -52,7 +52,7 @@ WebSocket 用于低延迟提示，不是业务事实来源。事件包括 conver
 | --- | --- | --- |
 | `src/api/` | Axum 路由、请求/响应模型、认证提取和协议适配 | handler 保持薄，不嵌入跨表业务事务 |
 | `src/services/` | 成交、通知、审核、ModerationCase、token、后台 worker 和状态转换 | service 是权限和事务的最终边界 |
-| `src/repositories/` | 用户、listing、chat、auth 等 SQL 封装 | 统一 ID/tenant/status 过滤，不让 handler 拼 SQL |
+| `src/repositories/` | listing、post、user、auth、order、watchlist 的纯持久化方法（返回 `sqlx::Result`，事务内方法接受 `&mut Transaction`） | 统一 ID/tenant/status 过滤；chat/moderation/admin/agent/feed 等域的 SQL 仍在各自事务型 service 内联 |
 | `src/agents/` | IntentRouter、市场工具、议价和 Agent 模型 | 工具调用 service，不信任模型提供的身份 |
 | `src/llm/` | Gemini、MiniMax、OpenAI-compatible provider | 隔离 provider 差异、超时和流式实现 |
 | `src/middleware/` | rate limit 等横切入口控制 | 只做通用控制，不决定领域状态 |
@@ -83,7 +83,7 @@ POST /api/posts
 
 ## 事务边界
 
-事务属于 service 或明确的业务工具适配层，因为只有这些层知道哪些事实必须一起成功。
+事务属于 service 或明确的业务工具适配层，因为只有这些层知道哪些事实必须一起成功。数据访问有两种合法形态：有仓库的域由 service 组合仓库的 `_in_tx` 纯持久化方法（仓库只返回 `sqlx::Result`，范例见 `services/watchlist.rs` + `repositories/watchlist_repo.rs`）；尚无仓库的域（chat、moderation、admin、agent、feed）由 SQL 直接内联在持有事务的 service 方法中。HTTP handler 一律不写 SQL（回归守护的硬不变量）；旧的 `repositories/traits.rs` trait 注入层已删除，新代码不要重建。
 
 当前线下成交语义：
 

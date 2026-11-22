@@ -4,7 +4,7 @@
 
 Goods4ncu (续樟) is a trusted campus marketplace: Rust/Axum backend + PostgreSQL/pgvector, Flutter mobile & web client, and an agent-first Live2D companion (小昌). Listings are two-directional (`offer`/`wanted`). The Cargo package is named `goods4ncu` even if the checkout dir is `good4ncu`.
 
-`src/` contains the Rust backend. Keep HTTP handlers in `src/api/`, business logic in `src/services/`, data access in `src/repositories/`, agent logic in `src/agents/`, middleware in `src/middleware/`, and provider integrations in `src/llm/`. Put schema changes in numbered files under `migrations/` such as `0116_add_feature.sql` (current head: `0115_post_idempotency.sql`).
+`src/` contains the Rust backend. Keep HTTP handlers in `src/api/`, business logic and transactions in `src/services/`, pure persistence in `src/repositories/` where a repo exists (SQL never in handlers), agent logic in `src/agents/`, middleware in `src/middleware/`, and provider integrations in `src/llm/`. Put schema changes in numbered files under `migrations/` such as `0116_add_feature.sql` (current head: `0115_post_idempotency.sql`).
 
 `tests/` holds Rust integration and regression suites like `chat_integration.rs` and `admin_auth_regression.rs`. The Flutter app lives in `mobile/`: feature code is under `mobile/lib/`, and Dart tests live in `mobile/test/`. Longer design notes and setup references are in `docs/`.
 
@@ -44,7 +44,7 @@ Never report frontend verification based on undecoded greps of compiled JS.
 
 Rust uses the default `rustfmt` style with 4-space indentation. Follow standard naming: modules and functions in `snake_case`, types in `PascalCase`, constants in `SCREAMING_SNAKE_CASE`. Existing patterns matter: services use names like `OrderService`, tools use names like `CreateListingTool`.
 
-Keep the current layering intact: handlers should call services and repositories instead of embedding ad hoc SQL. In Flutter, follow `flutter_lints`, keep pages/services/providers split by responsibility, and route new user-facing strings through `mobile/lib/l10n/`.
+Keep the current layering intact: HTTP handlers never contain SQL (hard invariant, regression-checked). SQL lives either in `src/repositories/` as pure persistence returning `sqlx::Result` — transaction-composing methods take `&mut Transaction` — or inline inside transaction-owning services; both are sanctioned. New repo-backed domains follow the watchlist exemplar (`services/watchlist.rs` + `repositories/watchlist_repo.rs`). In Flutter, follow `flutter_lints`, keep pages/services/providers split by responsibility, and route new user-facing strings through `mobile/lib/l10n/`.
 
 ### Code Editing Discipline (hard rule)
 
