@@ -21,12 +21,10 @@ use std::{
 use crate::config::AppConfig;
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use regex::Regex;
-use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
 /// Moderation result code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum ModerationCode {
     Ok,
     /// Operator-configured blocked keyword detected.
@@ -45,18 +43,13 @@ pub enum ModerationCode {
     HateHarassment,
     /// Personal information leakage or doxxing.
     PersonalInfo,
-    /// Legacy alias kept for older tests and callers.
-    Profanity,
     /// Phone / WeChat / QQ / email detected.
     ContactInfo,
     /// External URL detected.
     ExternalLink,
-    /// Image rejected by external API.
-    InappropriateImage,
 }
 
 impl ModerationCode {
-    #[allow(dead_code)]
     pub fn label(&self) -> &'static str {
         match self {
             ModerationCode::Ok => "ok",
@@ -68,10 +61,8 @@ impl ModerationCode {
             ModerationCode::ViolenceExtremism => "violence_extremism",
             ModerationCode::HateHarassment => "hate_harassment",
             ModerationCode::PersonalInfo => "personal_info",
-            ModerationCode::Profanity => "profanity",
             ModerationCode::ContactInfo => "contact_info",
             ModerationCode::ExternalLink => "external_link",
-            ModerationCode::InappropriateImage => "inappropriate_image",
         }
     }
 
@@ -79,7 +70,7 @@ impl ModerationCode {
     pub fn message(&self) -> &'static str {
         match self {
             ModerationCode::Ok => "",
-            ModerationCode::BlockedKeyword | ModerationCode::Profanity => "内容包含违规信息",
+            ModerationCode::BlockedKeyword => "内容包含违规信息",
             ModerationCode::IllegalGoods => "内容涉及违禁或管制物品",
             ModerationCode::AdultContent => "内容包含低俗或成人信息",
             ModerationCode::Gambling => "内容涉及赌博或博彩信息",
@@ -89,7 +80,6 @@ impl ModerationCode {
             ModerationCode::PersonalInfo => "内容包含他人隐私或敏感个人信息",
             ModerationCode::ContactInfo => "内容包含联系方式",
             ModerationCode::ExternalLink => "内容包含外部链接",
-            ModerationCode::InappropriateImage => "图片内容不合规",
         }
     }
 }
@@ -295,9 +285,12 @@ const BUILTIN_TEXT_RULES: &[BuiltinTextRule] = &[
 
 /// Moderation check result.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct ModerationResult {
     pub passed: bool,
+    /// Which rule family rejected the content. Never read outside this
+    /// crate's unit tests, which assert the exact rule that fired; the
+    /// user-facing surface is `reason`.
+    #[allow(dead_code)]
     pub code: ModerationCode,
     pub reason: Option<String>,
 }
@@ -318,38 +311,6 @@ impl ModerationResult {
             reason: Some(code.message().to_string()),
         }
     }
-
-    #[allow(dead_code)]
-    pub fn rejected_with_reason(code: ModerationCode, reason: String) -> Self {
-        Self {
-            passed: false,
-            code,
-            reason: Some(reason),
-        }
-    }
-}
-
-/// Image moderation job status.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[allow(dead_code)]
-#[serde(rename_all = "lowercase")]
-pub enum ImageModerationStatus {
-    Pending,
-    Approved,
-    Rejected,
-    Failed,
-}
-
-/// Image moderation job record.
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct ImageModerationJob {
-    pub id: String,
-    pub resource_type: String,
-    pub resource_id: String,
-    pub image_url: String,
-    pub status: ImageModerationStatus,
-    pub reject_reason: Option<String>,
 }
 
 /// Content moderation service.
@@ -377,12 +338,6 @@ pub struct ModerationService {
     url_re: Regex,
     /// Whether image moderation is enabled.
     image_enabled: bool,
-    /// Alibaba IMAN API endpoint.
-    #[allow(dead_code)]
-    image_api_url: Option<String>,
-    /// Alibaba IMAN API key.
-    #[allow(dead_code)]
-    image_api_key: Option<String>,
 }
 
 impl ModerationService {
@@ -434,8 +389,6 @@ impl ModerationService {
             email_re,
             url_re,
             image_enabled: config.moderation_image_enabled,
-            image_api_url: config.moderation_image_api_url.clone(),
-            image_api_key: config.moderation_image_api_key.clone(),
         }
     }
 
@@ -585,7 +538,6 @@ impl ModerationService {
     }
 
     /// Check if image moderation is enabled.
-    #[allow(dead_code)]
     pub fn is_image_enabled(&self) -> bool {
         self.image_enabled
     }
