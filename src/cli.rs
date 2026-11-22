@@ -1,4 +1,4 @@
-use crate::repositories::{PostgresUserRepository, UserRepository};
+use crate::repositories::PostgresUserRepository;
 use anyhow::Result;
 use sqlx::PgPool;
 use std::env;

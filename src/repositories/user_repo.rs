@@ -3,13 +3,11 @@
 use crate::api::error::ApiError;
 use crate::repositories::{
     User, UserDiscoverability, UserLookupMethod, UserLookupResult, UserPaymentQr, UserProfile,
-    UserRepository,
 };
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct PostgresUserRepository {
     pool: PgPool,
 }
@@ -174,8 +172,8 @@ fn mask_student_id(student_id: &str) -> String {
     format!("{prefix}****")
 }
 
-impl UserRepository for PostgresUserRepository {
-    async fn find_by_id(&self, id: &str) -> Result<Option<User>, ApiError> {
+impl PostgresUserRepository {
+    pub async fn find_by_id(&self, id: &str) -> Result<Option<User>, ApiError> {
         let row = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
             .bind(id)
             .fetch_optional(&self.pool)
@@ -184,7 +182,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(row)
     }
 
-    async fn find_by_username(&self, username: &str) -> Result<Option<User>, ApiError> {
+    pub async fn find_by_username(&self, username: &str) -> Result<Option<User>, ApiError> {
         let row = sqlx::query_as::<_, User>("SELECT * FROM users WHERE username = $1")
             .bind(username)
             .fetch_optional(&self.pool)
@@ -193,16 +191,8 @@ impl UserRepository for PostgresUserRepository {
         Ok(row)
     }
 
-    async fn find_by_email(&self, email: &str) -> Result<Option<User>, ApiError> {
-        let row = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
-            .bind(email)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        Ok(row)
-    }
-
-    async fn create(
+    #[allow(dead_code)] // used by auth_api_integration through the lib crate
+    pub async fn create(
         &self,
         username: &str,
         email: Option<&str>,
@@ -274,7 +264,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(user_id)
     }
 
-    async fn get_profile(&self, user_id: &str) -> Result<UserProfile, ApiError> {
+    pub async fn get_profile(&self, user_id: &str) -> Result<UserProfile, ApiError> {
         let row = sqlx::query(
             "SELECT id, username, email, student_id, discover_by_username,
                     discover_by_email, discover_by_student_id,
@@ -292,7 +282,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(profile_from_row(&row, "id"))
     }
 
-    async fn get_user_listings(
+    pub async fn get_user_listings(
         &self,
         user_id: &str,
         campus_id: Uuid,
@@ -352,34 +342,7 @@ impl UserRepository for PostgresUserRepository {
         Ok((rows, total))
     }
 
-    async fn search_users(&self, query: &str, limit: i64) -> Result<Vec<UserProfile>, ApiError> {
-        let escaped = query.replace('\'', "''");
-        let pattern = format!("%{}%", escaped);
-
-        let rows = sqlx::query(
-            "SELECT id, username, email, student_id, discover_by_username,
-                    discover_by_email, discover_by_student_id,
-                    avatar_url,
-                    wechat_pay_qr_url, alipay_qr_url, show_wechat_pay_qr,
-                    show_alipay_qr, role, created_at
-             FROM users
-             WHERE discover_by_username = TRUE
-               AND status = 'active'
-               AND username ILIKE $1
-             LIMIT $2",
-        )
-        .bind(&pattern)
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-        let profiles = rows.iter().map(|row| profile_from_row(row, "id")).collect();
-
-        Ok(profiles)
-    }
-
-    async fn search_users_with_listing_count(
+    pub async fn search_users_with_listing_count(
         &self,
         campus_id: Uuid,
         query: Option<&str>,
@@ -509,7 +472,7 @@ impl UserRepository for PostgresUserRepository {
         Ok((items, total))
     }
 
-    async fn lookup_users(
+    pub async fn lookup_users(
         &self,
         requester_id: &str,
         campus_id: Uuid,
@@ -660,7 +623,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(items)
     }
 
-    async fn ban_user(&self, user_id: &str) -> Result<(), ApiError> {
+    pub async fn ban_user(&self, user_id: &str) -> Result<(), ApiError> {
         sqlx::query("UPDATE users SET status = 'banned' WHERE id = $1")
             .bind(user_id)
             .execute(&self.pool)
@@ -669,7 +632,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(())
     }
 
-    async fn unban_user(&self, user_id: &str) -> Result<(), ApiError> {
+    pub async fn unban_user(&self, user_id: &str) -> Result<(), ApiError> {
         sqlx::query("UPDATE users SET status = 'active' WHERE id = $1")
             .bind(user_id)
             .execute(&self.pool)
@@ -678,7 +641,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(())
     }
 
-    async fn update_role(&self, user_id: &str, role: &str) -> Result<(), ApiError> {
+    pub async fn update_role(&self, user_id: &str, role: &str) -> Result<(), ApiError> {
         sqlx::query("UPDATE users SET role = $1 WHERE id = $2")
             .bind(role)
             .bind(user_id)
@@ -688,7 +651,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(())
     }
 
-    async fn update_username(&self, user_id: &str, new_username: &str) -> Result<(), ApiError> {
+    pub async fn update_username(&self, user_id: &str, new_username: &str) -> Result<(), ApiError> {
         // Check if username is already taken by another user
         let existing = sqlx::query("SELECT id FROM users WHERE username = $1 AND id != $2")
             .bind(new_username)
@@ -711,7 +674,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(())
     }
 
-    async fn update_avatar(&self, user_id: &str, avatar_url: &str) -> Result<(), ApiError> {
+    pub async fn update_avatar(&self, user_id: &str, avatar_url: &str) -> Result<(), ApiError> {
         sqlx::query("UPDATE users SET avatar_url = $1 WHERE id = $2")
             .bind(avatar_url)
             .bind(user_id)
@@ -721,7 +684,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(())
     }
 
-    async fn update_email(&self, user_id: &str, new_email: &str) -> Result<(), ApiError> {
+    pub async fn update_email(&self, user_id: &str, new_email: &str) -> Result<(), ApiError> {
         // Check if email is already taken by another user
         let existing = sqlx::query("SELECT id FROM users WHERE email = $1 AND id != $2")
             .bind(new_email)
@@ -791,7 +754,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(())
     }
 
-    async fn update_discoverability(
+    pub async fn update_discoverability(
         &self,
         user_id: &str,
         username: Option<bool>,
@@ -816,7 +779,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(())
     }
 
-    async fn update_payment_qr(
+    pub async fn update_payment_qr(
         &self,
         user_id: &str,
         wechat_url: Option<&str>,
@@ -850,7 +813,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(())
     }
 
-    async fn update_password_hash(
+    pub async fn update_password_hash(
         &self,
         user_id: &str,
         password_hash: &str,
@@ -864,14 +827,6 @@ impl UserRepository for PostgresUserRepository {
 
         Ok(())
     }
-
-    async fn count_users(&self) -> Result<i64, ApiError> {
-        let row = sqlx::query("SELECT COUNT(*) FROM users")
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        Ok(row.get(0))
-    }
 }
 
 #[cfg(test)]
@@ -880,7 +835,7 @@ mod tests {
     use crate::test_infra::with_test_pool;
 
     #[tokio::test]
-    async fn create_user_persists_standard_user_record() {
+    pub async fn create_user_persists_standard_user_record() {
         with_test_pool(|pool| async move {
             let repo = PostgresUserRepository::new(pool.clone());
 
@@ -923,7 +878,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_sets_student_id_and_private_discovery_defaults() {
+    pub async fn create_sets_student_id_and_private_discovery_defaults() {
         with_test_pool(|pool| async move {
             let repo = PostgresUserRepository::new(pool.clone());
 
@@ -947,7 +902,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lookup_users_respects_discovery_and_blocks() {
+    pub async fn lookup_users_respects_discovery_and_blocks() {
         with_test_pool(|pool| async move {
             let repo = PostgresUserRepository::new(pool.clone());
             let requester_id = repo
@@ -1078,7 +1033,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_password_hash_persists_new_hash() {
+    pub async fn update_password_hash_persists_new_hash() {
         with_test_pool(|pool| async move {
             let repo = PostgresUserRepository::new(pool.clone());
             let user_id = repo

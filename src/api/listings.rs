@@ -13,7 +13,7 @@ use crate::api::AppState;
 use crate::categories::MARKETPLACE_CATEGORIES;
 #[cfg(test)]
 use crate::repositories::CreateListingInput;
-use crate::repositories::{ListingRepository, UpdateOwnedResult};
+use crate::repositories::UpdateOwnedResult;
 use crate::services::campus::CampusService;
 use crate::services::listing_command::{ListingCommandService, UpdateListingDraft};
 use crate::services::notification::NewNotification;

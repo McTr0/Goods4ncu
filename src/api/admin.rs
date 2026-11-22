@@ -11,7 +11,6 @@ use crate::api::auth::{
 };
 use crate::api::error::ApiError;
 use crate::api::AppState;
-use crate::repositories::traits::{AuthRepository, UserRepository};
 use crate::services::admin::{AdminService, NewAuditLog};
 use crate::services::campus::CampusService;
 use crate::services::moderation_case::{

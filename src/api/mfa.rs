@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use crate::api::error::ApiError;
 use crate::api::session::Session;
 use crate::api::AppState;
-use crate::repositories::traits::UserRepository;
 use crate::services::admin_mfa::{AdminMfaService, TotpRejection};
 use crate::services::totp;
 

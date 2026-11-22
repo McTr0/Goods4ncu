@@ -353,8 +353,6 @@ pub struct AppState {
     pub listing_repo: crate::repositories::PostgresListingRepository,
     pub user_repo: crate::repositories::PostgresUserRepository,
     pub auth_repo: crate::repositories::PostgresAuthRepository,
-    #[allow(dead_code)]
-    pub order_repo: crate::repositories::PostgresOrderRepository,
 }
 
 impl AppState {

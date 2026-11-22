@@ -154,9 +154,6 @@ pub trait PostRepository: Send + Sync {
         listing_id: &str,
     ) -> Result<Option<Post>, ApiError>;
 
-    #[allow(dead_code)]
-    async fn create_post(&self, input: NewPost) -> Result<Post, ApiError>;
-
     async fn create_post_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -649,38 +646,6 @@ impl PostRepository for PostgresPostRepository {
             .await
             .map(|row| row.as_ref().map(post_from_row))
             .map_err(db_error)
-    }
-
-    async fn create_post(&self, input: NewPost) -> Result<Post, ApiError> {
-        let id: Uuid = sqlx::query_scalar(
-            "INSERT INTO posts (
-                 campus_id, author_id, category, title, body, tags,
-                 image_url, images_moderation_status,
-                 listing_id, space_id, idempotency_key, idempotency_hash
-             ) VALUES (
-                 $1, $2, $3, $4, $5, $6, $7,
-                 CASE WHEN $7::text IS NULL THEN 'approved' ELSE 'pending' END,
-                 $8, $9, $10, $11
-             )
-             RETURNING id",
-        )
-        .bind(input.campus_id)
-        .bind(&input.author_id)
-        .bind(&input.category)
-        .bind(&input.title)
-        .bind(&input.body)
-        .bind(serde_json::json!(input.tags))
-        .bind(input.image_url.as_deref())
-        .bind(input.listing_id.as_deref())
-        .bind(input.space_id)
-        .bind(input.idempotency_key.as_deref())
-        .bind(input.idempotency_hash.as_deref())
-        .fetch_one(&self.pool)
-        .await
-        .map_err(db_error)?;
-        self.find_by_id(input.campus_id, id)
-            .await?
-            .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("created post disappeared")))
     }
 
     async fn create_post_in_tx(

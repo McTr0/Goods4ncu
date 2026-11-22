@@ -11,7 +11,6 @@ use uuid::Uuid;
 
 use crate::api::error::ApiError;
 use crate::api::AppState;
-use crate::repositories::traits::{AuthRepository, UserRepository};
 use crate::repositories::{PostgresAuthRepository, PostgresUserRepository};
 use crate::services::campus::CampusService;
 
@@ -992,8 +991,7 @@ pub(crate) mod tests {
     use crate::agents::router::IntentRouter;
     use crate::api::{ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
     use crate::repositories::{
-        PostgresAuthRepository, PostgresListingRepository, PostgresOrderRepository,
-        PostgresUserRepository,
+        PostgresAuthRepository, PostgresListingRepository, PostgresUserRepository,
     };
     use crate::services::{self, notification::NotificationService};
     use axum::http::HeaderMap;
@@ -1056,7 +1054,6 @@ pub(crate) mod tests {
             listing_repo: PostgresListingRepository::new(pool.clone()),
             user_repo: PostgresUserRepository::new(pool.clone()),
             auth_repo: PostgresAuthRepository::new(pool.clone()),
-            order_repo: PostgresOrderRepository::new(pool),
         }
     }
 

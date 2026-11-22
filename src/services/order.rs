@@ -161,7 +161,7 @@ impl OrderService {
         }
 
         let order_id = uuid::Uuid::new_v4().to_string();
-        let order_repo = PostgresOrderRepository::new(self.db.clone());
+        let order_repo = PostgresOrderRepository::new();
         order_repo
             .create_pending_in_tx(tx, &order_id, listing_id, buyer_id, seller_id, final_price)
             .await

@@ -9,9 +9,7 @@ use crate::api::auth::AuthSessionContext;
 use crate::api::error::ApiError;
 use crate::api::session::{OptionalSession, Session};
 use crate::api::AppState;
-use crate::repositories::{
-    Listing, UserLookupMethod, UserLookupResult, UserProfile, UserRepository,
-};
+use crate::repositories::{Listing, UserLookupMethod, UserLookupResult, UserProfile};
 use crate::services::campus::CampusService;
 use crate::services::campus::{
     CampusMembershipView, CampusMembershipsResponse, VerificationRequestResponse,

@@ -10,8 +10,7 @@ use goods4ncu::llm::{
     MarketplaceAgent, ReplyAssistant,
 };
 use goods4ncu::repositories::{
-    PostgresAuthRepository, PostgresListingRepository, PostgresOrderRepository,
-    PostgresUserRepository,
+    PostgresAuthRepository, PostgresListingRepository, PostgresUserRepository,
 };
 use goods4ncu::services;
 use rig::completion::Message;
@@ -175,7 +174,6 @@ async fn main() -> Result<()> {
         listing_repo: PostgresListingRepository::new(pool.clone()),
         user_repo: PostgresUserRepository::new(pool.clone()),
         auth_repo: PostgresAuthRepository::new(pool.clone()),
-        order_repo: PostgresOrderRepository::new(pool),
     };
     let router = goods4ncu::api::create_router(
         state,

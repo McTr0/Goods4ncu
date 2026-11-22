@@ -1,8 +1,8 @@
 //! PostgreSQL implementation of the ListingRepository trait.
 
 use crate::api::error::ApiError;
-use crate::categories::{normalize_category, normalize_category_list, normalize_category_or_other};
-use crate::repositories::{CreateListingInput, Listing, ListingRepository, UpdateListingInput};
+use crate::categories::{normalize_category, normalize_category_list};
+use crate::repositories::{CreateListingInput, Listing, UpdateListingInput};
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
@@ -47,7 +47,6 @@ pub fn escape_like_pattern(input: &str) -> String {
 }
 
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct PostgresListingRepository {
     pool: PgPool,
 }
@@ -61,17 +60,6 @@ pub struct IdempotentCreateResult {
 impl PostgresListingRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
-    }
-
-    pub async fn create_in_tx(
-        &self,
-        tx: &mut Transaction<'_, Postgres>,
-        input: CreateListingInput,
-    ) -> Result<String, ApiError> {
-        Ok(self
-            .create_idempotent_in_tx(tx, input, None, None)
-            .await?
-            .id)
     }
 
     pub async fn create_idempotent_in_tx(
@@ -167,27 +155,6 @@ impl PostgresListingRepository {
 
     // Public transaction-owning wrapper retained for repository integration
     // tests; production HTTP flows compose `create_idempotent_in_tx` instead.
-    #[allow(dead_code)]
-    pub async fn create_idempotent(
-        &self,
-        input: CreateListingInput,
-        idempotency_key: Option<&str>,
-        idempotency_hash: Option<&str>,
-    ) -> Result<IdempotentCreateResult, ApiError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        let result = self
-            .create_idempotent_in_tx(&mut tx, input, idempotency_key, idempotency_hash)
-            .await?;
-        tx.commit()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-        Ok(result)
-    }
 
     fn update_query_for_owner(
         input: &UpdateListingInput,
@@ -288,75 +255,6 @@ impl PostgresListingRepository {
         Ok(query)
     }
 
-    #[allow(dead_code)]
-    pub async fn mark_sold_if_active_in_tx(
-        &self,
-        tx: &mut Transaction<'_, Postgres>,
-        id: &str,
-    ) -> Result<bool, ApiError> {
-        let updated = sqlx::query(
-            "UPDATE inventory SET status = 'sold'
-             WHERE id = $1 AND status = 'active'
-               AND NOT listing_has_active_restriction(id)",
-        )
-        .bind(id)
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-        Ok(updated.rows_affected() > 0)
-    }
-
-    #[allow(dead_code)]
-    pub async fn relist_if_no_open_orders_in_tx(
-        &self,
-        tx: &mut Transaction<'_, Postgres>,
-        listing_id: &str,
-    ) -> Result<bool, ApiError> {
-        let _ = sqlx::query("SELECT 1 FROM inventory WHERE id = $1 FOR UPDATE")
-            .bind(listing_id)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-        let updated = sqlx::query(
-            r#"
-            UPDATE inventory
-            SET status = 'active'
-            WHERE id = $1
-              AND status = 'sold'
-              AND NOT listing_has_active_restriction(id)
-              AND NOT EXISTS (
-                SELECT 1
-                FROM orders o
-                WHERE o.listing_id = $1
-                  AND o.status IN ('pending', 'paid', 'shipped')
-              )
-            "#,
-        )
-        .bind(listing_id)
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-        Ok(updated.rows_affected() > 0)
-    }
-
-    pub async fn update_owned_active_in_tx(
-        &self,
-        tx: &mut Transaction<'_, Postgres>,
-        id: &str,
-        owner_id: &str,
-        campus_id: Uuid,
-        input: &UpdateListingInput,
-    ) -> Result<bool, ApiError> {
-        Ok(matches!(
-            self.update_owned_active_with_state_in_tx(tx, id, owner_id, campus_id, input, None)
-                .await?,
-            UpdateOwnedResult::Updated
-        ))
-    }
-
     pub async fn update_owned_active_with_state_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -422,116 +320,6 @@ impl PostgresListingRepository {
 
     // Transaction-owning compatibility wrapper retained for direct callers;
     // ActionPlan execution composes `update_owned_active_in_tx` atomically.
-    #[allow(dead_code)]
-    pub async fn update_owned_active(
-        &self,
-        id: &str,
-        owner_id: &str,
-        campus_id: Uuid,
-        input: &UpdateListingInput,
-    ) -> Result<bool, ApiError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        let updated = self
-            .update_owned_active_in_tx(&mut tx, id, owner_id, campus_id, input)
-            .await?;
-        tx.commit()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        Ok(updated)
-    }
-
-    #[allow(dead_code)]
-    pub async fn update_in_campus(
-        &self,
-        id: &str,
-        owner_id: &str,
-        campus_id: Uuid,
-        input: UpdateListingInput,
-    ) -> Result<(), ApiError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        let status = sqlx::query_scalar::<_, String>(
-            "SELECT status FROM inventory
-             WHERE id = $1 AND owner_id = $2 AND campus_id = $3
-             FOR UPDATE",
-        )
-        .bind(id)
-        .bind(owner_id)
-        .bind(campus_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-        .ok_or(ApiError::NotFound)?;
-        let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
-            .bind(id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        if restricted {
-            return Err(ApiError::CodedConflict {
-                code: "listing_restricted",
-                message: "该发布受平台限制，不能编辑".to_string(),
-            });
-        }
-        if status != "active" {
-            return Err(ApiError::CodedConflict {
-                code: "listing_action_stale",
-                message: "只有正在展示的发布可以编辑".to_string(),
-            });
-        }
-
-        let query = Self::update_query_for_owner(&input, false)?;
-        Self::bind_update_query(sqlx::query(&query), &input)?
-            .bind(id)
-            .bind(owner_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        tx.commit()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    pub async fn soft_delete_active_owned_in_tx(
-        &self,
-        tx: &mut Transaction<'_, Postgres>,
-        id: &str,
-        owner_id: &str,
-        campus_id: Uuid,
-    ) -> Result<bool, ApiError> {
-        let result = sqlx::query(
-            "UPDATE inventory SET status = 'deleted'
-             WHERE id = $1 AND owner_id = $2 AND campus_id = $3 AND status = 'active'",
-        )
-        .bind(id)
-        .bind(owner_id)
-        .bind(campus_id)
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-        Ok(result.rows_affected() > 0)
-    }
-
-    pub async fn delete_owned_in_tx(
-        &self,
-        tx: &mut Transaction<'_, Postgres>,
-        id: &str,
-        owner_id: &str,
-        campus_id: Uuid,
-    ) -> Result<DeleteOwnedResult, ApiError> {
-        self.delete_owned_with_revision_in_tx(tx, id, owner_id, campus_id, None)
-            .await
-    }
 
     pub async fn delete_owned_with_revision_in_tx(
         &self,
@@ -852,8 +640,9 @@ pub struct ActiveRestrictionView {
     pub can_appeal: bool,
 }
 
-impl ListingRepository for PostgresListingRepository {
-    async fn find_listings(
+impl PostgresListingRepository {
+    #[allow(clippy::too_many_arguments)]
+    pub async fn find_listings(
         &self,
         campus_id: Uuid,
         category: Option<&str>,
@@ -981,20 +770,7 @@ impl ListingRepository for PostgresListingRepository {
         Ok((rows, total))
     }
 
-    async fn find_by_id(&self, id: &str) -> Result<Option<Listing>, ApiError> {
-        let row = sqlx::query_as::<_, Listing>(
-            "SELECT id, campus_id, content_revision, title, category, brand, direction, condition_score, suggested_price_cny, \
-             defects, description, CASE WHEN images_moderation_status = 'approved' THEN image_url ELSE NULL END AS image_url, owner_id, status, created_at \
-             FROM inventory WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        Ok(row)
-    }
-
-    async fn find_by_id_with_owner(
+    pub async fn find_by_id_with_owner(
         &self,
         id: &str,
     ) -> Result<Option<(Listing, Option<String>)>, ApiError> {
@@ -1039,7 +815,7 @@ impl ListingRepository for PostgresListingRepository {
         }
     }
 
-    async fn find_by_id_with_owner_in_campus(
+    pub async fn find_by_id_with_owner_in_campus(
         &self,
         id: &str,
         campus_id: Uuid,
@@ -1048,95 +824,7 @@ impl ListingRepository for PostgresListingRepository {
         Ok(result.filter(|(listing, _)| listing.campus_id == campus_id))
     }
 
-    async fn create(&self, input: CreateListingInput) -> Result<String, ApiError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        let listing_id = self.create_in_tx(&mut tx, input).await?;
-        tx.commit()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-        Ok(listing_id)
-    }
-
-    async fn update(
-        &self,
-        id: &str,
-        owner_id: &str,
-        input: UpdateListingInput,
-    ) -> Result<(), ApiError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        let row = sqlx::query("SELECT owner_id, status FROM inventory WHERE id = $1 FOR UPDATE")
-            .bind(id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?
-            .ok_or(ApiError::NotFound)?;
-
-        let current_owner: String = row.get("owner_id");
-        let current_status: String = row.get("status");
-        let restricted: bool = sqlx::query_scalar("SELECT listing_has_active_restriction($1)")
-            .bind(id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-        if current_owner != owner_id {
-            return Err(ApiError::Forbidden);
-        }
-        if current_status == "sold" {
-            return Err(ApiError::BadRequest("无法修改已售出的商品".to_string()));
-        }
-        if restricted {
-            return Err(ApiError::CodedConflict {
-                code: "listing_restricted",
-                message: "该发布受平台限制，不能编辑".to_string(),
-            });
-        }
-
-        let query = Self::update_query_for_owner(&input, false)?;
-        let q = Self::bind_update_query(sqlx::query(&query), &input)?
-            .bind(id)
-            .bind(owner_id);
-
-        q.execute(&mut *tx)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        tx.commit()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-        Ok(())
-    }
-
-    async fn delete(
-        &self,
-        id: &str,
-        owner_id: &str,
-        campus_id: uuid::Uuid,
-    ) -> Result<(), ApiError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        self.delete_owned_in_tx(&mut tx, id, owner_id, campus_id)
-            .await?;
-        tx.commit()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-        Ok(())
-    }
-
-    async fn relist(
+    pub async fn relist(
         &self,
         id: &str,
         owner_id: &str,
@@ -1206,61 +894,6 @@ impl ListingRepository for PostgresListingRepository {
             "listing reopened in a serialized lifecycle transition"
         );
         Ok(())
-    }
-
-    async fn mark_sold(&self, id: &str, owner_id: &str) -> Result<(), ApiError> {
-        sqlx::query(
-            "UPDATE inventory SET status = 'sold'
-             WHERE id = $1 AND owner_id = $2 AND status = 'active'
-               AND NOT listing_has_active_restriction(id)",
-        )
-        .bind(id)
-        .bind(owner_id)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        Ok(())
-    }
-
-    async fn count(&self, status: Option<&str>) -> Result<i64, ApiError> {
-        let query = if let Some(s) = status {
-            format!(
-                "SELECT COUNT(*) FROM inventory WHERE status = '{}'",
-                s.replace('\'', "''")
-            )
-        } else {
-            "SELECT COUNT(*) FROM inventory".to_string()
-        };
-
-        let row = sqlx::query(&query)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-        Ok(row.get(0))
-    }
-
-    async fn get_category_stats(&self) -> Result<Vec<(String, i64)>, ApiError> {
-        let rows = sqlx::query(
-            "SELECT COALESCE(category, 'Other') as category, COUNT(*) as cnt \
-             FROM inventory GROUP BY category ORDER BY cnt DESC LIMIT 50",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-
-        let mut merged = std::collections::BTreeMap::<String, i64>::new();
-        for row in rows {
-            let category: String = row.get("category");
-            let count: i64 = row.get("cnt");
-            let normalized = normalize_category_or_other(&category).to_string();
-            *merged.entry(normalized).or_default() += count;
-        }
-
-        let mut stats: Vec<(String, i64)> = merged.into_iter().collect();
-        stats.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-
-        Ok(stats)
     }
 }
 
@@ -1365,7 +998,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_listing_persists_standard_columns() {
+    pub async fn create_listing_persists_standard_columns() {
         with_test_pool(|pool| async move {
             sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')")
                 .bind("listing-owner")
@@ -1375,22 +1008,30 @@ mod tests {
                 .expect("insert owner");
 
             let repo = PostgresListingRepository::new(pool.clone());
-            let listing_id = repo
-                .create(CreateListingInput {
-                    campus_id: Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap(),
-                    title: "Desk".to_string(),
-                    category: "other".to_string(),
-                    brand: Some("Brand".to_string()),
-                    direction: "offer".to_string(),
-                    condition_score: 8,
-                    suggested_price_cny: 123.45,
-                    defects: vec!["scratch".to_string()],
-                    description: "usable".to_string(),
-                    image_url: Some("https://cdn.example.com/desk.jpg".to_string()),
-                    owner_id: "listing-owner".to_string(),
-                })
+            let mut tx = pool.begin().await.expect("begin tx");
+            let created = repo
+                .create_idempotent_in_tx(
+                    &mut tx,
+                    CreateListingInput {
+                        campus_id: Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap(),
+                        title: "Desk".to_string(),
+                        category: "other".to_string(),
+                        brand: Some("Brand".to_string()),
+                        direction: "offer".to_string(),
+                        condition_score: 8,
+                        suggested_price_cny: 123.45,
+                        defects: vec!["scratch".to_string()],
+                        description: "usable".to_string(),
+                        image_url: Some("https://cdn.example.com/desk.jpg".to_string()),
+                        owner_id: "listing-owner".to_string(),
+                    },
+                    None,
+                    None,
+                )
                 .await
                 .expect("create listing");
+            let listing_id = created.id;
+            tx.commit().await.expect("commit tx");
             assert!(Uuid::parse_str(&listing_id).is_ok());
 
             let row = sqlx::query(
@@ -1410,7 +1051,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn idempotent_create_replays_same_request_and_rejects_key_reuse() {
+    pub async fn idempotent_create_replays_same_request_and_rejects_key_reuse() {
         with_test_pool(|pool| async move {
             sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')")
                 .bind("idempotent-listing-owner")
@@ -1435,8 +1076,10 @@ mod tests {
             };
             let request_hash = "a".repeat(64);
 
+            let mut tx = pool.begin().await.expect("begin tx");
             let first = repo
-                .create_idempotent(
+                .create_idempotent_in_tx(
+                    &mut tx,
                     input.clone(),
                     Some("publish-attempt-1"),
                     Some(&request_hash),
@@ -1444,13 +1087,15 @@ mod tests {
                 .await
                 .expect("first create");
             let replay = repo
-                .create_idempotent(
+                .create_idempotent_in_tx(
+                    &mut tx,
                     input.clone(),
                     Some("publish-attempt-1"),
                     Some(&request_hash),
                 )
                 .await
                 .expect("replay create");
+            tx.commit().await.expect("commit tx");
 
             assert!(!first.replayed);
             assert!(replay.replayed);
@@ -1469,17 +1114,24 @@ mod tests {
             let mut changed = input;
             changed.title = "Different desk".to_string();
             let different_hash = "b".repeat(64);
+            let mut tx = pool.begin().await.expect("begin conflict tx");
             let error = repo
-                .create_idempotent(changed, Some("publish-attempt-1"), Some(&different_hash))
+                .create_idempotent_in_tx(
+                    &mut tx,
+                    changed,
+                    Some("publish-attempt-1"),
+                    Some(&different_hash),
+                )
                 .await
                 .expect_err("key reuse must fail");
+            tx.rollback().await.expect("rollback conflict tx");
             assert!(matches!(error, ApiError::Conflict(_)));
         })
         .await;
     }
 
     #[tokio::test]
-    async fn stale_listing_revision_cannot_overwrite_or_delete_newer_content() {
+    pub async fn stale_listing_revision_cannot_overwrite_or_delete_newer_content() {
         with_test_pool(|pool| async move {
             sqlx::query("INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')")
                 .bind("revision-owner")
@@ -1490,22 +1142,30 @@ mod tests {
 
             let campus_id = Uuid::parse_str("c0000000-0000-0000-0000-000000000001").unwrap();
             let repo = PostgresListingRepository::new(pool.clone());
-            let listing_id = repo
-                .create(CreateListingInput {
-                    campus_id,
-                    title: "Versioned desk".to_string(),
-                    category: "other".to_string(),
-                    brand: Some("Campus".to_string()),
-                    direction: "offer".to_string(),
-                    condition_score: 8,
-                    suggested_price_cny: 100.0,
-                    defects: vec![],
-                    description: "first".to_string(),
-                    image_url: None,
-                    owner_id: "revision-owner".to_string(),
-                })
+            let mut tx = pool.begin().await.expect("begin tx");
+            let created = repo
+                .create_idempotent_in_tx(
+                    &mut tx,
+                    CreateListingInput {
+                        campus_id,
+                        title: "Versioned desk".to_string(),
+                        category: "other".to_string(),
+                        brand: Some("Campus".to_string()),
+                        direction: "offer".to_string(),
+                        condition_score: 8,
+                        suggested_price_cny: 100.0,
+                        defects: vec![],
+                        description: "first".to_string(),
+                        image_url: None,
+                        owner_id: "revision-owner".to_string(),
+                    },
+                    None,
+                    None,
+                )
                 .await
                 .expect("create listing");
+            let listing_id = created.id;
+            tx.commit().await.expect("commit tx");
             let revision: i64 =
                 sqlx::query_scalar("SELECT content_revision FROM inventory WHERE id = $1")
                     .bind(&listing_id)

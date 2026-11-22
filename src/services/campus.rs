@@ -858,7 +858,7 @@ async fn deliver_verification_code(email: &str, code: &str) -> Result<(), ApiErr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repositories::{PostgresUserRepository, UserRepository};
+    use crate::repositories::PostgresUserRepository;
     use crate::test_infra::with_test_pool;
 
     #[tokio::test]

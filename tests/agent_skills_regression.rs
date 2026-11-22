@@ -107,7 +107,6 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
         listing_repo: goods4ncu::repositories::PostgresListingRepository::new(pool.clone()),
         user_repo: goods4ncu::repositories::PostgresUserRepository::new(pool.clone()),
         auth_repo: goods4ncu::repositories::PostgresAuthRepository::new(pool.clone()),
-        order_repo: goods4ncu::repositories::PostgresOrderRepository::new(pool),
     }
 }
 

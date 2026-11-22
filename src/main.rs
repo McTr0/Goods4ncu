@@ -400,7 +400,6 @@ async fn main() -> Result<(), anyhow::Error> {
         listing_repo: repositories::PostgresListingRepository::new(db_pool.clone()),
         user_repo: repositories::PostgresUserRepository::new(db_pool.clone()),
         auth_repo: repositories::PostgresAuthRepository::new(db_pool.clone()),
-        order_repo: repositories::PostgresOrderRepository::new(db_pool.clone()),
     };
 
     let app = api::create_router(app_state, &config.cors_origins);

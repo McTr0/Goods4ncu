@@ -11,8 +11,7 @@ use goods4ncu::agents::router::IntentRouter;
 use goods4ncu::api::{create_router, ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
 use goods4ncu::lifecycle::{ShutdownController, ShutdownSignal};
 use goods4ncu::repositories::{
-    PostgresAuthRepository, PostgresListingRepository, PostgresOrderRepository,
-    PostgresUserRepository,
+    PostgresAuthRepository, PostgresListingRepository, PostgresUserRepository,
 };
 use goods4ncu::services::{self, notification::NotificationService};
 use goods4ncu::test_infra::with_test_pool;
@@ -76,7 +75,6 @@ fn build_state(pool: sqlx::PgPool, shutdown: ShutdownSignal) -> AppState {
         listing_repo: PostgresListingRepository::new(pool.clone()),
         user_repo: PostgresUserRepository::new(pool.clone()),
         auth_repo: PostgresAuthRepository::new(pool.clone()),
-        order_repo: PostgresOrderRepository::new(pool),
     }
 }
 

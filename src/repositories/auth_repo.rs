@@ -1,13 +1,12 @@
 //! PostgreSQL implementation of the AuthRepository trait.
 
 use crate::api::error::ApiError;
-use crate::repositories::{AuthRepository, RefreshTokenRecord, User};
+use crate::repositories::{RefreshTokenRecord, User};
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct PostgresAuthRepository {
     pool: PgPool,
 }
@@ -18,8 +17,8 @@ impl PostgresAuthRepository {
     }
 }
 
-impl AuthRepository for PostgresAuthRepository {
-    async fn find_user_by_username(&self, username: &str) -> Result<Option<User>, ApiError> {
+impl PostgresAuthRepository {
+    pub async fn find_user_by_username(&self, username: &str) -> Result<Option<User>, ApiError> {
         let row = sqlx::query_as::<_, User>("SELECT * FROM users WHERE username = $1")
             .bind(username)
             .fetch_optional(&self.pool)
@@ -28,16 +27,7 @@ impl AuthRepository for PostgresAuthRepository {
         Ok(row)
     }
 
-    async fn find_user_by_email(&self, email: &str) -> Result<Option<User>, ApiError> {
-        let row = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
-            .bind(email)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("DB error: {}", e)))?;
-        Ok(row)
-    }
-
-    async fn create_user(
+    pub async fn create_user(
         &self,
         username: &str,
         email: Option<&str>,
@@ -133,7 +123,7 @@ impl AuthRepository for PostgresAuthRepository {
         }
     }
 
-    async fn store_refresh_token(
+    pub async fn store_refresh_token(
         &self,
         user_id: &str,
         token_hash: &str,
@@ -154,7 +144,7 @@ impl AuthRepository for PostgresAuthRepository {
         Ok(())
     }
 
-    async fn find_refresh_token(
+    pub async fn find_refresh_token(
         &self,
         token_hash: &str,
     ) -> Result<Option<RefreshTokenRecord>, ApiError> {
@@ -175,7 +165,7 @@ impl AuthRepository for PostgresAuthRepository {
         }))
     }
 
-    async fn revoke_refresh_token(&self, token_hash: &str) -> Result<(), ApiError> {
+    pub async fn revoke_refresh_token(&self, token_hash: &str) -> Result<(), ApiError> {
         let result = sqlx::query(
             "UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL",
         )
@@ -191,7 +181,7 @@ impl AuthRepository for PostgresAuthRepository {
         Ok(())
     }
 
-    async fn revoke_all_user_tokens(&self, user_id: &str) -> Result<(), ApiError> {
+    pub async fn revoke_all_user_tokens(&self, user_id: &str) -> Result<(), ApiError> {
         sqlx::query("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL")
             .bind(user_id)
             .execute(&self.pool)
@@ -200,7 +190,7 @@ impl AuthRepository for PostgresAuthRepository {
         Ok(())
     }
 
-    async fn revoke_access_token_jti(
+    pub async fn revoke_access_token_jti(
         &self,
         jti: &str,
         expires_at: chrono::DateTime<chrono::Utc>,
@@ -220,7 +210,7 @@ impl AuthRepository for PostgresAuthRepository {
         Ok(())
     }
 
-    async fn get_revoked_token_expiry(&self, jti: &str) -> Result<Option<i64>, ApiError> {
+    pub async fn get_revoked_token_expiry(&self, jti: &str) -> Result<Option<i64>, ApiError> {
         let persisted_exp = sqlx::query_scalar::<_, i64>(
             "SELECT EXTRACT(EPOCH FROM expires_at)::bigint
              FROM revoked_access_tokens

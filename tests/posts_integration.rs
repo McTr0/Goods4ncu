@@ -895,9 +895,6 @@ async fn atomic_post_and_marketplace_creation_in_single_transaction() {
             ) -> Result<Option<Post>, ApiError> {
                 self.0.find_by_listing_id(campus_id, listing_id).await
             }
-            async fn create_post(&self, input: NewPost) -> Result<Post, ApiError> {
-                self.0.create_post(input).await
-            }
             async fn create_post_in_tx(
                 &self,
                 _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,

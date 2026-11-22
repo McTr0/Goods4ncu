@@ -8,8 +8,7 @@ use goods4ncu::agents::router::IntentRouter;
 use goods4ncu::api::auth::{generate_access_token, generate_access_token_for_campus};
 use goods4ncu::api::{create_router, ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
 use goods4ncu::repositories::{
-    CreateListingInput, PostgresAuthRepository, PostgresListingRepository, PostgresOrderRepository,
-    PostgresUserRepository,
+    CreateListingInput, PostgresAuthRepository, PostgresListingRepository, PostgresUserRepository,
 };
 use goods4ncu::services::intent::slots::{PriceSlot, Slots};
 use goods4ncu::services::intent::{kinds, status, IntentService, NewIntent};
@@ -383,7 +382,6 @@ fn build_state_with_image_moderation(pool: sqlx::PgPool, image_enabled: bool) ->
         listing_repo: PostgresListingRepository::new(pool.clone()),
         user_repo: PostgresUserRepository::new(pool.clone()),
         auth_repo: PostgresAuthRepository::new(pool.clone()),
-        order_repo: PostgresOrderRepository::new(pool),
     }
 }
 

@@ -10,8 +10,7 @@ use goods4ncu::api::auth::{
 use goods4ncu::api::error::ApiError;
 use goods4ncu::api::{ApiAgents, ApiInfrastructure, ApiSecrets, AppState};
 use goods4ncu::repositories::{
-    AuthRepository, PostgresAuthRepository, PostgresListingRepository, PostgresOrderRepository,
-    PostgresUserRepository, UserRepository,
+    PostgresAuthRepository, PostgresListingRepository, PostgresUserRepository,
 };
 use goods4ncu::services::{self, campus::CampusService, notification::NotificationService};
 use goods4ncu::test_infra::with_test_pool;
@@ -75,7 +74,6 @@ fn build_state(pool: sqlx::PgPool) -> AppState {
         listing_repo: PostgresListingRepository::new(pool.clone()),
         user_repo: PostgresUserRepository::new(pool.clone()),
         auth_repo: PostgresAuthRepository::new(pool.clone()),
-        order_repo: PostgresOrderRepository::new(pool),
     }
 }
 
