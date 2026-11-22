@@ -5,15 +5,17 @@ import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
 import '../models/post.dart';
 import '../models/post_taxonomy.dart';
+import '../services/listing_service.dart';
 import '../services/post_service.dart';
 import '../theme/app_theme.dart';
 
 /// 我的发布 — manage every unified post the user authored
 /// (offer / wanted / discussion) with edit, lock and delete actions.
 class MyPostsPage extends StatefulWidget {
-  const MyPostsPage({super.key, this.postService});
+  const MyPostsPage({super.key, this.postService, this.listingService});
 
   final PostService? postService;
+  final ListingService? listingService;
 
   @override
   State<MyPostsPage> createState() => _MyPostsPageState();
@@ -21,6 +23,7 @@ class MyPostsPage extends StatefulWidget {
 
 class _MyPostsPageState extends State<MyPostsPage> {
   late final PostService _postService;
+  late final ListingService _listingService;
   List<CampusPost> _posts = [];
   bool _loading = true;
   String? _error;
@@ -32,6 +35,7 @@ class _MyPostsPageState extends State<MyPostsPage> {
   void initState() {
     super.initState();
     _postService = widget.postService ?? context.read<PostService>();
+    _listingService = widget.listingService ?? context.read<ListingService>();
     _load();
   }
 
@@ -86,7 +90,15 @@ class _MyPostsPageState extends State<MyPostsPage> {
     );
     if (confirmed != true) return;
     try {
-      await _postServiceDelete(post.id);
+      final listingId = post.listingId;
+      if (listingId != null) {
+        // Listing posts are governed by the listing API; deleting them here
+        // would desynchronize the referenced inventory row (posts API rejects
+        // listing-post mutations with 400).
+        await _listingService.deleteListing(listingId);
+      } else {
+        await _postServiceDelete(post.id);
+      }
       if (!mounted) return;
       await _load();
     } catch (error) {
