@@ -91,13 +91,6 @@ impl AsRef<AdminScope> for PlatformAdminScope {
     }
 }
 
-impl PlatformAdminScope {
-    #[allow(dead_code)]
-    pub fn into_inner(self) -> AdminScope {
-        self.0
-    }
-}
-
 impl FromRequestParts<AppState> for PlatformAdminScope {
     type Rejection = ApiError;
 
@@ -135,13 +128,6 @@ impl std::ops::Deref for AdminReadScope {
 impl AsRef<AdminScope> for AdminReadScope {
     fn as_ref(&self) -> &AdminScope {
         &self.0
-    }
-}
-
-impl AdminReadScope {
-    #[allow(dead_code)]
-    pub fn into_inner(self) -> AdminScope {
-        self.0
     }
 }
 
@@ -398,9 +384,6 @@ pub async fn get_community_health(
 
 #[derive(Deserialize)]
 pub struct CommunityHealthQuery {
-    #[serde(flatten)]
-    #[allow(dead_code)]
-    pub scope: AdminScopeQuery,
     /// Look-back window in days; clamped to 1–365 by the service.
     pub days: Option<i64>,
 }
@@ -442,10 +425,6 @@ pub struct AdminListQuery {
     pub limit: Option<i64>,
     pub status: Option<String>,
     pub q: Option<String>,
-    #[allow(dead_code)]
-    pub campus_id: Option<Uuid>,
-    #[allow(dead_code)]
-    pub reason: Option<String>,
 }
 
 impl AdminListQuery {
@@ -1293,10 +1272,6 @@ pub async fn update_user_role(
 pub struct AdminAuditLogsQuery {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
-    #[allow(dead_code)]
-    pub campus_id: Option<Uuid>,
-    #[allow(dead_code)]
-    pub reason: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1334,10 +1309,6 @@ pub async fn get_admin_audit_logs(
 pub struct AdminOutboxQuery {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
-    #[allow(dead_code)]
-    pub campus_id: Option<Uuid>,
-    #[allow(dead_code)]
-    pub reason: Option<String>,
 }
 
 #[derive(Serialize)]
