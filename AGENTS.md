@@ -58,7 +58,7 @@ Never patch source files with regex or blind string-replace one-liners. Formatte
 
 Live2D AI companion. Runtime lives in `mobile/lib/companion/`; persona layers in `/persona/*.md` (loaded server-side via `src/agents/persona.rs`); journey script at `scripts/agent_journey.sh`.
 
-- Flags: `AGENT_ENABLED` (server AI endpoints), `COMPANION_ENABLED` (dart-define, runtime shell). Both off ⇒ plain marketplace.
+- Flags: `AGENT_ENABLED` (server AI endpoints), `COMPANION_ENABLED` (dart-define, runtime shell). With `COMPANION_ENABLED=false` the companion runtime shell is removed and the legacy 小昌 brain still renders on the chat page; both off ⇒ the pre-companion marketplace experience, not the agent-first product.
 - Tests: `flutter test test/companion` (unit) — full gates per repo rules.
 - Architecture and subsystem docs: see **docs/companion-architecture.md** and the linked companion-* documents. (Frontend debug surfaces — `/companion/debug`, `/companion/timeline`, `?agentDebug=true` overlay — were removed 2026-08-24; debug via server structured logs / agent_runs.)
 - Rule of thumb: when touching `mobile/lib/companion/**` or agent prompt assembly, update the matching companion doc and refresh its `last-verified:` line.
