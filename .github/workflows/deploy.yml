@@ -1,5 +1,19 @@
 name: deploy
 
+# Production deploy is OPT-IN and currently DORMANT: no production server
+# exists yet, so this workflow would only burn a release build and then fail
+# on the SSH step for every green CI run on main.
+#
+# To re-enable once a server is provisioned:
+#   1. Set repo secrets: DEPLOY_SSH_PRIVATE_KEY, DEPLOY_KNOWN_HOSTS,
+#      DEPLOY_HOST, DEPLOY_PORT, DEPLOY_USER (deploy key + server host key).
+#   2. Set repo variable DEPLOY_ENABLED=true (Settings → Secrets and
+#      variables → Actions → Variables). Both jobs gate on it.
+#   3. The old DEPLOY_PASSWORD secret is unused by this workflow (BatchMode
+#      key auth only) and can be deleted.
+# The deploy job itself swaps releases, verifies /api/readyz health, and
+# rolls back automatically on failure — see the REMOTE script below.
+
 on:
   workflow_run:
     workflows: [CI]
@@ -16,7 +30,7 @@ concurrency:
 jobs:
   build:
     name: Build release binary and Flutter web
-    if: github.event.workflow_run.conclusion == 'success'
+    if: github.event.workflow_run.conclusion == 'success' && vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-24.04
     outputs:
       sha: ${{ github.event.workflow_run.head_sha }}
