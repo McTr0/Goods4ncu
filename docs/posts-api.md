@@ -1,4 +1,4 @@
-> last-verified: 2026-08-31
+> last-verified: 2026-11-21
 
 # Posts API
 
