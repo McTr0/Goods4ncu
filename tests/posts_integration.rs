@@ -557,6 +557,74 @@ async fn listings_are_references_and_marketplace_filters_follow_category() {
 }
 
 #[tokio::test]
+async fn listing_posts_reject_post_api_update_and_delete() {
+    with_test_pool(|pool| async move {
+        let campus_id = campus(&pool).await;
+        let owner = user(&pool, "listing-post-owner").await;
+        let service = service(&pool);
+        let offer_post = service
+            .create(CreatePost {
+                campus_id,
+                author_id: owner.clone(),
+                content: PostContent::Offer(
+                    MarketplaceDetails::new(
+                        MarketplaceCategory::Electronics,
+                        "Brand".to_string(),
+                        8,
+                        100.0,
+                        vec![],
+                        None,
+                    )
+                    .unwrap(),
+                ),
+                title: "出二手键盘，几乎全新".to_string(),
+                body: "已闲置三个月，宿舍自提。".to_string(),
+                tags: vec![],
+                cover_image_url: None,
+                space_id: None,
+                idempotency_key: None,
+            })
+            .await
+            .expect("create offer post with marketplace");
+        assert!(offer_post.listing_id.is_some());
+
+        // The post API only governs discussions; listing posts must be
+        // maintained through the listing API so the referenced inventory row
+        // stays authoritative (migration 0099 reference semantics).
+        let update = service
+            .update(
+                campus_id,
+                offer_post.id,
+                &owner,
+                EditPost {
+                    title: Some("绕过 listing API 的标题".to_string()),
+                    body: None,
+                    tags: None,
+                    locked: None,
+                },
+            )
+            .await;
+        assert!(
+            matches!(&update, Err(ApiError::BadRequest(message)) if message.contains("listing API")),
+            "expected listing-post update rejection, got {update:?}"
+        );
+
+        let delete = service.delete(campus_id, offer_post.id, &owner).await;
+        assert!(
+            matches!(&delete, Err(ApiError::BadRequest(message)) if message.contains("listing API")),
+            "expected listing-post delete rejection, got {delete:?}"
+        );
+
+        let still_there = service
+            .get(campus_id, offer_post.id)
+            .await
+            .expect("listing post must survive rejected mutations");
+        assert_eq!(still_there.status, "active");
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn for_you_ranker_uses_post_interactions_and_keeps_total_consistent() {
     with_test_pool(|pool| async move {
         let campus_id = campus(&pool).await;

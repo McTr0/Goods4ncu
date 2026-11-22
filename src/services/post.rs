@@ -771,6 +771,14 @@ impl<R: PostRepository> PostService<R> {
         if existing.author_id != author_id {
             return Err(ApiError::Forbidden);
         }
+        // Listing posts are governed by the listing API: editing title/body
+        // here would desynchronize the referenced inventory row (migration
+        // 0099 makes listing_id a plain reference, not a projection).
+        if existing.listing_id.is_some() {
+            return Err(ApiError::BadRequest(
+                "listing 帖请通过 listing API 编辑或删除".to_string(),
+            ));
+        }
         // Category is immutable after publish (taxonomy v4).
         let effective_category = existing.category.clone();
         let title = input
@@ -820,6 +828,11 @@ impl<R: PostRepository> PostService<R> {
         let existing = self.get(campus_id, id).await?;
         if existing.author_id != author_id {
             return Err(ApiError::Forbidden);
+        }
+        if existing.listing_id.is_some() {
+            return Err(ApiError::BadRequest(
+                "listing 帖请通过 listing API 编辑或删除".to_string(),
+            ));
         }
         if self
             .repository
