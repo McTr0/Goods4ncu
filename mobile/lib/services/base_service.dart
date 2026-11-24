@@ -15,6 +15,12 @@ class AuthException implements Exception {
   String toString() => message;
 }
 
+/// Thrown when a write is rejected because the active campus membership is
+/// still pending. Extends [AuthException] so existing handlers keep working.
+class CampusVerificationRequiredException extends AuthException {
+  CampusVerificationRequiredException([super.message = '需要先完成校园身份验证']);
+}
+
 /// Thrown when a sensitive operation needs a fresh password verification.
 class RecentAuthenticationException implements Exception {
   final String message;
@@ -134,6 +140,14 @@ class BaseService {
       _clearAuthAndRedirect();
       throw AuthException(serverMsg.isNotEmpty ? serverMsg : '登录已过期，请重新登录');
     }
+    if (serverCode == 'campus_verification_required') {
+      // Every write gate leads to the same place: a pending student gets a
+      // direct path to verification instead of a dead-end permission error.
+      _promptCampusVerification();
+      throw CampusVerificationRequiredException(
+        serverMsg.isNotEmpty ? serverMsg : '需要先完成校园身份验证',
+      );
+    }
     if (response.statusCode == 403) {
       throw AuthException(serverMsg.isNotEmpty ? serverMsg : '您没有权限执行此操作');
     }
@@ -171,6 +185,27 @@ class BaseService {
     if (context != null && context.mounted) {
       GoRouter.of(context).go('/login');
     }
+  }
+
+  void _promptCampusVerification() {
+    final context = navigatorKey.currentContext;
+    if (context == null || !context.mounted) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: const Text('验证学校邮箱后才能发布和联系同学'),
+          action: SnackBarAction(
+            label: '去验证',
+            onPressed: () {
+              final ctx = navigatorKey.currentContext;
+              if (ctx != null && ctx.mounted) GoRouter.of(ctx).go('/profile');
+            },
+          ),
+        ),
+      );
   }
 
   bool _canAttemptRefresh(Uri url, Map<String, String> headers) {

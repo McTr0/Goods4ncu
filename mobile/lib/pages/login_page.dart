@@ -58,7 +58,23 @@ class _LoginPageState extends State<LoginPage> {
 
       if (token.isNotEmpty) {
         if (mounted) {
-          context.go('/');
+          final messenger = ScaffoldMessenger.of(context);
+          final router = GoRouter.of(context);
+          router.go('/');
+          // New memberships start pending: point the student at verification
+          // now instead of letting the first post fail with a 403.
+          if (!_isLogin) {
+            messenger.showSnackBar(
+              SnackBar(
+                duration: const Duration(seconds: 8),
+                content: Text(l.campusMembershipPending),
+                action: SnackBarAction(
+                  label: l.verifyCampusIdentity,
+                  onPressed: () => router.go('/profile'),
+                ),
+              ),
+            );
+          }
         }
       }
     } catch (e) {
