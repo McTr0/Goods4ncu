@@ -1346,6 +1346,12 @@ abstract class AppLocalizations {
   /// **'Profile'**
   String get profileTab;
 
+  /// No description provided for @campusMembershipPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Verify your campus email to post and contact classmates'**
+  String get campusMembershipPending;
+
   /// No description provided for @campusMembershipSuspended.
   ///
   /// In en, this message translates to:

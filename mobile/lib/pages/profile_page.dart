@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
+import '../components/campus_verification_flow.dart';
 import '../components/user_avatar.dart';
 import '../models/models.dart';
 import '../services/admin_role_cache.dart';
@@ -76,6 +77,15 @@ class _ProfilePageState extends State<ProfilePage> {
         });
       }
     }
+  }
+
+  Future<void> _verifyCampusMembership(CampusMembership membership) async {
+    final verified = await runCampusVerificationFlow(
+      context,
+      userService: _userService,
+      membership: membership,
+    );
+    if (verified != null && mounted) await _loadProfile();
   }
 
   Future<void> _logout() async {
@@ -178,6 +188,15 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
             const SizedBox(height: AppTheme.sp32),
 
+            if (campusMembership != null &&
+                campusMembership.status == 'pending')
+              _MenuCard(
+                key: const Key('profile-campus-verification'),
+                icon: Icons.verified_user_outlined,
+                title: l.verifyCampusIdentity,
+                subtitle: l.campusMembershipPending,
+                onTap: () => _verifyCampusMembership(campusMembership!),
+              ),
             _MenuCard(
               icon: Icons.article_outlined,
               title: l.myPosts,
@@ -322,6 +341,7 @@ class _MenuCard extends StatelessWidget {
   final VoidCallback onTap;
 
   const _MenuCard({
+    super.key,
     required this.icon,
     required this.title,
     required this.subtitle,

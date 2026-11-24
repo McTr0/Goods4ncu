@@ -669,6 +669,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get profileTab => 'Profile';
 
   @override
+  String get campusMembershipPending =>
+      'Verify your campus email to post and contact classmates';
+
+  @override
   String get campusMembershipSuspended => 'Membership suspended';
 
   @override

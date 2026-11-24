@@ -31,7 +31,43 @@ class _FakeUserService extends UserService {
   @override
   Future<CampusMembershipState> getCampusMembershipState() async =>
       CampusMembershipState(items: memberships, activeCampusId: activeCampusId);
+
+  @override
+  Future<void> requestCampusVerification(String membershipId) async {
+    verificationRequests += 1;
+  }
+
+  @override
+  Future<CampusMembership> confirmCampusVerification(
+    String membershipId,
+    String code,
+  ) async {
+    confirmedCode = code;
+    memberships = [
+      for (final m in memberships)
+        m.id == membershipId ? _membership(status: 'verified', id: m.id) : m,
+    ];
+    return memberships.firstWhere((m) => m.id == membershipId);
+  }
 }
+
+CampusMembership _membership({required String status, String id = 'm1'}) {
+  return CampusMembership(
+    id: id,
+    campusId: 'c0000000-0000-0000-0000-000000000001',
+    campusSlug: 'ncu',
+    campusNameZh: '南昌大学',
+    campusNameEn: 'Nanchang University',
+    status: status,
+    role: 'member',
+  );
+}
+
+const _studentProfile = {
+  'username': 'fresh_student',
+  'role': 'user',
+  'created_at': '2026-11-24T08:00:00Z',
+};
 
 Widget _buildTestApp(Widget child) {
   return MaterialApp(
@@ -80,6 +116,78 @@ void main() {
       final l = AppLocalizations.of(tester.element(find.byType(Scaffold)))!;
 
       expect(find.text(l.adminConsole), findsOneWidget);
+    });
+
+    testWidgets('pending membership shows the campus verification entry', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildTestApp(
+          ProfilePage(
+            userService: _FakeUserService(
+              _studentProfile,
+              memberships: [_membership(status: 'pending')],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('profile-campus-verification')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('verified membership hides the campus verification entry', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildTestApp(
+          ProfilePage(
+            userService: _FakeUserService(
+              _studentProfile,
+              memberships: [_membership(status: 'verified')],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('profile-campus-verification')),
+        findsNothing,
+      );
+    });
+
+    testWidgets('verification flow sends a code, confirms it and refreshes', (
+      tester,
+    ) async {
+      final service = _FakeUserService(
+        _studentProfile,
+        memberships: [_membership(status: 'pending')],
+      );
+      await tester.pumpWidget(_buildTestApp(ProfilePage(userService: service)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('profile-campus-verification')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('campus-verification-send')));
+      await tester.pumpAndSettle();
+      expect(service.verificationRequests, 1);
+
+      await tester.enterText(
+        find.byKey(const Key('campus-verification-code')),
+        '123456',
+      );
+      await tester.tap(find.byKey(const Key('campus-verification-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(service.confirmedCode, '123456');
+      expect(
+        find.byKey(const Key('profile-campus-verification')),
+        findsNothing,
+      );
     });
   });
 }

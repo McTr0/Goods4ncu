@@ -647,6 +647,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get profileTab => '我的';
 
   @override
+  String get campusMembershipPending => '校园身份待验证，验证后才能发布和联系同学';
+
+  @override
   String get campusMembershipSuspended => '校园资格已暂停';
 
   @override

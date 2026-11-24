@@ -246,6 +246,7 @@
   "profile": "Profile",
   "profileLoadFailed": "Failed to load profile",
   "profileTab": "Profile",
+  "campusMembershipPending": "Verify your campus email to post and contact classmates",
   "campusMembershipSuspended": "Membership suspended",
   "campusMembershipRevoked": "Membership revoked",
   "campusEmail": "Campus email",
