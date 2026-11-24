@@ -800,6 +800,63 @@ async fn moderation_cases_are_private_and_allow_one_safe_appeal() {
 }
 
 #[tokio::test]
+async fn pending_member_lists_no_agent_plans_but_cannot_confirm_or_cancel() {
+    with_test_pool(|pool| async move {
+        let user_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO users (id, username, email, password_hash)
+             VALUES ($1, $2, $3, 'hash')",
+        )
+        .bind(&user_id)
+        .bind(format!("pending_plans_{}", Uuid::new_v4()))
+        .bind("202600000011@email.ncu.edu.cn")
+        .execute(&pool)
+        .await
+        .expect("pending user");
+        sqlx::query(
+            "INSERT INTO campus_memberships (id, campus_id, user_id, status)
+             SELECT $1, id, $2, 'pending' FROM campuses WHERE slug = 'ncu'",
+        )
+        .bind(Uuid::new_v4())
+        .bind(&user_id)
+        .execute(&pool)
+        .await
+        .expect("pending membership");
+
+        let (token, _, _) = generate_access_token(
+            &user_id,
+            "user",
+            "test_jwt_secret_at_least_32_characters_long",
+            3600,
+        )
+        .expect("token");
+        let app = create_router(build_state(pool.clone()), &[]);
+
+        // The chat page polls this on load; a pending student must get an
+        // empty list rather than a 403 that nags them before they act.
+        let (status, body) =
+            authenticated_json(&app, Method::GET, "/api/agent/plans", &token, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["items"], json!([]));
+
+        let plan_id = Uuid::new_v4();
+        for action in ["confirm", "cancel"] {
+            let (status, body) = authenticated_json(
+                &app,
+                Method::POST,
+                &format!("/api/agent/plans/{plan_id}/{action}"),
+                &token,
+                Some(json!({ "confirmation_token": "x" })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{action}");
+            assert_eq!(body["code"], "campus_verification_required", "{action}");
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn listing_creation_requires_verified_campus_membership() {
     with_test_pool(|pool| async move {
         let user_id = Uuid::new_v4().to_string();

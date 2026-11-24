@@ -18,17 +18,32 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::api::error::ApiError;
-use crate::api::session::VerifiedTenant;
+use crate::api::session::{Session, VerifiedTenant};
 use crate::api::AppState;
 use crate::services::agent_plan::{AgentPlanService, AgentPlanView, ConfirmOutcome};
+use crate::services::campus::CampusService;
 
 /// GET /api/agent/plans — the caller's pending plans (with confirmation tokens).
+///
+/// A pending member cannot own a plan (proposing one requires a verified
+/// membership), so they get an empty list instead of a 403: the chat page
+/// polls this on load and must not nag students who have not acted yet.
 pub async fn list_plans(
     State(state): State<AppState>,
-    tenant: VerifiedTenant,
+    Session(session): Session,
 ) -> Result<Response, ApiError> {
+    let tenant = match CampusService::new(state.infra.db.clone())
+        .require_tenant_context_for_session(&session.user_id, session.campus_id)
+        .await
+    {
+        Ok(tenant) => tenant,
+        Err(ApiError::CampusVerificationRequired) => {
+            return Ok(no_store_json(serde_json::json!({ "items": [] })));
+        }
+        Err(err) => return Err(err),
+    };
     let plans: Vec<AgentPlanView> = AgentPlanService::new(state.infra.db.clone())
-        .list_pending(&tenant.session.user_id, tenant.campus_id)
+        .list_pending(&session.user_id, tenant.campus_id)
         .await
         .map_err(ApiError::Internal)?;
     Ok(no_store_json(serde_json::json!({ "items": plans })))
