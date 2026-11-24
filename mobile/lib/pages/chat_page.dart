@@ -1600,7 +1600,8 @@ class _ChatPageState extends State<ChatPage> {
           onOpenHistory: _showHistorySheet,
           onOpenMemoryPanel: () => AssistantMemoryPanel.show(context),
           onClearHistory: _clearAssistantHistory,
-          onOpenExpressionLab: kIsWeb ? _showExpressionLab : null,
+          // Developer-only expression tuning; never shipped to students.
+          onOpenExpressionLab: kDebugMode && kIsWeb ? _showExpressionLab : null,
         ),
         ?agentResults,
         if (_historyError != null)
